@@ -251,14 +251,18 @@ def suggest_hedge(
     Returns:
         Full dict with beta_result, sizing_result, recommendation, urgency
     """
-    # Fetch VIX if not provided — direct Yahoo Finance chart API (cloud-safe)
+    # Fetch VIX if not provided — Yahoo Finance chart API with cookie+crumb
     if vix is None:
         try:
-            _url = ("https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
-                    "?interval=1d&range=5d&includePrePost=false")
+            from data.fetcher import _get_yf_crumb
+            import urllib.parse as _up
+            _opener, _crumb = _get_yf_crumb()
+            _cqs = f"&crumb={_up.quote(_crumb)}" if _crumb else ""
+            _url = (f"https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
+                    f"?interval=1d&range=5d&includePrePost=false{_cqs}")
             _req = urllib.request.Request(
                 _url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-            with urllib.request.urlopen(_req, timeout=8) as _r:
+            with _opener.open(_req, timeout=8) as _r:
                 _d = json.loads(_r.read())
             _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
             _valid  = [v for v in _closes if v is not None]

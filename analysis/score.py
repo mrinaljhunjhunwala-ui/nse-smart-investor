@@ -596,16 +596,20 @@ def score_stock(
     except ValueError:
         canonical = ticker if ticker.endswith(".NS") else ticker + ".NS"
 
-    # Fetch VIX — direct Yahoo Finance chart API (no yfinance library, cloud-safe)
+    # Fetch VIX via Yahoo Finance chart API (cookie+crumb auth, cloud-safe)
     if vix_info is None:
         try:
-            import json, urllib.request, math as _math
-            _url = ("https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
-                    "?interval=1d&range=5d&includePrePost=false")
+            import json, math as _math
+            from data.fetcher import _get_yf_crumb
+            import urllib.parse as _uparse
+            _opener, _crumb = _get_yf_crumb()
+            _cqs = f"&crumb={_uparse.quote(_crumb)}" if _crumb else ""
+            _url = (f"https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
+                    f"?interval=1d&range=5d&includePrePost=false{_cqs}")
             _req = urllib.request.Request(_url, headers={
                 "User-Agent": "Mozilla/5.0", "Accept": "application/json"
             })
-            with urllib.request.urlopen(_req, timeout=8) as _r:
+            with _opener.open(_req, timeout=8) as _r:
                 _d = json.loads(_r.read())
             _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
             _v = float(next(v for v in reversed(_closes) if v is not None))

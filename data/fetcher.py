@@ -4,22 +4,85 @@ Fetches OHLCV data for NSE/BSE stocks — no yfinance library anywhere.
 
 Primary source  : Stooq  (stooq.com) — free, no API key, no rate limits,
                   works from any cloud IP including Streamlit Community Cloud.
-Fallback source : Yahoo Finance v8 chart API (direct urllib, no library) —
-                  avoids the HTTP 429 rate-limiting that hits the yfinance
-                  Python library from datacenter / Streamlit Cloud IPs.
+Fallback source : Yahoo Finance v8 chart API (direct urllib, cookie+crumb auth) —
+                  Yahoo requires a session cookie (fc.yahoo.com) + crumb token
+                  since mid-2024.  _get_yf_crumb() handles this automatically
+                  and caches the session for 30 minutes.
 
 In-memory cache: each (ticker, period) is fetched only once per process.
 """
 
+import http.cookiejar
 import io
 import time
 import datetime
+import urllib.parse
 import urllib.request
 import pandas as pd
 from typing import List, Optional
 
 # ── In-process cache  {(ticker, period, interval): DataFrame} ────────────────
 _FETCH_CACHE: dict = {}
+
+# ── Yahoo Finance session cache (cookie jar + crumb token) ───────────────────
+_YF_SESSION: dict = {"opener": None, "crumb": "", "ts": 0.0}
+
+
+def _get_yf_crumb():
+    """
+    Obtain a Yahoo Finance cookie-aware opener and a crumb token.
+
+    Yahoo's v8 chart endpoint started requiring authentication in mid-2024:
+      1. A session cookie is issued by  https://fc.yahoo.com/
+      2. A crumb token is retrieved from /v1/test/getcrumb
+      3. The crumb is appended as ?crumb=<token> to every chart API call.
+
+    The session is cached for 30 minutes; a fresh crumb is fetched on expiry.
+    Returns: (opener: urllib.request.OpenerDirector, crumb: str)
+    """
+    global _YF_SESSION
+    now = time.time()
+    if _YF_SESSION["opener"] is not None and now - _YF_SESSION["ts"] < 1800:
+        return _YF_SESSION["opener"], _YF_SESSION["crumb"]
+
+    cj     = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    _hdrs  = [
+        ("User-Agent",      "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"),
+        ("Accept",          "application/json, */*"),
+        ("Accept-Language", "en-US,en;q=0.9"),
+    ]
+    opener.addheaders = _hdrs
+
+    # Step 1 — consent gate (sets B / GUC cookies required for crumb)
+    for _gate in ("https://fc.yahoo.com/", "https://finance.yahoo.com/"):
+        try:
+            opener.open(urllib.request.Request(
+                _gate, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            ), timeout=10)
+            break
+        except Exception:
+            continue
+
+    # Step 2 — crumb endpoint (short alpha-numeric token, ≤ 20 chars)
+    crumb = ""
+    for _cu in (
+        "https://query2.finance.yahoo.com/v1/test/getcrumb",
+        "https://query1.finance.yahoo.com/v1/test/getcrumb",
+    ):
+        try:
+            with opener.open(urllib.request.Request(
+                _cu, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            ), timeout=10) as _r:
+                _raw = _r.read().decode("utf-8").strip()
+                if _raw and len(_raw) <= 25 and not _raw.startswith("<"):
+                    crumb = _raw
+                    break
+        except Exception:
+            continue
+
+    _YF_SESSION.update({"opener": opener, "crumb": crumb, "ts": now})
+    return opener, crumb
 
 # ── Period → calendar days mapping ───────────────────────────────────────────
 _PERIOD_DAYS = {
@@ -123,14 +186,30 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
     _VALID_INTERVALS = {"1d", "1wk", "1mo", "5m", "15m", "30m", "60m", "1h"}
     yf_interval = interval if interval in _VALID_INTERVALS else "1d"
 
+    # Use cookie-aware opener + crumb (required by Yahoo Finance since mid-2024)
+    _opener, _crumb = _get_yf_crumb()
+    _crumb_qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
+
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-           f"?interval={yf_interval}&range={yf_range}&includePrePost=false")
+           f"?interval={yf_interval}&range={yf_range}&includePrePost=false{_crumb_qs}")
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Accept":     "application/json",
     })
-    with urllib.request.urlopen(req, timeout=15) as r:
-        data = json.loads(r.read())
+    try:
+        with _opener.open(req, timeout=15) as r:
+            data = json.loads(r.read())
+    except Exception:
+        # Session may have expired — reset cache and retry once with query2
+        _YF_SESSION["opener"] = None
+        url2 = (f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
+                f"?interval={yf_interval}&range={yf_range}&includePrePost=false")
+        req2 = urllib.request.Request(url2, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept":     "application/json",
+        })
+        with urllib.request.urlopen(req2, timeout=15) as r:
+            data = json.loads(r.read())
 
     result = data.get("chart", {}).get("result")
     if not result:

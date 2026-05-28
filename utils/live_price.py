@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional
 
@@ -27,20 +28,21 @@ from typing import Dict, List, Optional
 def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
     """
     Fetch live quote from Yahoo Finance JSON endpoint.
-    Works from cloud IPs (Streamlit Community Cloud, Heroku, etc.)
+    Uses cookie+crumb session (required since mid-2024).
     Returns dict with 'price', 'prev_close', or None on failure.
     """
     try:
+        from data.fetcher import _get_yf_crumb
+        _opener, _crumb = _get_yf_crumb()
+        _crumb_qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
+
         url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_ns}"
-               "?interval=1m&range=1d&includePrePost=false")
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Accept": "application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=8) as r:
+               f"?interval=1m&range=1d&includePrePost=false{_crumb_qs}")
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json",
+        })
+        with _opener.open(req, timeout=8) as r:
             data = json.loads(r.read())
 
         meta = data["chart"]["result"][0]["meta"]
