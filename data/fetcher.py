@@ -22,16 +22,37 @@ _FETCH_CACHE: dict = {}
 
 # ── Period → calendar days mapping ───────────────────────────────────────────
 _PERIOD_DAYS = {
+    # UI-style labels (1D / 5D / 1M / 6M / YTD / Max)
+    "1d":  10,  "5d":  18,  "1m":  35,  "6m": 185,
+    # yfinance-style labels (legacy internal use)
     "1mo": 35,  "2mo": 65,  "3mo": 95,  "6mo": 185,
     "1y":  370, "2y":  740, "3y": 1100, "5y": 1830,
+    "max": 1830,
+}
+
+# ── UI label → internal period key used for fetching ─────────────────────────
+UI_PERIOD_MAP = {
+    "1D":  "1d",
+    "5D":  "5d",
+    "1M":  "1m",
+    "6M":  "6m",
+    "YTD": "ytd",
+    "Max": "max",
 }
 
 
 def _period_to_dates(period: str):
-    """Convert yfinance-style period string to (start_str, end_str) for Stooq."""
-    days = _PERIOD_DAYS.get(period, 370)
-    end   = datetime.date.today()
-    start = end - datetime.timedelta(days=days)
+    """Convert period string to (start_str, end_str) for Stooq.
+    Handles UI labels (1d/5d/1m/6m/ytd/max) and legacy yfinance strings.
+    """
+    end = datetime.date.today()
+    if period.lower() == "ytd":
+        start = datetime.date(end.year, 1, 1)
+    elif period.lower() == "max":
+        start = end - datetime.timedelta(days=1830)
+    else:
+        days  = _PERIOD_DAYS.get(period.lower(), _PERIOD_DAYS.get(period, 370))
+        start = end - datetime.timedelta(days=days)
     return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
 
 
