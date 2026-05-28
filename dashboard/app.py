@@ -81,6 +81,10 @@ page = st.sidebar.radio(
         "🌍 Macro Dashboard",
         "📈 Market Breadth",
         "🏦 OI & Options Setup",
+        "⚡ Intraday Trader",
+        "📐 Position Sizer",
+        "✅ Swing Checklist",
+        "⭐ My Watchlist",
         "📖 Investor Guide",
     ],
     key="nav",
@@ -2267,24 +2271,42 @@ elif page == "🔎 Smart Screener":
                     prog.progress((i + 1) / len(signals))
                 signals = sorted(scored_signals, key=lambda x: x.get("composite_score", 0), reverse=True)
 
-            # Display results as cards
+            # Display results as Trade Setup Cards
             for sig in signals[:30]:  # cap at 30 for performance
-                t = sig["ticker"].replace(".NS", "")
+                t      = sig["ticker"].replace(".NS", "")
                 action = sig.get("action", "WATCHLIST")
-                card = _action_color(action)
-                emoji = _action_emoji(action)
-                score_str = (f"Score: {sig.get('composite_score','?')}/100 [{sig.get('grade','?')}]"
-                             if enrich_scores else "")
-                with st.expander(
-                    f"{emoji} {t}  |  ₹{sig.get('price', 0):,.2f}  "
-                    f"|  {sig.get('screen',''):<25}  |  {score_str}",
-                    expanded=False
-                ):
-                    d1, d2, d3, d4 = st.columns(4)
-                    d1.metric("Price",  f"₹{sig.get('price', 0):,.2f}")
-                    d2.metric("Stop",   f"₹{sig.get('sl', sig.get('stop_loss', 0)):,.2f}")
-                    d3.metric("Target", f"₹{sig.get('tp', sig.get('target', 0)):,.2f}" if sig.get('tp') else "Trail")
-                    d4.metric("Screen", sig.get("screen", ""))
+                card   = _action_color(action)
+                emoji  = _action_emoji(action)
+                _s_price = sig.get("price", 0)
+                _s_sl    = sig.get("sl", sig.get("stop_loss", 0)) or 0
+                _s_tp    = sig.get("tp", sig.get("target", None))
+                _s_rr    = (
+                    sig.get("rr_ratio") or
+                    (round((_s_tp - _s_price) / max(_s_price - _s_sl, 0.01), 1) if _s_tp else None)
+                )
+                _s_sector    = sig.get("sector", "")
+                _s_stop_type = sig.get("stop_type", "atr")
+                _s_score_str = (f"Score {sig.get('composite_score','?')}/100 "
+                                f"[{sig.get('grade','?')}]" if enrich_scores else "")
+                _s_rr_str    = f"R:R {_s_rr:.1f}x" if _s_rr else ""
+                _header = (f"{emoji} {t}  |  ₹{_s_price:,.2f}  "
+                           f"|  {sig.get('screen','')}  "
+                           + (f"|  {_s_rr_str}  " if _s_rr_str else "")
+                           + (f"|  {_s_sector}  " if _s_sector else "")
+                           + _s_score_str)
+                with st.expander(_header, expanded=False):
+                    d1, d2, d3, d4, d5 = st.columns(5)
+                    d1.metric("Entry",  f"₹{_s_price:,.2f}")
+                    d2.metric("Stop-Loss", f"₹{_s_sl:,.2f}",
+                              delta=f"({_s_stop_type})",
+                              delta_color="off")
+                    d3.metric("Target", f"₹{_s_tp:,.2f}" if _s_tp else "Trail SMA20")
+                    d4.metric("R:R",    f"{_s_rr:.1f}x" if _s_rr else "—",
+                              delta="✅ Good" if (_s_rr or 0) >= 2 else "⚠️ Low",
+                              delta_color="normal" if (_s_rr or 0) >= 2 else "inverse")
+                    d5.metric("Sector", _s_sector or "—")
+                    if sig.get("reason"):
+                        st.caption(f"📌 {sig['reason']}")
                     if enrich_scores and sig.get("narrative"):
                         st.markdown(
                             f'<div class="{card}" style="padding:10px 14px">'
@@ -3390,6 +3412,883 @@ elif page == "🏦 OI & Options Setup":
             "Key: Long Buildup (Price ↑ + OI ↑) is the strongest bullish signal. "
             "Short Covering (Price ↑ + OI ↓) is weaker — shorts exiting, not fresh bulls."
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE 10 — INTRADAY TRADER  [NEW]
+# ═══════════════════════════════════════════════════════════════════════════════
+elif page == "⚡ Intraday Trader":
+    st.title("⚡ Intraday Trader")
+    st.markdown(
+        "Real-time intraday tools — Gap Scanner, CPR Levels, ORB Setup, "
+        "and live Supertrend/VWAP signals on 5m/15m charts.  \n"
+        "⚠️ *Data is 15-min delayed via Yahoo Finance free API.*"
+    )
+
+    tab_gap, tab_chart, tab_orb, tab_sigs = st.tabs([
+        "📊 Pre-Market Gap Scanner",
+        "📈 Intraday Chart",
+        "⚡ ORB Setup",
+        "🎯 Live Intraday Signals",
+    ])
+
+    # ── TAB 1: GAP SCANNER ────────────────────────────────────────────────────
+    with tab_gap:
+        st.subheader("📊 Overnight Gap Scanner — Nifty 50")
+        st.caption("Shows stocks with opening gap ≥ 0.5%. Run at 9:15 AM for best results.")
+
+        col_gap_thresh, col_gap_btn = st.columns([2, 1])
+        with col_gap_thresh:
+            _gap_min = st.slider("Minimum gap %", 0.25, 5.0, 0.5, 0.25, key="gap_min_slider")
+        with col_gap_btn:
+            st.write("")
+            st.write("")
+            _run_gap = st.button("🔍 Scan Gaps", type="primary", key="run_gap_btn")
+
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _cached_gaps(min_pct: float):
+            from trading.gap_scanner import get_nifty50_gaps
+            return get_nifty50_gaps(min_gap_pct=min_pct)
+
+        if _run_gap or st.session_state.get("gap_scanned"):
+            st.session_state["gap_scanned"] = True
+            with st.spinner("Scanning Nifty 50 for gaps…"):
+                _gap_df = _cached_gaps(_gap_min)
+
+            if _gap_df.empty:
+                st.info(f"No stocks with gap ≥ {_gap_min}% today. Market opened flat.")
+            else:
+                # Summary metrics
+                _gup   = _gap_df[_gap_df["gap_pct"] > 0]
+                _gdown = _gap_df[_gap_df["gap_pct"] < 0]
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total Gapped",    len(_gap_df))
+                c2.metric("Gap Ups ↑",       len(_gup),   delta=f"{len(_gup)} stocks")
+                c3.metric("Gap Downs ↓",     len(_gdown), delta=f"-{len(_gdown)} stocks",
+                          delta_color="inverse")
+                c4.metric("Largest Gap",
+                          f"{_gap_df['gap_pct'].abs().max():.1f}%",
+                          delta=_gap_df.iloc[0]['ticker'])
+
+                # Color-coded table
+                _disp = _gap_df[["emoji","ticker","prev_close","today_open",
+                                  "gap_pct","change_pct","vol_ratio","category","strategy"]].copy()
+                _disp.columns = ["","Ticker","Prev Close","Open","Gap %","Day Chg %",
+                                  "Vol Ratio","Category","Intraday Strategy"]
+
+                def _color_gap(val):
+                    try:
+                        v = float(val)
+                        if v >= 1.5:  return "background-color:#1a3a2a; color:#4caf50"
+                        if v > 0:     return "background-color:#1a2a1a; color:#a5d6a7"
+                        if v <= -1.5: return "background-color:#3a1a1a; color:#ef5350"
+                        if v < 0:     return "background-color:#2a1a1a; color:#ef9a9a"
+                    except Exception:
+                        pass
+                    return ""
+
+                styled = _disp.style.applymap(_color_gap, subset=["Gap %","Day Chg %"])
+                st.dataframe(styled, hide_index=True, use_container_width=True, height=400)
+
+                # Gap distribution bar chart
+                _gap_chart_df = _gap_df.sort_values("gap_pct")
+                fig_gap = go.Figure(go.Bar(
+                    x=_gap_chart_df["ticker"].str.replace(".NS","",regex=False),
+                    y=_gap_chart_df["gap_pct"],
+                    marker_color=[
+                        "#4caf50" if g > 0 else "#ef5350"
+                        for g in _gap_chart_df["gap_pct"]
+                    ],
+                    text=_gap_chart_df["gap_pct"].apply(lambda x: f"{x:+.1f}%"),
+                    textposition="outside",
+                ))
+                fig_gap.update_layout(
+                    template="plotly_dark", height=320,
+                    title="Gap % Distribution — Nifty 50",
+                    xaxis_title="Stock", yaxis_title="Gap %",
+                    showlegend=False,
+                    yaxis=dict(zeroline=True, zerolinecolor="#666", zerolinewidth=2),
+                )
+                st.plotly_chart(fig_gap, use_container_width=True)
+        else:
+            st.info("Click **🔍 Scan Gaps** to load today's gap data.")
+
+    # ── TAB 2: INTRADAY CHART ─────────────────────────────────────────────────
+    with tab_chart:
+        st.subheader("📈 Intraday Chart — CPR + ORB + AVWAP + Supertrend")
+
+        _ic_c1, _ic_c2, _ic_c3 = st.columns([3, 1, 1])
+        with _ic_c1:
+            _ic_ticker = st.text_input(
+                "NSE Ticker", value="RELIANCE",
+                placeholder="RELIANCE / HDFCBANK / TCS",
+                key="ic_ticker",
+            ).strip().upper()
+        with _ic_c2:
+            _ic_interval = st.selectbox("Interval", ["5m","15m","30m"], key="ic_interval")
+        with _ic_c3:
+            _ic_days = st.selectbox("Days", [1, 2, 3, 5], index=2, key="ic_days")
+            st.write("")
+            _ic_load = st.button("📈 Load Chart", type="primary", key="ic_load")
+
+        @st.cache_data(ttl=180, show_spinner=False)
+        def _load_intraday_chart(tkr: str, intv: str, days: int):
+            from data.fetcher import fetch_intraday
+            from utils.indicators import add_all_indicators, add_anchored_vwap
+            df = fetch_intraday(tkr, interval=intv, days=days)
+            df = add_all_indicators(df)
+            df = add_anchored_vwap(df)
+            return df
+
+        if _ic_load or st.session_state.get("ic_last") == _ic_ticker:
+            st.session_state["ic_last"] = _ic_ticker
+            _sym = _ic_ticker if _ic_ticker.endswith(".NS") else _ic_ticker + ".NS"
+            try:
+                with st.spinner(f"Loading {_ic_interval} chart for {_ic_ticker}…"):
+                    _ic_df = _load_intraday_chart(_sym, _ic_interval, _ic_days)
+
+                if _ic_df.empty:
+                    st.warning("No intraday data returned. Try a different ticker or interval.")
+                else:
+                    from trading.intraday_signals import compute_orb
+                    _orb = compute_orb(_ic_df, orb_minutes=15)
+
+                    # Get latest CPR values (same for whole day)
+                    _cpr_tc  = float(_ic_df["CPR_TC"].iloc[-1])  if "CPR_TC"  in _ic_df.columns else None
+                    _cpr_bc  = float(_ic_df["CPR_BC"].iloc[-1])  if "CPR_BC"  in _ic_df.columns else None
+                    _pivot   = float(_ic_df["Pivot"].iloc[-1])   if "Pivot"   in _ic_df.columns else None
+                    _r1      = float(_ic_df["R1"].iloc[-1])      if "R1"      in _ic_df.columns else None
+                    _s1      = float(_ic_df["S1"].iloc[-1])      if "S1"      in _ic_df.columns else None
+                    _r2      = float(_ic_df["R2"].iloc[-1])      if "R2"      in _ic_df.columns else None
+                    _s2      = float(_ic_df["S2"].iloc[-1])      if "S2"      in _ic_df.columns else None
+
+                    fig_ic = make_subplots(
+                        rows=2, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.05, row_heights=[0.75, 0.25]
+                    )
+
+                    # Candlestick
+                    fig_ic.add_trace(go.Candlestick(
+                        x=_ic_df.index,
+                        open=_ic_df["Open"], high=_ic_df["High"],
+                        low=_ic_df["Low"],   close=_ic_df["Close"],
+                        name=_ic_ticker, increasing_line_color="#26a69a",
+                        decreasing_line_color="#ef5350",
+                    ), row=1, col=1)
+
+                    # Anchored VWAP
+                    if "AVWAP" in _ic_df.columns:
+                        fig_ic.add_trace(go.Scatter(
+                            x=_ic_df.index, y=_ic_df["AVWAP"],
+                            line=dict(color="#FFD700", width=1.5, dash="solid"),
+                            name="AVWAP", opacity=0.9,
+                        ), row=1, col=1)
+                        if "AVWAP_SD1_Upper" in _ic_df.columns:
+                            fig_ic.add_trace(go.Scatter(
+                                x=_ic_df.index, y=_ic_df["AVWAP_SD1_Upper"],
+                                line=dict(color="rgba(255,165,0,0.5)", width=1, dash="dot"),
+                                name="VWAP+1σ", showlegend=False,
+                            ), row=1, col=1)
+                            fig_ic.add_trace(go.Scatter(
+                                x=_ic_df.index, y=_ic_df["AVWAP_SD1_Lower"],
+                                line=dict(color="rgba(255,165,0,0.5)", width=1, dash="dot"),
+                                name="VWAP−1σ", fill="tonexty",
+                                fillcolor="rgba(255,165,0,0.05)", showlegend=False,
+                            ), row=1, col=1)
+
+                    # Supertrend
+                    if "Supertrend" in _ic_df.columns and "ST_Direction" in _ic_df.columns:
+                        _bull_st = _ic_df[_ic_df["ST_Direction"] == 1]
+                        _bear_st = _ic_df[_ic_df["ST_Direction"] == -1]
+                        if not _bull_st.empty:
+                            fig_ic.add_trace(go.Scatter(
+                                x=_bull_st.index, y=_bull_st["Supertrend"],
+                                mode="markers", marker=dict(size=3, color="#26a69a"),
+                                name="ST Bull", showlegend=False,
+                            ), row=1, col=1)
+                        if not _bear_st.empty:
+                            fig_ic.add_trace(go.Scatter(
+                                x=_bear_st.index, y=_bear_st["Supertrend"],
+                                mode="markers", marker=dict(size=3, color="#ef5350"),
+                                name="ST Bear", showlegend=False,
+                            ), row=1, col=1)
+
+                    # CPR levels as horizontal lines
+                    _level_defs = [
+                        (_r2,    "#ff6b6b", "R2", "dash"),
+                        (_r1,    "#ff9999", "R1", "dot"),
+                        (_cpr_tc,"#64b5f6", "CPR TC", "solid"),
+                        (_pivot, "#9e9e9e", "Pivot", "dot"),
+                        (_cpr_bc,"#64b5f6", "CPR BC", "solid"),
+                        (_s1,    "#81c784", "S1", "dot"),
+                        (_s2,    "#4caf50", "S2", "dash"),
+                    ]
+                    for _lv, _lc, _ln, _ld in _level_defs:
+                        if _lv and not pd.isna(_lv):
+                            fig_ic.add_hline(
+                                y=_lv, line_dash=_ld, line_color=_lc,
+                                line_width=1, opacity=0.7,
+                                annotation_text=_ln,
+                                annotation_position="right",
+                                annotation_font_color=_lc,
+                                row=1,
+                            )
+
+                    # ORB box
+                    if not pd.isna(_orb.get("orb_high", float("nan"))):
+                        try:
+                            import datetime as _dt
+                            _first_date = _ic_df.index[0].date()
+                            _orb_start  = _ic_df.index[0]
+                            _orb_end_t  = _dt.datetime.combine(_first_date, _dt.time(9, 29))
+                            _orb_end_t  = _orb_end_t.replace(tzinfo=_orb_start.tzinfo)
+                            _orb_end_idx = _ic_df.index[_ic_df.index <= _orb_end_t][-1] if len(_ic_df.index[_ic_df.index <= _orb_end_t]) else _ic_df.index[2]
+                        except Exception:
+                            _orb_start   = _ic_df.index[0]
+                            _orb_end_idx = _ic_df.index[min(3, len(_ic_df)-1)]
+                        fig_ic.add_vrect(
+                            x0=_orb_start, x1=_orb_end_idx,
+                            fillcolor="rgba(255,255,0,0.07)",
+                            layer="below", line_width=0,
+                            annotation_text="ORB Zone",
+                            annotation_position="top left",
+                        )
+                        fig_ic.add_hline(y=_orb["orb_high"], line_dash="dash",
+                                         line_color="#ffeb3b", line_width=1.5,
+                                         annotation_text=f"ORB H {_orb['orb_high']:.2f}",
+                                         annotation_position="right")
+                        fig_ic.add_hline(y=_orb["orb_low"], line_dash="dash",
+                                         line_color="#ff9800", line_width=1.5,
+                                         annotation_text=f"ORB L {_orb['orb_low']:.2f}",
+                                         annotation_position="right")
+
+                    # Volume subplot
+                    fig_ic.add_trace(go.Bar(
+                        x=_ic_df.index, y=_ic_df["Volume"],
+                        name="Volume",
+                        marker_color=[
+                            "#26a69a" if c >= o else "#ef5350"
+                            for c, o in zip(_ic_df["Close"], _ic_df["Open"])
+                        ],
+                        opacity=0.7,
+                    ), row=2, col=1)
+
+                    fig_ic.update_layout(
+                        template="plotly_dark", height=680,
+                        title=f"{_ic_ticker} — {_ic_interval} Chart | CPR + ORB + AVWAP",
+                        xaxis_rangeslider_visible=False,
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                        margin=dict(l=0, r=80, t=60, b=0),
+                    )
+                    st.plotly_chart(fig_ic, use_container_width=True)
+
+                    # CPR summary cards
+                    if _pivot and _cpr_tc and _cpr_bc:
+                        _cur_price = float(_ic_df["Close"].iloc[-1])
+                        _cpr_zone  = str(_ic_df["Price_vs_CPR"].iloc[-1]) if "Price_vs_CPR" in _ic_df.columns else "unknown"
+                        _cpr_bias  = "🟢 Bullish (above CPR)" if _cpr_zone == "above" else ("🔴 Bearish (below CPR)" if _cpr_zone == "below" else "🟡 Inside CPR — wait for breakout")
+                        _cpr_w     = float(_ic_df["CPR_Width_Pct"].iloc[-1]) if "CPR_Width_Pct" in _ic_df.columns else 0
+                        _day_type  = "Narrow CPR (directional day expected)" if _cpr_w < 0.3 else "Wide CPR (sideways / volatile day)"
+
+                        _cc1, _cc2, _cc3, _cc4, _cc5 = st.columns(5)
+                        _cc1.metric("Pivot", f"₹{_pivot:.1f}")
+                        _cc2.metric("CPR Top", f"₹{_cpr_tc:.1f}")
+                        _cc3.metric("CPR Bottom", f"₹{_cpr_bc:.1f}")
+                        _cc4.metric("Price vs CPR", _cpr_bias)
+                        _cc5.metric("CPR Width", f"{_cpr_w:.2f}%", delta=_day_type)
+
+                    # ORB summary
+                    if not pd.isna(_orb.get("orb_high", float("nan"))):
+                        st.markdown("---")
+                        _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+                        _oc1.metric("ORB High",  f"₹{_orb['orb_high']:.2f}")
+                        _oc2.metric("ORB Low",   f"₹{_orb['orb_low']:.2f}")
+                        _oc3.metric("ORB Range", f"{_orb['orb_range_pct']:.2f}%",
+                                    delta="Narrow" if _orb.get("narrow") else "Normal")
+                        _oc4.metric("Open Price", f"₹{_orb.get('open_price',0):.2f}")
+
+            except Exception as _ic_err:
+                st.error(f"Could not load intraday data: {_ic_err}")
+                st.caption("Yahoo Finance intraday data is limited to recent days and may be unavailable for some tickers.")
+        else:
+            st.info("Enter a ticker and click **📈 Load Chart** to view intraday data.")
+
+    # ── TAB 3: ORB SETUP ─────────────────────────────────────────────────────
+    with tab_orb:
+        st.subheader("⚡ Opening Range Breakout (ORB) — How to Trade It")
+        st.markdown("""
+        **ORB Strategy:** Define the first **15 minutes** of trading (9:15–9:30 AM IST) as the *Opening Range*.
+        Trade the breakout when price moves outside this range with strong volume.
+
+        | Setup | Trigger | Stop | Target | Best When |
+        |-------|---------|------|--------|-----------|
+        | **BUY ORB** | Close above ORB High on 5m/15m candle | Below ORB Low | ORB High + 1.5× range | Gap-up day, strong market |
+        | **SHORT ORB** | Close below ORB Low on 5m/15m candle | Above ORB High | ORB Low − 1.5× range | Gap-down day, weak market |
+
+        **Filters that improve win rate:**
+        - Volume on breakout bar > 1.5× opening range average
+        - India VIX < 22 (not in fear regime)
+        - Stock is in same direction as Nifty
+        - Narrow CPR (< 0.3% width) = directional day expected
+        """)
+
+        st.markdown("---")
+        st.subheader("ORB Quick Reference — Nifty 50 Watchlist")
+        st.caption("Paste tickers below, click Scan to see today's ORB levels.")
+
+        _orb_tickers_input = st.text_area(
+            "Tickers (one per line)",
+            value="RELIANCE.NS\nTCS.NS\nHDFCBANK.NS\nINFY.NS\nICICIBANK.NS",
+            height=120,
+            key="orb_tickers_input",
+        )
+        _orb_scan_btn = st.button("⚡ Compute ORB Levels", key="orb_scan_btn")
+
+        if _orb_scan_btn:
+            _orb_tickers = [t.strip() for t in _orb_tickers_input.split("\n") if t.strip()]
+            _orb_rows = []
+            _orb_prog = st.progress(0)
+            for _oi, _ot in enumerate(_orb_tickers):
+                try:
+                    from data.fetcher import fetch_intraday
+                    from utils.indicators import add_all_indicators, add_anchored_vwap
+                    from trading.intraday_signals import compute_orb
+                    _sym = _ot if _ot.endswith(".NS") else _ot + ".NS"
+                    _idf = fetch_intraday(_sym, interval="5m", days=1)
+                    _idf = add_anchored_vwap(_idf)
+                    _orb_r = compute_orb(_idf, 15)
+                    _cz = str(_idf["Price_vs_CPR"].iloc[-1]) if "Price_vs_CPR" in _idf.columns else "?"
+                    _av = round(float(_idf["AVWAP"].iloc[-1]), 2) if "AVWAP" in _idf.columns else None
+                    _cp = round(float(_idf["Close"].iloc[-1]), 2)
+                    _orb_rows.append({
+                        "Ticker":    _ot.replace(".NS",""),
+                        "Price":     _cp,
+                        "ORB High":  _orb_r.get("orb_high","—"),
+                        "ORB Low":   _orb_r.get("orb_low","—"),
+                        "Range %":   _orb_r.get("orb_range_pct","—"),
+                        "AVWAP":     _av,
+                        "CPR Zone":  _cz,
+                        "Day Type":  "Narrow⚡" if _orb_r.get("narrow") else "Normal",
+                    })
+                except Exception as _oe:
+                    _orb_rows.append({"Ticker": _ot.replace(".NS",""), "Price":"err", "ORB High":"—",
+                                      "ORB Low":"—","Range %":"—","AVWAP":"—","CPR Zone":"—","Day Type":"error"})
+                _orb_prog.progress((_oi+1)/len(_orb_tickers))
+            _orb_prog.empty()
+            if _orb_rows:
+                st.dataframe(pd.DataFrame(_orb_rows), hide_index=True, use_container_width=True)
+
+    # ── TAB 4: LIVE INTRADAY SIGNALS ─────────────────────────────────────────
+    with tab_sigs:
+        st.subheader("🎯 Live Intraday Signals — ORB + VWAP + Supertrend")
+        st.caption("Runs all 3 intraday signal checks on the latest bar. Refresh during market hours.")
+
+        _ls_c1, _ls_c2 = st.columns([3, 1])
+        with _ls_c1:
+            _ls_ticker = st.text_input(
+                "Ticker to scan", value="RELIANCE",
+                key="ls_ticker",
+            ).strip().upper()
+        with _ls_c2:
+            _ls_interval = st.selectbox("Interval", ["5m","15m"], key="ls_interval")
+            _ls_btn = st.button("🎯 Check Signals", type="primary", key="ls_btn")
+
+        if _ls_btn:
+            _ls_sym = _ls_ticker if _ls_ticker.endswith(".NS") else _ls_ticker + ".NS"
+            with st.spinner(f"Scanning {_ls_ticker} for intraday signals…"):
+                try:
+                    from trading.intraday_signals import scan_intraday
+                    _ls_result = scan_intraday(_ls_sym, interval=_ls_interval)
+
+                    if "error" in _ls_result:
+                        st.warning(f"Could not load data: {_ls_result['error']}")
+                    else:
+                        # Status bar
+                        _ls_c_a, _ls_c_b, _ls_c_c, _ls_c_d = st.columns(4)
+                        _ls_c_a.metric("Price",     f"₹{_ls_result.get('price',0):,.2f}")
+                        _ls_c_b.metric("AVWAP",
+                                       f"₹{_ls_result.get('avwap',0):,.2f}" if _ls_result.get("avwap") else "N/A")
+                        _ls_c_c.metric("Supertrend Dir",
+                                       "🟢 Bullish" if _ls_result.get("st_dir",0)==1 else "🔴 Bearish")
+                        _ls_c_d.metric("CPR Zone",  _ls_result.get("cpr_zone","?").replace("_"," ").title())
+
+                        sigs = _ls_result.get("signals", [])
+                        if sigs:
+                            st.markdown("---")
+                            st.success(f"✅ {len(sigs)} signal(s) fired on {_ls_ticker}!")
+                            for _sig in sigs:
+                                _act   = _sig.get("action","")
+                                _scr   = _sig.get("screen","")
+                                _clr   = "card-green" if _act == "BUY" else "card-red"
+                                _icon  = "🟢" if _act == "BUY" else "🔴"
+                                _price = _sig.get("price",0)
+                                _sl    = _sig.get("sl",0)
+                                _tp    = _sig.get("tp",0)
+                                _rr    = _sig.get("rr_ratio",0)
+                                st.markdown(f"""
+                                <div class="{_clr}">
+                                <span class="signal-big">{_icon} {_act} — {_scr}</span><br>
+                                <b>Entry:</b> ₹{_price:,.2f} &nbsp;|&nbsp;
+                                <b>SL:</b> ₹{_sl:,.2f} &nbsp;|&nbsp;
+                                <b>TP:</b> ₹{_tp:,.2f} &nbsp;|&nbsp;
+                                <b>R:R:</b> {_rr:.1f}x<br>
+                                <small>{_sig.get('reason','')}</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        else:
+                            st.info(f"No signal on {_ls_ticker} at this moment. Check back during active trading hours.")
+
+                        # ORB levels summary
+                        _ls_orb = _ls_result.get("orb", {})
+                        if _ls_orb and not pd.isna(_ls_orb.get("orb_high", float("nan"))):
+                            st.markdown("---")
+                            st.markdown(f"**Opening Range (15m):** "
+                                        f"High = ₹{_ls_orb['orb_high']:,.2f} | "
+                                        f"Low = ₹{_ls_orb['orb_low']:,.2f} | "
+                                        f"Range = {_ls_orb['orb_range_pct']:.2f}%")
+
+                except Exception as _ls_err:
+                    st.error(f"Signal scan failed: {_ls_err}")
+        else:
+            st.info("Enter a ticker and click **🎯 Check Signals** to run all 3 intraday checks.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE 12 — POSITION SIZER  [NEW]
+# ═══════════════════════════════════════════════════════════════════════════════
+elif page == "📐 Position Sizer":
+    st.title("📐 Position Sizer — Kelly Criterion + Risk Calculator")
+    st.markdown(
+        "Calculate exact position size using Kelly Criterion and fixed-risk rules.  \n"
+        "Never guess your lot size again — know exactly how many shares to buy *before* you enter."
+    )
+
+    _ps_tab1, _ps_tab2 = st.tabs(["💰 Fixed Risk Calculator", "📊 Kelly Criterion"])
+
+    with _ps_tab1:
+        st.subheader("Fixed-Risk Position Sizing")
+        st.caption("Most common approach: risk a fixed % of capital per trade.")
+
+        _psc1, _psc2 = st.columns(2)
+        with _psc1:
+            _ps_capital   = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="ps_cap")
+            _ps_risk_pct  = st.slider("Risk per trade (%)", 0.5, 3.0, 1.0, 0.25, key="ps_risk_pct")
+            _ps_entry     = st.number_input("Entry Price (₹)", 1.0, 100_000.0, 500.0, 0.5, key="ps_entry",
+                                            format="%.2f")
+        with _psc2:
+            _ps_sl        = st.number_input("Stop-Loss Price (₹)", 1.0, 100_000.0, 480.0, 0.5, key="ps_sl",
+                                            format="%.2f")
+            _ps_tp        = st.number_input("Target Price (₹)", 1.0, 200_000.0, 550.0, 0.5, key="ps_tp",
+                                            format="%.2f")
+            _ps_lot_size  = st.number_input("Lot / Board Lot (shares, 1 for equity)", 1, 10000, 1, key="ps_lot")
+
+        if _ps_entry > _ps_sl > 0:
+            _risk_rs    = _ps_capital * _ps_risk_pct / 100
+            _rps        = _ps_entry - _ps_sl
+            _raw_shares = _risk_rs / _rps
+            _lots       = max(1, int(_raw_shares / _ps_lot_size))
+            _shares     = _lots * _ps_lot_size
+            _notional   = _shares * _ps_entry
+            _actual_risk = _shares * _rps
+            _rr         = (_ps_tp - _ps_entry) / _rps if _rps > 0 else 0
+            _exp_profit = _shares * (_ps_tp - _ps_entry)
+
+            st.markdown("---")
+            r1, r2, r3, r4, r5 = st.columns(5)
+            r1.metric("Shares to Buy",   f"{_shares:,}")
+            r2.metric("Notional",        f"₹{_notional:,.0f}")
+            r3.metric("Risk ₹",          f"₹{_actual_risk:,.0f}",
+                      delta=f"{_actual_risk/_ps_capital*100:.2f}% of capital")
+            r4.metric("R:R Ratio",       f"{_rr:.1f}x",
+                      delta="✅ Good" if _rr >= 2 else "⚠️ Low")
+            r5.metric("Potential Profit",f"₹{_exp_profit:,.0f}")
+
+            _card_color = "card-green" if _rr >= 2 else ("card-yellow" if _rr >= 1.5 else "card-red")
+            st.markdown(f"""
+            <div class="{_card_color}">
+            <b>📋 Trade Plan: {_ps_entry:.2f} entry</b><br>
+            Buy <b>{_shares:,} shares</b> at ₹{_ps_entry:.2f} &nbsp;|&nbsp;
+            Stop ₹{_ps_sl:.2f} &nbsp;|&nbsp;
+            Target ₹{_ps_tp:.2f}<br>
+            Risk: ₹{_actual_risk:,.0f} ({_actual_risk/_ps_capital*100:.2f}% of ₹{_ps_capital:,}) &nbsp;|&nbsp;
+            R:R = {_rr:.1f}:1 &nbsp;|&nbsp; Potential profit: ₹{_exp_profit:,.0f}
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("Entry price must be greater than stop-loss price.")
+
+    with _ps_tab2:
+        st.subheader("Kelly Criterion Position Sizing")
+        st.caption("Mathematically optimal position size based on your historical win rate and R:R.")
+        st.markdown("""
+        **Kelly Formula:**  `f* = (b × p − q) / b`  where `b` = R:R ratio, `p` = win rate, `q` = 1 − p
+
+        ⚠️ *Use Half-Kelly (50% of Kelly output) in practice — full Kelly is too aggressive.*
+        """)
+
+        _kc1, _kc2 = st.columns(2)
+        with _kc1:
+            _k_capital  = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="k_cap")
+            _k_winrate  = st.slider("Historical Win Rate (%)", 30, 75, 55, 1, key="k_wr") / 100
+            _k_rr       = st.slider("Average R:R Ratio", 0.5, 5.0, 2.0, 0.1, key="k_rr")
+        with _kc2:
+            _k_fraction = st.slider("Kelly Fraction (0.5 = Half-Kelly)", 0.1, 1.0, 0.5, 0.05, key="k_frac")
+            _k_max_risk = st.slider("Max Risk Cap (%)", 0.5, 5.0, 2.0, 0.25, key="k_maxrisk")
+            _k_entry    = st.number_input("Entry Price (₹)", 1.0, 100_000.0, 500.0, 0.5, key="k_entry", format="%.2f")
+            _k_sl       = st.number_input("Stop-Loss (₹)",  1.0, 100_000.0, 480.0, 0.5, key="k_sl",    format="%.2f")
+
+        from trading.signals import kelly_position_size, shares_from_risk
+        try:
+            _k_result   = kelly_position_size(
+                win_rate=_k_winrate, rr_ratio=_k_rr,
+                capital=_k_capital, fraction=_k_fraction, max_risk_pct=_k_max_risk,
+            )
+            _k_shares   = shares_from_risk(_k_entry, _k_sl, _k_result["risk_rs"]) if _k_entry > _k_sl else 0
+            _k_notional = _k_shares * _k_entry
+            _k_actual_r = _k_shares * (_k_entry - _k_sl)
+
+            st.markdown("---")
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Kelly %",       f"{_k_result['kelly_pct']:.1f}%")
+            k2.metric("Applied Risk %", f"{_k_result['risk_pct']:.1f}%")
+            k3.metric("Risk ₹",        f"₹{_k_result['risk_rs']:,.0f}")
+            k4.metric("Shares",        f"{_k_shares:,}")
+
+            st.info(_k_result["notes"])
+            if _k_result["kelly_pct"] > 0:
+                st.markdown(f"""
+                <div class="card-blue">
+                <b>Kelly Plan @ ₹{_k_entry:.2f}</b><br>
+                Optimal risk: <b>{_k_result['risk_pct']:.1f}%</b> of capital = ₹{_k_result['risk_rs']:,.0f}<br>
+                Shares: <b>{_k_shares:,}</b> × ₹{_k_entry:.2f} = ₹{_k_notional:,.0f} notional<br>
+                Actual risk: ₹{_k_actual_r:,.0f} with SL at ₹{_k_sl:.2f}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.error("Negative Kelly — this setup has negative expected value. Do not trade.")
+        except Exception as _ke:
+            st.error(f"Kelly calculation error: {_ke}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE 13 — SWING TRADE CHECKLIST  [NEW]
+# ═══════════════════════════════════════════════════════════════════════════════
+elif page == "✅ Swing Checklist":
+    st.title("✅ Swing Trade Confluence Checklist")
+    st.markdown(
+        "Run all 7 go/no-go factors for a delivery swing trade in one click.  \n"
+        "Green = factor confirms the trade. Red = caution. Need ≥ 5/7 green to enter."
+    )
+
+    _sc_c1, _sc_c2 = st.columns([3, 1])
+    with _sc_c1:
+        _sc_ticker = st.text_input("NSE Ticker", value="RELIANCE",
+                                   placeholder="RELIANCE / TCS / INFY",
+                                   key="sc_ticker").strip().upper()
+    with _sc_c2:
+        st.write("")
+        st.write("")
+        _sc_btn = st.button("✅ Run Checklist", type="primary", key="sc_btn")
+
+    if _sc_btn and _sc_ticker:
+        _sc_sym = _sc_ticker if _sc_ticker.endswith(".NS") else _sc_ticker + ".NS"
+        with st.spinner(f"Running confluence checklist for {_sc_ticker}…"):
+            try:
+                from data.fetcher import fetch_single
+                from utils.indicators import add_all_indicators
+                from trading.signals import (get_india_vix_regime, check_oversold_bounce,
+                                              check_momentum_leader, check_fibonacci_pullback,
+                                              check_pullback_to_sma)
+                from strategies.sector_rotation import compute_sector_scores, SECTORS
+
+                _sc_df = fetch_single(_sc_sym, period="1y")
+                _sc_df = add_all_indicators(_sc_df)
+                _sc_df.dropna(subset=["RSI","ATR"], inplace=True)
+
+                _sc_cur = _sc_df.iloc[-1]
+                _price  = float(_sc_cur["Close"])
+                _rsi    = float(_sc_cur.get("RSI", 50))
+                _adx    = float(_sc_cur.get("ADX", 0)) if not pd.isna(_sc_cur.get("ADX",0)) else 0
+                _sma20  = float(_sc_cur.get("SMA_20", 0))
+                _sma50  = float(_sc_cur.get("SMA_50", 0))
+                _sma200 = float(_sc_cur.get("SMA_200", 0))
+                _atr    = float(_sc_cur.get("ATR", 0))
+                _vol_r  = float(_sc_cur.get("Volume_Ratio", 1))
+                _st_dir = int(_sc_cur.get("ST_Direction", 0))
+                _fib_zone = str(_sc_cur.get("Fib_Zone", "unknown"))
+                _cpr_zone = str(_sc_cur.get("Price_vs_CPR", "unknown"))
+
+                # VIX check
+                _vix_r = get_india_vix_regime()
+                _vix_ok = _vix_r["allow_buy"]
+                _vix_val = _vix_r.get("vix") or 0
+
+                # Sector rank check
+                try:
+                    _sec_scores = compute_sector_scores(period="1y")
+                    _top3 = set(_sec_scores.head(3).index.tolist()) if not _sec_scores.empty else set()
+                    _ticker_sector = {t: s for s, ts in SECTORS.items() for t in ts}
+                    _stock_sector = _ticker_sector.get(_sc_sym, "Unknown")
+                    _sector_ok = _stock_sector in _top3
+                    _sector_str = f"{_stock_sector} ({('Top 3' if _sector_ok else 'Not top 3')})"
+                except Exception:
+                    _sector_ok, _sector_str = True, "Unknown (not filtered)"
+
+                # MTF check (weekly trend)
+                try:
+                    from analysis.mtf import check_daily_weekly_alignment
+                    _mtf = check_daily_weekly_alignment(_sc_df)
+                    _mtf_ok = _mtf["alignment"] == "bullish"
+                    _mtf_str = _mtf["confirmation"]
+                except Exception:
+                    _mtf_ok, _mtf_str = True, "MTF check skipped"
+
+                # Build checklist items
+                _checks = [
+                    {
+                        "name":   "1️⃣ VIX Regime",
+                        "pass":   _vix_ok,
+                        "detail": f"India VIX = {_vix_val:.1f} | Regime: {_vix_r.get('regime','?').upper()}",
+                        "tip":    "VIX must be ≤ 28. High VIX = panic = avoid new longs.",
+                    },
+                    {
+                        "name":   "2️⃣ Long-Term Trend (SMA200)",
+                        "pass":   _price > _sma200 > 0,
+                        "detail": f"Price ₹{_price:.1f} {'>' if _price > _sma200 else '<'} SMA200 ₹{_sma200:.1f}",
+                        "tip":    "Price must be above 200-day SMA to confirm long-term uptrend.",
+                    },
+                    {
+                        "name":   "3️⃣ MA Stack (SMA20 > SMA50)",
+                        "pass":   _sma20 > _sma50 > 0,
+                        "detail": f"SMA20 ₹{_sma20:.1f} {'>' if _sma20>_sma50 else '<'} SMA50 ₹{_sma50:.1f}",
+                        "tip":    "Moving average alignment confirms short-term uptrend.",
+                    },
+                    {
+                        "name":   "4️⃣ RSI Zone (30–70)",
+                        "pass":   30 < _rsi < 72,
+                        "detail": f"RSI = {_rsi:.1f} | Ideal entry: 40–60",
+                        "tip":    "RSI in healthy range — not overbought (>72) or in freefall (<25).",
+                    },
+                    {
+                        "name":   "5️⃣ ADX Trend Strength",
+                        "pass":   _adx >= 20,
+                        "detail": f"ADX = {_adx:.1f} | {'Trending ✅' if _adx>=25 else ('Weak trend' if _adx>=20 else 'Ranging ❌')}",
+                        "tip":    "ADX ≥ 20 confirms trending environment. Below 20 = ranging/choppy.",
+                    },
+                    {
+                        "name":   "6️⃣ Multi-Timeframe Alignment",
+                        "pass":   _mtf_ok,
+                        "detail": _mtf_str,
+                        "tip":    "Both daily and weekly must be bullish for high-conviction swing entry.",
+                    },
+                    {
+                        "name":   "7️⃣ Sector in Top-3",
+                        "pass":   _sector_ok,
+                        "detail": _sector_str,
+                        "tip":    "Stocks in top-3 sectors by momentum score have higher win rates.",
+                    },
+                ]
+
+                # Score
+                _score = sum(1 for c in _checks if c["pass"])
+                _score_color = "card-green" if _score >= 5 else ("card-yellow" if _score >= 3 else "card-red")
+                _verdict = (
+                    "✅ STRONG SETUP — All key factors aligned. Consider entry."
+                    if _score >= 6 else
+                    "🟡 MODERATE SETUP — Most factors align. Entry with smaller size."
+                    if _score >= 4 else
+                    "🔴 WEAK SETUP — Too many factors against. Wait for improvement."
+                )
+
+                st.markdown(f"""
+                <div class="{_score_color}">
+                <span class="score-big">{_score}/7</span> &nbsp;&nbsp;
+                <span class="signal-big">{_verdict}</span><br>
+                <b>{_sc_ticker}</b> at ₹{_price:.2f} | RSI {_rsi:.1f} | ADX {_adx:.1f}
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("---")
+                st.markdown("### Checklist Details")
+                for _chk in _checks:
+                    _icon  = "✅" if _chk["pass"] else "❌"
+                    _color = "#4caf50" if _chk["pass"] else "#ef5350"
+                    st.markdown(
+                        f"<div style='border-left:4px solid {_color}; padding:8px 12px; "
+                        f"margin:6px 0; background:rgba(255,255,255,0.03); border-radius:4px;'>"
+                        f"<b>{_icon} {_chk['name']}</b><br>"
+                        f"<span style='color:#ccc'>{_chk['detail']}</span><br>"
+                        f"<small style='color:#888'>{_chk['tip']}</small></div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # Trade plan if score ≥ 4
+                if _score >= 4 and _atr > 0:
+                    st.markdown("---")
+                    st.markdown("### 📋 Suggested Trade Plan")
+                    _sl_val = _price - 2 * _atr
+                    _tp_val = _price + 3 * _atr
+                    _rr_val = 3 * _atr / (2 * _atr)
+                    st.markdown(f"""
+                    <div class="card-blue">
+                    <b>Entry:</b> ₹{_price:.2f} &nbsp;|&nbsp;
+                    <b>SL:</b> ₹{_sl_val:.2f} (2× ATR) &nbsp;|&nbsp;
+                    <b>TP:</b> ₹{_tp_val:.2f} (3× ATR) &nbsp;|&nbsp;
+                    <b>R:R:</b> {_rr_val:.1f}x<br>
+                    <small>ATR = ₹{_atr:.2f} | Fib Zone: {_fib_zone} | CPR: {_cpr_zone}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            except Exception as _sce:
+                st.error(f"Checklist error: {_sce}")
+                import traceback; st.code(traceback.format_exc())
+    else:
+        st.info("Enter a ticker and click **✅ Run Checklist** to see confluence analysis.")
+
+    # Reference table
+    st.markdown("---")
+    st.markdown("### 📖 Checklist Reference — What Each Factor Means")
+    st.dataframe(pd.DataFrame([
+        {"Factor":    "VIX Regime",          "Pass When":  "India VIX ≤ 28",        "Why It Matters": "High VIX = market panic = stop-outs are more likely"},
+        {"Factor":    "SMA200 Trend",         "Pass When":  "Price > SMA200",         "Why It Matters": "Stocks below SMA200 are in a downtrend — buying is fighting the tape"},
+        {"Factor":    "MA Stack",             "Pass When":  "SMA20 > SMA50",          "Why It Matters": "Short-term uptrend confirmed when faster MA is above slower"},
+        {"Factor":    "RSI Zone",             "Pass When":  "RSI 30–72",              "Why It Matters": "Outside this range = exhaustion (too hot or too cold)"},
+        {"Factor":    "ADX Strength",         "Pass When":  "ADX ≥ 20",              "Why It Matters": "Trending stocks have higher momentum carry than ranging stocks"},
+        {"Factor":    "MTF Alignment",        "Pass When":  "Daily+Weekly both bullish","Why It Matters": "Same direction on multiple timeframes = higher conviction"},
+        {"Factor":    "Sector Rank",          "Pass When":  "Sector in Top 3",        "Why It Matters": "Rising sectors carry stocks — fight sector momentum rarely works"},
+    ]), hide_index=True, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE 14 — MY WATCHLIST  [NEW]
+# ═══════════════════════════════════════════════════════════════════════════════
+elif page == "⭐ My Watchlist":
+    st.title("⭐ My Watchlist")
+    st.markdown("Save stocks you're tracking. Scores and prices update automatically.")
+
+    # SQLite-backed watchlist (same DB as paper trades)
+    import sqlite3 as _sql
+    _WL_DB = os.path.join(_ROOT, "dashboard", "paper_trades.db")
+
+    def _wl_init():
+        with _sql.connect(_WL_DB) as con:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker   TEXT NOT NULL UNIQUE,
+                    notes    TEXT DEFAULT '',
+                    added_at TEXT DEFAULT (datetime('now','localtime')),
+                    target_price REAL DEFAULT NULL,
+                    alert_sl     REAL DEFAULT NULL
+                )
+            """)
+        return _sql.connect(_WL_DB)
+
+    _wl_con = _wl_init()
+
+    def _wl_add(ticker: str, notes: str = "", target: float = None, sl: float = None):
+        try:
+            _wl_con.execute(
+                "INSERT OR IGNORE INTO watchlist(ticker, notes, target_price, alert_sl) VALUES(?,?,?,?)",
+                (ticker.upper(), notes, target, sl)
+            )
+            _wl_con.commit()
+            return True
+        except Exception:
+            return False
+
+    def _wl_remove(ticker: str):
+        _wl_con.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))
+        _wl_con.commit()
+
+    def _wl_get_all():
+        return pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", _wl_con)
+
+    # Add to watchlist form
+    with st.expander("➕ Add Stock to Watchlist", expanded=False):
+        _wl_f1, _wl_f2, _wl_f3, _wl_f4 = st.columns([2, 2, 1, 1])
+        with _wl_f1:
+            _new_tkr = st.text_input("Ticker (e.g. INFY)", key="wl_new_tkr").strip().upper()
+        with _wl_f2:
+            _new_notes = st.text_input("Notes (optional)", key="wl_new_notes")
+        with _wl_f3:
+            _new_target = st.number_input("Target ₹", 0.0, 100000.0, 0.0, key="wl_target", format="%.1f") or None
+        with _wl_f4:
+            _new_sl = st.number_input("Alert SL ₹", 0.0, 100000.0, 0.0, key="wl_sl", format="%.1f") or None
+        if st.button("⭐ Add", key="wl_add_btn") and _new_tkr:
+            _sym = _new_tkr if _new_tkr.endswith(".NS") else _new_tkr + ".NS"
+            if _wl_add(_sym, _new_notes, _new_target, _new_sl):
+                st.success(f"Added {_sym} to watchlist!")
+                st.rerun()
+
+    # Display watchlist with live scores
+    _wl_data = _wl_get_all()
+    if _wl_data.empty:
+        st.info("Your watchlist is empty. Add stocks using the form above.")
+    else:
+        _refresh_btn = st.button("🔄 Refresh Scores", key="wl_refresh")
+
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _wl_scores(tickers_tuple):
+            rows = []
+            for tkr in tickers_tuple:
+                try:
+                    cs = get_composite_score(tkr)
+                    rows.append({
+                        "ticker":    tkr,
+                        "price":     cs.current_price,
+                        "score":     cs.composite_score,
+                        "signal":    cs.overall_signal,
+                        "rsi":       round(cs.technical_indicators.get("rsi", 0), 1),
+                        "change_1d": round(cs.technical_indicators.get("return_1d", 0) * 100, 2),
+                    })
+                except Exception:
+                    rows.append({"ticker": tkr, "price": None, "score": None,
+                                 "signal": "Error", "rsi": None, "change_1d": None})
+            return rows
+
+        _tickers_tuple = tuple(_wl_data["ticker"].tolist())
+        with st.spinner("Loading scores…"):
+            _score_rows = _wl_scores(_tickers_tuple)
+
+        _score_map = {r["ticker"]: r for r in _score_rows}
+
+        # Merge with watchlist data
+        _merged = []
+        for _, row in _wl_data.iterrows():
+            tkr = row["ticker"]
+            sc  = _score_map.get(tkr, {})
+            _merged.append({
+                "⭐": "⭐",
+                "Ticker":       tkr.replace(".NS",""),
+                "Price ₹":      f"₹{sc.get('price',0):,.2f}" if sc.get("price") else "—",
+                "1d %":         f"{sc.get('change_1d',0):+.2f}%" if sc.get("change_1d") is not None else "—",
+                "Score":        sc.get("score", "—"),
+                "Signal":       sc.get("signal", "—"),
+                "RSI":          sc.get("rsi","—"),
+                "Target ₹":     f"₹{row['target_price']:.1f}" if row["target_price"] else "—",
+                "Alert SL ₹":   f"₹{row['alert_sl']:.1f}"   if row["alert_sl"]     else "—",
+                "Notes":        row["notes"] or "",
+                "Added":        str(row["added_at"])[:10],
+            })
+
+        _wl_display_df = pd.DataFrame(_merged)
+        st.dataframe(_wl_display_df, hide_index=True, use_container_width=True, height=420)
+
+        # Remove ticker
+        st.markdown("---")
+        _rm_col1, _rm_col2 = st.columns([3, 1])
+        with _rm_col1:
+            _rm_tkr = st.selectbox("Remove from watchlist", ["— select —"] + _wl_data["ticker"].tolist(),
+                                   key="wl_remove_sel")
+        with _rm_col2:
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Remove", key="wl_remove_btn") and _rm_tkr != "— select —":
+                _wl_remove(_rm_tkr)
+                st.success(f"Removed {_rm_tkr}")
+                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
