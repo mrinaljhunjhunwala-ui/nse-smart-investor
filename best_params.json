@@ -1,0 +1,58 @@
+{
+  "strategy": "RSIMACDStrategy",
+  "period": "2y",
+  "tickers_used": 5,
+  "consensus_params": {
+    "rsi_oversold": 40,
+    "rsi_overbought": 55,
+    "atr_stop_mult": 2.5,
+    "atr_tp_mult": 3.2
+  },
+  "per_ticker": [
+    {
+      "ticker": "RELIANCE.NS",
+      "params": {
+        "rsi_oversold": "45",
+        "rsi_overbought": "55",
+        "atr_stop_mult": 2.5,
+        "atr_tp_mult": 2.5
+      }
+    },
+    {
+      "ticker": "TCS.NS",
+      "params": {
+        "rsi_oversold": "40",
+        "rsi_overbought": "55",
+        "atr_stop_mult": 2.5,
+        "atr_tp_mult": 3.0
+      }
+    },
+    {
+      "ticker": "HDFCBANK.NS",
+      "params": {
+        "rsi_oversold": "40",
+        "rsi_overbought": "55",
+        "atr_stop_mult": 2.5,
+        "atr_tp_mult": 4.0
+      }
+    },
+    {
+      "ticker": "INFY.NS",
+      "params": {
+        "rsi_oversold": "35",
+        "rsi_overbought": "55",
+        "atr_stop_mult": 2.5,
+        "atr_tp_mult": 2.5
+      }
+    },
+    {
+      "ticker": "ICICIBANK.NS",
+      "params": {
+        "rsi_oversold": "45",
+        "rsi_overbought": "65",
+        "atr_stop_mult": 2.5,
+        "atr_tp_mult": 4.0
+      }
+    }
+  ]
+}
