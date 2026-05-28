@@ -62,12 +62,15 @@ def get_india_vix_regime() -> Dict:
         return _VIX_CACHE
 
     try:
-        import json, urllib.request
-        _url = ("https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
-                "?interval=1d&range=5d&includePrePost=false")
+        import json, urllib.parse as _up
+        from data.fetcher import _get_yf_crumb
+        _opener, _crumb = _get_yf_crumb()
+        _cqs = f"&crumb={_up.quote(_crumb)}" if _crumb else ""
+        _url = (f"https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
+                f"?interval=1d&range=5d&includePrePost=false{_cqs}")
         _req = urllib.request.Request(
             _url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-        with urllib.request.urlopen(_req, timeout=8) as _r:
+        with _opener.open(_req, timeout=8) as _r:
             _d = json.loads(_r.read())
         _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         _valid  = [v for v in _closes if v is not None]
