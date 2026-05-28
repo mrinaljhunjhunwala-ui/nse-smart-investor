@@ -198,7 +198,9 @@ def get_live_prices_batch(symbols: List[str], max_workers: int = 8) -> Dict[str,
         for fut in done:
             sym = futs[fut]
             try:
-                results[sym] = fut.result(timeout=0)
+                val = fut.result(timeout=0)
+                # Ensure we only store proper dicts — never raw exceptions or other types
+                results[sym] = val if isinstance(val, dict) else None
             except Exception:
                 results[sym] = None
     finally:
