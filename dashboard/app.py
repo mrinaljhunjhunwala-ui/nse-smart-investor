@@ -441,16 +441,16 @@ def load_ticker_df(ticker: str, period: str = "1y") -> pd.DataFrame:
 
 @st.cache_data(ttl=600)
 def load_vix_data():
-    import yfinance as yf
-    vix   = yf.download("^INDIAVIX", period="1y", interval="1d",
-                        auto_adjust=True, progress=False)
-    nifty = yf.download("^NSEI",     period="1y", interval="1d",
-                        auto_adjust=True, progress=False)
-    for df in [vix, nifty]:
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-    vix   = vix.dropna(subset=["Close"])
-    nifty = nifty.dropna(subset=["Close"])
+    """Load VIX + Nifty daily history via Stooq (no rate limits on cloud)."""
+    from data.fetcher import fetch_single
+    try:
+        vix   = fetch_single("^INDIAVIX", period="1y")
+    except Exception:
+        vix   = pd.DataFrame()
+    try:
+        nifty = fetch_single("^NSEI", period="1y")
+    except Exception:
+        nifty = pd.DataFrame()
     return vix, nifty
 
 
@@ -547,25 +547,21 @@ def paper_close_trade(trade_id: int, exit_price: float,
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _portfolio_live_prices(tickers: tuple) -> dict:
-    """Fast live prices via yfinance fast_info for portfolio holdings."""
-    import yfinance as yf, math
+    """
+    Live prices for portfolio holdings via Yahoo Finance JSON API (cloud-safe).
+    Falls back to Stooq EOD if Yahoo is unavailable.
+    """
+    from utils.live_price import get_live_prices_batch
+    raw = get_live_prices_batch(list(tickers))
     results = {}
     for t in tickers:
-        sym = t if t.endswith(".NS") else f"{t}.NS"
-        try:
-            fi    = yf.Ticker(sym).fast_info
-            price = fi.get("last_price") or fi.get("regularMarketPrice")
-            prev  = fi.get("previous_close") or fi.get("regularMarketPreviousClose")
-            if price and float(price) > 0 and not math.isnan(float(price)):
-                p  = float(price)
-                pc = float(prev) if (prev and not math.isnan(float(prev))) else p
-                results[t] = {
-                    "price": p,
-                    "prev":  pc,
-                    "chg":   (p / pc - 1) * 100 if pc > 0 else 0.0,
-                }
-        except Exception:
-            pass
+        q = raw.get(t)
+        if q and q.get("price"):
+            results[t] = {
+                "price": q["price"],
+                "prev":  q["prev_close"],
+                "chg":   q["chg_pct"],
+            }
     return results
 
 
@@ -1944,49 +1940,31 @@ elif page == "📂 Paper Trades":
     @st.cache_data(ttl=60, show_spinner=False)
     def _paper_trade_suggestions(ticker: str) -> dict:
         """
-        Fetch live price + compute ATR-based stop-loss & target for the paper trade form.
-        Returns dict with keys: price, prev, chg, atr, sl, tp, rsi, trend, qty_suggest, error
+        Live price (Yahoo JSON API) + ATR-based SL/TP + RSI + trend.
+        All data sources are cloud-safe (no yfinance rate limits).
+        Returns dict: price, prev, chg, atr, sl, tp, rsi, trend, qty_suggest, error
         """
-        import yfinance as yf, math, pandas as _pd2
+        import pandas as _pd2
+        from utils.live_price import get_live_quote
+        from data.fetcher import fetch_single
+
         result = {"price": None, "prev": None, "chg": 0.0,
                   "atr": None, "sl": None, "tp": None,
                   "rsi": None, "trend": "—", "qty_suggest": 1, "error": ""}
         try:
-            # ── Live price — fast_info first, fallback to 5m intraday bar ─
-            price = None
-            prev  = None
-            try:
-                fi    = yf.Ticker(ticker).fast_info
-                _p    = fi.get("last_price") or fi.get("regularMarketPrice")
-                _prev = fi.get("previous_close") or fi.get("regularMarketPreviousClose")
-                if _p and not math.isnan(float(_p)) and float(_p) > 0:
-                    price = float(_p)
-                    prev  = float(_prev) if (_prev and not math.isnan(float(_prev))) else price
-            except Exception:
-                pass
-
-            # fallback: 5-minute intraday bar
-            if price is None:
-                _intra = yf.download(ticker, period="1d", interval="5m",
-                                     auto_adjust=True, progress=False)
-                if isinstance(_intra.columns, _pd2.MultiIndex):
-                    _intra.columns = _intra.columns.get_level_values(0)
-                _intra = _intra.dropna(subset=["Close"])
-                if not _intra.empty:
-                    price = float(_intra["Close"].iloc[-1])
-
-            if price is None or price <= 0:
-                result["error"] = "Price unavailable — yfinance rate limited. Try again in 30 s."
+            # ── Live price via Yahoo JSON API / NSE / Stooq ────────────────
+            q = get_live_quote(ticker)
+            if not q or not q.get("price"):
+                result["error"] = "Price unavailable — all sources failed. Try again in 30 s."
                 return result
 
-            chg = (price / prev - 1) * 100 if (prev and prev > 0) else 0.0
-            result.update({"price": price, "prev": prev or price, "chg": chg})
+            price = q["price"]
+            prev  = q["prev_close"]
+            chg   = q["chg_pct"]
+            result.update({"price": price, "prev": prev, "chg": chg})
 
-            # ── Historical data for ATR + RSI + trend ─────────────────────
-            df = yf.download(ticker, period="60d", interval="1d",
-                             auto_adjust=True, progress=False)
-            if isinstance(df.columns, _pd2.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            # ── Historical data for ATR + RSI + trend via Stooq ───────────
+            df = fetch_single(ticker, period="3mo")
             df = df.dropna(subset=["Close"])
             if len(df) < 15:
                 # Fallback: simple % stops

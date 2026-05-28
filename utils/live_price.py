@@ -1,29 +1,70 @@
 """
-utils/live_price.py — real-time NSE equity prices.
+utils/live_price.py — Real-time NSE equity prices.
 
-Strategy (fastest to slowest, first success wins):
-  1. NSE India official API  (real-time, ~0 delay)
-  2. yfinance fast_info      (near real-time, ~15 min delay)
-  3. yfinance download 2d    (EOD fallback)
+Tier hierarchy (fastest → most reliable fallback):
+  1. Yahoo Finance JSON API  — direct HTTP, no library, works from cloud IPs,
+                               returns live price during market hours
+  2. NSE India official API  — real-time but needs cookie, may fail on cloud
+  3. Stooq EOD              — yesterday's close, never fails
 
-Usage:
-    from utils.live_price import get_live_price, get_live_prices_batch
-    price = get_live_price("ONGC")          # returns float or None
-    prices = get_live_prices_batch(["ONGC", "TCS", "INFY"])  # dict
+Why not yfinance?
+  yfinance.download() is rate-limited from Streamlit Cloud / datacenter IPs.
+  The direct Yahoo JSON endpoint (query1.finance.yahoo.com) is a lighter path
+  that avoids the rate-limiting applied to the Python library's batch calls.
 """
 
 from __future__ import annotations
+
+import json
+import math
 import time
+import urllib.request
 from typing import Dict, List, Optional
 
-# ─── NSE session (shared, keeps cookies alive) ────────────────────────────────
+
+# ─── Yahoo Finance direct quote API ─────────────────────────────────────────
+
+def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
+    """
+    Fetch live quote from Yahoo Finance JSON endpoint.
+    Works from cloud IPs (Streamlit Community Cloud, Heroku, etc.)
+    Returns dict with 'price', 'prev_close', or None on failure.
+    """
+    try:
+        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_ns}"
+               "?interval=1m&range=1d&includePrePost=false")
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())
+
+        meta = data["chart"]["result"][0]["meta"]
+        price      = meta.get("regularMarketPrice")
+        prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+
+        if price and float(price) > 0 and not math.isnan(float(price)):
+            return {
+                "price":      float(price),
+                "prev_close": float(prev_close) if prev_close else float(price),
+            }
+    except Exception:
+        pass
+    return None
+
+
+# ─── NSE India session (cookie-based, real-time) ────────────────────────────
+
 _nse_session = None
 _nse_session_ts: float = 0.0
-_NSE_SESSION_TTL = 300  # refresh session every 5 min
+_NSE_SESSION_TTL = 300
 
 
 def _get_nse_session():
-    """Return a requests.Session primed with NSE cookies."""
     global _nse_session, _nse_session_ts
     if _nse_session is None or (time.time() - _nse_session_ts) > _NSE_SESSION_TTL:
         import requests
@@ -31,15 +72,11 @@ def _get_nse_session():
         s.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
+                "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
             ),
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
             "Referer": "https://www.nseindia.com/",
         })
         try:
-            # Hit homepage to get session cookies (required by NSE API)
             s.get("https://www.nseindia.com/", timeout=6)
         except Exception:
             pass
@@ -48,11 +85,8 @@ def _get_nse_session():
     return _nse_session
 
 
-def _nse_live_price(symbol: str) -> Optional[float]:
-    """
-    Fetch live price from NSE India's official quote API.
-    Returns lastPrice (real-time during market hours) or None on failure.
-    """
+def _nse_live_price(symbol: str) -> Optional[dict]:
+    """NSE India official API — real-time, needs fresh session cookies."""
     try:
         session = _get_nse_session()
         url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}"
@@ -60,82 +94,107 @@ def _nse_live_price(symbol: str) -> Optional[float]:
         if resp.status_code != 200:
             return None
         data = resp.json()
-        # lastPrice is under priceInfo
-        price_info = data.get("priceInfo", {})
-        last = price_info.get("lastPrice") or price_info.get("close")
-        return float(last) if last else None
+        pi = data.get("priceInfo", {})
+        price = pi.get("lastPrice") or pi.get("close")
+        prev  = pi.get("previousClose") or pi.get("close")
+        if price:
+            return {"price": float(price), "prev_close": float(prev or price)}
     except Exception:
-        return None
+        pass
+    return None
 
 
-def _yfinance_fast_price(symbol: str) -> Optional[float]:
-    """yfinance fast_info — usually within ~15 min of live price."""
+# ─── Stooq EOD fallback ──────────────────────────────────────────────────────
+
+def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
+    """Last EOD close from Stooq — never rate-limited, works everywhere."""
     try:
-        import yfinance as yf
-        ticker_sym = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
-        t = yf.Ticker(ticker_sym)
-        fi = t.fast_info
-        import math
-        price = fi.get("last_price") or fi.get("regularMarketPrice")
-        if price is None:
+        import io, datetime, pandas as pd
+        sym = ticker_ns.lower()
+        end   = datetime.date.today()
+        start = end - datetime.timedelta(days=7)
+        url = (f"https://stooq.com/q/d/l/?s={sym}"
+               f"&d1={start.strftime('%Y%m%d')}&d2={end.strftime('%Y%m%d')}&i=d")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = r.read().decode()
+        if len(raw) < 60 or "No data" in raw:
             return None
-        p = float(price)
-        return p if (p > 0 and not math.isnan(p)) else None
-    except Exception:
-        return None
-
-
-def _yfinance_eod_price(symbol: str) -> Optional[float]:
-    """yfinance end-of-day fallback — yesterday's close."""
-    try:
-        import yfinance as yf
-        import pandas as pd
-        ticker_sym = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
-        df = yf.download(ticker_sym, period="2d", interval="1d",
-                         auto_adjust=True, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        df = pd.read_csv(io.StringIO(raw))
+        df.columns = [c.strip().title() for c in df.columns]
         df = df.dropna(subset=["Close"])
         if df.empty:
             return None
-        return float(df["Close"].iloc[-1])
+        df = df.sort_values("Date")
+        price = float(df["Close"].iloc[-1])
+        prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else price
+        return {"price": price, "prev_close": prev}
     except Exception:
         return None
 
 
+# ─── Public interface ────────────────────────────────────────────────────────
+
 def get_live_price(symbol: str) -> Optional[float]:
     """
-    Get the most current available price for a single NSE symbol.
-    Tries NSE API → yfinance fast_info → yfinance EOD.
+    Get current price for a single NSE symbol.
+    Returns float or None.
     """
-    clean = symbol.replace(".NS", "").upper()
+    clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
+    clean    = symbol.replace(".NS", "").upper()
 
-    # 1. NSE real-time
-    price = _nse_live_price(clean)
-    if price and price > 0:
-        return price
+    # Tier 1: Yahoo direct JSON (live during market hours, works from cloud)
+    q = _yahoo_json_quote(clean_ns)
+    if q:
+        return q["price"]
 
-    # 2. yfinance fast_info (~15 min delay)
-    price = _yfinance_fast_price(clean)
-    if price and price > 0:
-        return price
+    # Tier 2: NSE India API (real-time, may fail on cloud due to Cloudflare)
+    q = _nse_live_price(clean)
+    if q:
+        return q["price"]
 
-    # 3. yfinance EOD (prior day close)
-    return _yfinance_eod_price(clean)
+    # Tier 3: Stooq EOD (yesterday's close — always works)
+    q = _stooq_eod_price(clean_ns)
+    return q["price"] if q else None
 
 
-def get_live_prices_batch(symbols: List[str], max_workers: int = 6) -> Dict[str, Optional[float]]:
+def get_live_quote(symbol: str) -> Optional[dict]:
     """
-    Fetch live prices for multiple symbols in parallel.
-    Returns dict  { "ONGC": 273.30, "TCS": 3850.0, ... }
+    Get price + prev_close dict for one NSE symbol.
+    Returns {"price": float, "prev_close": float, "chg_pct": float} or None.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed, wait as _wait
+    clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
+    clean    = symbol.replace(".NS", "").upper()
 
-    results: Dict[str, Optional[float]] = {}
+    for fetch_fn, arg in [
+        (_yahoo_json_quote, clean_ns),
+        (_nse_live_price,   clean),
+        (_stooq_eod_price,  clean_ns),
+    ]:
+        q = fetch_fn(arg)
+        if q:
+            p  = q["price"]
+            pc = q["prev_close"]
+            return {
+                "price":      p,
+                "prev_close": pc,
+                "chg_pct":    (p / pc - 1) * 100 if pc > 0 else 0.0,
+            }
+    return None
+
+
+def get_live_prices_batch(symbols: List[str], max_workers: int = 8) -> Dict[str, Optional[dict]]:
+    """
+    Fetch live quotes for multiple symbols in parallel.
+    Returns {symbol: {"price", "prev_close", "chg_pct"} or None}
+    """
+    from concurrent.futures import ThreadPoolExecutor, wait as _wait
+
+    results: Dict[str, Optional[dict]] = {}
     pool = ThreadPoolExecutor(max_workers=max_workers)
     try:
-        futs = {pool.submit(get_live_price, sym): sym for sym in symbols}
-        done, _ = _wait(list(futs.keys()), timeout=15)
+        futs = {pool.submit(get_live_quote, sym): sym for sym in symbols}
+        done, _ = _wait(list(futs.keys()), timeout=20)
         for fut in done:
             sym = futs[fut]
             try:
@@ -145,9 +204,7 @@ def get_live_prices_batch(symbols: List[str], max_workers: int = 6) -> Dict[str,
     finally:
         pool.shutdown(wait=False)
 
-    # fill any that timed out
     for sym in symbols:
         if sym not in results:
             results[sym] = None
-
     return results
