@@ -481,12 +481,37 @@ def get_display_name(ticker: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
-def load_ticker_df(ticker: str, period: str = "1y") -> pd.DataFrame:
+def load_ticker_df(ticker: str, period: str = "2y") -> pd.DataFrame:
+    """
+    Fetch OHLCV + compute all technical indicators.
+
+    Always fetches at least 2 years so that SMA_200, RSI(14), MACD(26) etc.
+    are valid at the *most recent* row.  The UI chart period controls what
+    slice is *displayed*, not how much data is loaded.
+    """
     from data.fetcher import fetch_single
     from utils.indicators import add_all_indicators
     df = fetch_single(ticker, period=period)
     df = add_all_indicators(df)
     return df
+
+
+def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    """
+    Return a date-sliced copy of df matching the UI display period.
+    Indicators were computed on the full dataset so they remain accurate
+    at the most-recent row after slicing.
+    """
+    if df.empty:
+        return df
+    last_ts = df.index[-1]
+    _DAYS = {"1d": 8, "5d": 12, "1m": 35, "6m": 185}
+    if period in _DAYS:
+        cutoff = last_ts - pd.Timedelta(days=_DAYS[period])
+        return df[df.index >= cutoff]
+    if period == "ytd":
+        return df[df.index >= pd.Timestamp(last_ts.year, 1, 1)]
+    return df  # "max" or anything else → full history
 
 
 @st.cache_data(ttl=600)
@@ -514,10 +539,15 @@ def get_vix_info():
 
 
 @st.cache_data(ttl=600)
-def get_composite_score(ticker: str, period: str = "1y"):
+def get_composite_score(ticker: str):
+    """
+    Score a stock using a fixed 1-year lookback.
+    Scoring always uses 1Y regardless of what the chart display period is —
+    SMA_200, RSI divergence, and momentum all need a full year to be valid.
+    """
     from analysis.score import score_stock
     vix_info = get_vix_info()
-    return score_stock(ticker, period=period, vix_info=vix_info)
+    return score_stock(ticker, period="1y", vix_info=vix_info)
 
 
 def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
@@ -1702,8 +1732,12 @@ elif page == "🔍 Analyze Stock":
 
         with st.spinner(f"Scoring {ticker}…"):
             try:
-                cs = get_composite_score(ticker, period=period)
-                df = load_ticker_df(ticker, period=period)
+                # Scoring always uses 1Y data — changing chart period won't re-fetch
+                cs = get_composite_score(ticker)
+                # Full 2Y dataframe (all indicators valid at most-recent row)
+                df = load_ticker_df(ticker)
+                # Chart-display slice — only controls what the user SEES on the chart
+                df_chart = _trim_to_period(df, period)
 
                 # ── Score hero section ─────────────────────────────────────
                 st.markdown("---")
@@ -1862,7 +1896,9 @@ elif page == "🔍 Analyze Stock":
                 # ── Chart ─────────────────────────────────────────────────
                 st.markdown("---")
                 st.subheader("📊 Price Chart")
-                st.plotly_chart(build_price_chart(df, ticker), width="stretch")
+                # df_chart is the period-trimmed slice (indicators stay accurate
+                # because they were computed on the full 2-year dataset)
+                st.plotly_chart(build_price_chart(df_chart, ticker), width="stretch")
 
                 # ── News feed ─────────────────────────────────────────────
                 st.markdown("---")

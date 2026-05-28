@@ -1,7 +1,8 @@
 """
 utils/indicators.py
 Computes technical indicators: MA, RSI, MACD, BB, ATR, VWAP, ADX, Stochastic,
-Fibonacci retracements, candlestick patterns, and RSI divergence.
+Fibonacci retracements, Supertrend, CPR/Pivot Points,
+candlestick patterns, and RSI divergence.
 Uses pure pandas/numpy — no TA-Lib C library required.
 """
 
@@ -26,6 +27,8 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = add_volume_indicators(df)
     df = add_returns(df)
     df = add_fibonacci_levels(df)
+    df = add_supertrend(df)
+    df = add_pivot_points(df)
     df = detect_candlestick_patterns(df)
     df = detect_rsi_divergence(df)
     return df
@@ -101,6 +104,87 @@ def add_atr(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     df["ATR"]     = true_range.rolling(window=period).mean()
     df["ATR_Pct"] = df["ATR"] / df["Close"] * 100   # ATR as % of price
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchored VWAP  (intraday — resets at market open each day)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_anchored_vwap(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute intraday VWAP anchored from the start of each trading day.
+
+    Designed for intraday DataFrames with a DatetimeIndex.
+    Groups bars by date (ignoring time) and computes cumulative VWAP
+    that resets at 09:15 each morning.
+
+    Columns added:
+        AVWAP        : anchored VWAP (resets each day)
+        AVWAP_Pct    : (Close − AVWAP) / AVWAP × 100
+        AVWAP_SD1_Upper : VWAP + 1σ (volume-weighted)
+        AVWAP_SD1_Lower : VWAP − 1σ
+        AVWAP_SD2_Upper : VWAP + 2σ
+        AVWAP_SD2_Lower : VWAP − 2σ
+    """
+    try:
+        idx = df.index
+        # Works with both DatetimeIndex and date-based index
+        if hasattr(idx, "date"):
+            dates = pd.Series(idx.date, index=idx)
+        else:
+            dates = pd.Series(idx, index=idx)
+
+        tp     = (df["High"] + df["Low"] + df["Close"]) / 3
+        tp_vol = tp * df["Volume"]
+        tp_sq  = tp ** 2 * df["Volume"]
+
+        avwap_vals = np.zeros(len(df))
+        sd1u = np.zeros(len(df))
+        sd1l = np.zeros(len(df))
+        sd2u = np.zeros(len(df))
+        sd2l = np.zeros(len(df))
+
+        cum_tp_vol = 0.0
+        cum_vol    = 0.0
+        cum_sq     = 0.0
+        prev_date  = None
+
+        for i, (idx_val, date) in enumerate(dates.items()):
+            if date != prev_date:
+                # New day — reset cumulative sums
+                cum_tp_vol = 0.0
+                cum_vol    = 0.0
+                cum_sq     = 0.0
+                prev_date  = date
+
+            cum_tp_vol += float(tp_vol.iloc[i])
+            cum_vol    += float(df["Volume"].iloc[i])
+            cum_sq     += float(tp_sq.iloc[i])
+
+            if cum_vol > 0:
+                vwap_val = cum_tp_vol / cum_vol
+                var_val  = max(0, cum_sq / cum_vol - vwap_val ** 2)
+                sd_val   = var_val ** 0.5
+                avwap_vals[i] = vwap_val
+                sd1u[i]  = vwap_val + 1 * sd_val
+                sd1l[i]  = vwap_val - 1 * sd_val
+                sd2u[i]  = vwap_val + 2 * sd_val
+                sd2l[i]  = vwap_val - 2 * sd_val
+
+        df["AVWAP"]          = avwap_vals
+        df["AVWAP_Pct"]      = (df["Close"] / df["AVWAP"].replace(0, np.nan) - 1) * 100
+        df["AVWAP_SD1_Upper"] = sd1u
+        df["AVWAP_SD1_Lower"] = sd1l
+        df["AVWAP_SD2_Upper"] = sd2u
+        df["AVWAP_SD2_Lower"] = sd2l
+
+    except Exception:
+        # Fallback: add NaN columns so downstream code doesn't break
+        for col in ["AVWAP", "AVWAP_Pct", "AVWAP_SD1_Upper", "AVWAP_SD1_Lower",
+                    "AVWAP_SD2_Upper", "AVWAP_SD2_Lower"]:
+            df[col] = np.nan
+
     return df
 
 
@@ -384,6 +468,154 @@ def detect_rsi_divergence(df: pd.DataFrame, swing_lookback: int = 20) -> pd.Data
 
     df["RSI_Bull_Div"] = bull_div
     df["RSI_Bear_Div"] = bear_div
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Supertrend  (intraday + delivery — India's most-used trend indicator)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
+    """
+    Supertrend indicator — ATR-based dynamic support/resistance band.
+
+    Classic settings: period=10, multiplier=3.0 (works for daily and intraday)
+
+    How it works:
+        Upper Band = (High+Low)/2 + multiplier × ATR
+        Lower Band = (High+Low)/2 − multiplier × ATR
+        Supertrend switches direction when price crosses a band.
+
+    Columns added:
+        ST_Upper       : raw upper band value
+        ST_Lower       : raw lower band value
+        Supertrend     : current active support/resistance value
+        ST_Direction   : 1 = bullish (price above band), -1 = bearish
+        ST_Signal      : +1 = just crossed up (buy), -1 = just crossed down (sell)
+    """
+    if "ATR" not in df.columns:
+        df = add_atr(df, period=period)
+
+    hl2   = (df["High"] + df["Low"]) / 2
+    atr   = df["ATR"]
+    upper_raw = hl2 + multiplier * atr
+    lower_raw = hl2 - multiplier * atr
+
+    # Trailing band arrays
+    n           = len(df)
+    upper_band  = upper_raw.values.copy()
+    lower_band  = lower_raw.values.copy()
+    supertrend  = np.zeros(n)
+    direction   = np.ones(n, dtype=int)   # 1 = bullish
+    close       = df["Close"].values
+
+    for i in range(1, n):
+        # Upper band: only move DOWN (tighten)
+        if upper_raw.iloc[i] < upper_band[i - 1] or close[i - 1] > upper_band[i - 1]:
+            upper_band[i] = upper_raw.iloc[i]
+        else:
+            upper_band[i] = upper_band[i - 1]
+
+        # Lower band: only move UP (tighten)
+        if lower_raw.iloc[i] > lower_band[i - 1] or close[i - 1] < lower_band[i - 1]:
+            lower_band[i] = lower_raw.iloc[i]
+        else:
+            lower_band[i] = lower_band[i - 1]
+
+        # Direction flipping
+        prev_st = supertrend[i - 1] if i > 0 else upper_band[0]
+        if prev_st == upper_band[i - 1]:          # was bearish
+            if close[i] > upper_band[i]:
+                direction[i] = 1                   # flipped bullish
+                supertrend[i] = lower_band[i]
+            else:
+                direction[i] = -1
+                supertrend[i] = upper_band[i]
+        else:                                      # was bullish
+            if close[i] < lower_band[i]:
+                direction[i] = -1                  # flipped bearish
+                supertrend[i] = upper_band[i]
+            else:
+                direction[i] = 1
+                supertrend[i] = lower_band[i]
+
+    # Initialize first bar
+    supertrend[0] = upper_band[0]
+    direction[0]  = -1
+
+    df["ST_Upper"]     = upper_band
+    df["ST_Lower"]     = lower_band
+    df["Supertrend"]   = supertrend
+    df["ST_Direction"] = direction
+
+    # Signal: +1 on bar where direction flips from -1 to +1, -1 vice versa
+    dir_series     = pd.Series(direction, index=df.index)
+    df["ST_Signal"] = (dir_series.diff() > 0).astype(int) - (dir_series.diff() < 0).astype(int)
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CPR — Central Pivot Range  (India's #1 intraday framework)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_pivot_points(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Classic Pivot Points + Central Pivot Range (CPR) based on the *previous* bar.
+
+    Works on any timeframe:
+        Daily bars   → daily pivots from previous day's OHLC
+        Weekly bars  → weekly pivots from previous week
+        Intraday bars → pivots shift forward one BAR (approximate daily CPR)
+
+    Levels computed:
+        Pivot = (Prev_High + Prev_Low + Prev_Close) / 3
+        BC    = (Prev_High + Prev_Low) / 2              ← Bottom of CPR
+        TC    = Pivot + (Pivot - BC)                     ← Top of CPR
+        R1    = 2 × Pivot − Prev_Low
+        R2    = Pivot + (Prev_High − Prev_Low)
+        R3    = Prev_High + 2 × (Pivot − Prev_Low)
+        S1    = 2 × Pivot − Prev_High
+        S2    = Pivot − (Prev_High − Prev_Low)
+        S3    = Prev_Low  − 2 × (Prev_High − Pivot)
+
+    Additional columns:
+        CPR_Width   : TC − BC  (narrow CPR = directional day, wide = choppy)
+        CPR_Width_Pct : CPR_Width / Pivot × 100
+        Price_vs_CPR : 'above', 'inside', 'below'
+    """
+    ph = df["High"].shift(1)
+    pl = df["Low"].shift(1)
+    pc = df["Close"].shift(1)
+
+    pivot = (ph + pl + pc) / 3
+    bc    = (ph + pl) / 2
+    tc    = pivot + (pivot - bc)
+
+    df["Pivot"] = pivot
+    df["CPR_BC"] = bc
+    df["CPR_TC"] = tc
+    df["R1"] = 2 * pivot - pl
+    df["R2"] = pivot + (ph - pl)
+    df["R3"] = ph  + 2 * (pivot - pl)
+    df["S1"] = 2 * pivot - ph
+    df["S2"] = pivot - (ph - pl)
+    df["S3"] = pl   - 2 * (ph - pivot)
+
+    cpr_width = (tc - bc).abs()
+    df["CPR_Width"]     = cpr_width
+    df["CPR_Width_Pct"] = cpr_width / pivot * 100
+
+    # Classify current close vs CPR band
+    close = df["Close"]
+    cpr_upper = pd.concat([tc, bc], axis=1).max(axis=1)
+    cpr_lower = pd.concat([tc, bc], axis=1).min(axis=1)
+
+    conditions = [
+        close > cpr_upper,
+        (close >= cpr_lower) & (close <= cpr_upper),
+        close < cpr_lower,
+    ]
+    df["Price_vs_CPR"] = np.select(conditions, ["above", "inside", "below"], default="unknown")
     return df
 
 

@@ -115,9 +115,13 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
         "ytd": "ytd",  "max": "max",
         "1mo": "1mo",  "2mo": "3mo",  "3mo": "3mo",  "6mo": "6mo",
         "1y":  "1y",   "2y":  "2y",   "3y":  "5y",   "5y":  "5y",
+        # Intraday period keys (used by fetch_intraday)
+        "7d":  "5d",   "15d": "1mo",  "30d": "1mo",   "60d": "60d",
     }
-    yf_range    = _RANGE_MAP.get(period.lower(), "1y")
-    yf_interval = interval if interval in ("1d", "1wk", "1mo") else "1d"
+    yf_range = _RANGE_MAP.get(period.lower(), "1y")
+    # Allow intraday intervals — Yahoo supports 5m, 15m, 30m, 60m, 1h
+    _VALID_INTERVALS = {"1d", "1wk", "1mo", "5m", "15m", "30m", "60m", "1h"}
+    yf_interval = interval if interval in _VALID_INTERVALS else "1d"
 
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
            f"?interval={yf_interval}&range={yf_range}&includePrePost=false")
@@ -144,14 +148,27 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
     adjclose_list = (r0["indicators"].get("adjclose") or [{}])[0].get("adjclose")
     close_list    = adjclose_list if adjclose_list else quote.get("close", [])
 
-    dates = [datetime.datetime.utcfromtimestamp(ts).date() for ts in timestamps]
+    # For intraday intervals keep full datetime; for daily use date-only
+    _intraday = yf_interval not in ("1d", "1wk", "1mo")
+    if _intraday:
+        # Convert UTC unix seconds → IST (UTC+5:30) datetime
+        _ist_offset = datetime.timedelta(hours=5, minutes=30)
+        dates = [
+            datetime.datetime.utcfromtimestamp(ts) + _ist_offset
+            for ts in timestamps
+        ]
+        idx = pd.DatetimeIndex(dates, name="Datetime")
+    else:
+        dates = [datetime.datetime.utcfromtimestamp(ts).date() for ts in timestamps]
+        idx   = pd.DatetimeIndex(dates, name="Date")
+
     df = pd.DataFrame({
         "Open":   quote.get("open",   [None] * len(dates)),
         "High":   quote.get("high",   [None] * len(dates)),
         "Low":    quote.get("low",    [None] * len(dates)),
         "Close":  close_list,
         "Volume": quote.get("volume", [None] * len(dates)),
-    }, index=pd.DatetimeIndex(dates, name="Date"))
+    }, index=idx)
 
     df = df.dropna(subset=["Close"])
     df = df[df["Close"] > 0]
@@ -257,7 +274,7 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     df = None
     last_err = ""
 
-    # ── 1. Try Stooq (daily only) ─────────────────────────────────────────────
+    # ── 1. Try Stooq (daily bars only — skip for intraday) ───────────────────
     if interval == "1d":
         try:
             df = _fetch_stooq(ticker, period=period)
@@ -265,6 +282,8 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         except Exception as e:
             last_err = str(e)
             print(f"  [Stooq] {ticker} failed: {e} — trying Yahoo direct…")
+    else:
+        print(f"  [intraday {interval}] {ticker} — using Yahoo direct (Stooq is daily-only)")
 
     # ── 2. Fallback: direct Yahoo Finance chart API (no library, cloud-safe) ─────
     if df is None or df.empty:
@@ -280,6 +299,65 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
 
     _FETCH_CACHE[cache_key] = df
     return df.copy()
+
+
+def fetch_intraday(
+    ticker:   str,
+    interval: str = "5m",
+    days:     int = 5,
+) -> pd.DataFrame:
+    """
+    Fetch intraday OHLCV bars for a single NSE ticker.
+
+    Yahoo Finance intraday limits (free API):
+        5m  bars → last 5  trading days max
+        15m bars → last 60 trading days max
+        30m bars → last 60 trading days max
+        60m bars → last 730 trading days max
+
+    Args:
+        ticker   : yfinance symbol (e.g. 'RELIANCE.NS')
+        interval : '5m' | '15m' | '30m' | '60m'  (default '5m')
+        days     : how many trading days of data to request
+
+    Returns:
+        DataFrame with IST datetime index, columns: Open, High, Low, Close, Volume
+        Only market hours rows (09:15–15:30 IST) are returned.
+
+    Raises:
+        ValueError if no data returned.
+    """
+    _MAX_DAYS = {"5m": 5, "15m": 60, "30m": 60, "60m": 730, "1h": 730}
+    if interval not in _MAX_DAYS:
+        raise ValueError(f"interval must be one of {list(_MAX_DAYS)} — got '{interval}'")
+
+    # Cap days to Yahoo's limit for the chosen interval
+    cap = _MAX_DAYS[interval]
+    days = min(days, cap)
+
+    # Map days → period string understood by _fetch_yahoo_direct / _RANGE_MAP
+    if days <= 5:
+        period = "5d"
+    elif days <= 15:
+        period = "7d"
+    elif days <= 30:
+        period = "15d"
+    else:
+        period = "60d"
+
+    df = fetch_single(ticker, period=period, interval=interval)
+
+    # Filter to NSE market hours 09:15 – 15:30 IST
+    try:
+        times = df.index.time
+        import datetime as _dt
+        mkt_open  = _dt.time(9, 15)
+        mkt_close = _dt.time(15, 30)
+        df = df[(times >= mkt_open) & (times <= mkt_close)]
+    except Exception:
+        pass   # index may already be date-only on fallback
+
+    return df
 
 
 def fetch_index(index: str = "^NSEI", period: str = "2y") -> pd.DataFrame:
