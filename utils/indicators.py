@@ -295,6 +295,81 @@ def add_volume_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Relative Strength vs Index  (D-2 — delivery trader quality filter)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_relative_strength(
+    df:       pd.DataFrame,
+    bench_df: pd.DataFrame,
+    period:   int = 63,     # 63 trading days ≈ 3 months (IBD convention)
+) -> pd.DataFrame:
+    """
+    Compute Relative Strength of the stock vs a benchmark (usually Nifty 50).
+
+    RS Line  = stock_close / benchmark_close  (ratio)
+    RS_Pct   = (RS now / RS_N_bars_ago − 1) × 100  → +% = outperforming
+    RS_Score = percentile rank within own 52-week range [0–100]
+               (similar to IBD RS Rating — higher = stronger relative performer)
+
+    Typical usage (delivery trading rule):
+        - Only buy stocks where RS_Score ≥ 70 (top 30% relative performers)
+        - RS_Line making new highs before price = leading indicator
+
+    Args:
+        df       : stock daily OHLCV with Close column
+        bench_df : benchmark daily OHLCV (e.g. Nifty 50 from fetch_single('^NSEI'))
+        period   : lookback for RS_Pct momentum (default 63 bars = 3 months)
+
+    Columns added:
+        RS_Line   : stock / benchmark ratio
+        RS_Pct    : N-period relative momentum vs benchmark  (%)
+        RS_Score  : 0-100 rank within 52-week RS range
+        RS_Trend  : 'outperforming' | 'underperforming' | 'inline'
+    """
+    try:
+        # Align on common dates
+        common_idx = df.index.intersection(bench_df.index)
+        if len(common_idx) < period + 10:
+            for col in ["RS_Line", "RS_Pct", "RS_Score", "RS_Trend"]:
+                df[col] = np.nan
+            return df
+
+        stock_close = df["Close"].reindex(common_idx)
+        bench_close = bench_df["Close"].reindex(common_idx)
+
+        rs_line = stock_close / bench_close.replace(0, np.nan)
+
+        # Reindex back to original df index
+        rs_aligned = rs_line.reindex(df.index)
+        df["RS_Line"] = rs_aligned
+
+        # RS momentum: N-period change in RS ratio
+        rs_pct = rs_aligned.pct_change(period) * 100
+        df["RS_Pct"] = rs_pct.round(2)
+
+        # RS Score: 0-100 percentile rank in 252-bar rolling window
+        def _pct_rank(series: pd.Series, window: int = 252) -> pd.Series:
+            return series.rolling(window, min_periods=window // 4).apply(
+                lambda x: (x[-1] > x[:-1]).mean() * 100, raw=True
+            )
+        df["RS_Score"] = _pct_rank(rs_aligned, 252).round(1)
+
+        # Trend label
+        conditions = [
+            rs_pct > 2,
+            rs_pct < -2,
+        ]
+        df["RS_Trend"] = np.select(conditions, ["outperforming", "underperforming"],
+                                   default="inline")
+
+    except Exception:
+        for col in ["RS_Line", "RS_Pct", "RS_Score", "RS_Trend"]:
+            df[col] = np.nan
+
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Returns / Volatility
 # ─────────────────────────────────────────────────────────────────────────────
 
