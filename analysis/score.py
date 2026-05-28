@@ -188,16 +188,21 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
 
 def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
     cur = df.iloc[-1]
-    vol_ratio = float(cur.get("Volume_Ratio", 1.0))
+    vol_ratio  = float(cur.get("Volume_Ratio", 1.0))
+    close      = float(cur["Close"])
+    open_price = float(cur.get("Open", close))
+    up_day     = close >= open_price   # green candle = buying pressure
 
     pts: Dict[str, float] = {}
 
-    # Volume ratio — 10 pts
-    if vol_ratio > 2.5:   pts["vol_ratio"] = 10.0
-    elif vol_ratio > 1.8: pts["vol_ratio"] = 8.0
-    elif vol_ratio > 1.2: pts["vol_ratio"] = 6.0
-    elif vol_ratio > 0.8: pts["vol_ratio"] = 4.0
-    else:                 pts["vol_ratio"] = 1.0
+    # Volume ratio — 10 pts, but halved on red (distribution) days
+    if vol_ratio > 2.5:   raw_vol = 10.0
+    elif vol_ratio > 1.8: raw_vol = 8.0
+    elif vol_ratio > 1.2: raw_vol = 6.0
+    elif vol_ratio > 0.8: raw_vol = 4.0
+    else:                 raw_vol = 1.0
+    # High volume on a red candle = distribution (bearish) — penalise
+    pts["vol_ratio"] = raw_vol if up_day else max(1.0, raw_vol * 0.4)
 
     # OBV trend — 5 pts (slope of OBV over last 10 bars)
     if "OBV" in df.columns and len(df) >= 10:
@@ -216,25 +221,44 @@ def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _score_pattern(df: pd.DataFrame) -> Tuple[float, Dict]:
-    cur = df.iloc[-1]
+    # Scan last 3 bars so a pattern from 1-2 days ago still counts
+    recent = df.iloc[-3:] if len(df) >= 3 else df
     pts = 0.0
     found = []
 
-    # Bullish patterns (add)
-    if cur.get("Pat_MorningStar",   0): pts += 9.0; found.append("MorningStar")
-    elif cur.get("Pat_BullEngulfing", 0): pts += 8.0; found.append("BullEngulfing")
-    elif cur.get("Pat_Hammer",       0): pts += 6.0; found.append("Hammer")
-    elif cur.get("Pat_BullMarubozu", 0): pts += 5.0; found.append("BullMarubozu")
-    elif cur.get("Pat_Doji",         0): pts += 3.0; found.append("Doji")
+    bull_pat_cols = [
+        ("Pat_MorningStar",   9.0, "MorningStar"),
+        ("Pat_BullEngulfing", 8.0, "BullEngulfing"),
+        ("Pat_Hammer",        6.0, "Hammer"),
+        ("Pat_BullMarubozu",  5.0, "BullMarubozu"),
+        ("Pat_Doji",          3.0, "Doji"),
+    ]
+    bear_pat_cols = [
+        ("Pat_EveningStar",   7.0, "EveningStar⚠️"),
+        ("Pat_BearEngulfing", 6.0, "BearEngulfing⚠️"),
+        ("Pat_ShootingStar",  4.0, "ShootingStar⚠️"),
+    ]
 
-    # RSI divergence (additive)
+    for col, add, label in bull_pat_cols:
+        if recent[col].any() if col in recent.columns else False:
+            # Weight by recency: today=full, yesterday=60%, 2 days ago=30%
+            day_idx = recent[col].values[::-1].tolist()
+            recency = 1.0 if day_idx[0] else (0.6 if len(day_idx) > 1 and day_idx[1] else 0.3)
+            pts += add * recency
+            found.append(label)
+            break  # only count the strongest bullish pattern
+
+    for col, sub, label in bear_pat_cols:
+        if recent[col].any() if col in recent.columns else False:
+            day_idx = recent[col].values[::-1].tolist()
+            recency = 1.0 if day_idx[0] else (0.6 if len(day_idx) > 1 and day_idx[1] else 0.3)
+            pts -= sub * recency
+            found.append(label)
+            break
+
+    # RSI divergence (additive — check current bar only)
+    cur = df.iloc[-1]
     if cur.get("RSI_Bull_Div", 0): pts += 4.0; found.append("RSI_BullDiv")
-
-    # Bearish patterns (subtract, floor at 0)
-    if cur.get("Pat_EveningStar",   0): pts -= 7.0; found.append("EveningStar⚠️")
-    elif cur.get("Pat_BearEngulfing", 0): pts -= 6.0; found.append("BearEngulfing⚠️")
-    elif cur.get("Pat_ShootingStar",  0): pts -= 4.0; found.append("ShootingStar⚠️")
-
     if cur.get("RSI_Bear_Div", 0): pts -= 3.0; found.append("RSI_BearDiv⚠️")
 
     return round(max(0.0, min(pts, 10.0)), 2), {"patterns": found}
@@ -572,17 +596,19 @@ def score_stock(
     except ValueError:
         canonical = ticker if ticker.endswith(".NS") else ticker + ".NS"
 
-    # Fetch VIX once — inline, no cross-module import
+    # Fetch VIX — direct Yahoo Finance chart API (no yfinance library, cloud-safe)
     if vix_info is None:
         try:
-            import yfinance as _yf
-            import math as _math
-            _vdf = _yf.download("^INDIAVIX", period="5d", interval="1d",
-                                auto_adjust=True, progress=False)
-            if hasattr(_vdf.columns, "get_level_values"):
-                _vdf.columns = _vdf.columns.get_level_values(0)
-            _vdf = _vdf.dropna(subset=["Close"])   # drop incomplete today row
-            _v = float(_vdf["Close"].iloc[-1])
+            import json, urllib.request, math as _math
+            _url = ("https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
+                    "?interval=1d&range=5d&includePrePost=false")
+            _req = urllib.request.Request(_url, headers={
+                "User-Agent": "Mozilla/5.0", "Accept": "application/json"
+            })
+            with urllib.request.urlopen(_req, timeout=8) as _r:
+                _d = json.loads(_r.read())
+            _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+            _v = float(next(v for v in reversed(_closes) if v is not None))
             if _math.isnan(_v) or _v <= 0:
                 raise ValueError("VIX NaN")
             if   _v < 12: _reg = "complacency"
