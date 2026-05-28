@@ -1,7 +1,7 @@
 """
 utils/indicators.py
 Computes technical indicators: MA, RSI, MACD, BB, ATR, VWAP, ADX, Stochastic,
-candlestick patterns, and RSI divergence.
+Fibonacci retracements, candlestick patterns, and RSI divergence.
 Uses pure pandas/numpy — no TA-Lib C library required.
 """
 
@@ -25,6 +25,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = add_stochastic(df)
     df = add_volume_indicators(df)
     df = add_returns(df)
+    df = add_fibonacci_levels(df)
     df = detect_candlestick_patterns(df)
     df = detect_rsi_divergence(df)
     return df
@@ -383,6 +384,85 @@ def detect_rsi_divergence(df: pd.DataFrame, swing_lookback: int = 20) -> pd.Data
 
     df["RSI_Bull_Div"] = bull_div
     df["RSI_Bear_Div"] = bear_div
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fibonacci Retracement Levels  (from fibonacci-trading skill)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def add_fibonacci_levels(df: pd.DataFrame, lookback: int = 252) -> pd.DataFrame:
+    """
+    Fibonacci retracement levels from rolling swing high / swing low.
+
+    Levels are measured as retracement % from swing high toward swing low:
+
+        Fib_23_6 = H − 0.236 × (H − L)   ← shallow pullback
+        Fib_38_2 = H − 0.382 × (H − L)   ★ key support / entry zone
+        Fib_50_0 = H − 0.500 × (H − L)   ← mid range
+        Fib_61_8 = H − 0.618 × (H − L)   ★ golden-ratio support (deepest valid)
+        Fib_78_6 = H − 0.786 × (H − L)   ← last-ditch support before new lows
+
+    Price ordering (high → low):
+        Fib_23_6 > Fib_38_2 > Fib_50_0 > Fib_61_8 > Fib_78_6
+
+    Two lookbacks are calculated:
+        Long  (default 252 bars ≈ 1 year)   → columns  Fib_High, Fib_Low, Fib_*
+        Short (50 bars  ≈ 2.5 months)       → columns  Fib50_38_2, Fib50_50_0, Fib50_61_8
+
+    Proximity signals (long-term levels, ±1.5% tolerance):
+        Fib_Near_38 : 1 if Close is within 1.5 % of the 38.2 % level
+        Fib_Near_62 : 1 if Close is within 1.5 % of the 61.8 % level
+
+    Zone label (long-term):
+        Fib_Zone : 'above_23' | '23_38' | '38_50' | '50_62' | '62_78' | 'below_78'
+    """
+    # ── Long-term swing (major levels) ──────────────────────────────────────
+    min_p = max(50, lookback // 5)
+    h   = df["High"].rolling(window=lookback, min_periods=min_p).max()
+    l   = df["Low"].rolling(window=lookback, min_periods=min_p).min()
+    rng = (h - l).replace(0, np.nan)
+
+    df["Fib_High"] = h
+    df["Fib_Low"]  = l
+    df["Fib_23_6"] = h - 0.236 * rng
+    df["Fib_38_2"] = h - 0.382 * rng
+    df["Fib_50_0"] = h - 0.500 * rng
+    df["Fib_61_8"] = h - 0.618 * rng
+    df["Fib_78_6"] = h - 0.786 * rng
+
+    # ── Short-term swing (50-bar pullback levels) ────────────────────────────
+    h50  = df["High"].rolling(window=50, min_periods=20).max()
+    l50  = df["Low"].rolling(window=50, min_periods=20).min()
+    r50  = (h50 - l50).replace(0, np.nan)
+
+    df["Fib50_38_2"] = h50 - 0.382 * r50
+    df["Fib50_50_0"] = h50 - 0.500 * r50
+    df["Fib50_61_8"] = h50 - 0.618 * r50
+
+    # ── Proximity flags (long-term, ±1.5% band) ─────────────────────────────
+    tol = 0.015
+    df["Fib_Near_38"] = (
+        ((df["Close"] - df["Fib_38_2"]).abs() / df["Fib_38_2"]) <= tol
+    ).fillna(False).astype(int)
+
+    df["Fib_Near_62"] = (
+        ((df["Close"] - df["Fib_61_8"]).abs() / df["Fib_61_8"]) <= tol
+    ).fillna(False).astype(int)
+
+    # ── Zone the current close sits in (long-term) ───────────────────────────
+    # Fib_23_6 > Fib_38_2 > Fib_50_0 > Fib_61_8 > Fib_78_6 (price level order)
+    conditions = [
+        df["Close"] > df["Fib_23_6"],
+        (df["Close"] > df["Fib_38_2"]) & (df["Close"] <= df["Fib_23_6"]),
+        (df["Close"] > df["Fib_50_0"]) & (df["Close"] <= df["Fib_38_2"]),
+        (df["Close"] > df["Fib_61_8"]) & (df["Close"] <= df["Fib_50_0"]),
+        (df["Close"] > df["Fib_78_6"]) & (df["Close"] <= df["Fib_61_8"]),
+        df["Close"] <= df["Fib_78_6"],
+    ]
+    zone_labels = ["above_23", "23_38", "38_50", "50_62", "62_78", "below_78"]
+    df["Fib_Zone"] = np.select(conditions, zone_labels, default="unknown")
+
     return df
 
 
