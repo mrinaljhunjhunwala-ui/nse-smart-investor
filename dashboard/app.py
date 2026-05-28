@@ -93,52 +93,34 @@ st.sidebar.markdown("---")
 def _sidebar_all():
     """Fetch VIX + 4 macro instruments concurrently. Returns in <10s or gives up.
 
-    NOTE: We deliberately do NOT use `with ThreadPoolExecutor() as pool:` because
-    that context manager calls pool.shutdown(wait=True) on exit, which blocks until
-    ALL threads finish — including any that are stuck/hanging.  Instead we call
-    pool.shutdown(wait=False) after collecting whatever completed within the timeout.
+    Cloud-safe: uses Yahoo Finance JSON API directly (no yfinance library),
+    which avoids the rate-limiting that hits yf.download() from datacenter IPs.
     """
-    import yfinance as yf
+    from utils.live_price import _yahoo_json_quote
     from concurrent.futures import ThreadPoolExecutor, wait as _wait
-
-    def _dl(sym):
-        try:
-            import requests, urllib3
-            urllib3.disable_warnings()
-            session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(max_retries=0)
-            session.mount("https://", adapter)
-            df = yf.download(sym, period="2d", interval="1d",
-                             auto_adjust=True, progress=False,
-                             session=session)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            return sym, df
-        except Exception:
-            return sym, pd.DataFrame()
 
     symbols = {
         "^INDIAVIX": "vix",
-        "^NSEI": "Nifty",
-        "^NSEBANK": "BNifty",
-        "GC=F": "Gold",
-        "BZ=F": "Crude",
+        "^NSEI":     "Nifty",
+        "^NSEBANK":  "BNifty",
+        "GC=F":      "Gold",
+        "BZ=F":      "Crude",
     }
     results = {}
     pool = ThreadPoolExecutor(max_workers=5)
     try:
-        futs = {pool.submit(_dl, sym): (sym, name) for sym, name in symbols.items()}
-        done, _ = _wait(list(futs.keys()), timeout=10)
+        futs = {pool.submit(_yahoo_json_quote, sym): (sym, name)
+                for sym, name in symbols.items()}
+        done, _ = _wait(list(futs.keys()), timeout=12)
         for fut in done:
             sym, name = futs[fut]
             try:
-                _, df = fut.result(timeout=0)
-                if len(df) >= 2:
-                    results[name] = df
+                q = fut.result(timeout=0)
+                if q:
+                    results[name] = q   # {"price": float, "prev_close": float}
             except Exception:
                 pass
     finally:
-        # Don't wait for stuck threads — let them die as daemon threads
         pool.shutdown(wait=False)
 
     # Parse VIX
@@ -146,16 +128,15 @@ def _sidebar_all():
     if "vix" in results:
         try:
             import math as _m
-            v   = results["vix"].dropna(subset=["Close"])  # drop incomplete row
-            val = float(v["Close"].iloc[-1])
-            prev= float(v["Close"].iloc[-2]) if len(v) >= 2 else val
+            val = results["vix"]["price"]
+            prev= results["vix"]["prev_close"]
             chg = (val / prev - 1) * 100 if prev > 0 else 0.0
             if _m.isnan(val) or val <= 0:
                 raise ValueError("VIX NaN")
-            if val < 16:   reg, col = "Normal", "🟢"
-            elif val < 22: reg, col = "Elevated", "🟡"
-            elif val < 28: reg, col = "Fear", "🔴"
-            else:          reg, col = "PANIC", "🔴"
+            if val < 16:   reg, col = "Normal",   "🟢"
+            elif val < 22: reg, col = "Elevated",  "🟡"
+            elif val < 28: reg, col = "Fear",      "🔴"
+            else:          reg, col = "PANIC",     "🔴"
             vix_data = (val, chg, reg, col)
         except Exception:
             pass
@@ -166,11 +147,9 @@ def _sidebar_all():
     for name in ("Nifty", "BNifty", "Gold", "Crude"):
         if name in results:
             try:
-                df = results[name].dropna(subset=["Close"])
-                if len(df) < 2:
-                    continue
-                c, p = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
-                pulse[name] = (c, (c / p - 1) * 100, dp_map[name])
+                c  = results[name]["price"]
+                pc = results[name]["prev_close"]
+                pulse[name] = (c, (c / pc - 1) * 100 if pc > 0 else 0.0, dp_map[name])
             except Exception:
                 pass
 
@@ -221,6 +200,77 @@ try:
             st.rerun()
 except Exception:
     pass
+
+st.sidebar.markdown("---")
+
+# ── Personal Watchlist ────────────────────────────────────────────────────────
+st.sidebar.markdown("#### 👀 My Watchlist")
+
+# Initialise watchlist in session state with 5 popular defaults
+if "watchlist" not in st.session_state:
+    st.session_state["watchlist"] = [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"
+    ]
+
+_wl_add_col, _wl_btn_col = st.sidebar.columns([3, 1])
+with _wl_add_col:
+    _wl_input = st.text_input(
+        "Add ticker", value="", placeholder="e.g. WIPRO",
+        label_visibility="collapsed", key="wl_add_input"
+    ).strip().upper()
+with _wl_btn_col:
+    st.write("")
+    _wl_add_clicked = st.button("＋", key="wl_add_btn", use_container_width=True)
+
+if _wl_add_clicked and _wl_input:
+    _sym = _wl_input if _wl_input.endswith(".NS") else f"{_wl_input}.NS"
+    if _sym not in st.session_state["watchlist"] and len(st.session_state["watchlist"]) < 12:
+        st.session_state["watchlist"].append(_sym)
+
+# Fetch live prices for watchlist tickers
+@st.cache_data(ttl=60, show_spinner=False)
+def _watchlist_prices(tickers_tuple: tuple) -> dict:
+    from utils.live_price import get_live_prices_batch
+    raw = get_live_prices_batch(list(tickers_tuple))
+    out = {}
+    for t in tickers_tuple:
+        q = raw.get(t)
+        if q and q.get("price"):
+            out[t] = q
+    return out
+
+_wl_tickers = tuple(st.session_state["watchlist"])
+try:
+    _wl_prices = _watchlist_prices(_wl_tickers)
+except Exception:
+    _wl_prices = {}
+
+_wl_to_remove = None
+for _wl_sym in list(st.session_state["watchlist"]):
+    _wl_q   = _wl_prices.get(_wl_sym)
+    _wl_label = _wl_sym.replace(".NS", "")
+    _wl_c1, _wl_c2, _wl_c3 = st.sidebar.columns([2, 2, 1])
+    _wl_c1.markdown(f"<span style='font-size:12px;font-weight:700'>{_wl_label}</span>",
+                    unsafe_allow_html=True)
+    if _wl_q:
+        _wl_p   = _wl_q["price"]
+        _wl_chg = _wl_q.get("chg_pct", 0.0)
+        _wl_clr = "#26a69a" if _wl_chg >= 0 else "#ef5350"
+        _wl_arr = "▲" if _wl_chg >= 0 else "▼"
+        _wl_c2.markdown(
+            f'<span style="font-size:11px">₹{_wl_p:,.1f} '
+            f'<span style="color:{_wl_clr}">{_wl_arr}{abs(_wl_chg):.1f}%</span></span>',
+            unsafe_allow_html=True,
+        )
+    else:
+        _wl_c2.markdown('<span style="font-size:11px;color:#777">—</span>',
+                        unsafe_allow_html=True)
+    if _wl_c3.button("✕", key=f"wl_rm_{_wl_sym}", use_container_width=True):
+        _wl_to_remove = _wl_sym
+
+if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
+    st.session_state["watchlist"].remove(_wl_to_remove)
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
@@ -592,27 +642,55 @@ def _grade_color(grade: str) -> str:
 
 @st.cache_data(ttl=600)
 def load_macro_data():
-    import yfinance as yf
-    symbols = {
-        "Nifty 50":    "^NSEI",
-        "BankNifty":   "^NSEBANK",
-        "India VIX":   "^INDIAVIX",
+    """
+    Fetch 3-month daily history for macro instruments.
+    NSE indices via fetch_single() (Stooq first).
+    Commodities/FX via Yahoo Finance JSON history (cloud-safe direct HTTP).
+    """
+    import json, io, datetime, urllib.request
+    from data.fetcher import fetch_single
+
+    data = {}
+
+    # Indian index series — Stooq handles these reliably
+    index_map = {
+        "Nifty 50":  "^NSEI",
+        "BankNifty": "^NSEBANK",
+        "India VIX": "^INDIAVIX",
+    }
+    for name, sym in index_map.items():
+        try:
+            df = fetch_single(sym, period="3mo")
+            if not df.empty:
+                data[name] = df["Close"]
+        except Exception:
+            pass
+
+    # Commodities / FX — use Yahoo Finance JSON history (v8 chart API)
+    commodity_map = {
         "Gold ($/oz)": "GC=F",
         "Brent Crude": "BZ=F",
         "USD/INR":     "USDINR=X",
         "DXY":         "DX-Y.NYB",
     }
-    data = {}
-    for name, sym in symbols.items():
+    for name, sym in commodity_map.items():
         try:
-            df = yf.download(sym, period="3mo", interval="1d",
-                             auto_adjust=True, progress=False)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+                   "?interval=1d&range=3mo")
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                raw = json.loads(r.read())
+            res = raw["chart"]["result"][0]
+            ts  = res["timestamp"]
+            cl  = res["indicators"]["quote"][0]["close"]
+            df  = pd.DataFrame({"Close": cl},
+                               index=pd.to_datetime(ts, unit="s")).dropna()
             if not df.empty:
                 data[name] = df["Close"]
         except Exception:
             pass
+
     return pd.DataFrame(data).dropna(how="all")
 
 
@@ -630,16 +708,24 @@ _NIFTY50_TICKERS = (
 )
 
 
-@st.cache_data(ttl=900)  # 15-min cache — slow scan
+@st.cache_data(ttl=900)  # 15-min cache
 def compute_market_breadth(tickers: tuple):
+    """Batch download all 50 tickers in 1 HTTP call instead of 50 individual calls."""
     import yfinance as yf
+    tickers_list = list(tickers)
+    try:
+        batch = yf.download(tickers_list, period="1y", interval="1d",
+                            auto_adjust=True, progress=False, group_by="ticker")
+    except Exception:
+        batch = pd.DataFrame()
+
     adv = dec = above_20 = above_50 = above_200 = near_hi = near_lo = counted = 0
-    for t in tickers:
+    for t in tickers_list:
         try:
-            df = yf.download(t, period="1y", interval="1d",
-                             auto_adjust=True, progress=False)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            if isinstance(batch.columns, pd.MultiIndex) and t in batch.columns.get_level_values(0):
+                df = batch[t].dropna(subset=["Close"])
+            else:
+                continue
             if len(df) < 10:
                 continue
             close = df["Close"]
@@ -683,66 +769,167 @@ def compute_market_breadth(tickers: tuple):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
+    """
+    4-panel trading chart: Price (candlestick + SMAs + BB) / Volume / RSI / MACD.
+    Matches the layout of professional trading terminals.
+    """
     fig = make_subplots(
-        rows=3, cols=1, shared_xaxes=True,
-        row_heights=[0.6, 0.2, 0.2],
+        rows=4, cols=1, shared_xaxes=True,
+        row_heights=[0.52, 0.14, 0.17, 0.17],
         vertical_spacing=0.02,
-        subplot_titles=[f"{ticker} — Price", "RSI (14)", "MACD"],
+        subplot_titles=[f"{ticker} — Price", "Volume", "RSI (14)", "MACD"],
     )
+
+    # ── Row 1: Candlestick ──────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
         x=df.index, open=df["Open"], high=df["High"],
         low=df["Low"], close=df["Close"],
-        name="OHLC", increasing_line_color="#26a69a",
-        decreasing_line_color="#ef5350",
+        name="OHLC",
+        increasing_line_color="#26a69a", increasing_fillcolor="#26a69a",
+        decreasing_line_color="#ef5350", decreasing_fillcolor="#ef5350",
     ), row=1, col=1)
+
     if "BB_Upper" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["BB_Upper"],
-            line=dict(color="rgba(100,160,255,0.4)", dash="dash"),
+            line=dict(color="rgba(100,160,255,0.4)", dash="dash", width=1),
             name="BB Upper", showlegend=False,
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
             x=df.index, y=df["BB_Lower"],
-            fill="tonexty", fillcolor="rgba(100,160,255,0.05)",
-            line=dict(color="rgba(100,160,255,0.4)", dash="dash"),
+            fill="tonexty", fillcolor="rgba(100,160,255,0.06)",
+            line=dict(color="rgba(100,160,255,0.4)", dash="dash", width=1),
             name="BB Lower", showlegend=False,
         ), row=1, col=1)
+
     for sma, color in [("SMA_20", "#FF9800"), ("SMA_50", "#2196F3"), ("SMA_200", "#9C27B0")]:
         if sma in df.columns:
             fig.add_trace(go.Scatter(
                 x=df.index, y=df[sma], name=sma,
-                line=dict(color=color, width=1),
+                line=dict(color=color, width=1.2),
             ), row=1, col=1)
+
+    # ── Row 2: Volume bars (green = up day, red = down day) ─────────────────
+    if "Volume" in df.columns:
+        vol_colors = [
+            "#26a69a" if c >= o else "#ef5350"
+            for c, o in zip(df["Close"], df["Open"])
+        ]
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["Volume"],
+            marker_color=vol_colors,
+            name="Volume", showlegend=False,
+            opacity=0.7,
+        ), row=2, col=1)
+        # 20-day avg volume line
+        vol_ma = df["Volume"].rolling(20).mean()
+        fig.add_trace(go.Scatter(
+            x=df.index, y=vol_ma,
+            line=dict(color="#FFD700", width=1.2, dash="dot"),
+            name="Vol MA20", showlegend=False,
+        ), row=2, col=1)
+
+    # ── Row 3: RSI ──────────────────────────────────────────────────────────
     if "RSI" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["RSI"], name="RSI",
-            line=dict(color="#9C27B0", width=1.5),
-        ), row=2, col=1)
-        for level, color in [(30, "green"), (70, "red"), (50, "gray")]:
-            fig.add_hline(y=level, line_dash="dot", line_color=color, row=2, col=1)
+            line=dict(color="#CE93D8", width=1.5),
+        ), row=3, col=1)
+        for level, color in [(30, "#26a69a"), (70, "#ef5350"), (50, "rgba(150,150,150,0.5)")]:
+            fig.add_hline(y=level, line_dash="dot", line_color=color, row=3, col=1)
+        # RSI overbought / oversold shading
+        fig.add_hrect(y0=70, y1=100, fillcolor="rgba(239,83,80,0.06)",
+                      line_width=0, row=3, col=1)
+        fig.add_hrect(y0=0, y1=30, fillcolor="rgba(38,166,154,0.06)",
+                      line_width=0, row=3, col=1)
+
+    # ── Row 4: MACD ─────────────────────────────────────────────────────────
     if "MACD" in df.columns and "MACD_Signal" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["MACD"], name="MACD",
-            line=dict(color="#2196F3"),
-        ), row=3, col=1)
+            line=dict(color="#2196F3", width=1.5),
+        ), row=4, col=1)
         fig.add_trace(go.Scatter(
             x=df.index, y=df["MACD_Signal"], name="Signal",
-            line=dict(color="#FF9800"),
-        ), row=3, col=1)
+            line=dict(color="#FF9800", width=1.5),
+        ), row=4, col=1)
         if "MACD_Hist" in df.columns:
-            colors = ["#26a69a" if v >= 0 else "#ef5350" for v in df["MACD_Hist"]]
+            hist_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in df["MACD_Hist"]]
             fig.add_trace(go.Bar(
                 x=df.index, y=df["MACD_Hist"], name="Hist",
-                marker_color=colors,
-            ), row=3, col=1)
+                marker_color=hist_colors, opacity=0.6,
+            ), row=4, col=1)
+
     fig.update_layout(
-        height=680, template="plotly_dark",
+        height=740, template="plotly_dark",
         xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", y=1.02),
-        margin=dict(l=0, r=0, t=40, b=0),
+        legend=dict(orientation="h", y=1.03, font=dict(size=11)),
+        margin=dict(l=0, r=0, t=44, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(17,17,34,1)",
     )
+    # Axis labels
+    fig.update_yaxes(title_text="Price (₹)", row=1, col=1,
+                     title_font=dict(size=10), tickfont=dict(size=9))
+    fig.update_yaxes(title_text="Vol", row=2, col=1,
+                     title_font=dict(size=10), tickfont=dict(size=9),
+                     tickformat=".2s")
+    fig.update_yaxes(title_text="RSI", row=3, col=1,
+                     title_font=dict(size=10), tickfont=dict(size=9),
+                     range=[0, 100])
+    fig.update_yaxes(title_text="MACD", row=4, col=1,
+                     title_font=dict(size=10), tickfont=dict(size=9))
     return fig
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PERSISTENT TOP BAR — shown on every page
+# ═══════════════════════════════════════════════════════════════════════════════
+try:
+    _tb_nifty  = _pulse.get("Nifty")
+    _tb_vix    = vix_val
+    _tb_vix_r  = vix_reg
+    _tb_col    = vix_col
+
+    _tb_parts = []
+    if _tb_nifty:
+        _n_p, _n_chg, _ = _tb_nifty
+        _nc = "#26a69a" if _n_chg >= 0 else "#ef5350"
+        _na = "▲" if _n_chg >= 0 else "▼"
+        _tb_parts.append(
+            f'<span style="margin-right:24px"><b style="color:#aaa;font-size:11px">NIFTY 50</b> '
+            f'<b style="font-size:15px">{_n_p:,.0f}</b> '
+            f'<span style="color:{_nc};font-size:12px">{_na}{abs(_n_chg):.2f}%</span></span>'
+        )
+    if _tb_vix:
+        _vc = "#26a69a" if _tb_vix < 16 else "#f9a825" if _tb_vix < 22 else "#ef5350"
+        _tb_parts.append(
+            f'<span style="margin-right:24px"><b style="color:#aaa;font-size:11px">VIX</b> '
+            f'<b style="font-size:15px;color:{_vc}">{_tb_vix:.1f}</b> '
+            f'<span style="color:#aaa;font-size:11px">{_tb_col} {_tb_vix_r}</span></span>'
+        )
+    _ms_tb = _mstatus() if "market_status" in dir() else None
+    try:
+        from utils.market_hours import market_status as _ms_fn2
+        _ms_tb = _ms_fn2()
+        _st_c = "#26a69a" if _ms_tb["is_open"] else "#ef5350"
+        _tb_parts.append(
+            f'<span style="margin-right:24px"><b style="color:#aaa;font-size:11px">MARKET</b> '
+            f'<b style="font-size:13px;color:{_st_c}">{_ms_tb["status"]}</b></span>'
+        )
+    except Exception:
+        pass
+
+    if _tb_parts:
+        st.markdown(
+            '<div style="background:#1a1a2e;border-radius:8px;padding:10px 18px;'
+            'margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap;">'
+            + "".join(_tb_parts) +
+            '</div>',
+            unsafe_allow_html=True,
+        )
+except Exception:
+    pass  # top bar is cosmetic — never break the page over it
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE 0 — MARKET LIVE
@@ -902,12 +1089,9 @@ if page == "📡 Market Live":
             """Generate 2-4 plain-English reasons why a stock is moving."""
             reasons = []
             try:
-                import yfinance as yf
                 import math
-                df = yf.download(ticker, period="3mo", interval="1d",
-                                 auto_adjust=True, progress=False)
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
+                from data.fetcher import fetch_single
+                df = fetch_single(ticker, period="3mo")
                 df = df.dropna(subset=["Close"])
                 if len(df) < 20:
                     return reasons
@@ -973,6 +1157,7 @@ if page == "📡 Market Live":
             prev  = row.get("prev_close", price)
             name  = row["name"]
             tick  = row["ticker"].replace(".NS", "")
+            full_tick = row["ticker"]
             vol_r = row["vol_ratio"]
             arrow = "▲" if is_gainer else "▼"
 
@@ -989,6 +1174,22 @@ if page == "📡 Market Live":
                 reasons = _explain_mover(row["ticker"], chg, vol_r)
                 for r in reasons:
                     st.markdown(f"• {r}")
+
+                # ── Quick-action buttons ────────────────────────────────────
+                _ba, _bb, _bc = st.columns(3)
+                if _ba.button("📊 Analyze", key=f"ml_analyze_{full_tick}", use_container_width=True):
+                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.session_state["manual_ticker_input"] = tick
+                    st.session_state["last_analyzed"] = full_tick
+                    st.rerun()
+                if _bb.button("📝 Paper Trade", key=f"ml_trade_{full_tick}", use_container_width=True):
+                    st.session_state["nav"] = "📂 Paper Trades"
+                    st.session_state["pt_prefill_ticker"] = full_tick
+                    st.rerun()
+                if _bc.button("＋ Watchlist", key=f"ml_wl_{full_tick}", use_container_width=True):
+                    if full_tick not in st.session_state.get("watchlist", []):
+                        st.session_state.setdefault("watchlist", []).append(full_tick)
+                    st.toast(f"{tick} added to watchlist ✓")
 
         with col_g:
             st.subheader("🟢 Top Gainers (Nifty 50)")
@@ -1131,9 +1332,50 @@ elif page == "🏠 My Portfolio":
                             "Total Return": "—",
                             "Total P&L":    "—",
                         })
-                st.dataframe(pd.DataFrame(_lp_rows), hide_index=True, width="stretch")
+                _lp_df = pd.DataFrame(_lp_rows)
+                st.dataframe(_lp_df, hide_index=True, width="stretch")
+
+                # ── Portfolio Heatmap ──────────────────────────────────────
+                _hm_rows = []
+                for _row in _port_csv.itertuples():
+                    _sym  = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
+                    _lp   = _live_prices.get(_sym, {})
+                    _cur  = _lp.get("price")
+                    _buy  = getattr(_row, "avg_buy_price", 0)
+                    _qty  = getattr(_row, "quantity", 1)
+                    if _cur and _buy and _buy > 0:
+                        _pct   = (_cur / _buy - 1) * 100
+                        _val   = _cur * _qty
+                        _hm_rows.append({
+                            "label":  _row.ticker,
+                            "value":  _val,
+                            "pct":    round(_pct, 2),
+                            "text":   f"{_row.ticker}<br>{_pct:+.1f}%<br>₹{_val/1000:.0f}K",
+                        })
+                if _hm_rows:
+                    _hm_df = pd.DataFrame(_hm_rows)
+                    import plotly.express as _px2
+                    _fig_hm = _px2.treemap(
+                        _hm_df, path=["label"], values="value",
+                        color="pct",
+                        color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
+                        color_continuous_midpoint=0,
+                        custom_data=["pct", "text"],
+                        title="📊 Portfolio Heatmap — sized by value, coloured by P&L",
+                    )
+                    _fig_hm.update_traces(
+                        texttemplate="%{customdata[1]}",
+                        textfont_size=13,
+                        hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
+                    )
+                    _fig_hm.update_layout(
+                        template="plotly_dark", height=300,
+                        margin=dict(l=0, r=0, t=40, b=0),
+                        coloraxis_showscale=False,
+                    )
+                    st.plotly_chart(_fig_hm, use_container_width=True)
             else:
-                st.caption("⚠️ Live prices unavailable — yfinance rate-limited. Showing EOD data below.")
+                st.caption("⚠️ Live prices unavailable — trying again. Showing EOD data below.")
         except Exception as _e:
             st.caption(f"Live price strip skipped: {_e}")
 
@@ -1752,15 +1994,23 @@ elif page == "📊 Market Overview":
 
     @st.cache_data(ttl=600)
     def get_top_movers():
+        """Batch download all 50 tickers — 1 HTTP call instead of 50."""
         import yfinance as yf
         from data.fetcher import NIFTY50_TICKERS
+        tickers_list = list(NIFTY50_TICKERS[:50])
+        try:
+            batch = yf.download(tickers_list, period="5d", interval="1d",
+                                auto_adjust=True, progress=False, group_by="ticker")
+        except Exception:
+            return pd.DataFrame()
+
         rows = []
-        for t in NIFTY50_TICKERS[:50]:
+        for t in tickers_list:
             try:
-                d = yf.download(t, period="5d", interval="1d",
-                                auto_adjust=True, progress=False)
-                if isinstance(d.columns, pd.MultiIndex):
-                    d.columns = d.columns.get_level_values(0)
+                if isinstance(batch.columns, pd.MultiIndex) and t in batch.columns.get_level_values(0):
+                    d = batch[t].dropna(subset=["Close"])
+                else:
+                    continue
                 if len(d) < 2:
                     continue
                 close = float(d["Close"].iloc[-1])
@@ -1770,9 +2020,9 @@ elif page == "📊 Market Overview":
                 vol_r = float(d["Volume"].iloc[-1]) / max(float(d["Volume"].mean()), 1)
                 rows.append({
                     "Ticker": t.replace(".NS", ""),
-                    "Price": round(close, 2),
-                    "Day (%)": round(chg, 2),
-                    "5d (%)": round(w_chg, 2),
+                    "Price":     round(close, 2),
+                    "Day (%)":   round(chg,   2),
+                    "5d (%)":    round(w_chg, 2),
                     "Vol Ratio": round(vol_r, 2),
                 })
             except Exception:
@@ -1785,26 +2035,49 @@ elif page == "📊 Market Overview":
             top5 = movers.head(5)
             bot5 = movers.tail(5)
             m1, m2 = st.columns(2)
+
+            def _mover_row(row, is_gain: bool):
+                chg   = row["Day (%)"]
+                price = row["Price"]
+                tick  = row["Ticker"]  # e.g. "RELIANCE.NS"
+                short = tick.replace(".NS", "")
+                color = "#26a69a" if is_gain else "#ef5350"
+                sign  = "+" if is_gain else ""
+                card_cls = "card-green" if is_gain else "card-red"
+                st.markdown(
+                    f'<div class="{card_cls}" style="padding:8px 14px;margin-bottom:4px">'
+                    f'<b style="font-size:14px">{short}</b>'
+                    f'<span style="float:right;font-size:13px">₹{price:,.2f} '
+                    f'<b style="color:{color}">{sign}{chg:.2f}%</b></span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                btn_a, btn_b, btn_c = st.columns([1, 1, 1])
+                if btn_a.button("📊 Analyze", key=f"mover_analyze_{tick}",
+                                use_container_width=True):
+                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.session_state["manual_ticker_input"] = short
+                    st.session_state["last_analyzed"] = tick
+                    st.rerun()
+                if btn_b.button("📝 Paper Trade", key=f"mover_trade_{tick}",
+                                use_container_width=True):
+                    st.session_state["nav"] = "📂 Paper Trades"
+                    st.session_state["pt_prefill_ticker"] = tick
+                    st.rerun()
+                if btn_c.button("＋ Watchlist", key=f"mover_wl_{tick}",
+                                use_container_width=True):
+                    if tick not in st.session_state.get("watchlist", []):
+                        st.session_state.setdefault("watchlist", []).append(tick)
+                    st.toast(f"{short} added to watchlist ✓")
+
             with m1:
                 st.markdown("**📈 Top Gainers Today**")
                 for _, row in top5.iterrows():
-                    st.markdown(
-                        f'<div class="card-green" style="padding:8px 14px">'
-                        f'<b>{row["Ticker"]}</b>  ₹{row["Price"]:,.2f}  '
-                        f'<span style="color:#26a69a">+{row["Day (%)"]:,.2f}%</span>'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
+                    _mover_row(row, is_gain=True)
             with m2:
                 st.markdown("**📉 Top Losers Today**")
                 for _, row in bot5.iterrows():
-                    st.markdown(
-                        f'<div class="card-red" style="padding:8px 14px">'
-                        f'<b>{row["Ticker"]}</b>  ₹{row["Price"]:,.2f}  '
-                        f'<span style="color:#ef5350">{row["Day (%)"]:,.2f}%</span>'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
+                    _mover_row(row, is_gain=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1933,6 +2206,13 @@ elif page == "📂 Paper Trades":
         "Practice trading **without real money**. Open virtual trades, track live P&L, "
         "and measure your decision quality over time. All prices are from live market data."
     )
+
+    # Pre-fill ticker if navigated from Market Live / Market Overview "Trade" button
+    if "pt_prefill_ticker" in st.session_state and st.session_state["pt_prefill_ticker"]:
+        _pf_sym = st.session_state.pop("pt_prefill_ticker")
+        _pf_clean = _pf_sym.replace(".NS", "")
+        st.session_state["pt_manual_tk"] = _pf_clean
+        st.info(f"📝 Pre-filled from Market Overview: **{_pf_clean}** — live price loading…")
 
     _ensure_paper_db()
 
@@ -2281,20 +2561,60 @@ elif page == "📂 Paper Trades":
                 _cl_disp["pnl"] = pd.to_numeric(_cl_disp["pnl"], errors="coerce")
             st.dataframe(_cl_disp, hide_index=True, width="stretch")
 
-            # P&L Bar Chart
+            # P&L Bar Chart + Cumulative Equity Curve
             _pnl_plot = all_closed.copy()
             _pnl_plot["pnl"] = pd.to_numeric(_pnl_plot["pnl"], errors="coerce")
             _pnl_plot = _pnl_plot.dropna(subset=["pnl"])
             if not _pnl_plot.empty:
-                _fig_pnl = px.bar(
-                    _pnl_plot, x="ticker", y="pnl",
-                    color="pnl", color_continuous_scale="RdYlGn",
-                    title="Realised P&L per Closed Trade (₹)",
-                    labels={"pnl": "P&L (₹)", "ticker": "Stock"},
-                )
-                _fig_pnl.update_layout(template="plotly_dark", height=320,
-                                       margin=dict(l=0, r=0, t=40, b=0))
-                st.plotly_chart(_fig_pnl, width="stretch")
+                _chart_tab1, _chart_tab2 = st.tabs(["📊 P&L per Trade", "📈 Equity Curve"])
+
+                with _chart_tab1:
+                    _fig_pnl = px.bar(
+                        _pnl_plot, x="ticker", y="pnl",
+                        color="pnl", color_continuous_scale="RdYlGn",
+                        title="Realised P&L per Closed Trade (₹)",
+                        labels={"pnl": "P&L (₹)", "ticker": "Stock"},
+                    )
+                    _fig_pnl.update_layout(template="plotly_dark", height=320,
+                                           margin=dict(l=0, r=0, t=40, b=0))
+                    st.plotly_chart(_fig_pnl, width="stretch")
+
+                with _chart_tab2:
+                    # Cumulative P&L over sequential trades
+                    _eq_df = _pnl_plot.reset_index(drop=True)
+                    _eq_df["trade_no"]   = range(1, len(_eq_df) + 1)
+                    _eq_df["cumulative"] = _eq_df["pnl"].cumsum()
+                    _eq_colors = [
+                        "#26a69a" if v >= 0 else "#ef5350"
+                        for v in _eq_df["cumulative"]
+                    ]
+                    _fig_eq = go.Figure()
+                    _fig_eq.add_trace(go.Scatter(
+                        x=_eq_df["trade_no"], y=_eq_df["cumulative"],
+                        mode="lines+markers",
+                        line=dict(color="#2196F3", width=2.5),
+                        marker=dict(color=_eq_colors, size=8, line=dict(width=1, color="#fff")),
+                        fill="tozeroy",
+                        fillcolor="rgba(33,150,243,0.08)",
+                        name="Cumulative P&L",
+                        customdata=_eq_df[["ticker", "pnl"]].values,
+                        hovertemplate=(
+                            "Trade #%{x} — %{customdata[0]}<br>"
+                            "This trade: ₹%{customdata[1]:,.0f}<br>"
+                            "Cumulative: ₹%{y:,.0f}<extra></extra>"
+                        ),
+                    ))
+                    _fig_eq.add_hline(y=0, line_dash="dot", line_color="rgba(150,150,150,0.5)")
+                    _final_pnl = float(_eq_df["cumulative"].iloc[-1])
+                    _fig_eq.update_layout(
+                        template="plotly_dark", height=320,
+                        title=f"Equity Curve — Total P&L ₹{_final_pnl:+,.0f} "
+                              f"over {len(_eq_df)} trades",
+                        xaxis_title="Trade Number",
+                        yaxis_title="Cumulative P&L (₹)",
+                        margin=dict(l=0, r=0, t=44, b=0),
+                    )
+                    st.plotly_chart(_fig_eq, width="stretch")
 
             # ── Performance Stats ──────────────────────────────────────────
             with st.expander("📈 Performance Statistics", expanded=False):
