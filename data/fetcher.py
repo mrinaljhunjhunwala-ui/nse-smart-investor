@@ -57,6 +57,10 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
     if not raw.strip() or "No data" in raw or len(raw) < 60:
         raise ValueError(f"Stooq returned no data for {ticker}")
 
+    # Stooq sometimes returns an HTML page instead of CSV (maintenance / geo-block)
+    if raw.lstrip().startswith("<") or "<!DOCTYPE" in raw[:200] or "<html" in raw[:200].lower():
+        raise ValueError(f"Stooq returned HTML (not CSV) for {ticker}")
+
     df = pd.read_csv(io.StringIO(raw))
     df.columns = [c.strip().title() for c in df.columns]
     if "Date" not in df.columns:

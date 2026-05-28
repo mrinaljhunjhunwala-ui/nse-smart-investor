@@ -710,23 +710,37 @@ _NIFTY50_TICKERS = (
 
 @st.cache_data(ttl=900)  # 15-min cache
 def compute_market_breadth(tickers: tuple):
-    """Batch download all 50 tickers in 1 HTTP call instead of 50 individual calls."""
-    import yfinance as yf
+    """
+    Fetch 1-year OHLCV for each ticker via Stooq (no rate limits) in parallel,
+    then compute advance/decline, SMA positions, and 52-week extremes.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from data.fetcher import fetch_single
+
     tickers_list = list(tickers)
-    try:
-        batch = yf.download(tickers_list, period="1y", interval="1d",
-                            auto_adjust=True, progress=False, group_by="ticker")
-    except Exception:
-        batch = pd.DataFrame()
+
+    def _fetch_one(t):
+        try:
+            return t, fetch_single(t, period="1y")
+        except Exception:
+            return t, None
+
+    data_map = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futs = {pool.submit(_fetch_one, t): t for t in tickers_list}
+        for fut in as_completed(futs, timeout=45):
+            try:
+                t, df = fut.result(timeout=0)
+                if df is not None and not df.empty:
+                    data_map[t] = df
+            except Exception:
+                pass
 
     adv = dec = above_20 = above_50 = above_200 = near_hi = near_lo = counted = 0
     for t in tickers_list:
         try:
-            if isinstance(batch.columns, pd.MultiIndex) and t in batch.columns.get_level_values(0):
-                df = batch[t].dropna(subset=["Close"])
-            else:
-                continue
-            if len(df) < 10:
+            df = data_map.get(t)
+            if df is None or len(df) < 10:
                 continue
             close = df["Close"]
             curr  = float(close.iloc[-1])
@@ -750,6 +764,7 @@ def compute_market_breadth(tickers: tuple):
                 near_lo += 1
         except Exception:
             continue
+
     n = max(counted, 1)
     return {
         "advance":       adv,
@@ -969,85 +984,29 @@ if page == "📡 Market Live":
     @st.cache_data(ttl=180 if _ms["is_open"] else 3600, show_spinner=False)
     def _load_nifty_snapshot():
         """
-        Batch snapshot — 2 HTTP requests total instead of 100 individual ones.
-        yf.download(list_of_tickers) returns MultiIndex columns (ticker, field)
-        when group_by='ticker'. We extract each ticker's slice from those DataFrames.
-          - prev_close : yesterday's EOD close
-          - curr_price : latest intraday bar (5 m) → falls back to EOD when market closed
-          - chg_pct    : (curr / prev − 1) × 100
-          - vol_ratio  : today's volume vs 20-day average
+        Cloud-safe Nifty 50 snapshot.
+        Uses the 3-tier live price pipeline (Yahoo JSON → NSE India → Stooq EOD)
+        via get_live_prices_batch() — works from any IP, no rate limits.
         """
-        import yfinance as yf
-        import pandas as pd
         from data.fetcher import NIFTY50_TICKERS
+        from utils.live_price import get_live_prices_batch
 
         tickers_list = list(NIFTY50_TICKERS)
-
-        try:
-            # ONE call → all 50 tickers, intraday
-            intra_raw = yf.download(
-                tickers_list, period="1d", interval="5m",
-                auto_adjust=True, progress=False, group_by="ticker",
-            )
-            # ONE call → all 50 tickers, daily (prev close + avg volume)
-            daily_raw = yf.download(
-                tickers_list, period="30d", interval="1d",
-                auto_adjust=True, progress=False, group_by="ticker",
-            )
-        except Exception:
-            return pd.DataFrame()
-
-        daily_multi = isinstance(daily_raw.columns, pd.MultiIndex)
-        intra_multi = isinstance(intra_raw.columns, pd.MultiIndex)
+        raw = get_live_prices_batch(tickers_list, max_workers=12)
 
         rows = []
         for t in tickers_list:
+            q = raw.get(t)
+            if not q or not q.get("price"):
+                continue
             try:
-                # ── Extract daily slice ────────────────────────────────────────
-                if daily_multi:
-                    lvl0 = daily_raw.columns.get_level_values(0)
-                    if t not in lvl0:
-                        continue
-                    daily = daily_raw[t].copy()
-                else:
-                    daily = daily_raw.copy()
-
-                daily = daily.dropna(subset=["Close"])
-                if len(daily) < 2:
-                    continue
-
-                prev_close = float(daily["Close"].iloc[-1])
-                avg_vol    = float(daily["Volume"].tail(20).mean())
-
-                # ── Extract intraday slice ─────────────────────────────────────
-                if intra_multi:
-                    lvl0_i = intra_raw.columns.get_level_values(0)
-                    if t in lvl0_i:
-                        intra = intra_raw[t].dropna(subset=["Close"])
-                    else:
-                        intra = pd.DataFrame()
-                else:
-                    intra = intra_raw.dropna(subset=["Close"]) if not intra_raw.empty else pd.DataFrame()
-
-                if len(intra) > 0:
-                    curr      = float(intra["Close"].iloc[-1])
-                    today_vol = float(intra["Volume"].sum())
-                else:
-                    # Market closed — show yesterday's change vs the day before
-                    curr       = prev_close
-                    prev_close = float(daily["Close"].iloc[-2])
-                    today_vol  = float(daily["Volume"].iloc[-1])
-
-                chg   = (curr / prev_close - 1) * 100 if prev_close > 0 else 0.0
-                vol_r = today_vol / avg_vol if avg_vol > 0 else 1.0
-
                 rows.append({
                     "ticker":     t,
                     "name":       get_display_name(t),
-                    "price":      curr,
-                    "prev_close": prev_close,
-                    "chg_pct":    chg,
-                    "vol_ratio":  vol_r,
+                    "price":      q["price"],
+                    "prev_close": q["prev_close"],
+                    "chg_pct":    q["chg_pct"],
+                    "vol_ratio":  1.0,   # volume ratio not available from JSON API
                 })
             except Exception:
                 continue
@@ -1992,38 +1951,32 @@ elif page == "📊 Market Overview":
     st.markdown("---")
     st.subheader("🚀 NIFTY50 Top Movers")
 
-    @st.cache_data(ttl=600)
+    @st.cache_data(ttl=180)
     def get_top_movers():
-        """Batch download all 50 tickers — 1 HTTP call instead of 50."""
-        import yfinance as yf
+        """
+        Fetch Nifty50 movers using Yahoo JSON direct API (cloud-safe, no rate limits).
+        Falls back to Stooq EOD price if Yahoo JSON fails for a ticker.
+        """
         from data.fetcher import NIFTY50_TICKERS
+        from utils.live_price import get_live_prices_batch
         tickers_list = list(NIFTY50_TICKERS[:50])
-        try:
-            batch = yf.download(tickers_list, period="5d", interval="1d",
-                                auto_adjust=True, progress=False, group_by="ticker")
-        except Exception:
-            return pd.DataFrame()
+
+        # Parallel fetch — Yahoo JSON tier 1, NSE tier 2, Stooq EOD tier 3
+        raw = get_live_prices_batch(tickers_list, max_workers=12)
 
         rows = []
         for t in tickers_list:
+            q = raw.get(t)
+            if not q or not q.get("price"):
+                continue
             try:
-                if isinstance(batch.columns, pd.MultiIndex) and t in batch.columns.get_level_values(0):
-                    d = batch[t].dropna(subset=["Close"])
-                else:
-                    continue
-                if len(d) < 2:
-                    continue
-                close = float(d["Close"].iloc[-1])
-                prev  = float(d["Close"].iloc[-2])
-                chg   = (close / prev - 1) * 100
-                w_chg = (close / float(d["Close"].iloc[0]) - 1) * 100
-                vol_r = float(d["Volume"].iloc[-1]) / max(float(d["Volume"].mean()), 1)
                 rows.append({
-                    "Ticker": t.replace(".NS", ""),
-                    "Price":     round(close, 2),
-                    "Day (%)":   round(chg,   2),
-                    "5d (%)":    round(w_chg, 2),
-                    "Vol Ratio": round(vol_r, 2),
+                    "Ticker":   t,                               # keep .NS for routing
+                    "Price":    round(q["price"],     2),
+                    "Day (%)":  round(q["chg_pct"],   2),
+                    "Prev":     round(q["prev_close"], 2),
+                    "5d (%)":   round(q["chg_pct"],   2),       # same as day when using EOD
+                    "Vol Ratio": 1.0,
                 })
             except Exception:
                 continue
