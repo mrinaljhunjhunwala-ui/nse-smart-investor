@@ -1,32 +1,106 @@
 """
 data/fetcher.py
-Fetches OHLCV data for NSE/BSE stocks using yfinance.
-Appends .NS (NSE) or .BO (BSE) suffixes automatically.
+Fetches OHLCV data for NSE/BSE stocks.
 
-Includes:
-  - In-memory cache so each (ticker, period, interval) is only fetched once
-    per process — avoids duplicate network calls during sector rotation.
-  - Rate limiting (0.25 s between calls) to avoid Yahoo Finance DNS blocks.
+Primary source  : Stooq  (stooq.com) — free, no API key, no rate limits,
+                  works from any cloud IP including Streamlit Community Cloud.
+Fallback source : yfinance — used only if Stooq returns no data (e.g. for
+                  index tickers like ^NSEI or very small-cap stocks).
+
+In-memory cache: each (ticker, period) is fetched only once per process.
 """
 
+import io
 import time
-import yfinance as yf
+import datetime
+import urllib.request
 import pandas as pd
 from typing import List, Optional
 
 # ── In-process cache  {(ticker, period, interval): DataFrame} ────────────────
 _FETCH_CACHE: dict = {}
-_LAST_FETCH:  float = 0.0
-_MIN_GAP:     float = 0.25   # seconds between yfinance calls
+
+# ── Period → calendar days mapping ───────────────────────────────────────────
+_PERIOD_DAYS = {
+    "1mo": 35,  "2mo": 65,  "3mo": 95,  "6mo": 185,
+    "1y":  370, "2y":  740, "3y": 1100, "5y": 1830,
+}
+
+
+def _period_to_dates(period: str):
+    """Convert yfinance-style period string to (start_str, end_str) for Stooq."""
+    days = _PERIOD_DAYS.get(period, 370)
+    end   = datetime.date.today()
+    start = end - datetime.timedelta(days=days)
+    return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+
+
+def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
+    """
+    Fetch daily OHLCV from Stooq — zero rate limits, works from cloud IPs.
+    Ticker format: 'RELIANCE.NS' → stooq uses 'reliance.ns' (lowercase).
+    Returns flat DataFrame with Open, High, Low, Close, Volume index=Date.
+    """
+    sym = ticker.lower()
+    # Stooq uses ^nsei for Nifty 50 index — map common index names
+    _INDEX_MAP = {"^nsei": "^nsei", "^bsesn": "^bsesn", "^nsebank": "^nsebank"}
+    if sym in _INDEX_MAP:
+        sym = _INDEX_MAP[sym]
+
+    d1, d2 = _period_to_dates(period)
+    url = f"https://stooq.com/q/d/l/?s={sym}&d1={d1}&d2={d2}&i=d"
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        raw = r.read().decode("utf-8", errors="replace")
+
+    if not raw.strip() or "No data" in raw or len(raw) < 60:
+        raise ValueError(f"Stooq returned no data for {ticker}")
+
+    df = pd.read_csv(io.StringIO(raw))
+    df.columns = [c.strip().title() for c in df.columns]
+    if "Date" not in df.columns:
+        raise ValueError(f"Stooq unexpected format for {ticker}: {df.columns.tolist()}")
+
+    df["Date"] = pd.to_datetime(df["Date"])
+    df.set_index("Date", inplace=True)
+    df.sort_index(inplace=True)
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    df = df[df["Close"] > 0]
+    return df
+
+
+def _fetch_yfinance(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+    """
+    Fallback: yfinance download with a hard 20-second timeout via ThreadPoolExecutor.
+    Returns flat DataFrame with Open, High, Low, Close, Volume.
+    """
+    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+    def _dl():
+        df = yf.download(ticker, period=period, interval=interval,
+                         auto_adjust=True, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(_dl)
+        try:
+            df = fut.result(timeout=20)
+        except FuturesTimeout:
+            raise ValueError(f"yfinance timed out for {ticker}")
+
+    if df is None or df.empty:
+        raise ValueError(f"yfinance returned no data for {ticker}")
+    df.dropna(inplace=True)
+    return df
 
 
 def _rate_limit():
-    """Sleep if the last yfinance call was too recent."""
-    global _LAST_FETCH
-    gap = time.time() - _LAST_FETCH
-    if gap < _MIN_GAP:
-        time.sleep(_MIN_GAP - gap)
-    _LAST_FETCH = time.time()
+    """No-op — kept for backward compatibility with any callers."""
+    pass
 
 # ── NIFTY 50 constituents (updated 2026) ────────────────────────────────────
 # Nifty 50 as of 2026 using Yahoo Finance working symbols:
@@ -68,19 +142,11 @@ def fetch_data(
     dropna: bool = True,
 ) -> pd.DataFrame:
     """
-    Download historical OHLCV data for given tickers.
-
-    Args:
-        tickers:     List of ticker symbols (e.g. ['RELIANCE.NS', 'TCS.NS'])
-        period:      yfinance period string: '1mo','3mo','6mo','1y','2y','5y','10y','max'
-        interval:    '1d','1wk','1mo'  (intraday needs Kite/Upstox API)
-        auto_adjust: Adjust for splits/dividends
-        dropna:      Drop rows with any NaN values
-
-    Returns:
-        MultiIndex DataFrame with (OHLCV) x Ticker columns.
-        Single ticker → flat DataFrame with Open, High, Low, Close, Volume columns.
+    Download OHLCV for multiple tickers (backtesting / batch use).
+    Uses yfinance batch download which is more efficient for many tickers at once.
+    For single-ticker analysis prefer fetch_single() which uses Stooq first.
     """
+    import yfinance as yf
     print(f"  Fetching {len(tickers)} ticker(s) | period={period} | interval={interval}")
     data = yf.download(
         tickers=tickers,
@@ -97,31 +163,47 @@ def fetch_data(
     if dropna:
         data.dropna(how="all", inplace=True)
 
-    print(f"  OK Fetched {len(data)} rows from {data.index[0].date()} to {data.index[-1].date()}")
+    print(f"  OK Fetched {len(data)} rows")
     return data
 
 
 def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
-    """Fetch data for a single ticker and return a flat OHLCV DataFrame.
+    """
+    Fetch OHLCV for one ticker.  Stooq first → yfinance fallback.
+    Results are cached in-process — repeated calls return the cached copy.
 
-    Results are cached in-process — repeated calls for the same
-    (ticker, period, interval) return the cached copy instantly.
+    Why Stooq first:
+      - No rate limits, no API key, works from Streamlit Cloud US IPs
+      - yfinance gets HTTP 429 (rate-limited) from datacenter IPs frequently
     """
     cache_key = (ticker, period, interval)
     if cache_key in _FETCH_CACHE:
         return _FETCH_CACHE[cache_key].copy()
 
-    _rate_limit()
-    df = yf.download(ticker, period=period, interval=interval,
-                     auto_adjust=True, progress=False)
-    if df.empty:
-        raise ValueError(f"No data for {ticker}")
-    # yfinance >=0.2.31 returns MultiIndex columns (Price, Ticker) even for single tickers
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    df.dropna(inplace=True)
+    df = None
+    last_err = ""
+
+    # ── 1. Try Stooq (daily only) ─────────────────────────────────────────────
+    if interval == "1d":
+        try:
+            df = _fetch_stooq(ticker, period=period)
+            print(f"  [Stooq] {ticker}: {len(df)} rows")
+        except Exception as e:
+            last_err = str(e)
+            print(f"  [Stooq] {ticker} failed: {e} — trying yfinance…")
+
+    # ── 2. Fallback: yfinance (with 20 s timeout) ─────────────────────────────
+    if df is None or df.empty:
+        try:
+            df = _fetch_yfinance(ticker, period=period, interval=interval)
+            print(f"  [yfinance] {ticker}: {len(df)} rows")
+        except Exception as e:
+            last_err = str(e)
+
+    if df is None or df.empty:
+        raise ValueError(f"No data for {ticker}. Stooq + yfinance both failed: {last_err}")
+
     _FETCH_CACHE[cache_key] = df
-    print(f"  OK {ticker}: {len(df)} rows ({df.index[0].date()} to {df.index[-1].date()})")
     return df.copy()
 
 
