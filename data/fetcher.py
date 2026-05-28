@@ -1,11 +1,12 @@
 """
 data/fetcher.py
-Fetches OHLCV data for NSE/BSE stocks.
+Fetches OHLCV data for NSE/BSE stocks — no yfinance library anywhere.
 
 Primary source  : Stooq  (stooq.com) — free, no API key, no rate limits,
                   works from any cloud IP including Streamlit Community Cloud.
-Fallback source : yfinance — used only if Stooq returns no data (e.g. for
-                  index tickers like ^NSEI or very small-cap stocks).
+Fallback source : Yahoo Finance v8 chart API (direct urllib, no library) —
+                  avoids the HTTP 429 rate-limiting that hits the yfinance
+                  Python library from datacenter / Streamlit Cloud IPs.
 
 In-memory cache: each (ticker, period) is fetched only once per process.
 """
@@ -82,7 +83,11 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
     if raw.lstrip().startswith("<") or "<!DOCTYPE" in raw[:200] or "<html" in raw[:200].lower():
         raise ValueError(f"Stooq returned HTML (not CSV) for {ticker}")
 
-    df = pd.read_csv(io.StringIO(raw))
+    try:
+        df = pd.read_csv(io.StringIO(raw))
+    except Exception:
+        # Fallback: python engine is more lenient with malformed CSV rows
+        df = pd.read_csv(io.StringIO(raw), engine="python", on_bad_lines="skip")
     df.columns = [c.strip().title() for c in df.columns]
     if "Date" not in df.columns:
         raise ValueError(f"Stooq unexpected format for {ticker}: {df.columns.tolist()}")
@@ -95,31 +100,62 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
     return df
 
 
-def _fetch_yfinance(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
     """
-    Fallback: yfinance download with a hard 20-second timeout via ThreadPoolExecutor.
-    Returns flat DataFrame with Open, High, Low, Close, Volume.
+    Fallback: direct Yahoo Finance v8 chart API — no yfinance library, no rate limiting.
+    Uses the same underlying endpoint as the yfinance library but via raw urllib,
+    which avoids the HTTP 429 rate-limiting that hits the library from cloud IPs.
+    Returns flat DataFrame with Open, High, Low, Close, Volume index=Date.
     """
-    import yfinance as yf
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    import json, datetime
 
-    def _dl():
-        df = yf.download(ticker, period=period, interval=interval,
-                         auto_adjust=True, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        return df
+    # Map internal period strings → Yahoo Finance API range parameter
+    _RANGE_MAP = {
+        "1d":  "5d",   "5d":  "5d",   "1m":  "1mo",  "6m":  "6mo",
+        "ytd": "ytd",  "max": "max",
+        "1mo": "1mo",  "2mo": "3mo",  "3mo": "3mo",  "6mo": "6mo",
+        "1y":  "1y",   "2y":  "2y",   "3y":  "5y",   "5y":  "5y",
+    }
+    yf_range    = _RANGE_MAP.get(period.lower(), "1y")
+    yf_interval = interval if interval in ("1d", "1wk", "1mo") else "1d"
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        fut = pool.submit(_dl)
-        try:
-            df = fut.result(timeout=20)
-        except FuturesTimeout:
-            raise ValueError(f"yfinance timed out for {ticker}")
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+           f"?interval={yf_interval}&range={yf_range}&includePrePost=false")
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept":     "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.loads(r.read())
 
-    if df is None or df.empty:
-        raise ValueError(f"yfinance returned no data for {ticker}")
-    df.dropna(inplace=True)
+    result = data.get("chart", {}).get("result")
+    if not result:
+        err = data.get("chart", {}).get("error", {})
+        raise ValueError(f"Yahoo chart API error for {ticker}: {err}")
+
+    r0         = result[0]
+    timestamps = r0.get("timestamp", [])
+    quote      = r0["indicators"]["quote"][0]
+
+    if not timestamps:
+        raise ValueError(f"Yahoo chart API returned no timestamps for {ticker}")
+
+    # Prefer adjclose when available (same as auto_adjust=True in yfinance)
+    adjclose_list = (r0["indicators"].get("adjclose") or [{}])[0].get("adjclose")
+    close_list    = adjclose_list if adjclose_list else quote.get("close", [])
+
+    dates = [datetime.datetime.utcfromtimestamp(ts).date() for ts in timestamps]
+    df = pd.DataFrame({
+        "Open":   quote.get("open",   [None] * len(dates)),
+        "High":   quote.get("high",   [None] * len(dates)),
+        "Low":    quote.get("low",    [None] * len(dates)),
+        "Close":  close_list,
+        "Volume": quote.get("volume", [None] * len(dates)),
+    }, index=pd.DatetimeIndex(dates, name="Date"))
+
+    df = df.dropna(subset=["Close"])
+    df = df[df["Close"] > 0]
+    df.sort_index(inplace=True)
     return df
 
 
@@ -168,38 +204,51 @@ def fetch_data(
 ) -> pd.DataFrame:
     """
     Download OHLCV for multiple tickers (backtesting / batch use).
-    Uses yfinance batch download which is more efficient for many tickers at once.
-    For single-ticker analysis prefer fetch_single() which uses Stooq first.
+    Uses parallel fetch_single() calls — Stooq first, direct Yahoo fallback.
+    No yfinance library; avoids rate-limiting from cloud IPs.
+    Returns a MultiIndex DataFrame compatible with yfinance batch output.
     """
-    import yfinance as yf
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     print(f"  Fetching {len(tickers)} ticker(s) | period={period} | interval={interval}")
-    data = yf.download(
-        tickers=tickers,
-        period=period,
-        interval=interval,
-        auto_adjust=auto_adjust,
-        progress=False,
-        threads=True,
-    )
 
-    if data.empty:
+    results: dict = {}
+
+    def _one(t):
+        return t, fetch_single(t, period=period, interval=interval)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futs = {pool.submit(_one, t): t for t in tickers}
+        for fut in as_completed(futs, timeout=60):
+            try:
+                t, df = fut.result(timeout=0)
+                if df is not None and not df.empty:
+                    results[t] = df
+            except Exception:
+                pass
+
+    if not results:
         raise ValueError(f"No data returned for tickers: {tickers}")
 
-    if dropna:
-        data.dropna(how="all", inplace=True)
+    # Build MultiIndex DataFrame (Price × Ticker) to match yfinance batch format
+    frames = []
+    for t, df in results.items():
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            frames.append(df[[col]].rename(columns={col: (col, t)}))
 
-    print(f"  OK Fetched {len(data)} rows")
-    return data
+    combined = pd.concat(frames, axis=1)
+    combined.columns = pd.MultiIndex.from_tuples(combined.columns)
+    if dropna:
+        combined.dropna(how="all", inplace=True)
+
+    print(f"  OK Fetched {len(combined)} rows × {len(results)} tickers")
+    return combined
 
 
 def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     """
-    Fetch OHLCV for one ticker.  Stooq first → yfinance fallback.
+    Fetch OHLCV for one ticker.  Stooq first → direct Yahoo Finance chart API fallback.
+    No yfinance library anywhere — avoids HTTP 429 rate-limiting from cloud IPs.
     Results are cached in-process — repeated calls return the cached copy.
-
-    Why Stooq first:
-      - No rate limits, no API key, works from Streamlit Cloud US IPs
-      - yfinance gets HTTP 429 (rate-limited) from datacenter IPs frequently
     """
     cache_key = (ticker, period, interval)
     if cache_key in _FETCH_CACHE:
@@ -215,18 +264,19 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
             print(f"  [Stooq] {ticker}: {len(df)} rows")
         except Exception as e:
             last_err = str(e)
-            print(f"  [Stooq] {ticker} failed: {e} — trying yfinance…")
+            print(f"  [Stooq] {ticker} failed: {e} — trying Yahoo direct…")
 
-    # ── 2. Fallback: yfinance (with 20 s timeout) ─────────────────────────────
+    # ── 2. Fallback: direct Yahoo Finance chart API (no library, cloud-safe) ─────
     if df is None or df.empty:
         try:
-            df = _fetch_yfinance(ticker, period=period, interval=interval)
-            print(f"  [yfinance] {ticker}: {len(df)} rows")
+            df = _fetch_yahoo_direct(ticker, period=period, interval=interval)
+            print(f"  [Yahoo direct] {ticker}: {len(df)} rows")
         except Exception as e:
             last_err = str(e)
+            print(f"  [Yahoo direct] {ticker} failed: {e}")
 
     if df is None or df.empty:
-        raise ValueError(f"No data for {ticker}. Stooq + yfinance both failed: {last_err}")
+        raise ValueError(f"No data for {ticker}. Stooq + Yahoo both failed: {last_err}")
 
     _FETCH_CACHE[cache_key] = df
     return df.copy()
