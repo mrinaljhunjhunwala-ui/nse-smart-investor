@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nse-dashboard",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-m", "streamlit", "run", "dashboard/app.py", "--server.port", "8501", "--server.headless", "true"],
+      "port": 8501,
+      "cwd": "D:\\Downloads\\trading_model_starter_code\\trading_model",
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  ]
+}
