@@ -235,7 +235,7 @@ def _watchlist_prices(tickers_tuple: tuple) -> dict:
     out = {}
     for t in tickers_tuple:
         q = raw.get(t)
-        if q and q.get("price"):
+        if isinstance(q, dict) and q.get("price"):
             out[t] = q
     return out
 
@@ -606,7 +606,7 @@ def _portfolio_live_prices(tickers: tuple) -> dict:
     results = {}
     for t in tickers:
         q = raw.get(t)
-        if q and q.get("price"):
+        if isinstance(q, dict) and q.get("price"):
             results[t] = {
                 "price": q["price"],
                 "prev":  q["prev_close"],
@@ -997,7 +997,7 @@ if page == "📡 Market Live":
         rows = []
         for t in tickers_list:
             q = raw.get(t)
-            if not q or not q.get("price"):
+            if not isinstance(q, dict) or not q.get("price"):
                 continue
             try:
                 rows.append({
@@ -1967,7 +1967,7 @@ elif page == "📊 Market Overview":
         rows = []
         for t in tickers_list:
             q = raw.get(t)
-            if not q or not q.get("price"):
+            if not isinstance(q, dict) or not q.get("price"):
                 continue
             try:
                 rows.append({
@@ -2187,7 +2187,7 @@ elif page == "📂 Paper Trades":
         try:
             # ── Live price via Yahoo JSON API / NSE / Stooq ────────────────
             q = get_live_quote(ticker)
-            if not q or not q.get("price"):
+            if not isinstance(q, dict) or not q.get("price"):
                 result["error"] = "Price unavailable — all sources failed. Try again in 30 s."
                 return result
 
