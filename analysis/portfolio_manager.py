@@ -265,27 +265,10 @@ class PortfolioManager:
         """
         from analysis.score import score_stock
 
-        # Inline VIX fetch — no cross-module import, immune to stale sys.modules
+        # VIX fetch via utils.vix (cookie+crumb auth, no yfinance, cloud-safe)
         try:
-            import yfinance as _yf
-            import math as _math
-            _vdf = _yf.download("^INDIAVIX", period="5d", interval="1d",
-                                auto_adjust=True, progress=False)
-            if hasattr(_vdf.columns, "get_level_values"):
-                _vdf.columns = _vdf.columns.get_level_values(0)
-            _vdf = _vdf.dropna(subset=["Close"])   # drop today's incomplete NaN row
-            _v = float(_vdf["Close"].iloc[-1])
-            _p = float(_vdf["Close"].iloc[-2]) if len(_vdf) >= 2 else _v
-            if _math.isnan(_v) or _v <= 0:
-                raise ValueError("VIX is NaN or zero")
-            if   _v < 12: _reg = "complacency"
-            elif _v < 16: _reg = "normal"
-            elif _v < 22: _reg = "elevated"
-            elif _v < 28: _reg = "fear"
-            else:         _reg = "panic"
-            vix_info = {"vix": round(_v, 2), "regime": _reg,
-                        "allow_buy": _v <= 28,
-                        "vix_pct_chg": round((_v / _p - 1) * 100, 2)}
+            from utils.vix import get_india_vix_regime
+            vix_info = get_india_vix_regime()
         except Exception:
             vix_info = {"vix": None, "regime": "normal",
                         "allow_buy": True, "vix_pct_chg": 0.0}
