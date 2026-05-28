@@ -530,12 +530,26 @@ def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
             return pd.DataFrame()
 
 
+def load_trades_by_account(account: str, path: str = "trades.db") -> pd.DataFrame:
+    """Load trades filtered to a specific paper trading account."""
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    with sqlite3.connect(path) as conn:
+        try:
+            return pd.read_sql_query(
+                "SELECT * FROM trades WHERE account=? ORDER BY id DESC", conn, params=(account,)
+            )
+        except Exception:
+            return pd.DataFrame()
+
+
 def _ensure_paper_db(path: str = "trades.db"):
-    """Create paper-trading SQLite tables if they don't exist."""
+    """Create paper-trading SQLite tables; migrate to add account column if missing."""
     with sqlite3.connect(path) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trades (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                account     TEXT    NOT NULL DEFAULT 'My Account',
                 ticker      TEXT    NOT NULL,
                 strategy    TEXT    NOT NULL DEFAULT 'Manual',
                 action      TEXT    NOT NULL,
@@ -555,20 +569,50 @@ def _ensure_paper_db(path: str = "trades.db"):
                 pnl_pct     REAL
             )
         """)
+        # Migration: add account column to existing DBs that don't have it
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
+        if "account" not in cols:
+            conn.execute("ALTER TABLE trades ADD COLUMN account TEXT NOT NULL DEFAULT 'My Account'")
+        conn.commit()
+
+
+def paper_list_accounts(path: str = "trades.db") -> list:
+    """Return sorted list of distinct account names."""
+    _ensure_paper_db(path)
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT account FROM trades ORDER BY account"
+        ).fetchall()
+    names = [r[0] for r in rows if r[0]]
+    return names if names else ["My Account"]
+
+
+def paper_rename_account(old_name: str, new_name: str, path: str = "trades.db"):
+    """Rename an account across all its trades."""
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE trades SET account=? WHERE account=?", (new_name, old_name))
+        conn.commit()
+
+
+def paper_delete_account(name: str, path: str = "trades.db"):
+    """Delete all trades in an account."""
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM trades WHERE account=?", (name,))
         conn.commit()
 
 
 def paper_open_trade(ticker: str, price: float, qty: int,
                      sl: float, tp: float, reason: str = "",
+                     account: str = "My Account",
                      path: str = "trades.db") -> int:
     """Insert a new paper BUY trade. Returns new row id."""
     _ensure_paper_db(path)
     now = __import__("datetime").datetime.now().isoformat()
     with sqlite3.connect(path) as conn:
         cur = conn.execute(
-            "INSERT INTO trades (ticker,strategy,action,price,quantity,sl,tp,capital,reason,timestamp) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (ticker, "Manual", "BUY", price, qty, sl, tp, price * qty, reason, now)
+            "INSERT INTO trades (account,ticker,strategy,action,price,quantity,sl,tp,capital,reason,timestamp) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (account, ticker, "Manual", "BUY", price, qty, sl, tp, price * qty, reason, now)
         )
         conn.commit()
         return cur.lastrowid
@@ -592,6 +636,24 @@ def paper_close_trade(trade_id: int, exit_price: float,
             "exit_reason=?, pnl=?, pnl_pct=? WHERE id=?",
             (exit_price, now, reason, pnl, pnl_pct, trade_id)
         )
+        conn.commit()
+
+
+def paper_edit_trade(trade_id: int, sl: float = None, tp: float = None,
+                     reason: str = None, path: str = "trades.db"):
+    """Edit stop-loss, target, or reason of an open trade."""
+    fields, vals = [], []
+    if sl is not None:
+        fields.append("sl=?"); vals.append(sl)
+    if tp is not None:
+        fields.append("tp=?"); vals.append(tp)
+    if reason is not None:
+        fields.append("reason=?"); vals.append(reason)
+    if not fields:
+        return
+    vals.append(trade_id)
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"UPDATE trades SET {', '.join(fields)} WHERE id=?", vals)
         conn.commit()
 
 
@@ -1453,7 +1515,8 @@ elif page == "🏠 My Portfolio":
                                 paper_open_trade(
                                     h.ticker, _pt_price, _pt_qty,
                                     sl=h.stop_loss, tp=h.target,
-                                    reason=f"{h.action}: {h.headline}"
+                                    reason=f"{h.action}: {h.headline}",
+                                    account=st.session_state.get("pt_account", "My Account"),
                                 )
                                 st.success(f"Paper trade opened: {_pt_qty} × {h.ticker.replace('.NS','')} @ ₹{_pt_price:,.2f} | SL ₹{h.stop_loss:,.2f} | Target ₹{h.target:,.2f}")
                         with _pt_info:
@@ -1590,7 +1653,9 @@ elif page == "🔍 Analyze Stock":
                       for name, sym in STOCK_SEARCH_MAP.items()]
     search_options_sorted = sorted(search_options)
 
-    col_search, col_manual, col_p, col_btn = st.columns([3, 2, 1, 1])
+    _AS_PERIOD_MAP = {"1D":"1d","5D":"5d","1M":"1m","6M":"6m","YTD":"ytd","Max":"max"}
+
+    col_search, col_manual, col_btn = st.columns([3, 2, 1])
     with col_search:
         selected_option = st.selectbox(
             "Search by company name or symbol",
@@ -1605,13 +1670,20 @@ elif page == "🔍 Analyze Stock":
             placeholder="e.g. INFY or INFY.NS",
             key="manual_ticker_input",
         ).strip().upper()
-    with col_p:
-        period = st.selectbox("Period", ["3mo", "6mo", "1y", "2y"], index=2,
-                              key="analyze_period")
     with col_btn:
         st.write("")
         st.write("")
         analyze_btn = st.button("🔍 Analyze", type="primary", key="analyze_btn")
+
+    # ── Period selector — horizontal pill-style radio ──────────────────────
+    _ui_period = st.radio(
+        "Chart period",
+        list(_AS_PERIOD_MAP.keys()),
+        index=3,                      # default = 6M
+        horizontal=True,
+        key="analyze_period",
+    )
+    period = _AS_PERIOD_MAP[_ui_period]
 
     # Resolve final ticker
     ticker = ""
@@ -1708,6 +1780,50 @@ elif page == "🔍 Analyze Stock":
                         unsafe_allow_html=True
                     )
 
+                # ── Action strip — prominent recommendation banner ─────────
+                _as_colors = {
+                    "BUY":          ("#0a2a1a", "#26a69a"),
+                    "CAUTIOUS BUY": ("#0d2210", "#4caf50"),
+                    "HOLD":         ("#2a2a00", "#f9a825"),
+                    "WATCHLIST":    ("#0d1f3c", "#2196F3"),
+                    "EXIT":         ("#2a0a0a", "#ef5350"),
+                }
+                _as_bg, _as_border = _as_colors.get(cs.action, ("#1a1a2e", "#2196F3"))
+                _as_rr_ok = cs.risk_reward >= 1.5
+                _as_rr_color = "#26a69a" if _as_rr_ok else "#f9a825"
+
+                st.markdown(
+                    f'<div style="background:{_as_bg};border-left:6px solid {_as_border};'
+                    f'border-radius:8px;padding:16px 22px;margin:14px 0 6px 0">'
+                    f'<span style="font-size:22px;font-weight:700">'
+                    f'{_action_emoji(cs.action)} Recommendation: <span style="color:{_as_border}">'
+                    f'{cs.action}</span></span>'
+                    f'<span style="font-size:13px;color:#bbb;margin-left:16px">'
+                    f'Score {cs.score:.0f}/100</span><br>'
+                    f'<span style="font-size:13px;color:#ccc">'
+                    f'Entry <b style="color:#fff">₹{cs.entry:,.2f}</b> &nbsp;·&nbsp; '
+                    f'Stop <b style="color:#ef5350">₹{cs.stop_loss:,.2f}</b> '
+                    f'<span style="color:#888">(-{(cs.price-cs.stop_loss)/cs.price*100:.1f}%)</span> &nbsp;·&nbsp; '
+                    f'Target <b style="color:#26a69a">₹{cs.target:,.2f}</b> '
+                    f'<span style="color:#888">(+{(cs.target-cs.price)/cs.price*100:.1f}%)</span> &nbsp;·&nbsp; '
+                    f'R:R <b style="color:{_as_rr_color}">{cs.risk_reward:.1f}:1</b>'
+                    f'</span></div>',
+                    unsafe_allow_html=True,
+                )
+                _as_c1, _as_c2, _as_c3, _as_c4 = st.columns([1, 1, 1, 3])
+                if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", use_container_width=True):
+                    _wl = st.session_state.setdefault("watchlist", [])
+                    if ticker not in _wl:
+                        _wl.append(ticker)
+                    st.toast(f"{ticker.replace('.NS','')} added to watchlist ✓")
+                if _as_c2.button("📝 Paper Trade", key=f"as_pt_{ticker}", use_container_width=True):
+                    st.session_state["nav"] = "📂 Paper Trades"
+                    st.session_state["pt_prefill_ticker"] = ticker
+                    st.rerun()
+                if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", use_container_width=True):
+                    st.cache_data.clear()
+                    st.rerun()
+
                 # ── Technical indicators ───────────────────────────────────
                 st.markdown("---")
                 ti_cols = st.columns(6)
@@ -1801,7 +1917,8 @@ elif page == "🔍 Analyze Stock":
                         _new_trade_id = paper_open_trade(
                             ticker, cs.entry, _pt_qty,
                             sl=cs.stop_loss, tp=cs.target,
-                            reason=f"{cs.action} score={cs.score:.0f}: {cs.headline}"
+                            reason=f"{cs.action} score={cs.score:.0f}: {cs.headline}",
+                            account=st.session_state.get("pt_account", "My Account"),
                         )
                         st.success(
                             f"✅ Paper trade #{_new_trade_id} opened:  "
@@ -2169,6 +2286,92 @@ elif page == "📂 Paper Trades":
 
     _ensure_paper_db()
 
+    # ── ACCOUNT MANAGEMENT BAR ─────────────────────────────────────────────────
+    _all_accounts = paper_list_accounts()
+    # Ensure session state has a valid account
+    if "pt_account" not in st.session_state or st.session_state["pt_account"] not in _all_accounts:
+        st.session_state["pt_account"] = _all_accounts[0]
+
+    with st.container():
+        st.markdown(
+            '<div style="background:#0d1f3c;padding:12px 18px;border-radius:10px;'
+            'border-left:5px solid #2196F3;margin-bottom:16px">',
+            unsafe_allow_html=True,
+        )
+        _acc_c1, _acc_c2, _acc_c3, _acc_c4, _acc_c5 = st.columns([3, 1, 1, 1, 1])
+
+        with _acc_c1:
+            _selected_account = st.selectbox(
+                "📂 Active Account",
+                options=_all_accounts,
+                index=_all_accounts.index(st.session_state["pt_account"]),
+                key="pt_account_sel",
+                label_visibility="collapsed",
+            )
+            st.session_state["pt_account"] = _selected_account
+            st.caption(f"📂 Active: **{_selected_account}**")
+
+        with _acc_c2:
+            _new_acc_name = st.text_input(
+                "New account name", value="", placeholder="New account…",
+                label_visibility="collapsed", key="pt_new_acc_input"
+            ).strip()
+
+        with _acc_c3:
+            st.write("")
+            if st.button("➕ Create", key="pt_create_acc", use_container_width=True):
+                if _new_acc_name and _new_acc_name not in _all_accounts:
+                    # Create account by inserting a placeholder row then deleting it —
+                    # simpler: just store the name in session_state; it appears on first trade.
+                    # So we just switch to it immediately.
+                    st.session_state["pt_account"] = _new_acc_name
+                    st.success(f"Account **{_new_acc_name}** created. Open your first trade to save it.")
+                    st.rerun()
+                elif _new_acc_name in _all_accounts:
+                    st.warning("Account already exists.")
+
+        with _acc_c4:
+            st.write("")
+            _rename_to = st.text_input(
+                "Rename to", value="", placeholder="Rename to…",
+                label_visibility="collapsed", key="pt_rename_input"
+            ).strip()
+
+        with _acc_c5:
+            st.write("")
+            if st.button("✏️ Rename", key="pt_rename_acc", use_container_width=True):
+                if _rename_to and _rename_to != _selected_account:
+                    paper_rename_account(_selected_account, _rename_to)
+                    st.session_state["pt_account"] = _rename_to
+                    st.success(f"Renamed to **{_rename_to}**")
+                    st.rerun()
+                elif not _rename_to:
+                    st.warning("Enter a new name first.")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Delete account (separate row to avoid layout clutter)
+    if len(_all_accounts) > 1:
+        with st.expander("🗑️ Danger Zone — Delete Account", expanded=False):
+            st.warning(
+                f"This will permanently delete **all trades** in account "
+                f"**{_selected_account}**. This cannot be undone."
+            )
+            _del_confirm = st.checkbox(
+                f"Yes, I want to delete account '{_selected_account}' and all its trades",
+                key="pt_del_confirm"
+            )
+            if st.button("🗑️ Delete Account", key="pt_delete_acc",
+                         disabled=not _del_confirm, type="secondary"):
+                paper_delete_account(_selected_account)
+                # Switch to first remaining account
+                _remaining = [a for a in _all_accounts if a != _selected_account]
+                st.session_state["pt_account"] = _remaining[0] if _remaining else "My Account"
+                st.success(f"Account **{_selected_account}** deleted.")
+                st.rerun()
+
+    st.markdown("---")
+
     # ── LIVE PRICE + ATR SUGGESTIONS (cached 60 s per ticker) ─────────────────
     @st.cache_data(ttl=60, show_spinner=False)
     def _paper_trade_suggestions(ticker: str) -> dict:
@@ -2372,24 +2575,27 @@ elif page == "📂 Paper Trades":
             else:
                 _new_id = paper_open_trade(
                     _form_ticker, _form_price, int(_form_qty),
-                    sl=_form_sl, tp=_form_tp, reason=_form_reason
+                    sl=_form_sl, tp=_form_tp, reason=_form_reason,
+                    account=st.session_state.get("pt_account", "My Account"),
                 )
                 st.success(
-                    f"✅ Paper trade #{_new_id} opened: **{int(_form_qty)} × "
-                    f"{_form_ticker.replace('.NS','')}** @ ₹{_form_price:,.2f}  "
+                    f"✅ Paper trade #{_new_id} opened in **{st.session_state.get('pt_account','My Account')}**: "
+                    f"**{int(_form_qty)} × {_form_ticker.replace('.NS','')}** @ ₹{_form_price:,.2f}  "
                     f"| SL ₹{_form_sl:,.2f} | Target ₹{_form_tp:,.2f}"
                 )
                 st.cache_data.clear()
 
     st.markdown("---")
 
-    # ── LOAD ALL TRADES ────────────────────────────────────────────────────────
+    # ── LOAD TRADES FOR CURRENT ACCOUNT ───────────────────────────────────────
     _hcol, _rcol = st.columns([5, 1])
+    with _hcol:
+        st.markdown(f"#### 📂 {st.session_state.get('pt_account', 'My Account')}")
     with _rcol:
         if st.button("🔄 Refresh", key="paper_refresh"):
             st.cache_data.clear()
 
-    trades = load_trades_db()
+    trades = load_trades_by_account(st.session_state.get("pt_account", "My Account"))
 
     if trades.empty:
         st.info("No paper trades yet. Open your first trade using the form above.")
@@ -2479,7 +2685,7 @@ elif page == "📂 Paper Trades":
                     if _reason_txt:
                         st.caption(f"📝 {_reason_txt}")
 
-                    # Close buttons
+                    # ── Close buttons ──────────────────────────────────────
                     _cl1, _cl2, _cl3 = st.columns(3)
                     _tid = int(_row["id"])
                     if _cl1.button(f"❌ Close @ Live (₹{_cur:,.2f})", key=f"close_live_{_tid}"):
@@ -2499,6 +2705,34 @@ elif page == "📂 Paper Trades":
                         st.success(f"Target hit on {_tk.replace('.NS','')} @ ₹{_tp:,.2f} | Profit ₹{_tp_pnl:,.0f}")
                         st.cache_data.clear()
                         st.rerun()
+
+                    # ── Edit SL / TP ────────────────────────────────────────
+                    with st.expander("✏️ Edit Stop-Loss / Target", expanded=False):
+                        _e1, _e2 = st.columns(2)
+                        _new_sl = _e1.number_input(
+                            "New Stop-Loss (₹)", value=float(_sl or _ep * 0.97),
+                            min_value=0.01, max_value=float(_ep) - 0.01,
+                            format="%.2f", key=f"edit_sl_{_tid}"
+                        )
+                        _new_tp = _e2.number_input(
+                            "New Target (₹)", value=float(_tp or _ep * 1.06),
+                            min_value=float(_ep) + 0.01, max_value=1e7,
+                            format="%.2f", key=f"edit_tp_{_tid}"
+                        )
+                        _new_reason = st.text_input(
+                            "Update notes (optional)", value=str(_row.get("reason") or ""),
+                            key=f"edit_reason_{_tid}", placeholder="Update reason or notes…"
+                        )
+                        if st.button("💾 Save Changes", key=f"edit_save_{_tid}"):
+                            paper_edit_trade(
+                                _tid,
+                                sl=_new_sl if _new_sl != _sl else None,
+                                tp=_new_tp if _new_tp != _tp else None,
+                                reason=_new_reason if _new_reason != str(_row.get("reason") or "") else None,
+                            )
+                            st.success(f"Updated SL ₹{_new_sl:,.2f} | Target ₹{_new_tp:,.2f}")
+                            st.cache_data.clear()
+                            st.rerun()
 
             st.markdown("---")
 
@@ -2604,10 +2838,11 @@ elif page == "📂 Paper Trades":
         st.markdown("---")
         if not trades.empty:
             _export_bytes = trades.to_csv(index=False).encode()
+            _safe_acc = st.session_state.get("pt_account", "MyAccount").replace(" ", "_")
             st.download_button(
-                "📥 Download Full Trade Journal (CSV)",
+                f"📥 Download Trade Journal — {st.session_state.get('pt_account','My Account')} (CSV)",
                 data=_export_bytes,
-                file_name="paper_trade_journal.csv",
+                file_name=f"paper_trades_{_safe_acc}.csv",
                 mime="text/csv",
             )
 
@@ -2680,8 +2915,9 @@ elif page == "🧪 Backtest":
         value="RELIANCE.NS TCS.NS HDFCBANK.NS",
         key="backtest_tickers",
     )
-    comp_period = st.selectbox("Period", ["6mo", "1y", "2y", "3y"], index=1,
-                                key="comp_period")
+    _comp_ui = st.radio("Period", ["1M", "6M", "YTD", "1Y", "Max"], index=1,
+                        horizontal=True, key="comp_period")
+    comp_period = {"1M":"1m","6M":"6m","YTD":"ytd","1Y":"1y","Max":"max"}[_comp_ui]
 
     if st.button("📊 Show Normalised Performance", key="compare_btn"):
         tickers_list = [t.strip().upper() for t in raw2.split() if t.strip()]
