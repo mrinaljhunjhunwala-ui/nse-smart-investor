@@ -3875,7 +3875,7 @@ elif page == "⚡ Intraday Trader":
                         pass
                     return ""
 
-                styled = _disp.style.applymap(_color_gap, subset=["Gap %","Day Chg %"])
+                styled = _disp.style.map(_color_gap, subset=["Gap %","Day Chg %"])
                 st.dataframe(styled, hide_index=True, use_container_width=True, height=400)
 
                 # Gap distribution bar chart
@@ -5139,7 +5139,7 @@ ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  ANGEL_TOTP_SECRET=..
                     "P&L %":     "{:.2f}%",
                     "Value (Rs)":"Rs {:.0f}",
                 })
-                .applymap(_color_pnl, subset=["P&L (Rs)", "P&L %"])
+                .map(_color_pnl, subset=["P&L (Rs)", "P&L %"])
             )
             st.dataframe(_hdf_styled, hide_index=True, use_container_width=True)
 
@@ -5186,9 +5186,9 @@ ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  ANGEL_TOTP_SECRET=..
                         "LTP":       "Rs {:.2f}",
                         "P&L":       "Rs {:.0f}",
                     })
-                    .applymap(lambda v: "color:#26a69a;font-weight:600" if isinstance(v, (int,float)) and v >= 0
-                              else ("color:#ef5350;font-weight:600" if isinstance(v, (int,float)) else ""),
-                              subset=["P&L"]),
+                    .map(lambda v: "color:#26a69a;font-weight:600" if isinstance(v, (int,float)) and v >= 0
+                         else ("color:#ef5350;font-weight:600" if isinstance(v, (int,float)) else ""),
+                         subset=["P&L"]),
                     hide_index=True,
                     use_container_width=True,
                 )
@@ -5223,7 +5223,7 @@ ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  ANGEL_TOTP_SECRET=..
                     return f"color:{c}; font-weight:600"
 
                 st.dataframe(
-                    _odf.style.applymap(_status_color, subset=["Status"]),
+                    _odf.style.map(_status_color, subset=["Status"]),
                     hide_index=True,
                     use_container_width=True,
                 )
