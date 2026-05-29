@@ -1544,6 +1544,10 @@ elif page == "🏠 My Portfolio":
             _live_prices = _portfolio_live_prices(_port_tickers)
             if _live_prices:
                 _lp_rows = []
+                _total_today_pnl   = 0.0
+                _total_overall_pnl = 0.0
+                _total_port_value  = 0.0
+                _total_invested    = 0.0
                 for _row in _port_csv.itertuples():
                     _sym = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
                     _lp  = _live_prices.get(_sym, {})
@@ -1555,25 +1559,99 @@ elif page == "🏠 My Portfolio":
                         _today_pnl  = (_cur - _lp.get("prev", _cur)) * _qty
                         _total_pnl  = (_cur - _buy) * _qty
                         _total_pct  = (_cur / _buy - 1) * 100 if _buy > 0 else 0
+                        _total_today_pnl   += _today_pnl
+                        _total_overall_pnl += _total_pnl
+                        _total_port_value  += _cur * _qty
+                        _total_invested    += _buy * _qty
                         _lp_rows.append({
-                            "Stock":        _row.ticker,
-                            "Live Price":   f"₹{_cur:,.2f}",
-                            "Today":        f"{_chg:+.2f}%",
-                            "Today P&L":    f"₹{_today_pnl:+,.0f}",
-                            "Total Return": f"{_total_pct:+.1f}%",
-                            "Total P&L":    f"₹{_total_pnl:+,.0f}",
+                            "ticker":      str(_row.ticker).replace(".NS", ""),
+                            "qty":         int(_qty),
+                            "avg_cost":    float(_buy),
+                            "live_price":  float(_cur),
+                            "chg_pct":     float(_chg),
+                            "today_pnl":   float(_today_pnl),
+                            "total_pct":   float(_total_pct),
+                            "total_pnl":   float(_total_pnl),
                         })
                     else:
                         _lp_rows.append({
-                            "Stock":        _row.ticker,
-                            "Live Price":   "—",
-                            "Today":        "—",
-                            "Today P&L":    "—",
-                            "Total Return": "—",
-                            "Total P&L":    "—",
+                            "ticker":      str(_row.ticker).replace(".NS", ""),
+                            "qty":         int(getattr(_row, "quantity", 1)),
+                            "avg_cost":    float(getattr(_row, "avg_buy_price", 0)),
+                            "live_price":  None,
+                            "chg_pct":     None,
+                            "today_pnl":   None,
+                            "total_pct":   None,
+                            "total_pnl":   None,
                         })
-                _lp_df = pd.DataFrame(_lp_rows)
-                st.dataframe(_lp_df, hide_index=True, width="stretch")
+
+                # ── Today's Change Banner ─────────────────────────────────────
+                _td_c = "#26a69a" if _total_today_pnl >= 0 else "#ef5350"
+                _ov_c = "#26a69a" if _total_overall_pnl >= 0 else "#ef5350"
+                _td_a = "▲" if _total_today_pnl >= 0 else "▼"
+                _ov_a = "▲" if _total_overall_pnl >= 0 else "▼"
+                _ov_p = (_total_overall_pnl / _total_invested * 100) if _total_invested > 0 else 0
+                st.markdown(
+                    f'<div style="display:flex;gap:14px;margin:0 0 14px 0">'
+                    f'<div style="flex:1;background:#0d1f3c;padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
+                    f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s Change</div>'
+                    f'<div style="font-size:24px;font-weight:700;color:{_td_c}">{_td_a} ₹{abs(_total_today_pnl):,.0f}</div>'
+                    f'</div>'
+                    f'<div style="flex:1;background:#0d1f3c;padding:14px 18px;border-radius:10px;border-left:5px solid {_ov_c}">'
+                    f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Overall P&amp;L</div>'
+                    f'<div style="font-size:24px;font-weight:700;color:{_ov_c}">{_ov_a} ₹{abs(_total_overall_pnl):,.0f} '
+                    f'<span style="font-size:14px">({_ov_p:+.1f}%)</span></div>'
+                    f'</div>'
+                    f'<div style="flex:1;background:#0d1f3c;padding:14px 18px;border-radius:10px;border-left:5px solid #2196F3">'
+                    f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Portfolio Value</div>'
+                    f'<div style="font-size:24px;font-weight:700;color:#fff">₹{_total_port_value:,.0f}</div>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # ── Colored holdings table ────────────────────────────────────
+                _TH  = "background:#1a2744;padding:8px 12px;font-size:11px;color:#aaa;font-weight:600;border-bottom:2px solid #2a3a5c;text-align:right;white-space:nowrap"
+                _THL = _TH.replace("text-align:right", "text-align:left")
+                _TD  = "padding:8px 12px;font-size:13px;border-bottom:1px solid #1a2744;text-align:right"
+                _TDL = _TD.replace("text-align:right", "text-align:left")
+                _tbl = (
+                    '<table style="width:100%;border-collapse:collapse;margin-bottom:6px">'
+                    f'<thead><tr>'
+                    f'<th style="{_THL}">Stock</th>'
+                    f'<th style="{_TH}">Qty</th>'
+                    f'<th style="{_TH}">Avg Cost</th>'
+                    f'<th style="{_TH}">Live Price</th>'
+                    f'<th style="{_TH}">Today %</th>'
+                    f'<th style="{_TH}">Today P&amp;L</th>'
+                    f'<th style="{_TH}">Total Return</th>'
+                    f'<th style="{_TH}">Total P&amp;L</th>'
+                    f'</tr></thead><tbody>'
+                )
+                for _r in _lp_rows:
+                    _lv   = f"₹{_r['live_price']:,.2f}" if _r['live_price'] else "—"
+                    _cg   = f"{_r['chg_pct']:+.2f}%"   if _r['chg_pct']   is not None else "—"
+                    _tp2  = f"₹{_r['today_pnl']:+,.0f}" if _r['today_pnl'] is not None else "—"
+                    _tr2  = f"{_r['total_pct']:+.1f}%"  if _r['total_pct'] is not None else "—"
+                    _tnl  = f"₹{_r['total_pnl']:+,.0f}" if _r['total_pnl'] is not None else "—"
+                    _cgc  = "#26a69a" if (_r['chg_pct']   or 0) >= 0 else "#ef5350"
+                    _tpc  = "#26a69a" if (_r['today_pnl'] or 0) >= 0 else "#ef5350"
+                    _tnc  = "#26a69a" if (_r['total_pnl'] or 0) >= 0 else "#ef5350"
+                    _rbg  = "rgba(38,166,154,0.04)" if (_r['today_pnl'] or 0) >= 0 else "rgba(239,83,80,0.04)"
+                    _tbl += (
+                        f'<tr style="background:{_rbg}">'
+                        f'<td style="{_TDL}"><b>{_r["ticker"]}</b></td>'
+                        f'<td style="{_TD}">{_r["qty"]}</td>'
+                        f'<td style="{_TD}">₹{_r["avg_cost"]:,.2f}</td>'
+                        f'<td style="{_TD}"><b>{_lv}</b></td>'
+                        f'<td style="{_TD};color:{_cgc};font-weight:600">{_cg}</td>'
+                        f'<td style="{_TD};color:{_tpc};font-weight:700">{_tp2}</td>'
+                        f'<td style="{_TD};color:{_tnc}">{_tr2}</td>'
+                        f'<td style="{_TD};color:{_tnc};font-weight:600">{_tnl}</td>'
+                        f'</tr>'
+                    )
+                _tbl += '</tbody></table>'
+                st.markdown(_tbl, unsafe_allow_html=True)
 
                 # ── Portfolio Heatmap ──────────────────────────────────────
                 _hm_rows = []
@@ -2848,28 +2926,89 @@ elif page == "📂 Paper Trades":
         stopped_t  = trades[trades["status"] == "STOPPED"] if "status" in trades.columns else pd.DataFrame()
         all_closed = pd.concat([closed_t, stopped_t], ignore_index=True)
 
-        # ── Summary metrics ────────────────────────────────────────────────
-        _sm1, _sm2, _sm3, _sm4 = st.columns(4)
-        _sm1.metric("Total Trades", len(trades))
-        _sm2.metric("Open Positions", len(open_t))
-        _sm3.metric("Closed", len(all_closed))
+        # ── Fetch live prices BEFORE summary so we can show unrealised P&L ──
+        _open_syms = tuple(open_t["ticker"].tolist()) if not open_t.empty else ()
+        _open_lp   = _portfolio_live_prices(_open_syms) if _open_syms else {}
+
+        # ── Aggregate account-level P&L ────────────────────────────────────
+        _pt_deployed   = 0.0
+        _pt_unrealised = 0.0
+        _pt_today_pnl  = 0.0
+        for _, _orow in open_t.iterrows():
+            _o_ep   = float(_orow.get("price",    0) or 0)
+            _o_qty  = int(  _orow.get("quantity", 0) or 0)
+            _o_lp   = _open_lp.get(str(_orow["ticker"]), {})
+            _o_cur  = _o_lp.get("price", _o_ep)
+            _o_prv  = _o_lp.get("prev",  _o_cur)
+            _pt_deployed   += _o_ep  * _o_qty
+            _pt_unrealised += (_o_cur - _o_ep) * _o_qty
+            _pt_today_pnl  += (_o_cur - _o_prv) * _o_qty
+
+        _pt_realised = 0.0
+        _wins_cnt    = 0
         if not all_closed.empty and "pnl" in all_closed.columns:
-            _all_cl_pnl = pd.to_numeric(all_closed["pnl"], errors="coerce")
-            _tot_pnl  = _all_cl_pnl.sum()
-            _wins_cnt = (_all_cl_pnl > 0).sum()
-            _sm4.metric("Realised P&L",
-                        f"₹{_tot_pnl:+,.0f}",
-                        f"{_wins_cnt}/{len(all_closed)} winners",
-                        delta_color="normal" if _tot_pnl >= 0 else "inverse")
+            _all_cl_pnl  = pd.to_numeric(all_closed["pnl"], errors="coerce")
+            _pt_realised = float(_all_cl_pnl.sum())
+            _wins_cnt    = int((_all_cl_pnl > 0).sum())
+
+        _pt_unr_pct = (_pt_unrealised / _pt_deployed * 100) if _pt_deployed > 0 else 0
+
+        # ── Account Dashboard Card ─────────────────────────────────────────
+        _ac_name  = st.session_state.get("pt_account", "My Account")
+        _ur_col = "#26a69a" if _pt_unrealised >= 0 else "#ef5350"
+        _re_col = "#26a69a" if _pt_realised   >= 0 else "#ef5350"
+        _td_col = "#26a69a" if _pt_today_pnl  >= 0 else "#ef5350"
+        _ur_arr = "▲" if _pt_unrealised >= 0 else "▼"
+        _re_arr = "▲" if _pt_realised   >= 0 else "▼"
+        _td_arr = "▲" if _pt_today_pnl  >= 0 else "▼"
+        _n_open   = len(open_t)
+        _n_closed = len(all_closed)
+        st.markdown(
+            f'<div style="background:#0d1f3c;border-radius:12px;padding:18px 22px;'
+            f'margin-bottom:16px;border-left:5px solid #2196F3">'
+            f'<div style="font-size:11px;color:#5c8dd6;text-transform:uppercase;'
+            f'letter-spacing:1.5px;margin-bottom:12px">📂 {_ac_name}</div>'
+            f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">'
+
+            f'<div style="min-width:140px">'
+            f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s P&amp;L</div>'
+            f'<div style="font-size:22px;font-weight:700;color:{_td_col}">{_td_arr} ₹{abs(_pt_today_pnl):,.0f}</div>'
+            f'</div>'
+
+            f'<div style="min-width:170px">'
+            f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Unrealised P&amp;L</div>'
+            f'<div style="font-size:22px;font-weight:700;color:{_ur_col}">{_ur_arr} ₹{abs(_pt_unrealised):,.0f} '
+            f'<span style="font-size:13px">({_pt_unr_pct:+.1f}%)</span></div>'
+            f'</div>'
+
+            f'<div style="min-width:170px">'
+            f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">'
+            f'Realised P&amp;L &nbsp;<span style="color:#888">({_wins_cnt}/{_n_closed} won)</span></div>'
+            f'<div style="font-size:22px;font-weight:700;color:{_re_col}">{_re_arr} ₹{abs(_pt_realised):,.0f}</div>'
+            f'</div>'
+
+            f'<div style="min-width:140px">'
+            f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Deployed Capital</div>'
+            f'<div style="font-size:22px;font-weight:700;color:#fff">₹{_pt_deployed:,.0f}</div>'
+            f'</div>'
+
+            f'<div style="min-width:110px">'
+            f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Positions</div>'
+            f'<div style="font-size:20px;font-weight:700">'
+            f'<span style="color:#26a69a">{_n_open}</span> open &nbsp; '
+            f'<span style="color:#aaa;font-size:16px">{_n_closed} closed</span></div>'
+            f'</div>'
+
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
         st.markdown("---")
 
         # ── OPEN POSITIONS with live P&L + Exit button ─────────────────────
         if not open_t.empty:
             st.subheader("📌 Open Positions — Live P&L")
-
-            # Fetch live prices for all open tickers
-            _open_syms = tuple(open_t["ticker"].tolist())
-            _open_lp   = _portfolio_live_prices(_open_syms)
+            # _open_lp already fetched above for account dashboard
 
             for _, _row in open_t.iterrows():
                 _tk   = _row["ticker"]
@@ -2907,14 +3046,18 @@ elif page == "📂 Paper Trades":
                     f"| Unrealised: ₹{_unr:+,.0f} ({_unr_pct:+.2f}%){_rr_calc}",
                     expanded=True,
                 ):
-                    _oc1, _oc2, _oc3, _oc4, _oc5 = st.columns(5)
-                    _oc1.metric("Entry",    f"₹{_ep:,.2f}")
-                    _oc2.metric("Live",     f"₹{_cur:,.2f}",  f"{_lp.get('chg',0):+.2f}% today")
-                    _oc3.metric("Qty",      f"{_qty} shares")
-                    _oc4.metric("Stop-Loss",f"₹{_sl:,.2f}" if _sl else "—",
+                    _oc_today_pnl = (_cur - _lp.get("prev", _cur)) * _qty
+                    _oc1, _oc2, _oc3, _oc4, _oc5, _oc6 = st.columns(6)
+                    _oc1.metric("Entry",       f"₹{_ep:,.2f}")
+                    _oc2.metric("Live Price",  f"₹{_cur:,.2f}")
+                    _oc3.metric("Today's P&L", f"₹{_oc_today_pnl:+,.0f}",
+                                f"{_lp.get('chg', 0):+.2f}%",
+                                delta_color="normal" if _oc_today_pnl >= 0 else "inverse")
+                    _oc4.metric("Qty",         f"{_qty} shares")
+                    _oc5.metric("Stop-Loss",   f"₹{_sl:,.2f}" if _sl else "—",
                                 delta=f"{(_sl/_ep-1)*100:+.1f}%" if _sl else None,
                                 delta_color="inverse")
-                    _oc5.metric("Target",   f"₹{_tp:,.2f}" if _tp else "—",
+                    _oc6.metric("Target",      f"₹{_tp:,.2f}" if _tp else "—",
                                 delta=f"{(_tp/_ep-1)*100:+.1f}%" if _tp else None)
 
                     st.markdown(
@@ -2989,7 +3132,55 @@ elif page == "📂 Paper Trades":
             ].copy()
             if "pnl" in _cl_disp.columns:
                 _cl_disp["pnl"] = pd.to_numeric(_cl_disp["pnl"], errors="coerce")
-            st.dataframe(_cl_disp, hide_index=True, width="stretch")
+
+            # Colored HTML table for closed trades
+            _CTH = "background:#1a2744;padding:7px 11px;font-size:11px;color:#aaa;font-weight:600;border-bottom:2px solid #2a3a5c;text-align:right;white-space:nowrap"
+            _CTL = _CTH.replace("text-align:right", "text-align:left")
+            _CTD = "padding:7px 11px;font-size:12px;border-bottom:1px solid #1a2744;text-align:right"
+            _CTX = _CTD.replace("text-align:right", "text-align:left")
+            _ct_html = (
+                '<table style="width:100%;border-collapse:collapse;margin-bottom:6px">'
+                f'<thead><tr>'
+                f'<th style="{_CTL}">Stock</th>'
+                f'<th style="{_CTH}">Entry ₹</th>'
+                f'<th style="{_CTH}">Qty</th>'
+                f'<th style="{_CTH}">SL ₹</th>'
+                f'<th style="{_CTH}">TP ₹</th>'
+                f'<th style="{_CTH}">Exit ₹</th>'
+                f'<th style="{_CTL}">Exit Reason</th>'
+                f'<th style="{_CTH}">P&amp;L ₹</th>'
+                f'<th style="{_CTH}">P&amp;L %</th>'
+                f'<th style="{_CTL}">Date</th>'
+                f'</tr></thead><tbody>'
+            )
+            for _, _cr in _cl_disp.iterrows():
+                _c_pnl  = float(_cr.get("pnl", 0) or 0)
+                _c_pct  = float(_cr.get("pnl_pct", 0) or 0)
+                _c_col  = "#26a69a" if _c_pnl >= 0 else "#ef5350"
+                _c_bg   = "rgba(38,166,154,0.06)" if _c_pnl >= 0 else "rgba(239,83,80,0.06)"
+                _c_tick = str(_cr.get("ticker", "")).replace(".NS", "")
+                _c_ep   = f"₹{float(_cr.get('price', 0)):,.2f}"
+                _c_sl   = f"₹{float(_cr.get('sl', 0)):,.2f}" if _cr.get("sl") else "—"
+                _c_tp   = f"₹{float(_cr.get('tp', 0)):,.2f}" if _cr.get("tp") else "—"
+                _c_xp   = f"₹{float(_cr.get('exit_price', 0)):,.2f}" if _cr.get("exit_price") else "—"
+                _c_xr   = str(_cr.get("exit_reason", "") or "")
+                _c_dt   = str(_cr.get("timestamp", ""))[:10]
+                _ct_html += (
+                    f'<tr style="background:{_c_bg}">'
+                    f'<td style="{_CTX}"><b>{_c_tick}</b></td>'
+                    f'<td style="{_CTD}">{_c_ep}</td>'
+                    f'<td style="{_CTD}">{int(_cr.get("quantity", 0))}</td>'
+                    f'<td style="{_CTD}">{_c_sl}</td>'
+                    f'<td style="{_CTD}">{_c_tp}</td>'
+                    f'<td style="{_CTD}"><b>{_c_xp}</b></td>'
+                    f'<td style="{_CTX}">{_c_xr}</td>'
+                    f'<td style="{_CTD};color:{_c_col};font-weight:700">₹{_c_pnl:+,.0f}</td>'
+                    f'<td style="{_CTD};color:{_c_col}">{_c_pct:+.1f}%</td>'
+                    f'<td style="{_CTX}">{_c_dt}</td>'
+                    f'</tr>'
+                )
+            _ct_html += '</tbody></table>'
+            st.markdown(_ct_html, unsafe_allow_html=True)
 
             # P&L Bar Chart + Cumulative Equity Curve
             _pnl_plot = all_closed.copy()
