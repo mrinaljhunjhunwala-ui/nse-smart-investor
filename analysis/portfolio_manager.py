@@ -198,13 +198,14 @@ def _portfolio_narrative(
             f"— consider reviewing those positions."
         )
 
-    # VIX context
-    if "FEAR" in summary.vix_regime or "PANIC" in summary.vix_regime:
+    # VIX context — compare uppercase so "fear"/"FEAR" both match
+    _vix_upper = summary.vix_regime.upper()
+    if "FEAR" in _vix_upper or "PANIC" in _vix_upper:
         parts.append(
             "Markets are currently fearful (VIX elevated). "
             "This is often a better time to hold or buy carefully, not to sell in panic."
         )
-    elif "COMPLACENCY" in summary.vix_regime:
+    elif "COMPLACENCY" in _vix_upper:
         parts.append(
             "Market volatility is very low right now — a good time to review "
             "your stops, as sharp moves can catch investors off guard."

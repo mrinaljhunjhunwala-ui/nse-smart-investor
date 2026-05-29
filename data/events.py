@@ -32,7 +32,13 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+
+try:
+    import yfinance as yf
+    _YF_AVAILABLE = True
+except ImportError:
+    yf = None          # type: ignore[assignment]
+    _YF_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
 
@@ -52,6 +58,8 @@ def get_earnings_date(ticker: str) -> Optional[datetime]:
         - yfinance .calendar is unreliable for .NS tickers.
         - Returns None (not blocking) when data is unavailable.
     """
+    if not _YF_AVAILABLE:
+        return None
     try:
         info     = yf.Ticker(ticker)
         calendar = info.calendar          # dict or DataFrame depending on version

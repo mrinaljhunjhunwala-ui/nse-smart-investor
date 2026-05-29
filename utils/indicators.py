@@ -203,8 +203,10 @@ def add_vwap(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
     """
     tp               = (df["High"] + df["Low"] + df["Close"]) / 3
     tp_vol           = tp * df["Volume"]
-    df["VWAP_20"]    = tp_vol.rolling(period).sum() / df["Volume"].rolling(period).sum()
-    df["VWAP_Pct"]   = (df["Close"] / df["VWAP_20"] - 1) * 100
+    # Guard against zero-volume windows (halted stocks / holidays)
+    _vol_sum = df["Volume"].rolling(period).sum().replace(0, float("nan"))
+    df["VWAP_20"]    = tp_vol.rolling(period).sum() / _vol_sum
+    df["VWAP_Pct"]   = (df["Close"] / df["VWAP_20"].replace(0, float("nan")) - 1) * 100
     return df
 
 
