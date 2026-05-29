@@ -2,14 +2,13 @@
 data/fetcher.py
 Fetches OHLCV data for NSE/BSE stocks — no yfinance library anywhere.
 
-Primary source  : Stooq  (stooq.com) — free, no API key, no rate limits,
-                  works from any cloud IP including Streamlit Community Cloud.
-Fallback source : Yahoo Finance v8 chart API (direct urllib, cookie+crumb auth) —
-                  Yahoo requires a session cookie (fc.yahoo.com) + crumb token
-                  since mid-2024.  _get_yf_crumb() handles this automatically
-                  and caches the session for 30 minutes.
+Source priority (fastest / most reliable first):
+  Tier 0 : Angel One SmartAPI   — real-time, no rate limits, official exchange data.
+            Only active when [angel_one] credentials are set in Streamlit secrets.
+  Tier 1 : Stooq CSV            — free, no API key, cloud-safe (daily bars only).
+  Tier 2 : Yahoo Finance v8 API — direct urllib + cookie+crumb auth (since mid-2024).
 
-In-memory cache: each (ticker, period) is fetched only once per process.
+In-memory cache: each (ticker, period, interval) fetched only once per process.
 """
 
 import http.cookiejar
@@ -342,8 +341,8 @@ def fetch_data(
 
 def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     """
-    Fetch OHLCV for one ticker.  Stooq first → direct Yahoo Finance chart API fallback.
-    No yfinance library anywhere — avoids HTTP 429 rate-limiting from cloud IPs.
+    Fetch OHLCV for one ticker.
+    Priority: Angel One (Tier 0) → Stooq (Tier 1) → Yahoo Finance (Tier 2).
     Results are cached in-process — repeated calls return the cached copy.
     """
     cache_key = (ticker, period, interval)
@@ -353,28 +352,38 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     df = None
     last_err = ""
 
-    # ── 1. Try Stooq (daily bars only — skip for intraday) ───────────────────
-    if interval == "1d":
+    # ── Tier 0: Angel One SmartAPI (only if credentials configured) ───────────
+    try:
+        from data.angel_fetcher import fetch_historical as _ao_fetch, is_configured as _ao_ok
+        if _ao_ok():
+            df = _ao_fetch(ticker, period=period, interval=interval)
+            if df is not None and not df.empty:
+                print(f"  [AngelOne] {ticker}: {len(df)} rows")
+    except Exception as _e:
+        last_err = str(_e)
+
+    # ── Tier 1: Stooq CSV (daily bars only — no intraday support) ────────────
+    if (df is None or df.empty) and interval == "1d":
         try:
             df = _fetch_stooq(ticker, period=period)
             print(f"  [Stooq] {ticker}: {len(df)} rows")
         except Exception as e:
             last_err = str(e)
-            print(f"  [Stooq] {ticker} failed: {e} — trying Yahoo direct…")
-    else:
-        print(f"  [intraday {interval}] {ticker} — using Yahoo direct (Stooq is daily-only)")
+            print(f"  [Stooq] {ticker} failed: {e} — trying Yahoo…")
+    elif df is None or df.empty:
+        print(f"  [intraday {interval}] {ticker} — skipping Stooq (daily-only)")
 
-    # ── 2. Fallback: direct Yahoo Finance chart API (no library, cloud-safe) ─────
+    # ── Tier 2: Yahoo Finance v8 chart API (cookie+crumb auth) ───────────────
     if df is None or df.empty:
         try:
             df = _fetch_yahoo_direct(ticker, period=period, interval=interval)
-            print(f"  [Yahoo direct] {ticker}: {len(df)} rows")
+            print(f"  [Yahoo] {ticker}: {len(df)} rows")
         except Exception as e:
             last_err = str(e)
-            print(f"  [Yahoo direct] {ticker} failed: {e}")
+            print(f"  [Yahoo] {ticker} failed: {e}")
 
     if df is None or df.empty:
-        raise ValueError(f"No data for {ticker}. Stooq + Yahoo both failed: {last_err}")
+        raise ValueError(f"No data for {ticker}. All sources failed: {last_err}")
 
     _FETCH_CACHE[cache_key] = df
     return df.copy()

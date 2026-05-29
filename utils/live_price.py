@@ -142,21 +142,7 @@ def get_live_price(symbol: str) -> Optional[float]:
     Get current price for a single NSE symbol.
     Returns float or None.
     """
-    clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
-    clean    = symbol.replace(".NS", "").upper()
-
-    # Tier 1: Yahoo direct JSON (live during market hours, works from cloud)
-    q = _yahoo_json_quote(clean_ns)
-    if q:
-        return q["price"]
-
-    # Tier 2: NSE India API (real-time, may fail on cloud due to Cloudflare)
-    q = _nse_live_price(clean)
-    if q:
-        return q["price"]
-
-    # Tier 3: Stooq EOD (yesterday's close — always works)
-    q = _stooq_eod_price(clean_ns)
+    q = get_live_quote(symbol)
     return q["price"] if q else None
 
 
@@ -164,10 +150,27 @@ def get_live_quote(symbol: str) -> Optional[dict]:
     """
     Get price + prev_close dict for one NSE symbol.
     Returns {"price": float, "prev_close": float, "chg_pct": float} or None.
+
+    Priority:
+      Tier 0: Angel One SmartAPI (real-time, if credentials configured)
+      Tier 1: Yahoo Finance direct JSON (live during market hours)
+      Tier 2: NSE India official API (real-time, may fail on cloud)
+      Tier 3: Stooq EOD (yesterday's close — always works)
     """
     clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
     clean    = symbol.replace(".NS", "").upper()
 
+    # Tier 0: Angel One (real-time, no rate limits)
+    try:
+        from data.angel_fetcher import get_live_quote as _ao_quote, is_configured as _ao_ok
+        if _ao_ok():
+            q = _ao_quote(clean_ns)
+            if q:
+                return q
+    except Exception:
+        pass
+
+    # Tier 1–3: existing fallbacks
     for fetch_fn, arg in [
         (_yahoo_json_quote, clean_ns),
         (_nse_live_price,   clean),
