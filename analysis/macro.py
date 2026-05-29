@@ -90,12 +90,21 @@ def _fetch_yahoo_macro(symbol: str, period: str = "3mo") -> pd.DataFrame:
         "1y": "1y",   "2y": "2y",   "3y": "5y",
     }
     yf_range = _RANGE_MAP.get(period.lower(), "3mo")
+    # Use cookie+crumb auth — required by Yahoo Finance since mid-2024
+    try:
+        from data.fetcher import _get_yf_crumb
+        import urllib.parse as _up
+        _opener, _crumb = _get_yf_crumb()
+        _cqs = f"&crumb={_up.quote(_crumb)}" if _crumb else ""
+    except Exception:
+        _opener, _cqs = None, ""
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-           f"?interval=1d&range={yf_range}&includePrePost=false")
+           f"?interval=1d&range={yf_range}&includePrePost=false{_cqs}")
     req = urllib.request.Request(
         url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                       "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=12) as r:
+    _open_fn = _opener.open if _opener else urllib.request.urlopen
+    with _open_fn(req, timeout=12) as r:
         data = json.loads(r.read())
 
     result = data.get("chart", {}).get("result")

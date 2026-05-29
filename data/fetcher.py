@@ -354,7 +354,7 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
 
     # ── Tier 0: Angel One SmartAPI (only if credentials configured) ───────────
     try:
-        from data.angel_fetcher import fetch_historical as _ao_fetch, is_configured as _ao_ok
+        from .angel_fetcher import fetch_historical as _ao_fetch, is_configured as _ao_ok
         if _ao_ok():
             df = _ao_fetch(ticker, period=period, interval=interval)
             if df is not None and not df.empty:

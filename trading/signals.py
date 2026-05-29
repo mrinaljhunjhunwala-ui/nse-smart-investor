@@ -62,7 +62,7 @@ def get_india_vix_regime() -> Dict:
         return _VIX_CACHE
 
     try:
-        import json, urllib.parse as _up
+        import json, urllib.request, urllib.parse as _up
         from data.fetcher import _get_yf_crumb
         _opener, _crumb = _get_yf_crumb()
         _cqs = f"&crumb={_up.quote(_crumb)}" if _crumb else ""
@@ -290,8 +290,10 @@ def check_oversold_bounce(
     if pct_above < min_pct_above_52wL:
         return None
 
-    # Need at least one confirmation signal
+    # Need at least one confirmation signal — no confirmation = no trade
     confirmation = bull_div or bull_eng or hammer or morn
+    if not confirmation:
+        return None
     reason_parts = [f"RSI={rsi:.1f} (oversold)"]
     if bull_div:  reason_parts.append("RSI_Bull_Div")
     if bull_eng:  reason_parts.append("BullEngulfing")

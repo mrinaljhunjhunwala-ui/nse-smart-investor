@@ -42,53 +42,151 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS — non-trader friendly cards ────────────────────────────────────
-st.markdown("""
-<style>
-.card-green  { background:#1a3a2a; border-left:5px solid #26a69a; border-radius:8px;
+# ── Custom CSS — modern dark theme ────────────────────────────────────────────
+st.markdown(
+    """<style>
+.card-green  { background:linear-gradient(135deg,#0f2a1e,#1a3a2a);
+               border-left:4px solid #26a69a; border-radius:10px;
+               padding:14px 18px; margin:6px 0;
+               box-shadow:0 2px 8px rgba(38,166,154,.15); }
+.card-yellow { background:linear-gradient(135deg,#251f05,#3a3210);
+               border-left:4px solid #f9a825; border-radius:10px;
+               padding:14px 18px; margin:6px 0;
+               box-shadow:0 2px 8px rgba(249,168,37,.15); }
+.card-red    { background:linear-gradient(135deg,#250808,#3a1a1a);
+               border-left:4px solid #ef5350; border-radius:10px;
+               padding:14px 18px; margin:6px 0;
+               box-shadow:0 2px 8px rgba(239,83,80,.15); }
+.card-blue   { background:linear-gradient(135deg,#071428,#0d1f3c);
+               border-left:4px solid #2196F3; border-radius:10px;
+               padding:14px 18px; margin:6px 0;
+               box-shadow:0 2px 8px rgba(33,150,243,.15); }
+.card-purple { background:linear-gradient(135deg,#160d2a,#231440);
+               border-left:4px solid #9c27b0; border-radius:10px;
                padding:14px 18px; margin:6px 0; }
-.card-yellow { background:#3a3210; border-left:5px solid #f9a825; border-radius:8px;
+.card-orange { background:linear-gradient(135deg,#1f1005,#2d1a08);
+               border-left:4px solid #ff9800; border-radius:10px;
                padding:14px 18px; margin:6px 0; }
-.card-red    { background:#3a1a1a; border-left:5px solid #ef5350; border-radius:8px;
-               padding:14px 18px; margin:6px 0; }
-.card-blue   { background:#0d1f3c; border-left:5px solid #2196F3; border-radius:8px;
-               padding:14px 18px; margin:6px 0; }
-.score-big   { font-size:48px; font-weight:700; }
+.score-big   { font-size:52px; font-weight:800; letter-spacing:-1px; }
 .signal-big  { font-size:22px; font-weight:700; }
-.narrative   { font-size:15px; line-height:1.6; color:#e0e0e0; }
-.ticker-label{ font-size:20px; font-weight:700; color:#fff; }
-</style>
-""", unsafe_allow_html=True)
+.narrative   { font-size:15px; line-height:1.7; color:#d0d0d0; }
+.ticker-label{ font-size:22px; font-weight:800; color:#fff; }
+.pill-green  { display:inline-block; background:#1b4332; color:#52b788;
+               border:1px solid #52b788; border-radius:20px;
+               padding:2px 12px; font-size:12px; font-weight:600; }
+.pill-red    { display:inline-block; background:#3b0f0f; color:#ff6b6b;
+               border:1px solid #ff6b6b; border-radius:20px;
+               padding:2px 12px; font-size:12px; font-weight:600; }
+.pill-yellow { display:inline-block; background:#3b2800; color:#ffc107;
+               border:1px solid #ffc107; border-radius:20px;
+               padding:2px 12px; font-size:12px; font-weight:600; }
+.pill-gray   { display:inline-block; background:#2a2a2a; color:#aaa;
+               border:1px solid #555; border-radius:20px;
+               padding:2px 12px; font-size:12px; font-weight:600; }
+.pill-blue   { display:inline-block; background:#0d2040; color:#64b5f6;
+               border:1px solid #64b5f6; border-radius:20px;
+               padding:2px 12px; font-size:12px; font-weight:600; }
+.ao-badge-on  { background:linear-gradient(90deg,#0d2a1a,#1a3d28);
+                border:1px solid #2ecc71; border-radius:8px;
+                padding:8px 12px; font-size:12px; color:#2ecc71;
+                margin:4px 0; display:block; }
+.ao-badge-off { background:linear-gradient(90deg,#1e1e1e,#2a2a2a);
+                border:1px solid #555; border-radius:8px;
+                padding:8px 12px; font-size:12px; color:#aaa;
+                margin:4px 0; display:block; }
+.metric-box  { background:#151b24; border-radius:10px;
+               padding:14px 16px; text-align:center; }
+.metric-val  { font-size:28px; font-weight:800; margin:4px 0; }
+.metric-lbl  { font-size:11px; color:#888; text-transform:uppercase;
+               letter-spacing:.8px; }
+.metric-delta-pos { color:#26a69a; font-size:13px; font-weight:600; }
+.metric-delta-neg { color:#ef5350; font-size:13px; font-weight:600; }
+.order-buy  { background:#0d2a1a; border:1px solid #2ecc71;
+              border-radius:10px; padding:16px; }
+.order-sell { background:#2a0d0d; border:1px solid #ef5350;
+              border-radius:10px; padding:16px; }
+</style>""",
+    unsafe_allow_html=True,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sidebar
+# Sidebar — grouped navigation
 # ─────────────────────────────────────────────────────────────────────────────
-st.sidebar.title("📈 NSE Smart Investor")
-st.sidebar.markdown("*Your AI-powered equity companion*")
+st.sidebar.title("NSE Smart Investor")
+st.sidebar.markdown("*AI-powered equity companion*")
 st.sidebar.markdown("---")
 
-page = st.sidebar.radio(
-    "Navigate to",
-    [
-        "📡 Market Live",
-        "🏠 My Portfolio",
-        "🔍 Analyze Stock",
-        "📊 Market Overview",
-        "🔎 Smart Screener",
-        "📂 Paper Trades",
-        "🧪 Backtest",
-        "🌍 Macro Dashboard",
-        "📈 Market Breadth",
-        "🏦 OI & Options Setup",
-        "⚡ Intraday Trader",
-        "📐 Position Sizer",
-        "✅ Swing Checklist",
-        "⭐ My Watchlist",
-        "📖 Investor Guide",
-    ],
-    key="nav",
+# Two-level grouped navigation — 5 sections × 3-4 pages each
+_NAV_GROUPS: dict = {
+    "Markets":   ["Market Live", "Market Overview", "Market Breadth", "Macro Dashboard"],
+    "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
+    "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist"],
+    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist"],
+    "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
+}
+
+# Emoji map for display
+_PAGE_EMOJI: dict = {
+    "Market Live":     "📡",
+    "Market Overview": "📊",
+    "Market Breadth":  "📈",
+    "Macro Dashboard": "🌍",
+    "Intraday Trader": "⚡",
+    "Smart Screener":  "🔎",
+    "OI & Options":    "🏦",
+    "My Portfolio":    "🏠",
+    "Paper Trades":    "📂",
+    "My Watchlist":    "⭐",
+    "Analyze Stock":   "🔍",
+    "Backtest":        "🧪",
+    "Swing Checklist": "✅",
+    "Position Sizer":  "📐",
+    "Angel One":       "🔗",
+    "Investor Guide":  "📖",
+}
+
+# Restore old page key names for backward-compat with all elif checks below
+_PAGE_FULL_NAME: dict = {
+    "Market Live":     "📡 Market Live",
+    "Market Overview": "📊 Market Overview",
+    "Market Breadth":  "📈 Market Breadth",
+    "Macro Dashboard": "🌍 Macro Dashboard",
+    "Intraday Trader": "⚡ Intraday Trader",
+    "Smart Screener":  "🔎 Smart Screener",
+    "OI & Options":    "🏦 OI & Options Setup",
+    "My Portfolio":    "🏠 My Portfolio",
+    "Paper Trades":    "📂 Paper Trades",
+    "My Watchlist":    "⭐ My Watchlist",
+    "Analyze Stock":   "🔍 Analyze Stock",
+    "Backtest":        "🧪 Backtest",
+    "Swing Checklist": "✅ Swing Checklist",
+    "Position Sizer":  "📐 Position Sizer",
+    "Angel One":       "🔗 Angel One",
+    "Investor Guide":  "📖 Investor Guide",
+}
+
+_group_icons: dict = {
+    "Markets": "📊", "Trading": "⚡", "Portfolio": "💼",
+    "Analysis": "🔍", "Tools": "🛠",
+}
+
+_nav_group = st.sidebar.selectbox(
+    "Section",
+    [f"{_group_icons[g]} {g}" for g in _NAV_GROUPS],
+    key="nav_group",
+    label_visibility="collapsed",
 )
+_selected_group = _nav_group.split(" ", 1)[1]  # strip emoji
+
+_page_short = st.sidebar.radio(
+    "Page",
+    [f"{_PAGE_EMOJI[p]} {p}" for p in _NAV_GROUPS[_selected_group]],
+    key="nav",
+    label_visibility="collapsed",
+)
+_page_key   = _page_short.split(" ", 1)[1]   # strip emoji prefix
+page        = _PAGE_FULL_NAME.get(_page_key, _page_short)
 
 st.sidebar.markdown("---")
 
@@ -204,6 +302,24 @@ try:
             st.rerun()
 except Exception:
     pass
+
+# ── Angel One connection status ───────────────────────────────────────────────
+try:
+    from data.angel_fetcher import is_configured as _ao_configured
+    _ao_on = _ao_configured()
+    if _ao_on:
+        st.sidebar.markdown(
+            '<span class="ao-badge-on">🔗 Angel One <b>Connected</b></span>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.sidebar.markdown(
+            '<span class="ao-badge-off">🔗 Angel One  <b>Not connected</b> '
+            '— go to Tools › Angel One to set up</span>',
+            unsafe_allow_html=True,
+        )
+except Exception:
+    _ao_on = False
 
 st.sidebar.markdown("---")
 
@@ -497,6 +613,8 @@ def load_ticker_df(ticker: str, period: str = "2y") -> pd.DataFrame:
     from utils.indicators import add_all_indicators
     df = fetch_single(ticker, period=period)
     df = add_all_indicators(df)
+    # Drop warm-up rows where core indicators are NaN so iloc[-1] is always valid
+    df.dropna(subset=["RSI", "ATR", "SMA_200"], inplace=True)
     return df
 
 
@@ -509,7 +627,7 @@ def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     if df.empty:
         return df
     last_ts = df.index[-1]
-    _DAYS = {"1d": 8, "5d": 12, "1m": 35, "6m": 185}
+    _DAYS = {"1d": 8, "5d": 12, "1m": 35, "6m": 185, "1y": 375, "2y": 740}
     if period in _DAYS:
         cutoff = last_ts - pd.Timedelta(days=_DAYS[period])
         return df[df.index >= cutoff]
@@ -535,11 +653,13 @@ def load_vix_data():
 
 @st.cache_data(ttl=600)
 def get_vix_info():
+    # Route through utils.vix — has 10-min TTL and proper crumb auth
+    # (trading.signals had a missing urllib.request import bug)
     try:
-        from trading.signals import get_india_vix_regime
+        from utils.vix import get_india_vix_regime
         return get_india_vix_regime()
     except Exception:
-        return {"vix": 18.0, "regime": "NORMAL", "allow_buy": True, "vix_pct_chg": 0.0}
+        return {"vix": 18.0, "regime": "normal", "allow_buy": True, "vix_pct_chg": 0.0}
 
 
 @st.cache_data(ttl=600)
@@ -1076,19 +1196,39 @@ if page == "📡 Market Live":
     st.markdown(f"*{_ms['day']} — {_ms['detail']}*")
     st.markdown("---")
 
-    # ── Fetch Nifty 50 prices — batch download (2 HTTP calls for all 50 tickers) ─
-    @st.cache_data(ttl=180 if _ms["is_open"] else 3600, show_spinner=False)
+    # ── Fetch Nifty 50 prices — Angel One (priority) → Yahoo → NSE fallback ──────
+    @st.cache_data(ttl=60 if _ms["is_open"] else 3600, show_spinner=False)
     def _load_nifty_snapshot():
         """
         Cloud-safe Nifty 50 snapshot.
-        Uses the 3-tier live price pipeline (Yahoo JSON → NSE India → Stooq EOD)
-        via get_live_prices_batch() — works from any IP, no rate limits.
+        Priority: Angel One batch quotes (real-time, no rate limit) →
+                  Yahoo Finance JSON API → NSE India → Stooq EOD.
         """
         from data.fetcher import NIFTY50_TICKERS
-        from utils.live_price import get_live_prices_batch
 
         tickers_list = list(NIFTY50_TICKERS)
-        raw = get_live_prices_batch(tickers_list, max_workers=12)
+        raw: dict = {}
+        _source = "Yahoo Finance"
+
+        # Tier 1: Angel One (real-time, preferred)
+        try:
+            from data.angel_fetcher import (
+                is_configured as _aoc,
+                get_batch_quotes as _ao_batch,
+            )
+            if _aoc():
+                _ao_raw = _ao_batch(tickers_list)
+                if _ao_raw and sum(1 for v in _ao_raw.values() if v) > 10:
+                    raw     = _ao_raw
+                    _source = "Angel One (real-time)"
+        except Exception:
+            pass
+
+        # Tier 2: Yahoo Finance JSON
+        if not raw:
+            from utils.live_price import get_live_prices_batch
+            raw     = get_live_prices_batch(tickers_list, max_workers=12)
+            _source = "Yahoo Finance"
 
         rows = []
         for t in tickers_list:
@@ -1096,27 +1236,40 @@ if page == "📡 Market Live":
             if not isinstance(q, dict) or not q.get("price"):
                 continue
             try:
+                chg = q.get("chg_pct", (q["price"] / q["prev_close"] - 1) * 100
+                             if q.get("prev_close", 0) > 0 else 0.0)
                 rows.append({
                     "ticker":     t,
                     "name":       get_display_name(t),
                     "price":      q["price"],
-                    "prev_close": q["prev_close"],
-                    "chg_pct":    q["chg_pct"],
-                    "vol_ratio":  1.0,   # volume ratio not available from JSON API
+                    "prev_close": q.get("prev_close", q["price"]),
+                    "chg_pct":    chg,
+                    "vol_ratio":  1.0,
+                    "volume":     q.get("volume", 0),
+                    "_source":    _source,
                 })
             except Exception:
                 continue
 
         if not rows:
             return pd.DataFrame()
-        return pd.DataFrame(rows).sort_values("chg_pct", ascending=False)
+        df = pd.DataFrame(rows).sort_values("chg_pct", ascending=False)
+        return df
 
     with st.spinner("Loading Nifty 50 snapshot…"):
         snap = _load_nifty_snapshot()
 
     if snap.empty:
-        st.warning("Could not fetch market data. yfinance may be rate-limited — try again in 30 seconds.")
+        st.warning("Could not fetch market data. Try again in 30 seconds.")
     else:
+        # ── Data source badge ──────────────────────────────────────────────────
+        _src = snap.get("_source", pd.Series(["Yahoo Finance"])).iloc[0] if "_source" in snap.columns else "Yahoo Finance"
+        _src_pill = "pill-green" if "Angel One" in _src else "pill-gray"
+        st.markdown(
+            f'<span class="{_src_pill}">Data: {_src}</span>',
+            unsafe_allow_html=True,
+        )
+
         # ── Top metrics row ────────────────────────────────────────────────────
         adv = (snap["chg_pct"] > 0).sum()
         dec = (snap["chg_pct"] < 0).sum()
@@ -1299,6 +1452,35 @@ elif page == "🏠 My Portfolio":
         "Your holdings health check — live prices, plain English buy/hold/sell recommendations, and news for each stock."
     )
 
+    # ── Angel One real holdings shortcut ──────────────────────────────────────
+    try:
+        from data.angel_fetcher import is_configured as _pf_ao_ok, get_holdings as _pf_ao_holdings
+        if _pf_ao_ok():
+            with st.expander("🔗 Import from Angel One account", expanded=False):
+                st.info(
+                    "Your Angel One account is connected. Click below to import your "
+                    "real demat holdings directly — no CSV upload needed."
+                )
+                if st.button("Import Angel One Holdings", key="pf_ao_import"):
+                    _ao_h = _pf_ao_holdings()
+                    if _ao_h:
+                        import tempfile as _tmf
+                        import pathlib as _tmpl
+                        _rows = [
+                            f"{h['symbol']}.NS,{h['qty']},{h['avg_price']},2024-01-01"
+                            for h in _ao_h
+                        ]
+                        _ao_csv_content = "ticker,quantity,avg_buy_price,date_bought\n" + "\n".join(_rows)
+                        _ao_tmp = _tmpl.Path(_tmf.mktemp(suffix=".csv"))
+                        _ao_tmp.write_text(_ao_csv_content, encoding="utf-8")
+                        st.session_state["_ao_portfolio_path"] = str(_ao_tmp)
+                        st.success(f"Imported {len(_ao_h)} holdings from Angel One")
+                        st.rerun()
+                    else:
+                        st.error("Could not fetch holdings from Angel One")
+    except Exception:
+        pass
+
     # ── Auto-load default portfolio.csv OR let user upload ────────────────────
     import pathlib as _pl
     _DEFAULT_CSV = _pl.Path(_ROOT) / "portfolio.csv"
@@ -1334,6 +1516,9 @@ elif page == "🏠 My Portfolio":
         tmp.write_bytes(uploaded.read())
         _csv_source = tmp
         st.success("Using uploaded portfolio file.")
+    elif st.session_state.get("_ao_portfolio_path"):
+        _csv_source = _pl.Path(st.session_state["_ao_portfolio_path"])
+        st.success("Using Angel One holdings (imported from broker)")
     elif _DEFAULT_CSV.exists():
         _csv_source = _DEFAULT_CSV
         st.info(f"Auto-loaded: **portfolio.csv** ({len(pd.read_csv(_DEFAULT_CSV))} holdings found)")
@@ -3425,12 +3610,24 @@ elif page == "⚡ Intraday Trader":
         "⚠️ *Data is 15-min delayed via Yahoo Finance free API.*"
     )
 
-    tab_gap, tab_chart, tab_orb, tab_sigs = st.tabs([
-        "📊 Pre-Market Gap Scanner",
-        "📈 Intraday Chart",
-        "⚡ ORB Setup",
-        "🎯 Live Intraday Signals",
-    ])
+    # Determine if Angel One is connected for live positions tab
+    try:
+        from data.angel_fetcher import is_configured as _it_ao_ok
+        _it_ao = _it_ao_ok()
+    except Exception:
+        _it_ao = False
+
+    _it_tabs = ["📊 Pre-Market Gap Scanner", "📈 Intraday Chart",
+                "⚡ ORB Setup", "🎯 Live Intraday Signals"]
+    if _it_ao:
+        _it_tabs.append("💼 Live Positions")
+
+    _tab_objs = st.tabs(_it_tabs)
+    tab_gap   = _tab_objs[0]
+    tab_chart = _tab_objs[1]
+    tab_orb   = _tab_objs[2]
+    tab_sigs  = _tab_objs[3]
+    tab_pos   = _tab_objs[4] if _it_ao else None
 
     # ── TAB 1: GAP SCANNER ────────────────────────────────────────────────────
     with tab_gap:
@@ -3852,6 +4049,60 @@ elif page == "⚡ Intraday Trader":
                     st.error(f"Signal scan failed: {_ls_err}")
         else:
             st.info("Enter a ticker and click **🎯 Check Signals** to run all 3 intraday checks.")
+
+    # ── TAB 5: LIVE POSITIONS (Angel One only) ─────────────────────────────────
+    if tab_pos is not None:
+        with tab_pos:
+            st.subheader("Live Intraday Positions — Angel One")
+            st.caption("Real-time MIS + CNC positions from your Angel One account.")
+            if st.button("🔄 Refresh Positions", key="it_pos_refresh"):
+                st.cache_data.clear()
+
+            @st.cache_data(ttl=30, show_spinner=False)
+            def _it_positions():
+                from data.angel_fetcher import get_positions as _gp, get_funds as _gf
+                return _gp(), _gf()
+
+            with st.spinner("Fetching positions…"):
+                _it_pos_data, _it_funds = _it_positions()
+
+            # Funds strip
+            if _it_funds:
+                _fc1, _fc2, _fc3 = st.columns(3)
+                _fc1.metric("Available Cash", f"Rs {_it_funds['available_cash']:,.0f}")
+                _fc2.metric("Used Margin",    f"Rs {_it_funds['used_margin']:,.0f}")
+                _m2m_val = _it_funds.get("m2m", 0)
+                _fc3.metric("Unrealised P&L", f"Rs {_m2m_val:+,.0f}",
+                            delta_color="normal" if _m2m_val >= 0 else "inverse")
+
+            st.markdown("---")
+
+            if _it_pos_data is None:
+                st.error("Could not fetch positions.")
+            elif not _it_pos_data.get("net"):
+                st.info("No open positions. All flat.")
+            else:
+                _pos_list = _it_pos_data["net"]
+                for _p in _pos_list:
+                    _p_clr  = "card-green" if _p["pnl"] >= 0 else "card-red"
+                    _p_side_badge = (
+                        '<span class="pill-green">LONG</span>'
+                        if _p["qty"] > 0
+                        else '<span class="pill-red">SHORT</span>'
+                    )
+                    _p_pnl_clr = "#26a69a" if _p["pnl"] >= 0 else "#ef5350"
+                    st.markdown(
+                        f'<div class="{_p_clr}">'
+                        f'<b>{_p["symbol"]}</b>  {_p_side_badge}  '
+                        f'<span style="font-size:12px;color:#aaa">{_p["product"]}</span><br>'
+                        f'Qty: {abs(_p["qty"])}  ·  '
+                        f'Avg: Rs {_p["avg_price"]:.2f}  ·  '
+                        f'LTP: Rs {_p["ltp"]:.2f}  ·  '
+                        f'P&L: <span style="color:{_p_pnl_clr};font-weight:700">'
+                        f'Rs {_p["pnl"]:+,.0f}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4534,3 +4785,376 @@ elif page == "📖 Investor Guide":
             "No model is 100% accurate. Always use stop-losses. "
             "Paper trade first to verify the signals work for you before using real money."
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE — ANGEL ONE BROKER INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════════
+elif page == "🔗 Angel One":
+    from data.angel_fetcher import (
+        is_configured as _ao_is_configured,
+        _get_session as _ao_get_session,
+        get_profile as _ao_get_profile,
+        get_funds as _ao_get_funds,
+        get_holdings as _ao_get_holdings,
+        get_positions as _ao_get_positions,
+        get_order_book as _ao_get_orders,
+        get_trade_book as _ao_get_trades,
+        place_order as _ao_place_order,
+        cancel_order as _ao_cancel_order,
+        get_gtt_list as _ao_get_gtts,
+        cancel_gtt as _ao_cancel_gtt,
+        clear_session as _ao_clear_session,
+    )
+
+    st.title("🔗 Angel One — Broker Integration")
+    st.markdown("Connect your Angel One SmartAPI account for live data, real holdings, and order placement.")
+
+    _ao_ok = _ao_is_configured()
+
+    # ── Credentials setup ────────────────────────────────────────────────────
+    if not _ao_ok:
+        st.warning(
+            "**Angel One credentials not configured.**  \n"
+            "Add them to `.streamlit/secrets.toml` or as environment variables to connect your account."
+        )
+        with st.expander("📋 Setup Instructions", expanded=True):
+            st.markdown("""
+**Step 1 — Get your SmartAPI key:**
+1. Login to Angel One → My Profile → API Key (or visit [smartapi.angelone.in](https://smartapi.angelone.in))
+2. Click **Generate API Key** → copy the key
+
+**Step 2 — Get your TOTP secret:**
+1. Angel One → Profile → Security Settings → Two-Factor Authentication → **Re-Setup**
+2. Click **"Can't scan QR?"** → copy the **text key** (looks like `JBSWY3DPEHPK3PXP`)
+
+**Step 3 — Add to `.streamlit/secrets.toml`:**
+```toml
+[angel_one]
+api_key      = "C58Sb2tl..."        # SmartAPI key
+client_id    = "AABM038127"         # Your Angel One client ID
+password     = "yourpassword"       # Login password
+totp_secret  = "JBSWY3DPEHPK3PXP"  # Base32 TOTP seed
+```
+
+**Or set environment variables:**
+```bash
+ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  ANGEL_TOTP_SECRET=...
+```
+
+**Step 4 — Restart Streamlit** after adding credentials.
+""")
+        st.stop()
+
+    # ── Connected — show tabs ────────────────────────────────────────────────
+    st.success("Angel One connected", icon="🟢")
+
+    tab_ao1, tab_ao2, tab_ao3, tab_ao4, tab_ao5 = st.tabs([
+        "📊 Account Overview",
+        "💼 Holdings",
+        "⚡ Today's Positions",
+        "📋 Orders & Trades",
+        "🛒 Quick Order",
+    ])
+
+    # ── TAB 1: ACCOUNT OVERVIEW ───────────────────────────────────────────────
+    with tab_ao1:
+        st.subheader("Account Overview")
+        col_p, col_f = st.columns(2)
+
+        with col_p:
+            try:
+                _prof = _ao_get_profile()
+                if _prof:
+                    st.markdown(
+                        f'<div class="card-blue"><b>{_prof["name"]}</b><br>'
+                        f'Client ID: {_prof["client_id"]}<br>'
+                        f'Email: {_prof["email"]}<br>'
+                        f'Exchanges: {", ".join(_prof["exchanges"])}</div>',
+                        unsafe_allow_html=True,
+                    )
+            except Exception:
+                st.markdown("*Profile unavailable*")
+
+        with col_f:
+            try:
+                _funds = _ao_get_funds()
+                if _funds:
+                    _cash = _funds["available_cash"]
+                    _used = _funds["used_margin"]
+                    _m2m  = _funds["m2m"]
+                    _m2m_clr = "#26a69a" if _m2m >= 0 else "#ef5350"
+                    st.markdown(
+                        f'<div class="card-green">'
+                        f'<div class="metric-lbl">Available Cash</div>'
+                        f'<div class="metric-val">Rs {_cash:,.0f}</div>'
+                        f'Used Margin: Rs {_used:,.0f}<br>'
+                        f'Unrealised P&L: <span style="color:{_m2m_clr}">Rs {_m2m:+,.0f}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            except Exception:
+                st.markdown("*Funds data unavailable*")
+
+        if st.button("🔄 Refresh Session", key="ao_refresh"):
+            _ao_clear_session()
+            st.cache_data.clear()
+            st.success("Session cleared — reconnecting on next request")
+            st.rerun()
+
+    # ── TAB 2: HOLDINGS ────────────────────────────────────────────────────────
+    with tab_ao2:
+        st.subheader("Demat Holdings")
+        with st.spinner("Fetching holdings from Angel One…"):
+            _holdings = _ao_get_holdings()
+
+        if _holdings is None:
+            st.error("Could not fetch holdings. Check credentials and try again.")
+        elif len(_holdings) == 0:
+            st.info("No holdings found in your demat account.")
+        else:
+            _total_invested = sum(h["avg_price"] * h["qty"] for h in _holdings)
+            _total_value    = sum(h["value_rs"] for h in _holdings)
+            _total_pnl      = _total_value - _total_invested
+            _total_pnl_pct  = (_total_pnl / _total_invested * 100) if _total_invested > 0 else 0
+
+            mh1, mh2, mh3, mh4 = st.columns(4)
+            mh1.metric("Stocks", len(_holdings))
+            mh2.metric("Portfolio Value", f"Rs {_total_value:,.0f}")
+            mh3.metric("Total P&L",
+                       f"Rs {_total_pnl:+,.0f}",
+                       delta=f"{_total_pnl_pct:+.2f}%",
+                       delta_color="normal")
+            mh4.metric("Invested", f"Rs {_total_invested:,.0f}")
+
+            st.markdown("---")
+
+            _hdf = pd.DataFrame(_holdings)
+            _hdf = _hdf[["symbol", "qty", "avg_price", "ltp", "pnl", "pnl_pct", "value_rs"]]
+            _hdf.columns = ["Symbol", "Qty", "Avg Price", "LTP", "P&L (Rs)", "P&L %", "Value (Rs)"]
+
+            def _color_pnl(val):
+                if isinstance(val, (int, float)):
+                    color = "#26a69a" if val >= 0 else "#ef5350"
+                    return f"color: {color}; font-weight:600"
+                return ""
+
+            _hdf_styled = (
+                _hdf.style
+                .format({
+                    "Avg Price": "Rs {:.2f}",
+                    "LTP":       "Rs {:.2f}",
+                    "P&L (Rs)":  "Rs {:.0f}",
+                    "P&L %":     "{:.2f}%",
+                    "Value (Rs)":"Rs {:.0f}",
+                })
+                .applymap(_color_pnl, subset=["P&L (Rs)", "P&L %"])
+            )
+            st.dataframe(_hdf_styled, hide_index=True, use_container_width=True)
+
+            # Export
+            _holdings_csv = _hdf.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇ Export Holdings CSV",
+                _holdings_csv,
+                file_name="angel_one_holdings.csv",
+                mime="text/csv",
+            )
+
+    # ── TAB 3: TODAY'S POSITIONS ───────────────────────────────────────────────
+    with tab_ao3:
+        st.subheader("Today's Positions")
+        with st.spinner("Fetching positions…"):
+            _positions = _ao_get_positions()
+
+        if _positions is None:
+            st.error("Could not fetch positions.")
+        else:
+            _net_pos = _positions.get("net", [])
+            if not _net_pos:
+                st.info("No open positions today.")
+            else:
+                _pos_df = pd.DataFrame(_net_pos)
+                _pos_df = _pos_df[["symbol", "qty", "avg_price", "ltp", "pnl", "product", "side"]]
+                _pos_df.columns = ["Symbol", "Qty", "Avg Price", "LTP", "P&L", "Product", "Side"]
+
+                _total_pos_pnl = sum(p["pnl"] for p in _net_pos)
+                pos_c1, pos_c2, pos_c3 = st.columns(3)
+                pos_c1.metric("Open Positions", len(_net_pos))
+                pos_c2.metric("Total P&L Today",
+                              f"Rs {_total_pos_pnl:+,.0f}",
+                              delta_color="normal")
+                pos_c3.metric("Long / Short",
+                              f"{sum(1 for p in _net_pos if p['qty']>0)} / "
+                              f"{sum(1 for p in _net_pos if p['qty']<0)}")
+
+                st.dataframe(
+                    _pos_df.style
+                    .format({
+                        "Avg Price": "Rs {:.2f}",
+                        "LTP":       "Rs {:.2f}",
+                        "P&L":       "Rs {:.0f}",
+                    })
+                    .applymap(lambda v: "color:#26a69a;font-weight:600" if isinstance(v, (int,float)) and v >= 0
+                              else ("color:#ef5350;font-weight:600" if isinstance(v, (int,float)) else ""),
+                              subset=["P&L"]),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+    # ── TAB 4: ORDERS & TRADES ─────────────────────────────────────────────────
+    with tab_ao4:
+        st.subheader("Today's Orders & Trades")
+        ord_t1, ord_t2, ord_t3 = st.tabs(["📑 Order Book", "✅ Trade Book", "🎯 GTT Orders"])
+
+        with ord_t1:
+            with st.spinner("Fetching order book…"):
+                _orders = _ao_get_orders()
+            if _orders is None:
+                st.error("Could not fetch orders.")
+            elif not _orders:
+                st.info("No orders today.")
+            else:
+                _odf = pd.DataFrame(_orders)[
+                    ["order_id", "symbol", "side", "qty", "filled_qty",
+                     "order_type", "price", "avg_price", "status", "time"]
+                ]
+                _odf.columns = ["Order ID", "Symbol", "Side", "Qty", "Filled",
+                                 "Type", "Price", "Fill Price", "Status", "Time"]
+
+                def _status_color(val):
+                    colors = {
+                        "complete": "#26a69a", "rejected": "#ef5350",
+                        "cancelled": "#888",   "open": "#f9a825",
+                        "pending": "#f9a825",
+                    }
+                    c = colors.get(str(val).lower(), "#aaa")
+                    return f"color:{c}; font-weight:600"
+
+                st.dataframe(
+                    _odf.style.applymap(_status_color, subset=["Status"]),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+                # Cancel pending order
+                _pending = [o for o in _orders if o["status"].lower() in ("open", "pending", "trigger pending")]
+                if _pending:
+                    st.markdown("**Cancel Pending Order:**")
+                    _cancel_opts = {f"{o['symbol']} — {o['side']} {o['qty']} @ {o['price']}": o["order_id"]
+                                    for o in _pending}
+                    _to_cancel = st.selectbox("Select order", list(_cancel_opts.keys()), key="ao_cancel_sel")
+                    if st.button("Cancel Order", key="ao_cancel_btn", type="primary"):
+                        if _ao_cancel_order(_cancel_opts[_to_cancel]):
+                            st.success("Order cancelled")
+                            st.rerun()
+                        else:
+                            st.error("Cancel failed — order may already be processed")
+
+        with ord_t2:
+            with st.spinner("Fetching trade book…"):
+                _trades = _ao_get_trades()
+            if _trades is None:
+                st.error("Could not fetch trades.")
+            elif not _trades:
+                st.info("No executed trades today.")
+            else:
+                _tdf = pd.DataFrame(_trades)[
+                    ["symbol", "side", "qty", "price", "product", "time"]
+                ]
+                _tdf.columns = ["Symbol", "Side", "Qty", "Price", "Product", "Time"]
+                _total_traded = sum(
+                    t["qty"] * t["price"]
+                    for t in _trades
+                    if isinstance(t.get("qty"), (int, float)) and isinstance(t.get("price"), (int, float))
+                )
+                st.metric("Total Turnover Today", f"Rs {_total_traded:,.0f}")
+                st.dataframe(_tdf, hide_index=True, use_container_width=True)
+
+        with ord_t3:
+            with st.spinner("Fetching GTT rules…"):
+                _gtts = _ao_get_gtts()
+            if _gtts is None:
+                st.error("Could not fetch GTT rules.")
+            elif not _gtts:
+                st.info("No active GTT orders.")
+            else:
+                _gdf = pd.DataFrame(_gtts)[
+                    ["rule_id", "symbol", "side", "qty", "trigger", "limit_price", "status"]
+                ]
+                _gdf.columns = ["Rule ID", "Symbol", "Side", "Qty", "Trigger", "Limit", "Status"]
+                st.dataframe(_gdf, hide_index=True, use_container_width=True)
+
+                _active_gtts = [g for g in _gtts if g["status"].lower() in ("new", "active")]
+                if _active_gtts:
+                    st.markdown("**Cancel GTT:**")
+                    _gtt_opts = {f"{g['symbol']} {g['side']} {g['qty']} @ trigger {g['trigger']}": g
+                                 for g in _active_gtts}
+                    _gtt_sel = st.selectbox("Select GTT", list(_gtt_opts.keys()), key="ao_gtt_sel")
+                    if st.button("Cancel GTT", key="ao_gtt_cancel_btn"):
+                        _g = _gtt_opts[_gtt_sel]
+                        if _ao_cancel_gtt(_g["rule_id"], _g["symbol"]):
+                            st.success("GTT cancelled")
+                            st.rerun()
+                        else:
+                            st.error("Could not cancel GTT")
+
+    # ── TAB 5: QUICK ORDER ─────────────────────────────────────────────────────
+    with tab_ao5:
+        st.subheader("Quick Order")
+        st.warning(
+            "This places a **real order** in your Angel One account using live funds. "
+            "Double-check all details before confirming.",
+            icon="⚠️",
+        )
+
+        qo_c1, qo_c2 = st.columns(2)
+        with qo_c1:
+            _qo_sym   = st.text_input("Stock Symbol (NSE)", value="", placeholder="e.g. RELIANCE", key="qo_sym").strip().upper()
+            _qo_qty   = st.number_input("Quantity", min_value=1, value=1, step=1, key="qo_qty")
+            _qo_side  = st.radio("Transaction", ["BUY", "SELL"], horizontal=True, key="qo_side")
+            _qo_prod  = st.radio("Product", ["DELIVERY", "INTRADAY"], horizontal=True, key="qo_prod")
+
+        with qo_c2:
+            _qo_type  = st.selectbox("Order Type", ["MARKET", "LIMIT", "SL", "SL-M"], key="qo_type")
+            _qo_price = st.number_input("Limit/Trigger Price (0 = market)",
+                                         min_value=0.0, value=0.0, step=0.05, format="%.2f", key="qo_price")
+            _qo_trig  = st.number_input("SL Trigger Price (only for SL orders)",
+                                         min_value=0.0, value=0.0, step=0.05, format="%.2f", key="qo_trig")
+            _qo_valid = st.radio("Validity", ["DAY", "IOC"], horizontal=True, key="qo_valid")
+
+        if _qo_sym:
+            _card_cls = "order-buy" if _qo_side == "BUY" else "order-sell"
+            st.markdown(
+                f'<div class="{_card_cls}">'
+                f'<b>{_qo_side} {_qo_qty} × {_qo_sym}</b>  |  '
+                f'{_qo_prod} · {_qo_type}'
+                + (f'  |  Price: Rs {_qo_price:.2f}' if _qo_price > 0 else "  |  Market Order")
+                + f'</div>',
+                unsafe_allow_html=True,
+            )
+
+        _ao_confirm = st.checkbox(
+            "I confirm this is a real order with real money", key="qo_confirm"
+        )
+        _place_col, _ = st.columns([1, 3])
+        with _place_col:
+            if st.button("Place Order", type="primary", key="qo_place",
+                         disabled=not (_qo_sym and _ao_confirm)):
+                with st.spinner("Placing order…"):
+                    _result = _ao_place_order(
+                        symbol=_qo_sym,
+                        qty=int(_qo_qty),
+                        side=_qo_side,
+                        order_type=_qo_type,
+                        price=float(_qo_price),
+                        trigger_price=float(_qo_trig),
+                        product=_qo_prod,
+                        validity=_qo_valid,
+                    )
+                if _result and _result.get("status") == "placed":
+                    st.success(f"Order placed! Order ID: {_result.get('order_id')}")
+                elif _result:
+                    st.error(f"Order failed: {_result.get('message', 'Unknown error')}")
+                else:
+                    st.error("Could not connect to Angel One — check session")

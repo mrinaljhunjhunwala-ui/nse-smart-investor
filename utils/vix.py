@@ -10,15 +10,17 @@ No yfinance dependency — safe on Streamlit Cloud.
 """
 
 from __future__ import annotations
+import time
 from typing import Dict, Optional
 
 _VIX_CACHE: Optional[Dict] = None
+_VIX_CACHE_TTL = 600   # 10 minutes — VIX can spike intraday
 
 
 def get_india_vix_regime() -> Dict:
     """
     Fetch India VIX and classify regime.
-    Cached in-process (refreshed on server restart).
+    Cached for 10 minutes — refreshes intraday so panic spikes are caught.
 
     Returns:
         vix        : float | None
@@ -27,8 +29,8 @@ def get_india_vix_regime() -> Dict:
         vix_pct_chg: float  (1-day % change)
     """
     global _VIX_CACHE
-    if _VIX_CACHE is not None:
-        return _VIX_CACHE
+    if _VIX_CACHE is not None and time.time() - _VIX_CACHE.get("_ts", 0) < _VIX_CACHE_TTL:
+        return {k: v for k, v in _VIX_CACHE.items() if k != "_ts"}
 
     try:
         import http.cookiejar
@@ -102,15 +104,17 @@ def get_india_vix_regime() -> Dict:
             "regime":      regime,
             "allow_buy":   curr <= 28,
             "vix_pct_chg": round(pct_chg, 2),
+            "_ts":         time.time(),
         }
 
     except Exception:
         _VIX_CACHE = {
             "vix": None, "regime": "unknown",
             "allow_buy": True, "vix_pct_chg": 0.0,
+            "_ts": time.time(),
         }
 
-    return _VIX_CACHE
+    return {k: v for k, v in _VIX_CACHE.items() if k != "_ts"}
 
 
 def clear_vix_cache() -> None:

@@ -139,7 +139,7 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
-    if len(df) < 65:
+    if len(df) < 25:   # lowered from 65 — 2Y fetch gives ~250 rows after dropna
         return 12.5, {"note": "insufficient history"}
 
     close = df["Close"]
@@ -570,7 +570,7 @@ def score_dataframe(
 
 def score_stock(
     ticker:            str,
-    period:            str = "1y",
+    period:            str = "2y",
     vix_info:          Optional[Dict] = None,
     sector_scores_df:  Optional["pd.DataFrame"] = None,
 ) -> CompositeScore:
@@ -596,31 +596,11 @@ def score_stock(
     except ValueError:
         canonical = ticker if ticker.endswith(".NS") else ticker + ".NS"
 
-    # Fetch VIX via Yahoo Finance chart API (cookie+crumb auth, cloud-safe)
+    # Fetch VIX via utils.vix (cookie+crumb auth, 10-min TTL, cloud-safe)
     if vix_info is None:
         try:
-            import json, math as _math
-            from data.fetcher import _get_yf_crumb
-            import urllib.parse as _uparse
-            _opener, _crumb = _get_yf_crumb()
-            _cqs = f"&crumb={_uparse.quote(_crumb)}" if _crumb else ""
-            _url = (f"https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
-                    f"?interval=1d&range=5d&includePrePost=false{_cqs}")
-            _req = urllib.request.Request(_url, headers={
-                "User-Agent": "Mozilla/5.0", "Accept": "application/json"
-            })
-            with _opener.open(_req, timeout=8) as _r:
-                _d = json.loads(_r.read())
-            _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-            _v = float(next(v for v in reversed(_closes) if v is not None))
-            if _math.isnan(_v) or _v <= 0:
-                raise ValueError("VIX NaN")
-            if   _v < 12: _reg = "complacency"
-            elif _v < 16: _reg = "normal"
-            elif _v < 22: _reg = "elevated"
-            elif _v < 28: _reg = "fear"
-            else:         _reg = "panic"
-            vix_info = {"vix": round(_v, 2), "regime": _reg, "allow_buy": _v <= 28}
+            from utils.vix import get_india_vix_regime
+            vix_info = get_india_vix_regime()
         except Exception:
             vix_info = {"regime": "normal", "vix": None, "allow_buy": True}
 
