@@ -666,11 +666,17 @@ def get_vix_info():
 
 
 @st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache — powers Command Centre
-def _score_for_cc(ticker: str) -> dict:
-    """Score one stock for Command Centre. Cached 30 min so the page stays fast."""
+def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
+    """Score one stock for Command Centre. Pass vix_regime so we don't re-fetch VIX 5×."""
     try:
+        import sys, os as _os
+        sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
         from analysis.score import score_stock
-        s = score_stock(ticker)
+        _vix_info = {
+            "regime": vix_regime, "vix": None,
+            "allow_buy": vix_regime not in ("fear", "panic"),
+        }
+        s = score_stock(ticker, vix_info=_vix_info)
         return {
             "ticker": ticker, "price": s.price,
             "score": s.score, "grade": s.grade, "action": s.action,
@@ -681,7 +687,7 @@ def _score_for_cc(ticker: str) -> dict:
         return {
             "ticker": ticker, "price": 0, "score": 0, "grade": "?",
             "action": "UNAVAILABLE",
-            "headline": f"Could not score ({str(_e)[:60]})",
+            "headline": f"Data unavailable ({type(_e).__name__}: {str(_e)[:70]})",
             "entry": 0, "sl": 0, "tp": 0, "rr": 0,
         }
 
@@ -1220,17 +1226,16 @@ if page == "📡 Market Live":
     st.markdown(f"*{_ms['day']} — {_ms['detail']}*")
     st.markdown("---")
 
-    # ── Fetch Nifty 50 prices — Angel One (priority) → Yahoo → NSE fallback ──────
+    # ── Fetch NSE 500 prices — Angel One (priority) → Yahoo → NSE fallback ───────
     @st.cache_data(ttl=60 if _ms["is_open"] else 3600, show_spinner=False)
     def _load_nifty_snapshot():
         """
-        Cloud-safe Nifty 50 snapshot.
-        Priority: Angel One batch quotes (real-time, no rate limit) →
-                  Yahoo Finance JSON API → NSE India → Stooq EOD.
+        Cloud-safe NSE broad snapshot (Nifty 500 universe).
+        Priority: Angel One batch quotes → Yahoo Finance JSON API.
         """
-        from data.fetcher import NIFTY50_TICKERS
+        from data.universe import get_universe as _gu
 
-        tickers_list = list(NIFTY50_TICKERS)
+        tickers_list = _gu("nifty500")   # ~400 liquid NSE stocks
         raw: dict = {}
         _source = "Yahoo Finance"
 
@@ -1310,10 +1315,57 @@ if page == "📡 Market Live":
 
         st.markdown("---")
 
+        # ── Today's Trade Suggestions ──────────────────────────────────────────
+        st.markdown("##### 💡 Today's Trade Ideas")
+        _sg_buy   = snap[(snap["chg_pct"] > 1.5) & (snap["vol_ratio"] >= 1.5)].nlargest(1, "chg_pct")
+        _sg_short = snap[(snap["chg_pct"] < -1.5) & (snap["vol_ratio"] >= 1.5)].nsmallest(1, "chg_pct")
+        _sg_vol   = snap[snap["vol_ratio"] >= 3.0].nlargest(1, "vol_ratio")
+
+        _sg_items = []
+        if not _sg_buy.empty:
+            _r = _sg_buy.iloc[0]
+            _sg_items.append(("🟢 BUY MOMENTUM", "#26a69a", "#0a2a1a",
+                              _r["ticker"].replace(".NS",""),
+                              f"₹{_r['price']:,.2f}  ·  {_r['chg_pct']:+.1f}%  ·  {_r['vol_ratio']:.1f}× volume",
+                              "Strong up-move with heavy volume — momentum entry above today's open"))
+        if not _sg_short.empty:
+            _r = _sg_short.iloc[0]
+            _sg_items.append(("🔴 SHORT PRESSURE", "#ef5350", "#2a0a0a",
+                              _r["ticker"].replace(".NS",""),
+                              f"₹{_r['price']:,.2f}  ·  {_r['chg_pct']:+.1f}%  ·  {_r['vol_ratio']:.1f}× volume",
+                              "Selling pressure with above-average volume — weakness confirmed"))
+        if not _sg_vol.empty:
+            _r = _sg_vol.iloc[0]
+            _chg_d = f"{'Up' if _r['chg_pct']>=0 else 'Down'} {abs(_r['chg_pct']):.1f}%"
+            _sg_items.append(("⚡ VOLUME ALERT", "#FFC107", "#1a1400",
+                              _r["ticker"].replace(".NS",""),
+                              f"₹{_r['price']:,.2f}  ·  {_chg_d}  ·  {_r['vol_ratio']:.1f}× volume",
+                              "Unusually high volume — institutional activity, watch for breakout"))
+        if _sg_items:
+            _sg_html = '<div style="display:flex;gap:10px;margin-bottom:4px;flex-wrap:wrap">'
+            for _lbl, _c, _bg, _tk, _sub, _why in _sg_items:
+                _sg_html += (
+                    f'<div style="flex:1;min-width:200px;background:{_bg};border-left:5px solid {_c};'
+                    f'border-radius:10px;padding:12px 15px">'
+                    f'<div style="font-size:10px;color:{_c};text-transform:uppercase;'
+                    f'letter-spacing:1px;font-weight:700;margin-bottom:2px">{_lbl}</div>'
+                    f'<div style="font-size:20px;font-weight:700;color:#fff">{_tk}</div>'
+                    f'<div style="font-size:12px;color:#ccc;margin:2px 0">{_sub}</div>'
+                    f'<div style="font-size:11px;color:#999">{_why}</div></div>'
+                )
+            _sg_html += '</div>'
+            st.markdown(_sg_html, unsafe_allow_html=True)
+        else:
+            st.caption("No strong momentum signals yet — market in low-activity phase.")
+
+        st.markdown("---")
+
         # ── Gainers and Losers ─────────────────────────────────────────────────
         top5 = snap.head(5)
         bot5 = snap.tail(5).iloc[::-1]
-
+        _ml_header_c1, _ml_header_c2 = st.columns(2)
+        _ml_header_c1.subheader(f"🟢 Top Gainers — NSE 500")
+        _ml_header_c2.subheader(f"🔴 Top Losers — NSE 500")
         col_g, col_l = st.columns(2)
 
         @st.cache_data(ttl=300, show_spinner=False)
@@ -1424,12 +1476,10 @@ if page == "📡 Market Live":
                     st.toast(f"{tick} added to watchlist ✓")
 
         with col_g:
-            st.subheader("🟢 Top Gainers (Nifty 50)")
             for _, row in top5.iterrows():
                 _mover_card(row, is_gainer=True)
 
         with col_l:
-            st.subheader("🔴 Top Losers (Nifty 50)")
             for _, row in bot5.iterrows():
                 _mover_card(row, is_gainer=False)
 
@@ -1647,7 +1697,7 @@ elif page == "🎯 Command Centre":
     _cc_prog = st.progress(0, text="Scoring your watchlist…")
     _cc_scores: dict = {}
     for _cci, _cct in enumerate(_cc_wl):
-        _cc_scores[_cct] = _score_for_cc(_cct)
+        _cc_scores[_cct] = _score_for_cc(_cct, vix_regime=_cc_vix_r)
         _cc_prog.progress((_cci + 1) / len(_cc_wl),
                           text=f"Scoring {_cct.replace('.NS','')}… ({_cci+1}/{len(_cc_wl)})")
     _cc_prog.empty()
@@ -2058,87 +2108,94 @@ elif page == "🏠 My Portfolio":
                                 unsafe_allow_html=True
                             )
 
-                # ── Holdings cards ─────────────────────────────────────────
+                # ── Holdings cards (2-column grid) ────────────────────────
                 st.markdown("---")
                 st.subheader("📋 Your Holdings — What to Do")
 
-                for h in summary.holdings:
-                    card_class = _action_color(h.action)
-                    emoji = _action_emoji(h.action)
-                    pnl_str = f"{'+' if h.pnl >= 0 else ''}{h.pnl_pct:.1f}%  (₹{'+' if h.pnl >= 0 else ''}{h.pnl:,.0f})"
-                    grade_color = _grade_color(h.grade)
+                _ACT_CARD_STYLE = {
+                    "STRONG BUY": ("#26a69a", "#0a2a1a"), "BUY": ("#4CAF50", "#0d2510"),
+                    "WATCHLIST":  ("#2196F3", "#0d1f3c"), "HOLD": ("#9E9E9E", "#1a1a1a"),
+                    "CAUTION":    ("#FF9800", "#1a1200"),  "EXIT": ("#ef5350", "#2a0a0a"),
+                }
+                _hc_grid = st.columns(2)
+                for _hi, h in enumerate(summary.holdings):
+                    _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#9E9E9E", "#1a1a1a"))
+                    _h_emoji = _action_emoji(h.action)
+                    _h_pnl_c = "#26a69a" if h.pnl >= 0 else "#ef5350"
+                    _h_pnl_a = "▲" if h.pnl >= 0 else "▼"
+                    _h_lbl   = h.ticker.replace(".NS", "")
+                    _h_inv   = h.avg_buy_price * h.quantity
+                    _h_val   = h.current_price * h.quantity
 
-                    with st.expander(
-                        f"{emoji} {h.ticker.replace('.NS','')} — {h.signal}  |  "
-                        f"P&L: {pnl_str}  |  Score: {h.score:.0f}/100 [{h.grade}]",
-                        expanded=False,
-                    ):
-                        row1, row2, row3 = st.columns(3), st.columns(4), st.columns(1)
+                    # Progress bar: SL → Entry → Current → Target
+                    _h_sl  = h.stop_loss or (h.avg_buy_price * 0.95)
+                    _h_tp  = h.target    or (h.avg_buy_price * 1.10)
+                    _h_rng = max(_h_tp - _h_sl, 0.01)
+                    _h_ep_pct  = min(100, max(0, (_h_sl + (_h_rng * 0.3) - _h_sl) / _h_rng * 100))
+                    _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
+                    _h_bar_c   = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
+                    _h_score_w = min(int(h.score), 100)
 
-                        with st.container():
-                            cols_info = st.columns(4)
-                            cols_info[0].metric("Buy Price",    f"₹{h.avg_buy_price:,.2f}")
-                            cols_info[1].metric("Current",      f"₹{h.current_price:,.2f}",
-                                                f"{'+' if h.pnl_pct >= 0 else ''}{h.pnl_pct:.1f}%")
-                            cols_info[2].metric("Quantity",     f"{h.quantity:.0f} shares")
-                            cols_info[3].metric("Days Held",    f"{h.days_held}d")
-
-                            cols_lvl = st.columns(4)
-                            cols_lvl[0].metric("Score",         f"{h.score:.0f}/100  [{h.grade}]")
-                            cols_lvl[1].metric("Stop-Loss",     f"₹{h.stop_loss:,.2f}")
-                            cols_lvl[2].metric("Target",        f"₹{h.target:,.2f}")
-                            cols_lvl[3].metric("Risk:Reward",   f"{h.risk_reward:.1f}:1")
-
-                        st.markdown(
-                            f'<div class="{card_class}">'
-                            f'<span class="signal-big">{emoji} {h.action}</span><br>'
-                            f'<b>{h.headline}</b><br><br>'
-                            f'<span class="narrative">{h.narrative}</span>'
-                            f'</div>',
-                            unsafe_allow_html=True
-                        )
-
-                        # ── Paper Trade button ────────────────────────────
-                        _pt_col, _pt_info = st.columns([1, 3])
-                        with _pt_col:
-                            if st.button(f"📌 Paper Trade {h.ticker.replace('.NS','')}", key=f"pt_{h.ticker}"):
+                    _h_html = (
+                        f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
+                        f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
+                        # Header row: name + action + score
+                        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
+                        f'<div>'
+                        f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
+                        f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">{_h_emoji} {h.action}</span>'
+                        f'</div>'
+                        f'<div style="text-align:right">'
+                        f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
+                        f'<div style="width:60px;height:5px;background:#333;border-radius:3px;margin-top:3px">'
+                        f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div></div>'
+                        f'</div></div>'
+                        # Price row
+                        f'<div style="font-size:15px;color:#fff;margin-bottom:4px">'
+                        f'<b>₹{h.current_price:,.2f}</b>'
+                        f'<span style="font-size:12px;color:#aaa;margin-left:8px">{h.quantity:.0f} shares · held {h.days_held}d</span>'
+                        f'</div>'
+                        # Invested vs Now
+                        f'<div style="font-size:12px;color:#aaa;margin-bottom:6px">'
+                        f'Invested ₹{_h_inv:,.0f} → Now ₹{_h_val:,.0f}'
+                        f'</div>'
+                        # P&L
+                        f'<div style="font-size:18px;font-weight:700;color:{_h_pnl_c};margin-bottom:8px">'
+                        f'{_h_pnl_a} ₹{abs(h.pnl):,.0f} ({h.pnl_pct:+.1f}%)'
+                        f'</div>'
+                        # Progress bar: SL → current → target
+                        f'<div style="margin-bottom:6px">'
+                        f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:2px">'
+                        f'<span>SL ₹{_h_sl:,.0f}</span><span>Target ₹{_h_tp:,.0f}</span></div>'
+                        f'<div style="width:100%;height:6px;background:#333;border-radius:3px;position:relative">'
+                        f'<div style="position:absolute;left:0;width:{_h_cur_pct:.0f}%;height:100%;'
+                        f'background:{_h_bar_c};border-radius:3px;opacity:0.7"></div>'
+                        f'<div style="position:absolute;left:{_h_cur_pct:.0f}%;transform:translateX(-50%);'
+                        f'top:-4px;width:14px;height:14px;background:{_h_bar_c};border-radius:50%;'
+                        f'border:2px solid #fff"></div>'
+                        f'</div></div>'
+                        # Headline reason
+                        f'<div style="font-size:12px;color:#ccc;margin-top:6px">{h.headline}</div>'
+                        f'</div>'
+                    )
+                    with _hc_grid[_hi % 2]:
+                        st.markdown(_h_html, unsafe_allow_html=True)
+                        _hb1, _hb2 = st.columns(2)
+                        with _hb1:
+                            if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}", use_container_width=True):
+                                st.session_state["analyze_ticker"] = h.ticker
+                                st.session_state["nav"] = "🔍 Analyze Stock"
+                                st.rerun()
+                        with _hb2:
+                            if st.button(f"📌 Paper Trade", key=f"pt_{h.ticker}", use_container_width=True):
                                 _pt_price = h.current_price or h.avg_buy_price
                                 _pt_qty   = max(1, int(10000 / _pt_price)) if _pt_price > 0 else 1
-                                paper_open_trade(
-                                    h.ticker, _pt_price, _pt_qty,
-                                    sl=h.stop_loss, tp=h.target,
-                                    reason=f"{h.action}: {h.headline}",
-                                    account=st.session_state.get("pt_account", "My Account"),
-                                )
-                                st.success(f"Paper trade opened: {_pt_qty} × {h.ticker.replace('.NS','')} @ ₹{_pt_price:,.2f} | SL ₹{h.stop_loss:,.2f} | Target ₹{h.target:,.2f}")
-                        with _pt_info:
-                            st.caption("Paper trades are virtual — no real money. View them in '📂 Paper Trades'.")
-
-                        # ── News for this holding ─────────────────────────
-                        with st.expander(f"📰 Latest News — {h.ticker.replace('.NS','')}", expanded=False):
-                            try:
-                                from utils.news import get_stock_news as _gsn2
-                                _h_news = _gsn2(h.ticker, max_articles=4)
-                                if _h_news:
-                                    for _art in _h_news:
-                                        _si = _art["sentiment"]
-                                        _ic = "🟢" if _si == "positive" else ("🔴" if _si == "negative" else "⚪")
-                                        _bg = "#1a3a2a" if _si == "positive" else ("#3a1a1a" if _si == "negative" else "#1a1a2a")
-                                        st.markdown(
-                                            f'<div style="background:{_bg};padding:8px 12px;border-radius:6px;margin:4px 0">'
-                                            f'{_ic} <b><a href="{_art["link"]}" target="_blank" style="color:#ccc;text-decoration:none">'
-                                            f'{_art["title"]}</a></b><br>'
-                                            f'<span style="font-size:11px;color:#888">{_art["publisher"]} · {_art["time"]} · <b style="color:{"#26a69a" if _si=="positive" else "#ef5350" if _si=="negative" else "#aaa"}">{_si.upper()}</b></span>'
-                                            f'</div>',
-                                            unsafe_allow_html=True
-                                        )
-                                else:
-                                    st.caption("No recent news found.")
-                            except Exception:
-                                st.caption("News unavailable.")
-
+                                paper_open_trade(h.ticker, _pt_price, _pt_qty, sl=h.stop_loss,
+                                                 tp=h.target, reason=f"{h.action}: {h.headline}",
+                                                 account=st.session_state.get("pt_account","My Account"))
+                                st.success(f"✅ Paper trade opened: {_h_lbl}")
                         if h.error:
-                            st.warning(f"⚠️ Data note: {h.error}")
+                            st.caption(f"⚠️ {h.error}")
 
                 # ── Best / Worst ───────────────────────────────────────────
                 st.markdown("---")
@@ -3300,120 +3357,98 @@ elif page == "📂 Paper Trades":
 
         st.markdown("---")
 
-        # ── OPEN POSITIONS with live P&L + Exit button ─────────────────────
+        # ── OPEN POSITIONS — compact cards with progress bar ───────────────
         if not open_t.empty:
-            st.subheader("📌 Open Positions — Live P&L")
-            # _open_lp already fetched above for account dashboard
+            st.subheader("📌 Open Positions")
 
             for _, _row in open_t.iterrows():
                 _tk   = _row["ticker"]
                 _ep   = float(_row["price"])
                 _qty  = int(_row["quantity"])
-                _sl   = float(_row["sl"]) if _row.get("sl") else None
-                _tp   = float(_row["tp"]) if _row.get("tp") else None
-                _tstp = _row.get("timestamp", "")
+                _sl   = float(_row["sl"]) if _row.get("sl") else (_ep * 0.95)
+                _tp   = float(_row["tp"]) if _row.get("tp") else (_ep * 1.10)
                 _lp   = _open_lp.get(_tk, {})
                 _cur  = _lp.get("price", _ep)
+                _prv  = _lp.get("prev", _cur)
                 _unr  = (_cur - _ep) * _qty
                 _unr_pct = (_cur / _ep - 1) * 100 if _ep > 0 else 0
-                _rr_calc = ""
-                if _sl and _tp and _sl < _ep and _tp > _ep:
-                    _risk = _ep - _sl
-                    _rew  = _tp - _ep
-                    _rr_calc = f"  |  R:R {_rew/_risk:.1f}:1"
+                _tid  = int(_row["id"])
+                _today_pnl = (_cur - _prv) * _qty
 
-                # Status badge
-                _sl_warn = _sl and _cur <= _sl
-                _tp_hit  = _tp and _cur >= _tp
-                _stat_badge = ""
-                if _tp_hit:
-                    _stat_badge = "🎯 TARGET HIT — consider closing"
-                elif _sl_warn:
-                    _stat_badge = "🚨 STOP-LOSS BREACHED — consider closing"
-                elif _unr >= 0:
-                    _stat_badge = "🟢 In Profit"
-                else:
-                    _stat_badge = "🔴 In Loss"
+                # Status
+                if _tp and _cur >= _tp:     _st_badge, _st_bdr = "🎯 TARGET HIT", "#26a69a"
+                elif _sl and _cur <= _sl:   _st_badge, _st_bdr = "🚨 STOP BREACHED", "#ef5350"
+                elif _unr >= 0:             _st_badge, _st_bdr = "🟢 In Profit", "#26a69a"
+                else:                       _st_badge, _st_bdr = "🔴 In Loss", "#ef5350"
 
-                _pos_color = "card-green" if _unr >= 0 else "card-red"
-                with st.expander(
-                    f"{'🟢' if _unr >= 0 else '🔴'} {_tk.replace('.NS','')}  "
-                    f"| Unrealised: ₹{_unr:+,.0f} ({_unr_pct:+.2f}%){_rr_calc}",
-                    expanded=True,
-                ):
-                    _oc_today_pnl = (_cur - _lp.get("prev", _cur)) * _qty
-                    _oc1, _oc2, _oc3, _oc4, _oc5, _oc6 = st.columns(6)
-                    _oc1.metric("Entry",       f"₹{_ep:,.2f}")
-                    _oc2.metric("Live Price",  f"₹{_cur:,.2f}")
-                    _oc3.metric("Today's P&L", f"₹{_oc_today_pnl:+,.0f}",
-                                f"{_lp.get('chg', 0):+.2f}%",
-                                delta_color="normal" if _oc_today_pnl >= 0 else "inverse")
-                    _oc4.metric("Qty",         f"{_qty} shares")
-                    _oc5.metric("Stop-Loss",   f"₹{_sl:,.2f}" if _sl else "—",
-                                delta=f"{(_sl/_ep-1)*100:+.1f}%" if _sl else None,
-                                delta_color="inverse")
-                    _oc6.metric("Target",      f"₹{_tp:,.2f}" if _tp else "—",
-                                delta=f"{(_tp/_ep-1)*100:+.1f}%" if _tp else None)
+                _unr_c = "#26a69a" if _unr >= 0 else "#ef5350"
+                _td_c  = "#26a69a" if _today_pnl >= 0 else "#ef5350"
 
+                # Progress bar: SL → current → target
+                _rng = max(_tp - _sl, 0.01)
+                _ep_pct  = min(100, max(0, (_ep  - _sl) / _rng * 100))
+                _cur_pct = min(100, max(0, (_cur - _sl) / _rng * 100))
+                _bar_c   = "#26a69a" if _cur >= _ep else "#ef5350"
+                # Width of colored fill = distance from entry to current
+                _fill_left  = min(_ep_pct, _cur_pct)
+                _fill_width = abs(_cur_pct - _ep_pct)
+
+                _reason_txt = str(_row.get("reason") or "")
+
+                _pt_card = st.container()
+                with _pt_card:
                     st.markdown(
-                        f'<div class="{_pos_color}" style="padding:8px 14px;margin:4px 0">'
-                        f'{_stat_badge}'
-                        f'</div>',
-                        unsafe_allow_html=True
+                        f'<div style="background:#0d1f3c;border-left:5px solid {_st_bdr};'
+                        f'border-radius:10px;padding:13px 16px;margin-bottom:6px">'
+                        # Row 1: name + status + P&L numbers
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+                        f'<div>'
+                        f'<span style="font-size:17px;font-weight:700;color:#fff">{_tk.replace(".NS","")}</span>'
+                        f'&nbsp;<span style="font-size:11px;color:{_st_bdr};font-weight:600">{_st_badge}</span>'
+                        f'<span style="font-size:11px;color:#888;margin-left:8px">{_qty} shares</span>'
+                        f'</div>'
+                        f'<div style="text-align:right">'
+                        f'<div style="font-size:17px;font-weight:700;color:{_unr_c}">₹{_unr:+,.0f} ({_unr_pct:+.1f}%)</div>'
+                        f'<div style="font-size:11px;color:{_td_c}">Today ₹{_today_pnl:+,.0f}</div>'
+                        f'</div></div>'
+                        # Row 2: Entry → Current bar
+                        f'<div style="margin-bottom:6px">'
+                        f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:3px">'
+                        f'<span>SL ₹{_sl:,.2f}</span>'
+                        f'<span>Entry ₹{_ep:,.2f}</span>'
+                        f'<span>Now ₹{_cur:,.2f}</span>'
+                        f'<span>Target ₹{_tp:,.2f}</span>'
+                        f'</div>'
+                        f'<div style="width:100%;height:8px;background:#2a3a4c;border-radius:4px;position:relative;overflow:visible">'
+                        # Entry marker
+                        f'<div style="position:absolute;left:{_ep_pct:.0f}%;top:-3px;width:2px;height:14px;background:#888;border-radius:1px"></div>'
+                        # Fill from entry to current
+                        f'<div style="position:absolute;left:{_fill_left:.0f}%;width:{_fill_width:.0f}%;height:100%;background:{_bar_c};border-radius:4px;opacity:0.7"></div>'
+                        # Current dot
+                        f'<div style="position:absolute;left:{_cur_pct:.0f}%;top:-4px;transform:translateX(-50%);width:16px;height:16px;background:{_bar_c};border-radius:50%;border:2px solid #fff"></div>'
+                        f'</div></div>'
+                        + (f'<div style="font-size:11px;color:#888;margin-top:4px">📝 {_reason_txt[:80]}</div>' if _reason_txt else '')
+                        + '</div>',
+                        unsafe_allow_html=True,
                     )
-
-                    _reason_txt = str(_row.get("reason") or "")
-                    if _reason_txt:
-                        st.caption(f"📝 {_reason_txt}")
-
-                    # ── Close buttons ──────────────────────────────────────
-                    _cl1, _cl2, _cl3 = st.columns(3)
-                    _tid = int(_row["id"])
-                    if _cl1.button(f"❌ Close @ Live (₹{_cur:,.2f})", key=f"close_live_{_tid}"):
+                    # Action buttons inline
+                    _cb1, _cb2, _cb3, _cb4 = st.columns([2, 2, 2, 1])
+                    if _cb1.button(f"❌ Close @ ₹{_cur:,.2f}", key=f"cl_live_{_tid}", use_container_width=True):
                         paper_close_trade(_tid, _cur, "Closed at live price")
-                        st.success(f"Closed {_tk.replace('.NS','')} @ ₹{_cur:,.2f} | P&L ₹{_unr:+,.0f}")
-                        st.cache_data.clear()
-                        st.rerun()
-                    if _sl and _cl2.button(f"🔴 Close @ Stop (₹{_sl:,.2f})", key=f"close_sl_{_tid}"):
-                        _sl_pnl = (_sl - _ep) * _qty
+                        st.cache_data.clear(); st.rerun()
+                    if _cb2.button(f"🔴 Close @ SL ₹{_sl:,.2f}", key=f"cl_sl_{_tid}", use_container_width=True):
                         paper_close_trade(_tid, _sl, "Stop-loss triggered")
-                        st.warning(f"Stop triggered on {_tk.replace('.NS','')} @ ₹{_sl:,.2f} | Loss ₹{_sl_pnl:,.0f}")
-                        st.cache_data.clear()
-                        st.rerun()
-                    if _tp and _cl3.button(f"🎯 Close @ Target (₹{_tp:,.2f})", key=f"close_tp_{_tid}"):
-                        _tp_pnl = (_tp - _ep) * _qty
+                        st.cache_data.clear(); st.rerun()
+                    if _cb3.button(f"🎯 Close @ Target ₹{_tp:,.2f}", key=f"cl_tp_{_tid}", use_container_width=True):
                         paper_close_trade(_tid, _tp, "Target reached")
-                        st.success(f"Target hit on {_tk.replace('.NS','')} @ ₹{_tp:,.2f} | Profit ₹{_tp_pnl:,.0f}")
-                        st.cache_data.clear()
-                        st.rerun()
-
-                    # ── Edit SL / TP ────────────────────────────────────────
-                    with st.expander("✏️ Edit Stop-Loss / Target", expanded=False):
-                        _e1, _e2 = st.columns(2)
-                        _new_sl = _e1.number_input(
-                            "New Stop-Loss (₹)", value=float(_sl or _ep * 0.97),
-                            min_value=0.01, max_value=float(_ep) - 0.01,
-                            format="%.2f", key=f"edit_sl_{_tid}"
-                        )
-                        _new_tp = _e2.number_input(
-                            "New Target (₹)", value=float(_tp or _ep * 1.06),
-                            min_value=float(_ep) + 0.01, max_value=1e7,
-                            format="%.2f", key=f"edit_tp_{_tid}"
-                        )
-                        _new_reason = st.text_input(
-                            "Update notes (optional)", value=str(_row.get("reason") or ""),
-                            key=f"edit_reason_{_tid}", placeholder="Update reason or notes…"
-                        )
-                        if st.button("💾 Save Changes", key=f"edit_save_{_tid}"):
-                            paper_edit_trade(
-                                _tid,
-                                sl=_new_sl if _new_sl != _sl else None,
-                                tp=_new_tp if _new_tp != _tp else None,
-                                reason=_new_reason if _new_reason != str(_row.get("reason") or "") else None,
-                            )
-                            st.success(f"Updated SL ₹{_new_sl:,.2f} | Target ₹{_new_tp:,.2f}")
-                            st.cache_data.clear()
-                            st.rerun()
+                        st.cache_data.clear(); st.rerun()
+                    with _cb4.expander("✏️ Edit"):
+                        _ne1, _ne2 = st.columns(2)
+                        _nsl = _ne1.number_input("New SL", value=float(_sl), format="%.2f", key=f"esl_{_tid}")
+                        _ntp = _ne2.number_input("New TP", value=float(_tp), format="%.2f", key=f"etp_{_tid}")
+                        if st.button("Save", key=f"esv_{_tid}"):
+                            paper_edit_trade(_tid, sl=_nsl, tp=_ntp)
+                            st.cache_data.clear(); st.rerun()
 
             st.markdown("---")
 
@@ -3532,8 +3567,71 @@ elif page == "📂 Paper Trades":
                     )
                     st.plotly_chart(_fig_eq, width="stretch")
 
+            # ── Closed Trade Insights (always visible, not behind expander) ────
+            st.markdown("#### 📊 Trading Insights")
+            _pnl_ins = pd.to_numeric(all_closed.get("pnl", pd.Series()), errors="coerce").dropna()
+            _n_ins   = len(_pnl_ins)
+            if _n_ins >= 2:
+                _wins_ins  = _pnl_ins[_pnl_ins > 0]
+                _loss_ins  = _pnl_ins[_pnl_ins < 0]
+                _wr_ins    = len(_wins_ins) / _n_ins * 100
+                _aw_ins    = float(_wins_ins.mean()) if not _wins_ins.empty else 0
+                _al_ins    = float(_loss_ins.mean()) if not _loss_ins.empty else 0
+                _pay_ins   = abs(_aw_ins / _al_ins) if _al_ins != 0 else 0
+                _exp_ins   = (_wr_ins/100 * _aw_ins) + ((1-_wr_ins/100) * _al_ins)
+                _wr_c   = "#26a69a" if _wr_ins >= 50 else "#ef5350"
+                _exp_c  = "#26a69a" if _exp_ins >= 0 else "#ef5350"
+                _pay_c  = "#26a69a" if _pay_ins >= 1.5 else "#FFC107" if _pay_ins >= 1.0 else "#ef5350"
+                st.markdown(
+                    f'<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">'
+                    f'<div style="flex:1;min-width:120px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid {_wr_c}">'
+                    f'<div style="font-size:10px;color:#888;text-transform:uppercase">Win Rate</div>'
+                    f'<div style="font-size:22px;font-weight:700;color:{_wr_c}">{_wr_ins:.0f}%</div>'
+                    f'<div style="font-size:11px;color:#888">{len(_wins_ins)}/{_n_ins} trades</div></div>'
+                    f'<div style="flex:1;min-width:120px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid {_pay_c}">'
+                    f'<div style="font-size:10px;color:#888;text-transform:uppercase">Payoff Ratio</div>'
+                    f'<div style="font-size:22px;font-weight:700;color:{_pay_c}">{_pay_ins:.2f}:1</div>'
+                    f'<div style="font-size:11px;color:#888">avg win / avg loss</div></div>'
+                    f'<div style="flex:1;min-width:140px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid {_exp_c}">'
+                    f'<div style="font-size:10px;color:#888;text-transform:uppercase">Expectancy</div>'
+                    f'<div style="font-size:22px;font-weight:700;color:{_exp_c}">₹{_exp_ins:,.0f}</div>'
+                    f'<div style="font-size:11px;color:#888">avg ₹ per trade</div></div>'
+                    f'<div style="flex:1;min-width:120px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid #2196F3">'
+                    f'<div style="font-size:10px;color:#888;text-transform:uppercase">Avg Win</div>'
+                    f'<div style="font-size:22px;font-weight:700;color:#26a69a">₹{_aw_ins:,.0f}</div>'
+                    f'<div style="font-size:11px;color:#888">avg loss ₹{abs(_al_ins):,.0f}</div></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                # What setup types worked?
+                if "reason" in all_closed.columns:
+                    _cl_copy = all_closed.copy()
+                    _cl_copy["pnl"] = pd.to_numeric(_cl_copy["pnl"], errors="coerce")
+                    _cl_copy["win"] = _cl_copy["pnl"] > 0
+                    # Truncate reason to setup label (first 30 chars)
+                    _cl_copy["setup"] = _cl_copy["reason"].fillna("Manual").str[:35]
+                    _setup_g = _cl_copy.groupby("setup").agg(
+                        trades=("pnl","count"), total_pnl=("pnl","sum"),
+                        win_rate=("win","mean")
+                    ).round(0).sort_values("total_pnl", ascending=False).head(5)
+                    if len(_setup_g) > 1:
+                        st.caption("**Top setups by total P&L:**")
+                        for _sn, _sr in _setup_g.iterrows():
+                            _s_c = "#26a69a" if _sr["total_pnl"] >= 0 else "#ef5350"
+                            st.markdown(
+                                f'<div style="display:flex;justify-content:space-between;'
+                                f'padding:4px 0;border-bottom:1px solid #1a2744;font-size:12px">'
+                                f'<span style="color:#ccc">{_sn}</span>'
+                                f'<span><span style="color:{_s_c};font-weight:700">₹{_sr["total_pnl"]:+,.0f}</span>'
+                                f'&nbsp;<span style="color:#888">{int(_sr["trades"])} trades · {_sr["win_rate"]*100:.0f}% WR</span></span>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
+            else:
+                st.caption("Close at least 2 trades to see performance insights.")
+
             # ── Performance Stats ──────────────────────────────────────────
-            with st.expander("📈 Performance Statistics", expanded=False):
+            with st.expander("📈 Detailed Statistics", expanded=False):
                 _pnl_s = pd.to_numeric(all_closed["pnl"], errors="coerce").dropna()
                 _n     = len(_pnl_s)
                 _wins  = _pnl_s[_pnl_s > 0]
