@@ -1045,15 +1045,63 @@ def _suggest_position(entry: float, sl: float,
     }
 
 
+def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
+                         reason: str, key: str, label: str = "📌 Paper Trade") -> None:
+    """
+    Render a popover that lets the user review & adjust quantity (pre-filled
+    with the risk-based suggestion) BEFORE opening a paper trade.
+
+    Confirmation uses st.toast so feedback survives the popover closing on rerun.
+    """
+    sugg  = _suggest_position(entry, sl)
+    _tlbl = ticker.replace(".NS", "")
+    with st.popover(label, use_container_width=True):
+        st.markdown(f"**{_tlbl}** — open paper trade")
+        st.caption(
+            f"💡 Suggested **{sugg['qty']} shares** — sizes your loss-to-stop to "
+            f"≈1% of ₹5,00,000 (₹{sugg['capital_at_risk']:,.0f} at risk). "
+            f"Adjust below if you want a different size."
+        )
+        qty = st.number_input(
+            "Quantity (shares)", min_value=1, max_value=1_000_000,
+            value=int(sugg["qty"]), step=1, key=f"{key}_qty",
+        )
+        _val  = qty * entry
+        _risk = abs(entry - (sl or entry)) * qty
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("Entry", f"₹{entry:,.2f}")
+        _c2.metric("Position", f"₹{_val:,.0f}")
+        _c3.metric("At Risk", f"₹{_risk:,.0f}")
+        if sl or tp:
+            st.caption(f"🛑 SL ₹{(sl or 0):,.2f}  ·  🎯 Target ₹{(tp or 0):,.2f}")
+        if st.button("✅ Confirm & Open", key=f"{key}_confirm",
+                     type="primary", use_container_width=True):
+            _id = paper_open_trade(
+                ticker, float(entry), int(qty), sl=sl, tp=tp, reason=reason,
+                account=st.session_state.get("pt_account", "My Account"),
+            )
+            st.toast(f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry:,.2f}", icon="✅")
+            st.cache_data.clear()
+            st.rerun()
+
+
 def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
     """
     Auto-close any OPEN paper trade whose live price has crossed its TP or SL.
     Paper trades only — never touches real broker positions.
 
-    Returns a list of dicts describing what was closed (for notification).
-    Caller is responsible for st.rerun() if the returned list is non-empty.
+    Only runs during NSE market hours: outside hours the live-price feed falls
+    back to EOD close, which could falsely trip a stop/target. Returns a list of
+    dicts describing what was closed. Caller reruns if the list is non-empty.
     """
     closed = []
+    # Guard: only auto-close on live intraday prices, never on stale EOD data
+    try:
+        from utils.market_hours import market_status as _msx
+        if not _msx().get("is_open", False):
+            return closed
+    except Exception:
+        pass
     try:
         _ensure_paper_db(path)
         with sqlite3.connect(path) as conn:
@@ -1527,7 +1575,7 @@ if page == "📡 Market Live":
         df = pd.DataFrame(rows).sort_values("chg_pct", ascending=False)
         return df
 
-    with st.spinner("Loading Nifty 50 snapshot…"):
+    with st.spinner("Loading NSE market snapshot…"):
         snap = _load_nifty_snapshot()
 
     if snap.empty:
@@ -1542,73 +1590,105 @@ if page == "📡 Market Live":
         )
 
         # ── Top metrics row ────────────────────────────────────────────────────
-        adv = (snap["chg_pct"] > 0).sum()
-        dec = (snap["chg_pct"] < 0).sum()
+        adv = int((snap["chg_pct"] > 0).sum())
+        dec = int((snap["chg_pct"] < 0).sum())
         unch = len(snap) - adv - dec
         avg_chg = snap["chg_pct"].mean()
+        _breadth_pct = adv / max(adv + dec, 1) * 100
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Nifty 50 Stocks", f"{len(snap)} tracked")
+        m1.metric("NSE Stocks Tracked", f"{len(snap)}")
         m2.metric("Advances / Declines", f"{adv} / {dec}",
                   delta=f"{adv-dec:+d} net", delta_color="normal" if adv >= dec else "inverse")
         m3.metric("Avg Change", f"{avg_chg:+.2f}%",
                   delta_color="normal" if avg_chg >= 0 else "inverse")
-        m4.metric("Unchanged", str(unch))
+        m4.metric("Breadth", f"{_breadth_pct:.0f}% up",
+                  delta_color="normal" if _breadth_pct >= 50 else "inverse")
 
         st.markdown("---")
 
-        # ── Today's Trade Suggestions ──────────────────────────────────────────
+        # ── Today's Trade Ideas (from live % change + market breadth) ──────────
+        # NOTE: intraday volume isn't available in the batch feed, so ideas are
+        # ranked on live price change + breadth, not volume.
         st.markdown("##### 💡 Today's Trade Ideas")
-        _sg_buy   = snap[(snap["chg_pct"] > 1.5) & (snap["vol_ratio"] >= 1.5)].nlargest(1, "chg_pct")
-        _sg_short = snap[(snap["chg_pct"] < -1.5) & (snap["vol_ratio"] >= 1.5)].nsmallest(1, "chg_pct")
-        _sg_vol   = snap[snap["vol_ratio"] >= 3.0].nlargest(1, "vol_ratio")
-
         _sg_items = []
-        if not _sg_buy.empty:
-            _r = _sg_buy.iloc[0]
-            _sg_items.append(("🟢 BUY MOMENTUM", "#26a69a", "#0a2a1a",
-                              _r["ticker"].replace(".NS",""),
-                              f"₹{_r['price']:,.2f}  ·  {_r['chg_pct']:+.1f}%  ·  {_r['vol_ratio']:.1f}× volume",
-                              "Strong up-move with heavy volume — momentum entry above today's open"))
-        if not _sg_short.empty:
-            _r = _sg_short.iloc[0]
-            _sg_items.append(("🔴 SHORT PRESSURE", "#ef5350", "#2a0a0a",
-                              _r["ticker"].replace(".NS",""),
-                              f"₹{_r['price']:,.2f}  ·  {_r['chg_pct']:+.1f}%  ·  {_r['vol_ratio']:.1f}× volume",
-                              "Selling pressure with above-average volume — weakness confirmed"))
-        if not _sg_vol.empty:
-            _r = _sg_vol.iloc[0]
-            _chg_d = f"{'Up' if _r['chg_pct']>=0 else 'Down'} {abs(_r['chg_pct']):.1f}%"
-            _sg_items.append(("⚡ VOLUME ALERT", "#FFC107", "#1a1400",
-                              _r["ticker"].replace(".NS",""),
-                              f"₹{_r['price']:,.2f}  ·  {_chg_d}  ·  {_r['vol_ratio']:.1f}× volume",
-                              "Unusually high volume — institutional activity, watch for breakout"))
-        if _sg_items:
-            _sg_html = '<div style="display:flex;gap:10px;margin-bottom:4px;flex-wrap:wrap">'
-            for _lbl, _c, _bg, _tk, _sub, _why in _sg_items:
-                _sg_html += (
-                    f'<div style="flex:1;min-width:200px;background:{_bg};border-left:5px solid {_c};'
-                    f'border-radius:10px;padding:12px 15px">'
-                    f'<div style="font-size:10px;color:{_c};text-transform:uppercase;'
-                    f'letter-spacing:1px;font-weight:700;margin-bottom:2px">{_lbl}</div>'
-                    f'<div style="font-size:20px;font-weight:700;color:#fff">{_tk}</div>'
-                    f'<div style="font-size:12px;color:#ccc;margin:2px 0">{_sub}</div>'
-                    f'<div style="font-size:11px;color:#999">{_why}</div></div>'
-                )
-            _sg_html += '</div>'
-            st.markdown(_sg_html, unsafe_allow_html=True)
+        _top_gain = snap.iloc[0]   if len(snap) else None       # sorted desc
+        _top_lose = snap.iloc[-1]  if len(snap) else None
+        if _top_gain is not None and _top_gain["chg_pct"] >= 1.0:
+            _sg_items.append(("🟢 STRONGEST TODAY", "#26a69a", "#0a2a1a",
+                              _top_gain["ticker"].replace(".NS",""),
+                              f"₹{_top_gain['price']:,.2f}  ·  {_top_gain['chg_pct']:+.2f}%",
+                              "Leading the market higher — momentum / long-bias candidate"))
+        if _top_lose is not None and _top_lose["chg_pct"] <= -1.0:
+            _sg_items.append(("🔴 WEAKEST TODAY", "#ef5350", "#2a0a0a",
+                              _top_lose["ticker"].replace(".NS",""),
+                              f"₹{_top_lose['price']:,.2f}  ·  {_top_lose['chg_pct']:+.2f}%",
+                              "Under the heaviest selling — avoid / short-bias candidate"))
+        # Market-regime idea from breadth
+        if _breadth_pct >= 65:
+            _sg_items.append(("📈 BROAD STRENGTH", "#26a69a", "#0a2a1a", "Market-wide",
+                              f"{_breadth_pct:.0f}% of stocks up · avg {avg_chg:+.2f}%",
+                              "Risk-on day — trend-following longs favoured"))
+        elif _breadth_pct <= 35:
+            _sg_items.append(("📉 BROAD WEAKNESS", "#ef5350", "#2a0a0a", "Market-wide",
+                              f"{100-_breadth_pct:.0f}% of stocks down · avg {avg_chg:+.2f}%",
+                              "Risk-off day — protect capital, avoid fresh longs"))
         else:
-            st.caption("No strong momentum signals yet — market in low-activity phase.")
+            _sg_items.append(("↔️ MIXED MARKET", "#FFC107", "#1a1400", "Market-wide",
+                              f"{_breadth_pct:.0f}% up · avg {avg_chg:+.2f}%",
+                              "No clear breadth edge — be selective, stock-specific only"))
+
+        _sg_html = '<div style="display:flex;gap:10px;margin-bottom:4px;flex-wrap:wrap">'
+        for _lbl, _c, _bg, _tk, _sub, _why in _sg_items:
+            _sg_html += (
+                f'<div style="flex:1;min-width:200px;background:{_bg};border-left:5px solid {_c};'
+                f'border-radius:10px;padding:12px 15px">'
+                f'<div style="font-size:10px;color:{_c};text-transform:uppercase;'
+                f'letter-spacing:1px;font-weight:700;margin-bottom:2px">{_lbl}</div>'
+                f'<div style="font-size:20px;font-weight:700;color:#fff">{_tk}</div>'
+                f'<div style="font-size:12px;color:#ccc;margin:2px 0">{_sub}</div>'
+                f'<div style="font-size:11px;color:#999">{_why}</div></div>'
+            )
+        _sg_html += '</div>'
+        st.markdown(_sg_html, unsafe_allow_html=True)
+        st.caption("Ideas ranked on live price change + market breadth (intraday volume not in feed). "
+                   "Not financial advice — confirm with the Analyze page before trading.")
 
         st.markdown("---")
 
-        # ── Gainers and Losers ─────────────────────────────────────────────────
+        # ── Gainers and Losers — clean HTML cards (robust, no nested expanders) ─
         top5 = snap.head(5)
         bot5 = snap.tail(5).iloc[::-1]
-        _ml_header_c1, _ml_header_c2 = st.columns(2)
-        _ml_header_c1.subheader(f"🟢 Top Gainers — NSE 500")
-        _ml_header_c2.subheader(f"🔴 Top Losers — NSE 500")
-        col_g, col_l = st.columns(2)
+
+        def _movers_block(rows, is_gainer):
+            _acc = "#26a69a" if is_gainer else "#ef5350"
+            _html = ""
+            for _i, (_, _row) in enumerate(rows.iterrows(), 1):
+                _ch = _row["chg_pct"]
+                _cc2 = "#26a69a" if _ch >= 0 else "#ef5350"
+                _ar = "▲" if _ch >= 0 else "▼"
+                _nm = str(_row.get("name", ""))[:26]
+                _html += (
+                    f'<div style="background:#0d1f3c;border-left:4px solid {_acc};'
+                    f'border-radius:9px;padding:9px 13px;margin-bottom:6px;'
+                    f'display:flex;justify-content:space-between;align-items:center">'
+                    f'<div><span style="color:#666;font-size:11px;margin-right:6px">#{_i}</span>'
+                    f'<span style="font-size:15px;font-weight:700;color:#fff">{_row["ticker"].replace(".NS","")}</span>'
+                    f'<div style="font-size:11px;color:#888">{_nm}</div></div>'
+                    f'<div style="text-align:right">'
+                    f'<div style="font-size:15px;font-weight:700;color:#fff">₹{_row["price"]:,.2f}</div>'
+                    f'<div style="font-size:13px;font-weight:600;color:{_cc2}">{_ar} {abs(_ch):.2f}%</div>'
+                    f'</div></div>'
+                )
+            return _html
+
+        _mc1, _mc2 = st.columns(2)
+        with _mc1:
+            st.markdown("#### 🟢 Top Gainers")
+            st.markdown(_movers_block(top5, True), unsafe_allow_html=True)
+        with _mc2:
+            st.markdown("#### 🔴 Top Losers")
+            st.markdown(_movers_block(bot5, False), unsafe_allow_html=True)
 
         @st.cache_data(ttl=300, show_spinner=False)
         def _explain_mover(ticker: str, chg_pct: float, vol_ratio: float) -> list:
@@ -1677,64 +1757,53 @@ if page == "📡 Market Live":
                 pass
             return reasons if reasons else ["No specific technical catalyst detected"]
 
-        def _mover_card(row, is_gainer: bool):
-            chg   = row["chg_pct"]
-            price = row["price"]
-            prev  = row.get("prev_close", price)
-            name  = row["name"]
-            tick  = row["ticker"].replace(".NS", "")
-            full_tick = row["ticker"]
-            vol_r = row["vol_ratio"]
-            arrow = "▲" if is_gainer else "▼"
-
-            with st.expander(
-                f"{arrow} **{tick}** — {name}  |  ₹{price:,.2f}  |  {chg:+.2f}%",
-                expanded=True,
-            ):
-                rc1, rc2, rc3 = st.columns(3)
-                rc1.metric("Live Price", f"₹{price:,.2f}", f"{chg:+.2f}%",
-                           delta_color="normal" if is_gainer else "inverse")
-                rc2.metric("Prev Close", f"₹{prev:,.2f}")
-                rc3.metric("Volume Ratio", f"{vol_r:.2f}x")
-
-                reasons = _explain_mover(row["ticker"], chg, vol_r)
-                for r in reasons:
-                    st.markdown(f"• {r}")
-
-                # ── Quick-action buttons ────────────────────────────────────
-                _ba, _bb, _bc = st.columns(3)
-                if _ba.button("📊 Analyze", key=f"ml_analyze_{full_tick}", use_container_width=True):
+        # ── Drill into any mover (one panel, no nested-expander clutter) ───────
+        st.markdown("")
+        _drill_pool = pd.concat([top5, bot5]).drop_duplicates(subset=["ticker"])
+        _drill_opts = ["— pick a stock —"] + [
+            f"{r['ticker'].replace('.NS','')}  ({r['chg_pct']:+.2f}%)"
+            for _, r in _drill_pool.iterrows()
+        ]
+        _drill_sel = st.selectbox("🔍 Drill into a mover", _drill_opts, key="ml_drill_sel")
+        if _drill_sel != "— pick a stock —":
+            _dt_label = _drill_sel.split("  (")[0].strip()
+            _dt_full  = _dt_label if _dt_label.endswith(".NS") else _dt_label + ".NS"
+            _drow = _drill_pool[_drill_pool["ticker"].str.replace(".NS", "") == _dt_label]
+            if not _drow.empty:
+                _dr = _drow.iloc[0]
+                _dchg = _dr["chg_pct"]
+                _dd1, _dd2, _dd3 = st.columns(3)
+                _dd1.metric("Live Price", f"₹{_dr['price']:,.2f}", f"{_dchg:+.2f}%",
+                            delta_color="normal" if _dchg >= 0 else "inverse")
+                _dd2.metric("Prev Close", f"₹{_dr.get('prev_close', _dr['price']):,.2f}")
+                _dd3.metric("Company", str(_dr.get("name", ""))[:20])
+                with st.spinner("Reading the chart…"):
+                    for _rs in _explain_mover(_dt_full, _dchg, 1.0):
+                        st.markdown(f"• {_rs}")
+                _da, _db, _dc = st.columns(3)
+                if _da.button("📊 Analyze", key=f"ml_an_{_dt_full}", use_container_width=True):
                     st.session_state["nav"] = "🔍 Analyze Stock"
-                    st.session_state["manual_ticker_input"] = tick
-                    st.session_state["last_analyzed"] = full_tick
+                    st.session_state["manual_ticker_input"] = _dt_label
+                    st.session_state["last_analyzed"] = _dt_full
                     st.rerun()
-                if _bb.button("📝 Paper Trade", key=f"ml_trade_{full_tick}", use_container_width=True):
+                if _db.button("📝 Paper Trade", key=f"ml_pt_{_dt_full}", use_container_width=True):
                     st.session_state["nav"] = "📂 Paper Trades"
-                    st.session_state["pt_prefill_ticker"] = full_tick
+                    st.session_state["pt_prefill_ticker"] = _dt_full
                     st.rerun()
-                if _bc.button("＋ Watchlist", key=f"ml_wl_{full_tick}", use_container_width=True):
-                    if full_tick not in st.session_state.get("watchlist", []):
-                        st.session_state.setdefault("watchlist", []).append(full_tick)
-                    st.toast(f"{tick} added to watchlist ✓")
+                if _dc.button("＋ Watchlist", key=f"ml_wl_{_dt_full}", use_container_width=True):
+                    if _dt_full not in st.session_state.get("watchlist", []):
+                        st.session_state.setdefault("watchlist", []).append(_dt_full)
+                    st.toast(f"{_dt_label} added to watchlist ✓")
 
-        with col_g:
-            for _, row in top5.iterrows():
-                _mover_card(row, is_gainer=True)
-
-        with col_l:
-            for _, row in bot5.iterrows():
-                _mover_card(row, is_gainer=False)
-
-        # ── Full Nifty 50 heatmap table ────────────────────────────────────────
+        # ── Full NSE snapshot table ────────────────────────────────────────────
         st.markdown("---")
-        with st.expander("📋 Full Nifty 50 Snapshot", expanded=False):
-            disp = snap[["name", "ticker", "price", "chg_pct", "vol_ratio"]].copy()
-            disp.columns = ["Company", "Ticker", "Price (₹)", "Change %", "Vol Ratio"]
+        with st.expander(f"📋 Full NSE Snapshot ({len(snap)} stocks)", expanded=False):
+            disp = snap[["name", "ticker", "price", "chg_pct"]].copy()
+            disp.columns = ["Company", "Ticker", "Price (₹)", "Change %"]
             disp["Ticker"]    = disp["Ticker"].str.replace(".NS", "")
             disp["Price (₹)"] = disp["Price (₹)"].map("₹{:,.2f}".format)
             disp["Change %"]  = disp["Change %"].map("{:+.2f}%".format)
-            disp["Vol Ratio"] = disp["Vol Ratio"].map("{:.2f}x".format)
-            st.dataframe(disp)
+            st.dataframe(disp, hide_index=True, use_container_width=True, height=400)
 
     # ── Market News ────────────────────────────────────────────────────────────
     st.markdown("---")
@@ -1849,8 +1918,8 @@ elif page == "🎯 Command Centre":
             "🤖 Auto-close on SL/TP", value=st.session_state.get("auto_close_on", True),
             key="cc_autoclose_toggle",
             help="When ON, paper trades that hit their target or stop-loss are "
-                 "closed automatically each time this page loads. Real broker "
-                 "holdings are never auto-traded — only alerted.",
+                 "closed automatically on page load (during market hours only, "
+                 "on live prices). Real broker holdings are never auto-traded — only alerted.",
         )
         st.session_state["auto_close_on"] = _cc_autoclose
 
@@ -1942,7 +2011,81 @@ elif page == "🎯 Command Centre":
 
     st.markdown("---")
 
-    # ── 3. WATCHLIST DECISIONS ─────────────────────────────────────────────────
+    # ── 3. TODAY'S TOP PICKS — broad NSE scan (shown ABOVE the watchlist) ──────
+    _tp_h1, _tp_h2 = st.columns([5, 2])
+    with _tp_h1:
+        st.markdown("### 🔥 Today's Top Picks — NSE Scan")
+        st.caption("Best buy & sell setups from ~36 liquid large/mid-caps, "
+                   "scored on trend + momentum + RSI + volume + sector + VIX. "
+                   "Cached 30 min · first load ~20-40 s.")
+    with _tp_h2:
+        st.write("")
+        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+
+    if _run_picks or st.session_state.get("cc_picks_loaded"):
+        st.session_state["cc_picks_loaded"] = True
+        with st.spinner("Scanning NSE for the strongest setups…"):
+            _picks = _home_top_picks(vix_regime=_cc_vix_r)
+
+        _pk_buy, _pk_sell = st.columns(2)
+        with _pk_buy:
+            st.markdown("#### 🟢 Buy Candidates")
+            if not _picks["buys"]:
+                st.caption("No strong buy setups today — market not offering clean entries.")
+            for _b in _picks["buys"]:
+                _bl = _b["ticker"].replace(".NS", "")
+                _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
+                _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
+                            f'{_bs["qty"]} sh</span>') if _bs else ""
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
+                    f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>'
+                    f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_b["headline"]}</div>'
+                    + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                       f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
+                       if _b["entry"] else "")
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+                if _b["entry"]:
+                    _paper_trade_popover(
+                        _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
+                        reason=f"Top Pick: {_b['headline'][:55]}",
+                        key=f"cc_pick_{_b['ticker']}",
+                        label=f"📌 Paper Trade {_bl}",
+                    )
+        with _pk_sell:
+            st.markdown("#### 🔴 Sell / Avoid")
+            if not _picks["sells"]:
+                st.caption("No clear sell signals — nothing flashing red in the scan.")
+            for _sv in _picks["sells"]:
+                _svl = _sv["ticker"].replace(".NS", "")
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
+                    f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
+                    f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"🔍 Deep Dive {_svl}", key=f"cc_pick_dd_{_sv['ticker']}",
+                             use_container_width=True):
+                    st.session_state["analyze_ticker"] = _sv["ticker"]
+                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.rerun()
+    else:
+        st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
+
+    st.markdown("---")
+
+    # ── 4. WATCHLIST DECISIONS ─────────────────────────────────────────────────
     _cc_wl = st.session_state.get("watchlist", ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"])
     _wh1, _wh2 = st.columns([5, 2])
     with _wh1:
@@ -2029,101 +2172,17 @@ elif page == "🎯 Command Centre":
             )
         with _cc2:
             if _act in ("STRONG BUY", "BUY") and _entry > 0:
-                _sugg_pos = _suggest_position(_entry, _sl)
-                st.caption(f"Suggest: **{_sugg_pos['qty']}** sh @ ₹{_entry:,.0f}")
-                if st.button("📌 Paper Trade", key=f"cc_pt_{_cct}",
-                             use_container_width=True, type="primary"):
-                    _pt_id = paper_open_trade(
-                        _cct, _sugg_pos["price"], _sugg_pos["qty"], sl=_sl, tp=_tp,
-                        reason=f"Command Centre: {_hl[:60]}",
-                        account=st.session_state.get("pt_account", "My Account"),
-                    )
-                    st.success(
-                        f"✅ #{_pt_id}: {_sugg_pos['qty']} × {_lbl} @ ₹{_entry:,.2f} "
-                        f"· risking ₹{_sugg_pos['capital_at_risk']:,.0f}"
-                    )
-                    st.cache_data.clear()
+                _paper_trade_popover(
+                    _cct, _entry, _sl, _tp,
+                    reason=f"Command Centre: {_hl[:60]}",
+                    key=f"cc_wl_{_cct}",
+                )
             else:
                 if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
                              use_container_width=True):
                     st.session_state["analyze_ticker"] = _cct
                     st.session_state["nav"] = "🔍 Analyze Stock"
                     st.rerun()
-
-    # ── 4. TODAY'S TOP PICKS — broad NSE scan ──────────────────────────────────
-    st.markdown("---")
-    _tp_h1, _tp_h2 = st.columns([5, 2])
-    with _tp_h1:
-        st.markdown("### 🔥 Today's Top Picks — NSE Scan")
-        st.caption("Best buy & sell setups from ~36 liquid large/mid-caps, "
-                   "scored on trend + momentum + RSI + volume + sector + VIX. "
-                   "Cached 30 min · first load ~20-40 s.")
-    with _tp_h2:
-        st.write("")
-        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
-
-    if _run_picks or st.session_state.get("cc_picks_loaded"):
-        st.session_state["cc_picks_loaded"] = True
-        with st.spinner("Scanning NSE for the strongest setups…"):
-            _picks = _home_top_picks(vix_regime=_cc_vix_r)
-
-        _pk_buy, _pk_sell = st.columns(2)
-        with _pk_buy:
-            st.markdown("#### 🟢 Buy Candidates")
-            if not _picks["buys"]:
-                st.caption("No strong buy setups today — market not offering clean entries.")
-            for _b in _picks["buys"]:
-                _bl = _b["ticker"].replace(".NS", "")
-                _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
-                _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
-                            f'{_bs["qty"]} sh</span>') if _bs else ""
-                st.markdown(
-                    f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
-                    f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>'
-                    f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
-                    f'</div>'
-                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_b["headline"]}</div>'
-                    + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-                       f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
-                       if _b["entry"] else "")
-                    + '</div>',
-                    unsafe_allow_html=True,
-                )
-                if _b["entry"] and st.button(f"📌 Paper Trade {_bl}", key=f"cc_pick_pt_{_b['ticker']}",
-                                             use_container_width=True):
-                    _pid = paper_open_trade(
-                        _b["ticker"], _bs["price"], _bs["qty"], sl=_b["sl"], tp=_b["tp"],
-                        reason=f"Top Pick: {_b['headline'][:55]}",
-                        account=st.session_state.get("pt_account", "My Account"),
-                    )
-                    st.success(f"✅ #{_pid}: {_bs['qty']} × {_bl} @ ₹{_b['entry']:,.2f}")
-                    st.cache_data.clear()
-        with _pk_sell:
-            st.markdown("#### 🔴 Sell / Avoid")
-            if not _picks["sells"]:
-                st.caption("No clear sell signals — nothing flashing red in the scan.")
-            for _sv in _picks["sells"]:
-                _svl = _sv["ticker"].replace(".NS", "")
-                st.markdown(
-                    f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
-                    f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
-                    f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
-                    f'</div>'
-                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                if st.button(f"🔍 Deep Dive {_svl}", key=f"cc_pick_dd_{_sv['ticker']}",
-                             use_container_width=True):
-                    st.session_state["analyze_ticker"] = _sv["ticker"]
-                    st.session_state["nav"] = "🔍 Analyze Stock"
-                    st.rerun()
-    else:
-        st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
 
     # ── 5. BACKGROUND TELEGRAM ALERTS (viewer) ─────────────────────────────────
     st.markdown("---")
@@ -2559,14 +2618,12 @@ elif page == "🏠 My Portfolio":
                                 st.session_state["nav"] = "🔍 Analyze Stock"
                                 st.rerun()
                         with _hb2:
-                            if st.button(f"📌 Paper Trade", key=f"pt_{h.ticker}", use_container_width=True):
-                                _pt_price = h.current_price or h.avg_buy_price
-                                _pt_pos   = _suggest_position(_pt_price, h.stop_loss or _pt_price * 0.95)
-                                paper_open_trade(h.ticker, _pt_pos["price"], _pt_pos["qty"], sl=h.stop_loss,
-                                                 tp=h.target, reason=f"{h.action}: {h.headline}",
-                                                 account=st.session_state.get("pt_account","My Account"))
-                                st.success(f"✅ {_pt_pos['qty']} × {_h_lbl} @ ₹{_pt_price:,.2f} "
-                                           f"· risking ₹{_pt_pos['capital_at_risk']:,.0f}")
+                            _ph_price = h.current_price or h.avg_buy_price
+                            _paper_trade_popover(
+                                h.ticker, _ph_price, h.stop_loss or _ph_price * 0.95, h.target,
+                                reason=f"{h.action}: {h.headline}",
+                                key=f"ph_pt_{h.ticker}",
+                            )
                         if h.error:
                             st.caption(f"⚠️ {h.error}")
 
@@ -3642,7 +3699,7 @@ elif page == "📂 Paper Trades":
             "🤖 Auto-close SL/TP", value=st.session_state.get("auto_close_on", True),
             key="pt_autoclose_toggle",
             help="Automatically close any position that hits its target or stop-loss "
-                 "when this page loads.",
+                 "on page load — during market hours only, on live prices.",
         )
         st.session_state["auto_close_on"] = _pt_autoclose
     with _rcol:
