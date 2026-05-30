@@ -45,32 +45,86 @@ st.set_page_config(
 # ── Custom CSS — modern dark theme ────────────────────────────────────────────
 st.markdown(
     """<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* Global font + smoothing */
+html, body, [class*="css"], .stApp, .stMarkdown, p, div, span, button, input, select {
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;
+    -webkit-font-smoothing:antialiased;
+}
+.stApp { background:radial-gradient(1200px 600px at 50% -10%, #0d1424 0%, #070b12 55%) fixed; }
+
+/* Cards — richer gradients + hover lift */
+.card-green, .card-yellow, .card-red, .card-blue, .card-purple, .card-orange {
+    transition:transform .15s ease, box-shadow .15s ease;
+}
+.card-green:hover, .card-yellow:hover, .card-red:hover,
+.card-blue:hover, .card-purple:hover, .card-orange:hover {
+    transform:translateY(-2px);
+}
 .card-green  { background:linear-gradient(135deg,#0f2a1e,#1a3a2a);
-               border-left:4px solid #26a69a; border-radius:10px;
+               border-left:4px solid #26a69a; border-radius:12px;
                padding:14px 18px; margin:6px 0;
-               box-shadow:0 2px 8px rgba(38,166,154,.15); }
+               box-shadow:0 4px 16px rgba(38,166,154,.18); }
 .card-yellow { background:linear-gradient(135deg,#251f05,#3a3210);
-               border-left:4px solid #f9a825; border-radius:10px;
+               border-left:4px solid #f9a825; border-radius:12px;
                padding:14px 18px; margin:6px 0;
-               box-shadow:0 2px 8px rgba(249,168,37,.15); }
+               box-shadow:0 4px 16px rgba(249,168,37,.18); }
 .card-red    { background:linear-gradient(135deg,#250808,#3a1a1a);
-               border-left:4px solid #ef5350; border-radius:10px;
+               border-left:4px solid #ef5350; border-radius:12px;
                padding:14px 18px; margin:6px 0;
-               box-shadow:0 2px 8px rgba(239,83,80,.15); }
+               box-shadow:0 4px 16px rgba(239,83,80,.18); }
 .card-blue   { background:linear-gradient(135deg,#071428,#0d1f3c);
-               border-left:4px solid #2196F3; border-radius:10px;
+               border-left:4px solid #2196F3; border-radius:12px;
                padding:14px 18px; margin:6px 0;
-               box-shadow:0 2px 8px rgba(33,150,243,.15); }
+               box-shadow:0 4px 16px rgba(33,150,243,.18); }
 .card-purple { background:linear-gradient(135deg,#160d2a,#231440);
-               border-left:4px solid #9c27b0; border-radius:10px;
-               padding:14px 18px; margin:6px 0; }
+               border-left:4px solid #9c27b0; border-radius:12px;
+               padding:14px 18px; margin:6px 0;
+               box-shadow:0 4px 16px rgba(156,39,176,.18); }
 .card-orange { background:linear-gradient(135deg,#1f1005,#2d1a08);
-               border-left:4px solid #ff9800; border-radius:10px;
-               padding:14px 18px; margin:6px 0; }
+               border-left:4px solid #ff9800; border-radius:12px;
+               padding:14px 18px; margin:6px 0;
+               box-shadow:0 4px 16px rgba(255,152,0,.18); }
 .score-big   { font-size:52px; font-weight:800; letter-spacing:-1px; }
 .signal-big  { font-size:22px; font-weight:700; }
 .narrative   { font-size:15px; line-height:1.7; color:#d0d0d0; }
 .ticker-label{ font-size:22px; font-weight:800; color:#fff; }
+
+/* Metric cards — subtle panel */
+[data-testid="stMetric"] {
+    background:linear-gradient(135deg,#0e1726,#0a121f);
+    border:1px solid rgba(255,255,255,.05);
+    border-radius:12px; padding:12px 16px;
+    box-shadow:0 2px 10px rgba(0,0,0,.25);
+}
+[data-testid="stMetricValue"] { font-weight:700; letter-spacing:-.5px; }
+
+/* Buttons — gradient + hover */
+.stButton > button {
+    border-radius:9px; font-weight:600; transition:all .15s ease;
+    border:1px solid rgba(255,255,255,.08);
+}
+.stButton > button:hover { transform:translateY(-1px); filter:brightness(1.12); }
+.stButton > button[kind="primary"] {
+    background:linear-gradient(135deg,#1e88e5,#1565c0); border:none;
+}
+
+/* Tabs — pill style */
+.stTabs [data-baseweb="tab-list"] { gap:6px; }
+.stTabs [data-baseweb="tab"] {
+    background:#0e1726; border-radius:8px 8px 0 0; padding:8px 16px;
+}
+.stTabs [aria-selected="true"] { background:#16243c; }
+
+/* Sidebar polish */
+[data-testid="stSidebar"] { background:linear-gradient(180deg,#0a1120,#070b12); }
+
+/* Slimmer, themed scrollbars */
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-thumb { background:#1e2a3c; border-radius:5px; }
+::-webkit-scrollbar-thumb:hover { background:#2a3a52; }
+::-webkit-scrollbar-track { background:#0a0f17; }
 .pill-green  { display:inline-block; background:#1b4332; color:#52b788;
                border:1px solid #52b788; border-radius:20px;
                padding:2px 12px; font-size:12px; font-weight:600; }
@@ -692,6 +746,68 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
         }
 
 
+# Curated liquid large/mid-cap universe for the home-page "Top Picks" scan.
+# Kept ~36 names so a full scan finishes fast (Angel One: ~15-25 s) and stays cached.
+_HOME_SCAN_UNIVERSE = [
+    "RELIANCE.NS","TCS.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS","SBIN.NS",
+    "BHARTIARTL.NS","LT.NS","ITC.NS","AXISBANK.NS","KOTAKBANK.NS","HINDUNILVR.NS",
+    "BAJFINANCE.NS","MARUTI.NS","SUNPHARMA.NS","TATAMOTORS.NS","NTPC.NS","TITAN.NS",
+    "ULTRACEMCO.NS","ASIANPAINT.NS","WIPRO.NS","ADANIENT.NS","JSWSTEEL.NS","POWERGRID.NS",
+    "TATASTEEL.NS","HCLTECH.NS","ONGC.NS","COALINDIA.NS","BAJAJFINSV.NS","TECHM.NS",
+    "DRREDDY.NS","CIPLA.NS","HINDALCO.NS","GRASIM.NS","EICHERMOT.NS","TRENT.NS",
+]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache
+def _home_top_picks(vix_regime: str = "normal", n: int = 5) -> dict:
+    """
+    Scan a curated NSE large/mid-cap universe and return the strongest
+    BUY candidates and the clearest SELL/EXIT candidates for the day.
+
+    Each stock's CompositeScore already folds in trend, momentum, RSI,
+    volume, sector strength, and VIX sentiment — so this is "self-analysis
+    + volatility" in one number. Returns {"buys": [...], "sells": [...]}.
+    """
+    import concurrent.futures as _cf
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    buys, sells = [], []
+
+    _vix = {"regime": vix_regime, "vix": None,
+            "allow_buy": vix_regime not in ("fear", "panic")}
+
+    def _one(tk):
+        """Score directly via score_stock (not the cached wrapper) — safe in threads."""
+        try:
+            from analysis.score import score_stock
+            s = score_stock(tk, vix_info=_vix)
+            return {"ticker": tk, "price": s.price, "score": s.score,
+                    "grade": s.grade, "action": s.action, "headline": s.headline,
+                    "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward}
+        except Exception:
+            return {"ticker": tk, "price": 0, "score": 0, "grade": "?",
+                    "action": "UNAVAILABLE", "headline": "", "entry": 0,
+                    "sl": 0, "tp": 0, "rr": 0}
+
+    results = []
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+            results = list(ex.map(_one, _HOME_SCAN_UNIVERSE))
+    except Exception:
+        results = [_one(tk) for tk in _HOME_SCAN_UNIVERSE]
+
+    for s in results:
+        act = s.get("action", "")
+        if act in ("STRONG BUY", "BUY") and s.get("score", 0) > 0:
+            buys.append(s)
+        elif act in ("EXIT", "CAUTION") and s.get("score", 0) > 0:
+            sells.append(s)
+
+    buys.sort(key=lambda x: -x.get("score", 0))
+    sells.sort(key=lambda x: x.get("score", 0))   # lowest score = weakest
+    return {"buys": buys[:n], "sells": sells[:n]}
+
+
 @st.cache_data(ttl=600)
 def get_composite_score(ticker: str):
     """
@@ -880,6 +996,132 @@ def _action_emoji(action: str) -> str:
 def _grade_color(grade: str) -> str:
     return {"A+": "#26a69a", "A": "#4CAF50", "B": "#8BC34A",
             "C": "#FFC107", "D": "#FF5722", "F": "#f44336"}.get(grade, "#9E9E9E")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Position sizing — risk-based qty suggestion (used by auto-open paper trades)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _suggest_position(entry: float, sl: float,
+                      capital: float = 500_000.0,
+                      risk_pct: float = 1.0,
+                      max_alloc_pct: float = 20.0) -> dict:
+    """
+    Suggest share quantity for a trade using fixed-fractional risk sizing.
+
+    Sizes so that (entry - sl) × qty ≈ risk_pct% of capital, then caps the
+    position at max_alloc_pct% of capital so a single name can't dominate.
+
+    Returns: {qty, price, risk_per_share, capital_at_risk, position_value, basis}
+    """
+    entry = float(entry or 0)
+    sl    = float(sl or 0)
+    if entry <= 0:
+        return {"qty": 1, "price": entry, "risk_per_share": 0,
+                "capital_at_risk": 0, "position_value": entry, "basis": "fallback"}
+
+    risk_amount = capital * (risk_pct / 100.0)
+    rps = abs(entry - sl)
+    if rps > 0.01:
+        qty_risk = int(risk_amount / rps)
+        basis = f"{risk_pct:.0f}% risk (₹{risk_amount:,.0f}) ÷ ₹{rps:.2f}/share"
+    else:
+        qty_risk = int(risk_amount / entry)   # no valid stop → notional sizing
+        basis = "notional (no valid stop)"
+
+    # Cap at max allocation
+    qty_cap = int((capital * max_alloc_pct / 100.0) / entry)
+    qty = max(1, min(qty_risk, qty_cap))
+    if qty == qty_cap < qty_risk:
+        basis += f" · capped at {max_alloc_pct:.0f}% allocation"
+
+    return {
+        "qty":             qty,
+        "price":           round(entry, 2),
+        "risk_per_share":  round(rps, 2),
+        "capital_at_risk": round(rps * qty, 0),
+        "position_value":  round(entry * qty, 0),
+        "basis":           basis,
+    }
+
+
+def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
+    """
+    Auto-close any OPEN paper trade whose live price has crossed its TP or SL.
+    Paper trades only — never touches real broker positions.
+
+    Returns a list of dicts describing what was closed (for notification).
+    Caller is responsible for st.rerun() if the returned list is non-empty.
+    """
+    closed = []
+    try:
+        _ensure_paper_db(path)
+        with sqlite3.connect(path) as conn:
+            if account:
+                rows = pd.read_sql_query(
+                    "SELECT * FROM trades WHERE status='OPEN' AND account=?",
+                    conn, params=(account,))
+            else:
+                rows = pd.read_sql_query(
+                    "SELECT * FROM trades WHERE status='OPEN'", conn)
+        if rows.empty:
+            return closed
+
+        syms = tuple(rows["ticker"].tolist())
+        lp   = _portfolio_live_prices(syms)
+
+        for _, r in rows.iterrows():
+            tk  = str(r["ticker"])
+            ep  = float(r.get("price", 0) or 0)
+            qty = int(r.get("quantity", 0) or 0)
+            sl  = float(r.get("sl", 0) or 0) or None
+            tp  = float(r.get("tp", 0) or 0) or None
+            cur = lp.get(tk, {}).get("price")
+            if cur is None or ep <= 0:
+                continue
+
+            hit = None
+            if tp and cur >= tp:
+                hit, exit_px, why = "target", tp, "Auto-closed: target reached"
+            elif sl and cur <= sl:
+                hit, exit_px, why = "stop", sl, "Auto-closed: stop-loss hit"
+            if hit:
+                paper_close_trade(int(r["id"]), exit_px, why, path=path)
+                closed.append({
+                    "ticker": tk.replace(".NS", ""), "type": hit,
+                    "exit": exit_px, "pnl": (exit_px - ep) * qty,
+                    "account": str(r.get("account", "My Account")),
+                })
+    except Exception:
+        pass
+    return closed
+
+
+def _render_autoclose_banner(closed: list) -> None:
+    """Show a prominent banner listing trades that were just auto-closed."""
+    if not closed:
+        return
+    _rows = ""
+    for c in closed:
+        _ic  = "🎯" if c["type"] == "target" else "🛑"
+        _col = "#26a69a" if c["pnl"] >= 0 else "#ef5350"
+        _rows += (
+            f'<div style="display:flex;justify-content:space-between;'
+            f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px">'
+            f'<span style="color:#eee">{_ic} <b>{c["ticker"]}</b> '
+            f'<span style="color:#888">({c["account"]})</span> — '
+            f'{"target reached" if c["type"]=="target" else "stop-loss hit"} '
+            f'@ ₹{c["exit"]:,.2f}</span>'
+            f'<span style="color:{_col};font-weight:700">₹{c["pnl"]:+,.0f}</span></div>'
+        )
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1a1200,#2d1f00);'
+        f'border:1px solid #FFC107;border-radius:12px;padding:14px 18px;margin-bottom:14px">'
+        f'<div style="font-size:14px;font-weight:700;color:#FFC107;margin-bottom:6px">'
+        f'🔔 {len(closed)} position{"s" if len(closed)!=1 else ""} auto-closed on SL/TP</div>'
+        f'{_rows}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1599,9 +1841,26 @@ elif page == "🎯 Command Centre":
 
     st.markdown("---")
 
-    # ── 2. OPEN POSITION ALERTS ────────────────────────────────────────────────
+    # ── 2. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
     _cc_h1, _cc_h2 = st.columns([5, 2])
     _cc_h1.markdown("### 📌 Open Positions")
+    with _cc_h2:
+        _cc_autoclose = st.toggle(
+            "🤖 Auto-close on SL/TP", value=st.session_state.get("auto_close_on", True),
+            key="cc_autoclose_toggle",
+            help="When ON, paper trades that hit their target or stop-loss are "
+                 "closed automatically each time this page loads. Real broker "
+                 "holdings are never auto-traded — only alerted.",
+        )
+        st.session_state["auto_close_on"] = _cc_autoclose
+
+    # Run auto-close across ALL accounts, then show what was closed
+    if _cc_autoclose:
+        _cc_closed = _auto_close_breached()
+        if _cc_closed:
+            _render_autoclose_banner(_cc_closed)
+            st.cache_data.clear()
+
     _cc_open_df = pd.DataFrame()
     try:
         _ensure_paper_db()
@@ -1770,15 +2029,19 @@ elif page == "🎯 Command Centre":
             )
         with _cc2:
             if _act in ("STRONG BUY", "BUY") and _entry > 0:
+                _sugg_pos = _suggest_position(_entry, _sl)
+                st.caption(f"Suggest: **{_sugg_pos['qty']}** sh @ ₹{_entry:,.0f}")
                 if st.button("📌 Paper Trade", key=f"cc_pt_{_cct}",
                              use_container_width=True, type="primary"):
-                    _default_qty = max(1, int(10_000 / _entry))
                     _pt_id = paper_open_trade(
-                        _cct, _entry, _default_qty, sl=_sl, tp=_tp,
+                        _cct, _sugg_pos["price"], _sugg_pos["qty"], sl=_sl, tp=_tp,
                         reason=f"Command Centre: {_hl[:60]}",
                         account=st.session_state.get("pt_account", "My Account"),
                     )
-                    st.success(f"✅ #{_pt_id} opened: {_lbl} @ ₹{_entry:,.2f}")
+                    st.success(
+                        f"✅ #{_pt_id}: {_sugg_pos['qty']} × {_lbl} @ ₹{_entry:,.2f} "
+                        f"· risking ₹{_sugg_pos['capital_at_risk']:,.0f}"
+                    )
                     st.cache_data.clear()
             else:
                 if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
@@ -1786,6 +2049,81 @@ elif page == "🎯 Command Centre":
                     st.session_state["analyze_ticker"] = _cct
                     st.session_state["nav"] = "🔍 Analyze Stock"
                     st.rerun()
+
+    # ── 4. TODAY'S TOP PICKS — broad NSE scan ──────────────────────────────────
+    st.markdown("---")
+    _tp_h1, _tp_h2 = st.columns([5, 2])
+    with _tp_h1:
+        st.markdown("### 🔥 Today's Top Picks — NSE Scan")
+        st.caption("Best buy & sell setups from ~36 liquid large/mid-caps, "
+                   "scored on trend + momentum + RSI + volume + sector + VIX. "
+                   "Cached 30 min · first load ~20-40 s.")
+    with _tp_h2:
+        st.write("")
+        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+
+    if _run_picks or st.session_state.get("cc_picks_loaded"):
+        st.session_state["cc_picks_loaded"] = True
+        with st.spinner("Scanning NSE for the strongest setups…"):
+            _picks = _home_top_picks(vix_regime=_cc_vix_r)
+
+        _pk_buy, _pk_sell = st.columns(2)
+        with _pk_buy:
+            st.markdown("#### 🟢 Buy Candidates")
+            if not _picks["buys"]:
+                st.caption("No strong buy setups today — market not offering clean entries.")
+            for _b in _picks["buys"]:
+                _bl = _b["ticker"].replace(".NS", "")
+                _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
+                _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
+                            f'{_bs["qty"]} sh</span>') if _bs else ""
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
+                    f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>'
+                    f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_b["headline"]}</div>'
+                    + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                       f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
+                       if _b["entry"] else "")
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+                if _b["entry"] and st.button(f"📌 Paper Trade {_bl}", key=f"cc_pick_pt_{_b['ticker']}",
+                                             use_container_width=True):
+                    _pid = paper_open_trade(
+                        _b["ticker"], _bs["price"], _bs["qty"], sl=_b["sl"], tp=_b["tp"],
+                        reason=f"Top Pick: {_b['headline'][:55]}",
+                        account=st.session_state.get("pt_account", "My Account"),
+                    )
+                    st.success(f"✅ #{_pid}: {_bs['qty']} × {_bl} @ ₹{_b['entry']:,.2f}")
+                    st.cache_data.clear()
+        with _pk_sell:
+            st.markdown("#### 🔴 Sell / Avoid")
+            if not _picks["sells"]:
+                st.caption("No clear sell signals — nothing flashing red in the scan.")
+            for _sv in _picks["sells"]:
+                _svl = _sv["ticker"].replace(".NS", "")
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
+                    f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
+                    f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"🔍 Deep Dive {_svl}", key=f"cc_pick_dd_{_sv['ticker']}",
+                             use_container_width=True):
+                    st.session_state["analyze_ticker"] = _sv["ticker"]
+                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.rerun()
+    else:
+        st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2189,11 +2527,12 @@ elif page == "🏠 My Portfolio":
                         with _hb2:
                             if st.button(f"📌 Paper Trade", key=f"pt_{h.ticker}", use_container_width=True):
                                 _pt_price = h.current_price or h.avg_buy_price
-                                _pt_qty   = max(1, int(10000 / _pt_price)) if _pt_price > 0 else 1
-                                paper_open_trade(h.ticker, _pt_price, _pt_qty, sl=h.stop_loss,
+                                _pt_pos   = _suggest_position(_pt_price, h.stop_loss or _pt_price * 0.95)
+                                paper_open_trade(h.ticker, _pt_pos["price"], _pt_pos["qty"], sl=h.stop_loss,
                                                  tp=h.target, reason=f"{h.action}: {h.headline}",
                                                  account=st.session_state.get("pt_account","My Account"))
-                                st.success(f"✅ Paper trade opened: {_h_lbl}")
+                                st.success(f"✅ {_pt_pos['qty']} × {_h_lbl} @ ₹{_pt_price:,.2f} "
+                                           f"· risking ₹{_pt_pos['capital_at_risk']:,.0f}")
                         if h.error:
                             st.caption(f"⚠️ {h.error}")
 
@@ -3261,11 +3600,27 @@ elif page == "📂 Paper Trades":
     st.markdown("---")
 
     # ── LOAD TRADES FOR CURRENT ACCOUNT ───────────────────────────────────────
-    _hcol, _rcol = st.columns([5, 1])
+    _hcol, _tcol, _rcol = st.columns([4, 2, 1])
     with _hcol:
         st.markdown(f"#### 📂 {st.session_state.get('pt_account', 'My Account')}")
+    with _tcol:
+        _pt_autoclose = st.toggle(
+            "🤖 Auto-close SL/TP", value=st.session_state.get("auto_close_on", True),
+            key="pt_autoclose_toggle",
+            help="Automatically close any position that hits its target or stop-loss "
+                 "when this page loads.",
+        )
+        st.session_state["auto_close_on"] = _pt_autoclose
     with _rcol:
+        st.write("")
         if st.button("🔄 Refresh", key="paper_refresh"):
+            st.cache_data.clear()
+
+    # Run auto-close for this account, then surface what was closed
+    if _pt_autoclose:
+        _pt_closed = _auto_close_breached(account=st.session_state.get("pt_account", "My Account"))
+        if _pt_closed:
+            _render_autoclose_banner(_pt_closed)
             st.cache_data.clear()
 
     trades = load_trades_by_account(st.session_state.get("pt_account", "My Account"))
