@@ -117,8 +117,9 @@ st.sidebar.title("NSE Smart Investor")
 st.sidebar.markdown("*AI-powered equity companion*")
 st.sidebar.markdown("---")
 
-# Two-level grouped navigation — 5 sections × 3-4 pages each
+# Two-level grouped navigation — Home + 5 sections
 _NAV_GROUPS: dict = {
+    "Home":      ["Command Centre"],
     "Markets":   ["Market Live", "Market Overview", "Market Breadth", "Macro Dashboard"],
     "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist"],
@@ -128,6 +129,7 @@ _NAV_GROUPS: dict = {
 
 # Emoji map for display
 _PAGE_EMOJI: dict = {
+    "Command Centre":  "🎯",
     "Market Live":     "📡",
     "Market Overview": "📊",
     "Market Breadth":  "📈",
@@ -148,6 +150,7 @@ _PAGE_EMOJI: dict = {
 
 # Restore old page key names for backward-compat with all elif checks below
 _PAGE_FULL_NAME: dict = {
+    "Command Centre":  "🎯 Command Centre",
     "Market Live":     "📡 Market Live",
     "Market Overview": "📊 Market Overview",
     "Market Breadth":  "📈 Market Breadth",
@@ -167,7 +170,7 @@ _PAGE_FULL_NAME: dict = {
 }
 
 _group_icons: dict = {
-    "Markets": "📊", "Trading": "⚡", "Portfolio": "💼",
+    "Home": "🎯", "Markets": "📊", "Trading": "⚡", "Portfolio": "💼",
     "Analysis": "🔍", "Tools": "🛠",
 }
 
@@ -660,6 +663,27 @@ def get_vix_info():
         return get_india_vix_regime()
     except Exception:
         return {"vix": 18.0, "regime": "normal", "allow_buy": True, "vix_pct_chg": 0.0}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache — powers Command Centre
+def _score_for_cc(ticker: str) -> dict:
+    """Score one stock for Command Centre. Cached 30 min so the page stays fast."""
+    try:
+        from analysis.score import score_stock
+        s = score_stock(ticker)
+        return {
+            "ticker": ticker, "price": s.price,
+            "score": s.score, "grade": s.grade, "action": s.action,
+            "headline": s.headline, "entry": s.entry,
+            "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
+        }
+    except Exception as _e:
+        return {
+            "ticker": ticker, "price": 0, "score": 0, "grade": "?",
+            "action": "UNAVAILABLE",
+            "headline": f"Could not score ({str(_e)[:60]})",
+            "entry": 0, "sl": 0, "tp": 0, "rr": 0,
+        }
 
 
 @st.cache_data(ttl=600)
@@ -1441,6 +1465,277 @@ if page == "📡 Market Live":
 
     if ri > 0:
         st.caption(f"Auto-refreshes every {ri//60} minutes while market is open.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE 0 — COMMAND CENTRE
+# ═══════════════════════════════════════════════════════════════════════════════
+elif page == "🎯 Command Centre":
+    st.title("🎯 Command Centre")
+    st.caption("Market conditions · open positions needing action · watchlist decisions — no digging required.")
+
+    # ── 1. MARKET PULSE ────────────────────────────────────────────────────────
+    _cc_vix_info = get_vix_info()
+    _cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
+    _cc_vix_v = _cc_vix_info.get("vix")
+
+    # Nifty trend from cached daily bars
+    _cc_nifty_trend = "unknown"
+    _cc_nifty_val   = None
+    _cc_nifty_5d    = 0.0
+    try:
+        from data.fetcher import fetch_single as _cc_fs
+        _cc_ndf = _cc_fs("^NSEI", period="3mo")
+        if not _cc_ndf.empty:
+            _cc_nifty_val = float(_cc_ndf["Close"].iloc[-1])
+            _cc_nifty_5d  = float((_cc_ndf["Close"].iloc[-1] / _cc_ndf["Close"].iloc[-6] - 1) * 100) if len(_cc_ndf) >= 6 else 0
+            _cc_sma20 = float(_cc_ndf["Close"].rolling(20).mean().iloc[-1]) if len(_cc_ndf) >= 20 else _cc_nifty_val
+            _cc_sma50 = float(_cc_ndf["Close"].rolling(50).mean().iloc[-1]) if len(_cc_ndf) >= 50 else _cc_nifty_val
+            if _cc_nifty_val > _cc_sma20 and _cc_sma20 > _cc_sma50:
+                _cc_nifty_trend = "uptrend"
+            elif _cc_nifty_val < _cc_sma20 and _cc_sma20 < _cc_sma50:
+                _cc_nifty_trend = "downtrend"
+            else:
+                _cc_nifty_trend = "sideways"
+    except Exception:
+        pass
+
+    _VIX_LBL = {
+        "complacency": ("#FFC107", "😴", "COMPLACENT"), "normal":  ("#26a69a", "🟢", "CALM"),
+        "elevated":    ("#FF9800", "🟡", "ELEVATED"),   "fear":    ("#ef5350", "🔴", "HIGH FEAR"),
+        "panic":       ("#b71c1c", "🚨", "PANIC"),      "unknown": ("#9e9e9e", "❓", "UNKNOWN"),
+    }
+    _NT_LBL = {
+        "uptrend":  ("#26a69a", "📈", "UPTREND"),  "downtrend": ("#ef5350", "📉", "DOWNTREND"),
+        "sideways": ("#FFC107", "↔️", "SIDEWAYS"), "unknown":   ("#9e9e9e", "❓", "NO DATA"),
+    }
+    _vc, _vi, _vl = _VIX_LBL.get(_cc_vix_r, _VIX_LBL["unknown"])
+    _nc, _ni, _nl = _NT_LBL.get(_cc_nifty_trend, _NT_LBL["unknown"])
+
+    # Overall market verdict
+    if _cc_vix_r == "normal" and _cc_nifty_trend == "uptrend":
+        _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "#0a2a1a", "#26a69a"
+    elif _cc_vix_r in ("fear", "panic") or _cc_nifty_trend == "downtrend":
+        _verd, _vbg, _vbdr = "🔴 Weak / fearful market — avoid new buys, protect capital", "#2a0a0a", "#ef5350"
+    elif _cc_vix_r == "complacency":
+        _verd, _vbg, _vbdr = "😴 Market too calm — be selective, tighten stops", "#2a2000", "#FFC107"
+    else:
+        _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "#1a1a0a", "#FFC107"
+
+    st.markdown(
+        f'<div style="display:flex;gap:12px;margin-bottom:4px">'
+        f'<div style="flex:1;background:#0d1f3c;border-left:5px solid {_vc};border-radius:10px;padding:14px 16px">'
+        f'<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">India VIX</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
+        f'<div style="font-size:12px;color:#bbb;margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
+        f'</div>'
+        f'<div style="flex:1;background:#0d1f3c;border-left:5px solid {_nc};border-radius:10px;padding:14px 16px">'
+        f'<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Nifty 50</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{_nc}">{_ni} {_nl}</div>'
+        f'<div style="font-size:12px;color:#bbb;margin-top:3px">'
+        f'{f"{_cc_nifty_val:,.0f}" if _cc_nifty_val else "—"}'
+        f'{f"&nbsp;({_cc_nifty_5d:+.1f}% 5d)" if _cc_nifty_val else ""}</div>'
+        f'</div>'
+        f'<div style="flex:2;background:{_vbg};border-left:5px solid {_vbdr};border-radius:10px;'
+        f'padding:14px 16px;display:flex;align-items:center">'
+        f'<div style="font-size:16px;font-weight:600;color:#fff">{_verd}</div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    _cc_ref_c = st.columns([6, 1])[1]
+    if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=True):
+        st.cache_data.clear(); st.rerun()
+
+    st.markdown("---")
+
+    # ── 2. OPEN POSITION ALERTS ────────────────────────────────────────────────
+    _cc_h1, _cc_h2 = st.columns([5, 2])
+    _cc_h1.markdown("### 📌 Open Positions")
+    _cc_open_df = pd.DataFrame()
+    try:
+        _ensure_paper_db()
+        with sqlite3.connect("trades.db") as _cc_conn:
+            _cc_open_df = pd.read_sql_query(
+                "SELECT * FROM trades WHERE status='OPEN' ORDER BY timestamp DESC", _cc_conn
+            )
+    except Exception:
+        pass
+
+    if _cc_open_df.empty:
+        st.info("No open paper positions. Use **Paper Trades** or click **Paper Trade** on any BUY signal below.")
+    else:
+        _cc_syms = tuple(_cc_open_df["ticker"].tolist())
+        _cc_lp   = _portfolio_live_prices(_cc_syms)
+
+        _cc_alerts, _cc_normal_pos = [], []
+        for _, _ccr in _cc_open_df.iterrows():
+            _ck  = _ccr["ticker"]
+            _cep = float(_ccr.get("price", 0) or 0)
+            _cqt = int(  _ccr.get("quantity", 0) or 0)
+            _csl = float(_ccr.get("sl", 0) or 0) or None
+            _ctp = float(_ccr.get("tp", 0) or 0) or None
+            _clp_d = _cc_lp.get(_ck, {})
+            _ccur  = _clp_d.get("price", _cep)
+            _cunr  = (_ccur - _cep) * _cqt
+            _cunr_pct = (_ccur / _cep - 1) * 100 if _cep > 0 else 0
+
+            _cst = "normal"
+            if _ctp and _ccur >= _ctp:       _cst = "target_hit"
+            elif _csl and _ccur <= _csl:     _cst = "sl_hit"
+            elif abs(_cunr_pct) >= 5:        _cst = "big_move"
+
+            _entry_d = dict(id=int(_ccr["id"]), ticker=_ck,
+                            account=str(_ccr.get("account","My Account")),
+                            ep=_cep, cur=_ccur, qty=_cqt, sl=_csl, tp=_ctp,
+                            unr=_cunr, unr_pct=_cunr_pct, status=_cst)
+            (_cc_alerts if _cst != "normal" else _cc_normal_pos).append(_entry_d)
+
+        if _cc_alerts:
+            st.markdown("**⚠️ These positions need your attention:**")
+
+        for _pos in _cc_alerts + _cc_normal_pos:
+            _pbdr = {"target_hit": "#26a69a", "sl_hit": "#ef5350", "big_move": "#FF9800",
+                     "normal": "#2196F3"}.get(_pos["status"], "#2196F3")
+            _pbg  = {"target_hit": "#0a2a1a", "sl_hit": "#2a0a0a",  "big_move": "#1a1200",
+                     "normal": "#0d1f3c"}.get(_pos["status"], "#0d1f3c")
+            _purc = "#26a69a" if _pos["unr"] >= 0 else "#ef5350"
+            _palert = {
+                "target_hit": f"🎯 Target hit — close to lock in profit",
+                "sl_hit":     f"🚨 Stop-loss breached — consider exiting to limit loss",
+                "big_move":   f"{'📈' if _pos['unr_pct']>0 else '📉'} Large move — review your stop and target",
+            }.get(_pos["status"], "")
+
+            _pc1, _pc2 = st.columns([5, 1])
+            with _pc1:
+                st.markdown(
+                    f'<div style="background:{_pbg};border-left:5px solid {_pbdr};'
+                    f'border-radius:10px;padding:11px 15px;margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<div><span style="font-size:16px;font-weight:700;color:#fff">'
+                    f'{_pos["ticker"].replace(".NS","")}</span>'
+                    f'<span style="font-size:11px;color:#888;margin-left:8px">📂 {_pos["account"]}</span>'
+                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
+                    f'Entry ₹{_pos["ep"]:,.2f} → Now ₹{_pos["cur"]:,.2f}</span></div>'
+                    f'<div style="font-size:16px;font-weight:700;color:{_purc}">'
+                    f'₹{_pos["unr"]:+,.0f} ({_pos["unr_pct"]:+.1f}%)</div></div>'
+                    + (f'<div style="font-size:13px;color:#ddd;margin-top:4px">{_palert}</div>' if _palert else '')
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+            with _pc2:
+                if _pos["status"] in ("target_hit", "sl_hit"):
+                    if st.button("Close Now", key=f"cc_cl_{_pos['id']}",
+                                 use_container_width=True, type="primary"):
+                        paper_close_trade(_pos["id"], _pos["cur"],
+                                          "Closed via Command Centre")
+                        st.cache_data.clear(); st.rerun()
+
+    st.markdown("---")
+
+    # ── 3. WATCHLIST DECISIONS ─────────────────────────────────────────────────
+    _cc_wl = st.session_state.get("watchlist", ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"])
+    _wh1, _wh2 = st.columns([5, 2])
+    with _wh1:
+        st.markdown("### ⭐ Watchlist — What to Do Today")
+        st.caption("Scores update every 30 min. First load takes ~20-40 s while data is fetched.")
+    with _wh2:
+        st.write("")
+        if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
+            st.cache_data.clear(); st.rerun()
+
+    _cc_prog = st.progress(0, text="Scoring your watchlist…")
+    _cc_scores: dict = {}
+    for _cci, _cct in enumerate(_cc_wl):
+        _cc_scores[_cct] = _score_for_cc(_cct)
+        _cc_prog.progress((_cci + 1) / len(_cc_wl),
+                          text=f"Scoring {_cct.replace('.NS','')}… ({_cci+1}/{len(_cc_wl)})")
+    _cc_prog.empty()
+
+    # Sort: BUY signals first, EXIT last
+    _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
+                "HOLD": 3, "CAUTION": 4, "EXIT": 5, "UNAVAILABLE": 9}
+    _cc_sorted = sorted(_cc_wl, key=lambda t: _A_ORDER.get(
+        _cc_scores.get(t, {}).get("action", "HOLD"), 3))
+
+    _ACT_STYLE = {
+        "STRONG BUY": ("#26a69a", "🚀", "#0a2a1a"),
+        "BUY":        ("#4CAF50", "🟢", "#0d2510"),
+        "WATCHLIST":  ("#2196F3", "👀", "#0d1f3c"),
+        "HOLD":       ("#9E9E9E", "🟡", "#1a1a1a"),
+        "CAUTION":    ("#FF9800", "⚠️", "#1a1200"),
+        "EXIT":       ("#ef5350", "🔴", "#2a0a0a"),
+        "UNAVAILABLE":("#555555", "❓", "#111111"),
+    }
+
+    for _cct in _cc_sorted:
+        _s     = _cc_scores.get(_cct, {})
+        _act   = _s.get("action", "HOLD")
+        _score = float(_s.get("score", 0))
+        _hl    = _s.get("headline", "")
+        _entry = float(_s.get("entry", 0))
+        _sl    = float(_s.get("sl",    0))
+        _tp    = float(_s.get("tp",    0))
+        _rr    = float(_s.get("rr",    0))
+        _price = float(_s.get("price", 0))
+
+        _ac, _ai, _abg = _ACT_STYLE.get(_act, _ACT_STYLE["HOLD"])
+        _lbl   = _cct.replace(".NS", "")
+        _bar_w = min(int(_score), 100)
+
+        # Price levels block (only shown for actionable signals)
+        _price_block = ""
+        if _act in ("STRONG BUY", "BUY", "EXIT", "WATCHLIST", "CAUTION") and _entry > 0:
+            _sl_str = f'<span style="color:#ef5350">SL ₹{_sl:,.2f}</span>' if _sl else ""
+            _tp_str = f'<span style="color:#26a69a">Target ₹{_tp:,.2f}</span>' if _tp else ""
+            _price_block = (
+                f'<div style="font-size:12px;color:#aaa;margin-top:6px">'
+                f'Entry ₹{_entry:,.2f} &nbsp;·&nbsp; {_sl_str} &nbsp;·&nbsp; {_tp_str}'
+                + (f' &nbsp;·&nbsp; <span style="color:#fff">R:R {_rr:.1f}:1</span>' if _rr > 0 else "")
+                + '</div>'
+            )
+
+        _cc1, _cc2 = st.columns([5, 1])
+        with _cc1:
+            st.markdown(
+                f'<div style="background:{_abg};border-left:5px solid {_ac};'
+                f'border-radius:10px;padding:13px 16px;margin-bottom:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+                f'<div style="flex:1">'
+                f'<span style="font-size:18px;font-weight:700;color:#fff">{_lbl}</span>'
+                f'&nbsp;&nbsp;<span style="font-size:14px;font-weight:700;color:{_ac}">{_ai} {_act}</span>'
+                f'<div style="margin:5px 0 3px 0;display:flex;align-items:center;gap:8px">'
+                f'<span style="font-size:12px;font-weight:700;color:{_ac}">{_score:.0f}/100</span>'
+                f'<div style="width:120px;height:6px;background:#333;border-radius:3px">'
+                f'<div style="width:{_bar_w}%;height:100%;background:{_ac};border-radius:3px"></div></div>'
+                f'</div>'
+                f'<div style="font-size:13px;color:#ccc">{_hl}</div>'
+                f'{_price_block}'
+                f'</div>'
+                f'<div style="font-size:14px;color:#aaa;text-align:right;min-width:70px">'
+                f'{"₹" + f"{_price:,.2f}" if _price else ""}'
+                f'</div>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+        with _cc2:
+            if _act in ("STRONG BUY", "BUY") and _entry > 0:
+                if st.button("📌 Paper Trade", key=f"cc_pt_{_cct}",
+                             use_container_width=True, type="primary"):
+                    _default_qty = max(1, int(10_000 / _entry))
+                    _pt_id = paper_open_trade(
+                        _cct, _entry, _default_qty, sl=_sl, tp=_tp,
+                        reason=f"Command Centre: {_hl[:60]}",
+                        account=st.session_state.get("pt_account", "My Account"),
+                    )
+                    st.success(f"✅ #{_pt_id} opened: {_lbl} @ ₹{_entry:,.2f}")
+                    st.cache_data.clear()
+            else:
+                if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
+                             use_container_width=True):
+                    st.session_state["analyze_ticker"] = _cct
+                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
