@@ -1,0 +1,63 @@
+name: Market Alerts
+
+# Runs every 15 minutes during NSE market hours and sends Telegram alerts
+# for custom price levels, VIX fear/panic regimes, and Nifty downtrends.
+#
+# NSE hours 09:15–15:30 IST = 03:45–10:00 UTC. GitHub cron is UTC-only and
+# can't express :45, so we run 03–10 UTC and the script self-guards on the
+# exact IST window (and skips weekends).
+
+on:
+  schedule:
+    - cron: "*/15 3-10 * * 1-5"   # every 15 min, 03:00–10:59 UTC, Mon–Fri
+  workflow_dispatch:               # allow manual "Run workflow" from the Actions tab
+
+# Avoid overlapping runs if one is slow
+concurrency:
+  group: market-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal deps
+        run: pip install --quiet pandas numpy requests
+
+      # Persist the de-dup state file between runs so the same alert
+      # isn't re-sent every 15 minutes. New cache each run, restore latest.
+      - name: Restore alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
+          restore-keys: |
+            alert-state-
+
+      - name: Run alert checker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Optional — set these only if you want real-time Angel One prices
+          # instead of the 15-min-delayed Yahoo fallback:
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python alerts/check_alerts.py
+
+      - name: Save alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}

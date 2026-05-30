@@ -31,6 +31,9 @@ ENV/
 # SQLite paper trades database (ephemeral — regenerated on startup)
 trades.db
 
+# Background-alert de-dup state (managed by GitHub Actions cache, not source)
+data/alert_state.json
+
 # Large data files
 *.csv.bak
 *.parquet
