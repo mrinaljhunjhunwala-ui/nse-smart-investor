@@ -1,0 +1,6 @@
+ticker,condition,level,note,enabled
+RELIANCE,above,1400,EXAMPLE - breakout watch (set enabled=1 to activate),0
+RELIANCE,below,1280,EXAMPLE - support break,0
+TCS,above,2400,EXAMPLE - resistance test,0
+HDFCBANK,below,720,EXAMPLE - stop-loss zone,0
+INFY,above,1250,EXAMPLE - momentum breakout,0

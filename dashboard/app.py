@@ -2125,6 +2125,40 @@ elif page == "🎯 Command Centre":
     else:
         st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
 
+    # ── 5. BACKGROUND TELEGRAM ALERTS (viewer) ─────────────────────────────────
+    st.markdown("---")
+    with st.expander("🔔 Background Alerts (Telegram) — fire even when this app is closed", expanded=False):
+        st.caption(
+            "A GitHub Actions job checks these every 15 min during market hours and "
+            "messages you on Telegram. Edit **data/alerts.csv** in your GitHub repo to "
+            "change them. Full setup: **alerts/README.md**."
+        )
+        try:
+            import pathlib as _alp
+            _alerts_path = _alp.Path(_ROOT) / "data" / "alerts.csv"
+            if _alerts_path.exists():
+                _al_df = pd.read_csv(_alerts_path)
+                _act_df = _al_df[_al_df["enabled"].astype(str).isin(["1", "True", "true"])]
+                st.markdown(f"**{len(_act_df)} active** of {len(_al_df)} configured price alerts:")
+                if not _act_df.empty:
+                    _al_show = _act_df[["ticker", "condition", "level", "note"]].copy()
+                    _al_show.columns = ["Stock", "When price goes", "Level (₹)", "Note"]
+                    st.dataframe(_al_show, hide_index=True, use_container_width=True)
+                else:
+                    st.info("No active price alerts. All rows are examples (enabled=0). "
+                            "Set `enabled=1` on a row in data/alerts.csv to activate it.")
+            else:
+                st.info("No alerts.csv found yet.")
+        except Exception as _ale:
+            st.caption(f"Could not read alerts.csv: {_ale}")
+
+        st.markdown(
+            "**Also alerted automatically:** 🔴 VIX entering fear/panic · 📉 Nifty breaking into a downtrend.  \n"
+            "**One-time setup:** create a Telegram bot via @BotFather, then add "
+            "`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` as GitHub Actions secrets "
+            "(Settings → Secrets and variables → Actions)."
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE 1 — MY PORTFOLIO
