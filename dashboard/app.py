@@ -928,11 +928,12 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache, whole watchlist
-def _score_watchlist(tickers: tuple, vix_regime: str = "normal") -> dict:
+def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: tuple = ()) -> dict:
     """
     Score a whole watchlist IN PARALLEL (one thread per stock) and cache the
     result for 30 min. Calls score_stock directly (not the cached single-stock
-    wrapper) so it is safe to run inside worker threads. Returns {ticker: score_dict}.
+    wrapper) so it is safe to run inside worker threads. Sector strength is
+    folded in via sector_ranks. Returns {ticker: score_dict}.
     """
     import concurrent.futures as _cf
     import sys, os as _os
@@ -940,11 +941,12 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal") -> dict:
 
     _vix = {"regime": vix_regime, "vix": None,
             "allow_buy": vix_regime not in ("fear", "panic")}
+    _sec_df = _sector_df_from_tuple(sector_ranks)
 
     def _one(tk):
         try:
             from analysis.score import score_stock
-            s = score_stock(tk, vix_info=_vix)
+            s = score_stock(tk, vix_info=_vix, sector_scores_df=_sec_df)
             return tk, {"ticker": tk, "price": s.price, "score": s.score,
                         "grade": s.grade, "action": s.action, "headline": s.headline,
                         "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward}
@@ -980,15 +982,28 @@ _HOME_SCAN_UNIVERSE = [
 ]
 
 
+def _sector_df_from_tuple(sector_ranks: tuple):
+    """Rebuild a sector-rank DataFrame (index=sector, col=Rank) from a hashable tuple."""
+    if not sector_ranks:
+        return None
+    try:
+        return pd.DataFrame(
+            [{"Rank": int(r)} for _, r in sector_ranks],
+            index=[str(s) for s, _ in sector_ranks],
+        )
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache
-def _home_top_picks(vix_regime: str = "normal", n: int = 5) -> dict:
+def _home_top_picks(vix_regime: str = "normal", n: int = 5, sector_ranks: tuple = ()) -> dict:
     """
     Scan a curated NSE large/mid-cap universe and return the strongest
     BUY candidates and the clearest SELL/EXIT candidates for the day.
 
-    Each stock's CompositeScore already folds in trend, momentum, RSI,
-    volume, sector strength, and VIX sentiment — so this is "self-analysis
-    + volatility" in one number. Returns {"buys": [...], "sells": [...]}.
+    Each stock's CompositeScore folds in trend, momentum, RSI, volume, VIX
+    sentiment AND sector strength (via sector_ranks) — "self-analysis +
+    volatility" in one number. Returns {"buys": [...], "sells": [...]}.
     """
     import concurrent.futures as _cf
     import sys, os as _os
@@ -997,12 +1012,13 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 5) -> dict:
 
     _vix = {"regime": vix_regime, "vix": None,
             "allow_buy": vix_regime not in ("fear", "panic")}
+    _sec_df = _sector_df_from_tuple(sector_ranks)
 
     def _one(tk):
         """Score directly via score_stock (not the cached wrapper) — safe in threads."""
         try:
             from analysis.score import score_stock
-            s = score_stock(tk, vix_info=_vix)
+            s = score_stock(tk, vix_info=_vix, sector_scores_df=_sec_df)
             return {"ticker": tk, "price": s.price, "score": s.score,
                     "grade": s.grade, "action": s.action, "headline": s.headline,
                     "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward}
@@ -1041,6 +1057,17 @@ def _sector_ranking():
         return rank_sectors()
     except Exception:
         return None
+
+
+def _sector_ranks_tuple() -> tuple:
+    """Hashable ((sector, rank), …) form of _sector_ranking() for cached scorers."""
+    df = _sector_ranking()
+    if df is None or df.empty:
+        return ()
+    try:
+        return tuple((str(idx), int(row["Rank"])) for idx, row in df.iterrows())
+    except Exception:
+        return ()
 
 
 @st.cache_data(ttl=600)
@@ -1657,7 +1684,7 @@ try:
     if _tb_parts:
         st.markdown(
             '<div style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);'
-            'border-radius:10px;padding:10px 18px;margin-bottom:16px;'
+            'border-radius:10px;padding:10px 18px;margin-bottom:8px;'
             'display:flex;align-items:center;flex-wrap:wrap;gap:4px;'
             'backdrop-filter:blur(8px)">'
             + "".join(_tb_parts) +
@@ -1666,6 +1693,45 @@ try:
         )
 except Exception:
     pass  # top bar is cosmetic — never break the page over it
+
+
+# ── Live ticker tape (NSE Pro — scrolling movers on every page) ───────────────
+@st.cache_data(ttl=90, show_spinner=False)
+def _ticker_tape_data():
+    _names = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+              "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "AXISBANK.NS",
+              "MARUTI.NS", "TATAMOTORS.NS", "SUNPHARMA.NS", "TITAN.NS"]
+    try:
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch(_names, max_workers=10)
+    except Exception:
+        raw = {}
+    out = []
+    for t in _names:
+        q = raw.get(t)
+        if isinstance(q, dict) and q.get("price"):
+            out.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
+    return out
+
+try:
+    _tt = _ticker_tape_data()
+    if _tt:
+        _tt_items = ""
+        for _sym, _px, _chg in _tt:
+            _tc = "#00d4aa" if _chg >= 0 else "#ff4757"
+            _ta = "▲" if _chg >= 0 else "▼"
+            _tt_items += (
+                f'<span style="margin:0 22px">'
+                f'<b style="color:#f0f4ff">{_sym}</b> '
+                f'<span style="color:#c8d0e0">₹{_px:,.2f}</span> '
+                f'<span style="color:{_tc}">{_ta}{abs(_chg):.2f}%</span></span>'
+            )
+        st.markdown(
+            f'<div class="ticker-wrap"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
+            unsafe_allow_html=True,
+        )
+except Exception:
+    pass  # ticker tape is cosmetic — never break the page over it
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE 0 — MARKET LIVE
@@ -2206,7 +2272,8 @@ elif page == "🎯 Command Centre":
     if _run_picks or st.session_state.get("cc_picks_loaded"):
         st.session_state["cc_picks_loaded"] = True
         with st.spinner("Scanning NSE for the strongest setups…"):
-            _picks = _home_top_picks(vix_regime=_cc_vix_r)
+            _picks = _home_top_picks(vix_regime=_cc_vix_r,
+                                     sector_ranks=_sector_ranks_tuple())
 
         _pk_buy, _pk_sell = st.columns(2)
         with _pk_buy:
@@ -2278,7 +2345,8 @@ elif page == "🎯 Command Centre":
             st.cache_data.clear(); st.rerun()
 
     with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 30 min)…"):
-        _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r)
+        _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r,
+                                      sector_ranks=_sector_ranks_tuple())
 
     # Sort: BUY signals first, EXIT last
     _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
