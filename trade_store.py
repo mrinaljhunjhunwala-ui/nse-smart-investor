@@ -21,8 +21,9 @@ two backends stay in sync. SQLite behaviour is unchanged from before.
 from __future__ import annotations
 
 import datetime
+import json
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import pandas as pd
 
@@ -270,3 +271,59 @@ def fetch_open(account: str = None) -> pd.DataFrame:
         return pd.DataFrame()
     finally:
         conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Key-value store — persists user settings & watchlist across sessions
+# (and across redeploys when a Postgres backend is configured)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _kv_ensure() -> None:
+    conn = _connect()
+    try:
+        conn.cursor().execute(
+            "CREATE TABLE IF NOT EXISTS user_kv (k TEXT PRIMARY KEY, v TEXT)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def kv_get(key: str, default: Any = None) -> Any:
+    """Read a JSON-serialised setting; returns `default` if missing/unavailable."""
+    try:
+        _kv_ensure()
+        conn = _connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT v FROM user_kv WHERE k=?"), (key,))
+            row = cur.fetchone()
+            return json.loads(row[0]) if row and row[0] is not None else default
+        finally:
+            conn.close()
+    except Exception:
+        return default
+
+
+def kv_set(key: str, value: Any) -> None:
+    """Upsert a JSON-serialisable setting. Silently no-ops on failure."""
+    try:
+        _kv_ensure()
+        payload = json.dumps(value)
+        conn = _connect()
+        try:
+            cur = conn.cursor()
+            if _is_pg():
+                cur.execute(
+                    "INSERT INTO user_kv (k, v) VALUES (%s, %s) "
+                    "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v",
+                    (key, payload),
+                )
+            else:
+                cur.execute("INSERT OR REPLACE INTO user_kv (k, v) VALUES (?, ?)",
+                            (key, payload))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass

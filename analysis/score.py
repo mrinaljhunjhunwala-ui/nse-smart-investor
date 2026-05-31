@@ -300,21 +300,45 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15) -> T
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float, float, float]:
+    """
+    Structure-aware stop + conviction-scaled target.
+
+    Stop: placed just below the most recent swing low (last 10 bars) so it sits
+    under real support, but bounded to 1.2–3.0× ATR of risk so it's neither too
+    tight (noise) nor too wide (over-risking). Falls back to a pure 2× ATR stop
+    when structure is unavailable.
+
+    Target: set as a multiple of the actual risk (entry − stop), so the
+    risk:reward is explicit and never drops below 1.5:1 for any quoted setup —
+    higher conviction (score) earns a wider target.
+    """
     cur   = df.iloc[-1]
     price = float(cur["Close"])
     atr   = float(cur.get("ATR", price * 0.02))
+    if atr <= 0 or pd.isna(atr):
+        atr = price * 0.02
 
-    sl = price - 2.0 * atr
-    if score >= 70:
-        tp = price + 3.0 * atr
-    elif score >= 50:
-        tp = price + 2.5 * atr
-    else:
-        tp = price + 2.0 * atr
+    # ── Structure-based stop (recent swing low) with ATR bounds ──────────────
+    lows      = df["Low"].tail(10).dropna()
+    swing_low = float(lows.min()) if len(lows) else price - 2.0 * atr
+    sl        = swing_low - 0.25 * atr            # small buffer below support
 
-    risk   = price - sl
-    reward = tp - price
-    rr     = round(reward / risk, 2) if risk > 0 else 1.0
+    max_risk = 3.0 * atr                          # never risk more than 3 ATR
+    min_risk = 1.2 * atr                          # always give at least 1.2 ATR room
+    if price - sl > max_risk:
+        sl = price - 2.0 * atr                    # support too far → fall back to ATR stop
+    if price - sl < min_risk:
+        sl = price - min_risk                     # support too close → widen for breathing room
+
+    risk = max(price - sl, 0.01)
+
+    # ── Conviction-scaled target as a multiple of risk (R:R is explicit) ─────
+    if   score >= 72: rr_mult = 3.0
+    elif score >= 60: rr_mult = 2.5
+    elif score >= 48: rr_mult = 2.0
+    else:             rr_mult = 1.5               # floor: even weak setups quoted at min viable R:R
+    tp   = price + rr_mult * risk
+    rr   = round((tp - price) / risk, 2)
 
     return round(price, 2), round(sl, 2), round(tp, 2), rr
 

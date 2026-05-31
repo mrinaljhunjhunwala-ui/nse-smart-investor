@@ -42,126 +42,240 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS — modern dark theme ────────────────────────────────────────────
+# ── NSE Pro Design System — trading-dashboard-design skill applied ─────────────
 st.markdown(
     """<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* Global font + smoothing */
-html, body, [class*="css"], .stApp, .stMarkdown, p, div, span, button, input, select {
-    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;
-    -webkit-font-smoothing:antialiased;
+/* ── Global ──────────────────────────────────────────────────────────────── */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    -webkit-font-smoothing: antialiased;
 }
-.stApp { background:radial-gradient(1200px 600px at 50% -10%, #0d1424 0%, #070b12 55%) fixed; }
+.stApp {
+    background: radial-gradient(ellipse 130% 60% at 50% -8%, #0f1e3d 0%, #070c18 65%) fixed;
+}
+.mono { font-family:'JetBrains Mono','Courier New',monospace !important; }
 
-/* Cards — richer gradients + hover lift */
+/* ── Cards ───────────────────────────────────────────────────────────────── */
 .card-green, .card-yellow, .card-red, .card-blue, .card-purple, .card-orange {
-    transition:transform .15s ease, box-shadow .15s ease;
+    transition: transform .18s ease, box-shadow .18s ease;
 }
 .card-green:hover, .card-yellow:hover, .card-red:hover,
 .card-blue:hover, .card-purple:hover, .card-orange:hover {
-    transform:translateY(-2px);
+    transform: translateY(-3px);
 }
-.card-green  { background:linear-gradient(135deg,#0f2a1e,#1a3a2a);
-               border-left:4px solid #26a69a; border-radius:12px;
-               padding:14px 18px; margin:6px 0;
-               box-shadow:0 4px 16px rgba(38,166,154,.18); }
-.card-yellow { background:linear-gradient(135deg,#251f05,#3a3210);
-               border-left:4px solid #f9a825; border-radius:12px;
-               padding:14px 18px; margin:6px 0;
-               box-shadow:0 4px 16px rgba(249,168,37,.18); }
-.card-red    { background:linear-gradient(135deg,#250808,#3a1a1a);
-               border-left:4px solid #ef5350; border-radius:12px;
-               padding:14px 18px; margin:6px 0;
-               box-shadow:0 4px 16px rgba(239,83,80,.18); }
-.card-blue   { background:linear-gradient(135deg,#071428,#0d1f3c);
-               border-left:4px solid #2196F3; border-radius:12px;
-               padding:14px 18px; margin:6px 0;
-               box-shadow:0 4px 16px rgba(33,150,243,.18); }
-.card-purple { background:linear-gradient(135deg,#160d2a,#231440);
-               border-left:4px solid #9c27b0; border-radius:12px;
-               padding:14px 18px; margin:6px 0;
-               box-shadow:0 4px 16px rgba(156,39,176,.18); }
-.card-orange { background:linear-gradient(135deg,#1f1005,#2d1a08);
-               border-left:4px solid #ff9800; border-radius:12px;
-               padding:14px 18px; margin:6px 0;
-               box-shadow:0 4px 16px rgba(255,152,0,.18); }
-.score-big   { font-size:52px; font-weight:800; letter-spacing:-1px; }
-.signal-big  { font-size:22px; font-weight:700; }
-.narrative   { font-size:15px; line-height:1.7; color:#d0d0d0; }
-.ticker-label{ font-size:22px; font-weight:800; color:#fff; }
+.card-green  { background:linear-gradient(135deg,#061f16,#0a2e1f); border-left:3px solid #00d4aa; border-radius:12px; padding:16px 20px; margin:6px 0; box-shadow:0 4px 20px rgba(0,212,170,.12); }
+.card-yellow { background:linear-gradient(135deg,#1f1500,#2e1f00); border-left:3px solid #ff9500; border-radius:12px; padding:16px 20px; margin:6px 0; box-shadow:0 4px 20px rgba(255,149,0,.12); }
+.card-red    { background:linear-gradient(135deg,#1f0608,#2e0a0e); border-left:3px solid #ff4757; border-radius:12px; padding:16px 20px; margin:6px 0; box-shadow:0 4px 20px rgba(255,71,87,.12); }
+.card-blue   { background:linear-gradient(135deg,#040e2a,#081633); border-left:3px solid #5b8def; border-radius:12px; padding:16px 20px; margin:6px 0; box-shadow:0 4px 20px rgba(91,141,239,.12); }
+.card-purple { background:linear-gradient(135deg,#120820,#1c0d30); border-left:3px solid #a78bfa; border-radius:12px; padding:16px 20px; margin:6px 0; box-shadow:0 4px 20px rgba(167,139,250,.12); }
+.card-orange { background:linear-gradient(135deg,#1f0e00,#2d1500); border-left:3px solid #ff9500; border-radius:12px; padding:16px 20px; margin:6px 0; }
 
-/* Metric cards — subtle panel */
+/* ── Score & typography ───────────────────────────────────────────────────── */
+.score-big    { font-size:56px; font-weight:900; letter-spacing:-2px; }
+.signal-big   { font-size:22px; font-weight:700; letter-spacing:.3px; }
+.narrative    { font-size:14px; line-height:1.75; color:#8899bb; }
+.ticker-label { font-size:24px; font-weight:800; color:#f0f4ff; }
+
+/* ── Pills ───────────────────────────────────────────────────────────────── */
+.pill-green  { display:inline-block; background:rgba(0,212,170,.12); color:#00d4aa; border:1px solid rgba(0,212,170,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
+.pill-red    { display:inline-block; background:rgba(255,71,87,.12); color:#ff4757; border:1px solid rgba(255,71,87,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
+.pill-yellow { display:inline-block; background:rgba(255,149,0,.12); color:#ff9500; border:1px solid rgba(255,149,0,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
+.pill-gray   { display:inline-block; background:rgba(255,255,255,.06); color:#8899bb; border:1px solid rgba(255,255,255,.12); border-radius:20px; padding:3px 14px; font-size:12px; }
+.pill-blue   { display:inline-block; background:rgba(91,141,239,.12); color:#5b8def; border:1px solid rgba(91,141,239,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
+
+/* ── Signal badges ───────────────────────────────────────────────────────── */
+.badge-buy   { background:#004d35; color:#00d4aa; border:1px solid #00d4aa; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
+.badge-sell  { background:#4d0009; color:#ff4757; border:1px solid #ff4757; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
+.badge-hold  { background:#4d3800; color:#ff9500; border:1px solid #ff9500; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
+.badge-watch { background:#1a2540; color:#5b8def; border:1px solid #5b8def; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
+
+/* ── Angel One badges ────────────────────────────────────────────────────── */
+.ao-badge-on  { background:linear-gradient(90deg,#061f10,#0a2e18); border:1px solid rgba(0,212,170,.4); border-radius:10px; padding:10px 14px; font-size:12px; color:#00d4aa; margin:4px 0; display:flex; align-items:center; gap:8px; }
+.ao-badge-off { background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:10px 14px; font-size:12px; color:#4a5568; margin:4px 0; display:block; }
+
+/* ── Streamlit metric override ───────────────────────────────────────────── */
 [data-testid="stMetric"] {
-    background:linear-gradient(135deg,#0e1726,#0a121f);
-    border:1px solid rgba(255,255,255,.05);
-    border-radius:12px; padding:12px 16px;
-    box-shadow:0 2px 10px rgba(0,0,0,.25);
+    background: linear-gradient(135deg, #0d1526, #0a1120);
+    border: 1px solid rgba(255,255,255,.05);
+    border-radius: 12px; padding: 14px 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.3);
 }
-[data-testid="stMetricValue"] { font-weight:700; letter-spacing:-.5px; }
+[data-testid="stMetricValue"] { font-weight:800; letter-spacing:-.5px; font-size:24px; }
+[data-testid="stMetricLabel"] { font-size:11px; color:#4a5568; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
 
-/* Buttons — gradient + hover */
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
 .stButton > button {
-    border-radius:9px; font-weight:600; transition:all .15s ease;
-    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px; font-weight:600; letter-spacing:.2px;
+    border: 1px solid rgba(255,255,255,.08); transition: all .15s ease;
+    background: rgba(255,255,255,.04);
 }
-.stButton > button:hover { transform:translateY(-1px); filter:brightness(1.12); }
+.stButton > button:hover { transform:translateY(-1px); filter:brightness(1.15); box-shadow:0 4px 15px rgba(0,0,0,.3); }
 .stButton > button[kind="primary"] {
-    background:linear-gradient(135deg,#1e88e5,#1565c0); border:none;
+    background: linear-gradient(135deg,#1a5fbd,#1248a0); border:none;
+    box-shadow: 0 4px 15px rgba(26,95,189,.35);
 }
 
-/* Tabs — pill style */
-.stTabs [data-baseweb="tab-list"] { gap:6px; }
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px; background: rgba(255,255,255,.02);
+    border-radius: 12px; padding: 4px;
+    border: 1px solid rgba(255,255,255,.04);
+}
 .stTabs [data-baseweb="tab"] {
-    background:#0e1726; border-radius:8px 8px 0 0; padding:8px 16px;
+    border-radius: 9px; padding: 8px 18px; font-weight: 500;
+    color: #4a5568; transition: all .15s;
 }
-.stTabs [aria-selected="true"] { background:#16243c; }
+.stTabs [aria-selected="true"] {
+    background: #0d1526; font-weight: 700; color: #f0f4ff;
+}
 
-/* Sidebar polish */
-[data-testid="stSidebar"] { background:linear-gradient(180deg,#0a1120,#070b12); }
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg,#070c18 0%,#050811 100%);
+    border-right: 1px solid rgba(255,255,255,.04);
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    font-size: 13px; color: #8899bb;
+}
 
-/* Slimmer, themed scrollbars */
-::-webkit-scrollbar { width:10px; height:10px; }
-::-webkit-scrollbar-thumb { background:#1e2a3c; border-radius:5px; }
-::-webkit-scrollbar-thumb:hover { background:#2a3a52; }
-::-webkit-scrollbar-track { background:#0a0f17; }
-.pill-green  { display:inline-block; background:#1b4332; color:#52b788;
-               border:1px solid #52b788; border-radius:20px;
-               padding:2px 12px; font-size:12px; font-weight:600; }
-.pill-red    { display:inline-block; background:#3b0f0f; color:#ff6b6b;
-               border:1px solid #ff6b6b; border-radius:20px;
-               padding:2px 12px; font-size:12px; font-weight:600; }
-.pill-yellow { display:inline-block; background:#3b2800; color:#ffc107;
-               border:1px solid #ffc107; border-radius:20px;
-               padding:2px 12px; font-size:12px; font-weight:600; }
-.pill-gray   { display:inline-block; background:#2a2a2a; color:#aaa;
-               border:1px solid #555; border-radius:20px;
-               padding:2px 12px; font-size:12px; font-weight:600; }
-.pill-blue   { display:inline-block; background:#0d2040; color:#64b5f6;
-               border:1px solid #64b5f6; border-radius:20px;
-               padding:2px 12px; font-size:12px; font-weight:600; }
-.ao-badge-on  { background:linear-gradient(90deg,#0d2a1a,#1a3d28);
-                border:1px solid #2ecc71; border-radius:8px;
-                padding:8px 12px; font-size:12px; color:#2ecc71;
-                margin:4px 0; display:block; }
-.ao-badge-off { background:linear-gradient(90deg,#1e1e1e,#2a2a2a);
-                border:1px solid #555; border-radius:8px;
-                padding:8px 12px; font-size:12px; color:#aaa;
-                margin:4px 0; display:block; }
-.metric-box  { background:#151b24; border-radius:10px;
-               padding:14px 16px; text-align:center; }
-.metric-val  { font-size:28px; font-weight:800; margin:4px 0; }
-.metric-lbl  { font-size:11px; color:#888; text-transform:uppercase;
-               letter-spacing:.8px; }
-.metric-delta-pos { color:#26a69a; font-size:13px; font-weight:600; }
-.metric-delta-neg { color:#ef5350; font-size:13px; font-weight:600; }
-.order-buy  { background:#0d2a1a; border:1px solid #2ecc71;
-              border-radius:10px; padding:16px; }
-.order-sell { background:#2a0d0d; border:1px solid #ef5350;
-              border-radius:10px; padding:16px; }
+/* ── Selectbox / inputs ──────────────────────────────────────────────────── */
+[data-baseweb="select"] > div:first-child {
+    background: #0d1526; border-color: rgba(255,255,255,.08) !important;
+    border-radius: 8px;
+}
+.stTextInput > div > div > input {
+    background: #0d1526; border-color: rgba(255,255,255,.08);
+    border-radius: 8px; color: #f0f4ff;
+}
+.stNumberInput > div > div > input {
+    background: #0d1526; border-color: rgba(255,255,255,.08);
+    border-radius: 8px; color: #f0f4ff;
+}
+
+/* ── Expanders ───────────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: rgba(255,255,255,.02);
+    border: 1px solid rgba(255,255,255,.05) !important;
+    border-radius: 10px;
+}
+
+/* ── DataFrames ──────────────────────────────────────────────────────────── */
+[data-testid="stDataFrame"] { border-radius: 10px; overflow: hidden; }
+[data-testid="stDataFrame"] thead th {
+    background: #0d1526 !important; color: #4a5568 !important;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.06) !important;
+}
+[data-testid="stDataFrame"] tbody td { color: #c8d0e0 !important; }
+[data-testid="stDataFrame"] tbody tr:hover td { background: rgba(91,141,239,.05) !important; }
+
+/* ── Order form ──────────────────────────────────────────────────────────── */
+.order-buy  { background:rgba(0,212,170,.06); border:1px solid rgba(0,212,170,.3); border-radius:12px; padding:18px; }
+.order-sell { background:rgba(255,71,87,.06); border:1px solid rgba(255,71,87,.3); border-radius:12px; padding:18px; }
+
+/* ── Custom metric box ───────────────────────────────────────────────────── */
+.metric-box       { background:#0d1526; border-radius:12px; padding:16px; text-align:center; border:1px solid rgba(255,255,255,.04); }
+.metric-val       { font-size:28px; font-weight:800; margin:4px 0; letter-spacing:-.5px; }
+.metric-lbl       { font-size:11px; color:#4a5568; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+.metric-delta-pos { color:#00d4aa; font-size:13px; font-weight:600; }
+.metric-delta-neg { color:#ff4757; font-size:13px; font-weight:600; }
+
+/* ── Section divider ─────────────────────────────────────────────────────── */
+.sec-div { display:flex; align-items:center; gap:12px; margin:28px 0 18px; }
+.sec-div-label { font-size:11px; font-weight:700; color:#3a4a6a; text-transform:uppercase; letter-spacing:1.5px; white-space:nowrap; }
+.sec-div-line  { flex:1; height:1px; background:linear-gradient(90deg,rgba(255,255,255,.07),transparent); }
+
+/* ── Glassmorphism panel ─────────────────────────────────────────────────── */
+.glass-panel {
+    background: rgba(255,255,255,.03);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 16px; padding: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-thumb { background:#1e2d4a; border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:#2a3d5e; }
+::-webkit-scrollbar-track { background:transparent; }
+
+/* ── Alerts & info boxes ─────────────────────────────────────────────────── */
+[data-testid="stAlert"] { border-radius: 10px; }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(0,212,170,.3)} 50%{box-shadow:0 0 0 8px rgba(0,212,170,0)} }
+@keyframes pulse-red   { 0%,100%{box-shadow:0 0 0 0 rgba(255,71,87,.3)}  50%{box-shadow:0 0 0 8px rgba(255,71,87,0)}  }
+.pulse-green { animation:pulse-green 2s infinite; }
+.pulse-red   { animation:pulse-red 2s infinite; }
+
+@keyframes ticker-scroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+.ticker-wrap { overflow:hidden; border-top:1px solid rgba(255,255,255,.04); border-bottom:1px solid rgba(255,255,255,.04); padding:8px 0; margin:8px 0; }
+.ticker-content { display:inline-block; white-space:nowrap; animation:ticker-scroll 80s linear infinite; font-size:13px; font-family:'JetBrains Mono','Courier New',monospace; }
+.ticker-wrap:hover .ticker-content { animation-play-state:paused; }
 </style>""",
     unsafe_allow_html=True,
 )
+
+
+# ── Design helper functions (NSE Pro — from trading-dashboard-design skill) ───
+def _glass_metric(label: str, value: str, delta: str = "", delta_pos: bool = True) -> str:
+    d_color = "#00d4aa" if delta_pos else "#ff4757"
+    d_sym   = "▲" if delta_pos else "▼"
+    d_html  = (f'<div style="font-size:12px;color:{d_color};margin-top:4px;font-weight:600">'
+               f'{d_sym} {delta}</div>') if delta else ""
+    return (
+        f'<div class="glass-panel" style="text-align:center;min-height:80px">'
+        f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1.2px;font-weight:600">{label}</div>'
+        f'<div style="font-size:24px;font-weight:800;color:#f0f4ff;margin-top:6px;letter-spacing:-.5px">{value}</div>'
+        f'{d_html}</div>'
+    )
+
+def _section_div(label: str, icon: str = "") -> None:
+    st.markdown(
+        f'<div class="sec-div"><div class="sec-div-label">{icon}&nbsp;{label}</div>'
+        f'<div class="sec-div-line"></div></div>',
+        unsafe_allow_html=True,
+    )
+
+def _spacer(size: str = "md") -> None:
+    px = {"sm": "12px", "md": "24px", "lg": "40px"}.get(size, "24px")
+    st.markdown(f'<div style="height:{px}"></div>', unsafe_allow_html=True)
+
+def _signal_card(ticker, action, price, entry, stop, target, reason, score=None, sector="") -> str:
+    COLORS = {
+        "BUY":  ("#00d4aa","#004d35"),
+        "SELL": ("#ff4757","#4d0009"),
+        "HOLD": ("#ff9500","#4d3800"),
+        "WATCH":("#5b8def","#1a2540"),
+    }
+    tc, bc = COLORS.get(action, COLORS["HOLD"])
+    rr = (target - entry) / (entry - stop) if (entry - stop) > 0.01 else 0
+    sc_html = (f'<div style="font-size:30px;font-weight:900;color:{tc}">{score}</div>'
+               f'<div style="font-size:10px;color:#666">SCORE</div>') if score is not None else ""
+    sect_html = (f'<span style="font-size:11px;color:#4a5568;font-weight:400;margin-left:8px">{sector}</span>'
+                 if sector else "")
+    return (
+        f'<div style="background:linear-gradient(135deg,{bc}22,{bc}11);border:1px solid {tc}44;'
+        f'border-left:4px solid {tc};border-radius:12px;padding:16px 20px;margin:8px 0;'
+        f'display:flex;align-items:flex-start;gap:16px">'
+        f'<div style="min-width:60px;text-align:center">{sc_html}'
+        f'<div style="background:{bc};color:{tc};border:1px solid {tc};border-radius:6px;'
+        f'padding:4px 10px;font-size:14px;font-weight:800;letter-spacing:1px;margin-top:4px">{action}</div></div>'
+        f'<div style="flex:1">'
+        f'<div style="font-size:18px;font-weight:800;color:#f0f4ff">{ticker}{sect_html}</div>'
+        f'<div style="font-size:12px;color:#4a5568;margin:4px 0">{reason}</div>'
+        f'<div style="display:flex;gap:20px;margin-top:10px;font-size:13px">'
+        f'<div><span style="color:#4a5568;font-size:11px">LTP</span><br><b style="color:#c8d0e0">₹{price:.2f}</b></div>'
+        f'<div><span style="color:#4a5568;font-size:11px">ENTRY</span><br><b style="color:#c8d0e0">₹{entry:.2f}</b></div>'
+        f'<div><span style="color:#4a5568;font-size:11px">STOP</span><br><b style="color:#ff4757">₹{stop:.2f}</b></div>'
+        f'<div><span style="color:#4a5568;font-size:11px">TARGET</span><br><b style="color:#00d4aa">₹{target:.2f}</b></div>'
+        f'<div><span style="color:#4a5568;font-size:11px">R:R</span><br><b style="color:{tc}">{rr:.1f}x</b></div>'
+        f'</div></div></div>'
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -384,10 +498,44 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("#### 👀 My Watchlist")
 
 # Initialise watchlist in session state with 5 popular defaults
+# Initialise persisted user state (watchlist + sizing settings) from the store
+# once per session, so they survive page refreshes (and redeploys on Postgres).
+if "_user_state_loaded" not in st.session_state:
+    try:
+        import trade_store as _ts_init
+        _saved_wl = _ts_init.kv_get("watchlist", None)
+        st.session_state["watchlist"] = _saved_wl if _saved_wl else [
+            "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"
+        ]
+        st.session_state["trade_capital"] = float(_ts_init.kv_get("trade_capital", 500_000))
+        st.session_state["risk_pct"]      = float(_ts_init.kv_get("risk_pct", 1.0))
+    except Exception:
+        st.session_state.setdefault("watchlist",
+            ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"])
+    st.session_state["_user_state_loaded"] = True
+
 if "watchlist" not in st.session_state:
     st.session_state["watchlist"] = [
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"
     ]
+
+
+def _persist_user_state():
+    """Save watchlist + sizing settings to the store if they changed since last save."""
+    try:
+        import trade_store as _ts_p
+        _snap = (
+            tuple(st.session_state.get("watchlist", [])),
+            st.session_state.get("trade_capital"),
+            st.session_state.get("risk_pct"),
+        )
+        if st.session_state.get("_user_state_snapshot") != _snap:
+            _ts_p.kv_set("watchlist", list(st.session_state.get("watchlist", [])))
+            _ts_p.kv_set("trade_capital", st.session_state.get("trade_capital", 500_000))
+            _ts_p.kv_set("risk_pct", st.session_state.get("risk_pct", 1.0))
+            st.session_state["_user_state_snapshot"] = _snap
+    except Exception:
+        pass
 
 _wl_add_col, _wl_btn_col = st.sidebar.columns([3, 1])
 with _wl_add_col:
@@ -468,6 +616,9 @@ with st.sidebar.expander("⚙️ Position Sizing", expanded=False):
     )
     _eg = st.session_state["trade_capital"] * st.session_state["risk_pct"] / 100
     st.caption(f"→ Risking up to **₹{_eg:,.0f}** per trade.")
+
+# Persist watchlist + sizing settings whenever they change (survives refresh)
+_persist_user_state()
 
 # ── Storage backend badge (paper trades persistence) ──────────────────────────
 try:
@@ -1406,25 +1557,45 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
                 marker_color=hist_colors, opacity=0.6,
             ), row=4, col=1)
 
+    # ── NSE Pro Plotly layout ────────────────────────────────────────────────
+    _NSE_GRID = dict(gridcolor="rgba(255,255,255,.04)", linecolor="rgba(255,255,255,.06)")
+    _NSE_TICK = dict(color="#4a5568", size=10)
     fig.update_layout(
-        height=740, template="plotly_dark",
+        height=720,
+        paper_bgcolor="#070c18",
+        plot_bgcolor="#0a1020",
         xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", y=1.03, font=dict(size=11)),
-        margin=dict(l=0, r=0, t=44, b=0),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(17,17,34,1)",
+        font=dict(family="Inter, -apple-system, sans-serif", color="#8899bb", size=11),
+        legend=dict(
+            orientation="h", y=1.02, x=0,
+            bgcolor="rgba(7,12,24,.85)",
+            bordercolor="rgba(255,255,255,.06)", borderwidth=1,
+            font=dict(color="#8899bb", size=11),
+        ),
+        margin=dict(l=0, r=60, t=40, b=0),
+        hoverlabel=dict(
+            bgcolor="#0d1526", bordercolor="rgba(255,255,255,.1)",
+            font=dict(color="#f0f4ff", family="Inter", size=12),
+        ),
+        hovermode="x unified",
     )
-    # Axis labels
-    fig.update_yaxes(title_text="Price (₹)", row=1, col=1,
-                     title_font=dict(size=10), tickfont=dict(size=9))
-    fig.update_yaxes(title_text="Vol", row=2, col=1,
-                     title_font=dict(size=10), tickfont=dict(size=9),
-                     tickformat=".2s")
-    fig.update_yaxes(title_text="RSI", row=3, col=1,
-                     title_font=dict(size=10), tickfont=dict(size=9),
-                     range=[0, 100])
-    fig.update_yaxes(title_text="MACD", row=4, col=1,
-                     title_font=dict(size=10), tickfont=dict(size=9))
+    # Apply grid style to all rows
+    for row in range(1, 5):
+        fig.update_xaxes(
+            **_NSE_GRID, zeroline=False, tickfont=_NSE_TICK,
+            row=row, col=1,
+        )
+        fig.update_yaxes(
+            **_NSE_GRID, zeroline=False, tickfont=_NSE_TICK,
+            side="right", row=row, col=1,
+        )
+    fig.update_yaxes(title_text="₹ Price",  title_font=dict(size=10,color="#4a5568"), row=1, col=1)
+    fig.update_yaxes(title_text="Volume",   title_font=dict(size=10,color="#4a5568"), tickformat=".2s", row=2, col=1)
+    fig.update_yaxes(title_text="RSI",      title_font=dict(size=10,color="#4a5568"), range=[0,100], row=3, col=1)
+    fig.update_yaxes(title_text="MACD",     title_font=dict(size=10,color="#4a5568"), row=4, col=1)
+    # Spike lines for crosshair
+    fig.update_xaxes(showspikes=True, spikethickness=1, spikecolor="#5a6a8a", spikedash="dot")
+    fig.update_yaxes(showspikes=True, spikethickness=1, spikecolor="#5a6a8a")
     return fig
 
 
@@ -1468,8 +1639,10 @@ try:
 
     if _tb_parts:
         st.markdown(
-            '<div style="background:#1a1a2e;border-radius:8px;padding:10px 18px;'
-            'margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap;">'
+            '<div style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);'
+            'border-radius:10px;padding:10px 18px;margin-bottom:16px;'
+            'display:flex;align-items:center;flex-wrap:wrap;gap:4px;'
+            'backdrop-filter:blur(8px)">'
             + "".join(_tb_parts) +
             '</div>',
             unsafe_allow_html=True,
@@ -2460,11 +2633,11 @@ elif page == "🏠 My Portfolio":
             st.caption(f"Live price strip skipped: {_e}")
 
         st.markdown("---")
-        with st.spinner("Scoring your portfolio… this takes 30–60 seconds for 5–10 stocks"):
+        with st.spinner("Scoring your portfolio (parallel)… ~10–20 s for 5–10 stocks"):
             try:
                 from analysis.portfolio_manager import PortfolioManager
                 pm = PortfolioManager(_csv_source)
-                summary = pm.mark_to_market()
+                summary = pm.mark_to_market(parallel=True)
 
                 # ── Top summary banner ─────────────────────────────────────
                 pnl_sign = "+" if summary.total_pnl >= 0 else ""
