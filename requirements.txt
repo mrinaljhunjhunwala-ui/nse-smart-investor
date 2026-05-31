@@ -36,6 +36,11 @@ xgboost>=2.0.0
 # ── TOTP generation (for Angel One SmartAPI authentication) ──────────────────
 pyotp>=2.8.0
 
+# ── Persistent paper-trade storage (Postgres backend, optional) ──────────────
+# Only used when a DATABASE_URL / [database].url secret is set; without it the
+# app falls back to local SQLite. Kept installed so enabling it needs no redeploy.
+psycopg2-binary>=2.9.0
+
 # ── Optional: live broker integrations ───────────────────────────────────────
 # kiteconnect>=4.2.0     # Zerodha Kite Connect
 # smartapi-python>=1.3.8 # Angel One SmartAPI (not needed — we use direct urllib)
