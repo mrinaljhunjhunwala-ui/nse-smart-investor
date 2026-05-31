@@ -1,0 +1,13 @@
+# NSE Pro theme — makes Streamlit's native widgets (buttons, sliders, selectboxes,
+# radios, tabs, links) adopt the saffron + navy palette. The custom CSS in app.py
+# layers on top of this. Without this block, native widgets stay default-blue.
+[theme]
+base                     = "dark"
+primaryColor             = "#ff9500"
+backgroundColor          = "#070c18"
+secondaryBackgroundColor = "#0d1526"
+textColor                = "#f0f4ff"
+font                     = "sans serif"
+
+[server]
+headless = true
