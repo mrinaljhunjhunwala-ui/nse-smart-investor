@@ -449,6 +449,36 @@ if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
     st.session_state["watchlist"].remove(_wl_to_remove)
     st.rerun()
 
+# ── Position-sizing settings (drive all suggested quantities) ─────────────────
+st.sidebar.markdown("---")
+with st.sidebar.expander("⚙️ Position Sizing", expanded=False):
+    st.caption("Used to suggest how many shares to buy on every Paper Trade button.")
+    st.session_state["trade_capital"] = st.number_input(
+        "Trading capital (₹)", min_value=10_000, max_value=100_000_000,
+        value=int(st.session_state.get("trade_capital", 500_000)), step=10_000,
+        key="sb_trade_capital",
+        help="Your total trading capital. Suggested quantity is sized against this.",
+    )
+    st.session_state["risk_pct"] = st.slider(
+        "Risk per trade (%)", min_value=0.25, max_value=5.0,
+        value=float(st.session_state.get("risk_pct", 1.0)), step=0.25,
+        key="sb_risk_pct",
+        help="Max % of capital you're willing to lose if the stop-loss is hit. "
+             "1% is the common rule.",
+    )
+    _eg = st.session_state["trade_capital"] * st.session_state["risk_pct"] / 100
+    st.caption(f"→ Risking up to **₹{_eg:,.0f}** per trade.")
+
+# ── Storage backend badge (paper trades persistence) ──────────────────────────
+try:
+    import trade_store as _ts_badge
+    if _ts_badge.backend_name() == "postgres":
+        st.sidebar.caption("🟢 Paper trades: cloud DB (persistent)")
+    else:
+        st.sidebar.caption("🟡 Paper trades: local (resets on redeploy) — see dashboard/DB_SETUP.md")
+except Exception:
+    pass
+
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     "⚠️ *For educational use only.*  \n"
@@ -746,6 +776,47 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
         }
 
 
+@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache, whole watchlist
+def _score_watchlist(tickers: tuple, vix_regime: str = "normal") -> dict:
+    """
+    Score a whole watchlist IN PARALLEL (one thread per stock) and cache the
+    result for 30 min. Calls score_stock directly (not the cached single-stock
+    wrapper) so it is safe to run inside worker threads. Returns {ticker: score_dict}.
+    """
+    import concurrent.futures as _cf
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+    _vix = {"regime": vix_regime, "vix": None,
+            "allow_buy": vix_regime not in ("fear", "panic")}
+
+    def _one(tk):
+        try:
+            from analysis.score import score_stock
+            s = score_stock(tk, vix_info=_vix)
+            return tk, {"ticker": tk, "price": s.price, "score": s.score,
+                        "grade": s.grade, "action": s.action, "headline": s.headline,
+                        "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward}
+        except Exception as e:
+            return tk, {"ticker": tk, "price": 0, "score": 0, "grade": "?",
+                        "action": "UNAVAILABLE",
+                        "headline": f"Data unavailable ({type(e).__name__})",
+                        "entry": 0, "sl": 0, "tp": 0, "rr": 0}
+
+    out: dict = {}
+    if not tickers:
+        return out
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=min(8, max(1, len(tickers)))) as ex:
+            for tk, sc in ex.map(_one, tickers):
+                out[tk] = sc
+    except Exception:
+        for tk in tickers:
+            _tk, _sc = _one(tk)
+            out[_tk] = _sc
+    return out
+
+
 # Curated liquid large/mid-cap universe for the home-page "Top Picks" scan.
 # Kept ~36 names so a full scan finishes fast (Angel One: ~15-25 s) and stays cached.
 _HOME_SCAN_UNIVERSE = [
@@ -830,75 +901,34 @@ def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
             return pd.DataFrame()
 
 
+# ── Paper-trade storage — delegates to trade_store (SQLite default, Postgres
+#    if DATABASE_URL/secrets configured). `path` kept for signature compat. ────
+import trade_store as _store
+
+
 def load_trades_by_account(account: str, path: str = "trades.db") -> pd.DataFrame:
     """Load trades filtered to a specific paper trading account."""
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    with sqlite3.connect(path) as conn:
-        try:
-            return pd.read_sql_query(
-                "SELECT * FROM trades WHERE account=? ORDER BY id DESC", conn, params=(account,)
-            )
-        except Exception:
-            return pd.DataFrame()
+    return _store.load_by_account(account)
 
 
 def _ensure_paper_db(path: str = "trades.db"):
-    """Create paper-trading SQLite tables; migrate to add account column if missing."""
-    with sqlite3.connect(path) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS trades (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                account     TEXT    NOT NULL DEFAULT 'My Account',
-                ticker      TEXT    NOT NULL,
-                strategy    TEXT    NOT NULL DEFAULT 'Manual',
-                action      TEXT    NOT NULL,
-                price       REAL    NOT NULL,
-                quantity    INTEGER NOT NULL,
-                sl          REAL,
-                tp          REAL,
-                trail_stop  REAL,
-                capital     REAL,
-                reason      TEXT,
-                timestamp   TEXT    NOT NULL,
-                status      TEXT    DEFAULT 'OPEN',
-                exit_price  REAL,
-                exit_reason TEXT,
-                exit_time   TEXT,
-                pnl         REAL,
-                pnl_pct     REAL
-            )
-        """)
-        # Migration: add account column to existing DBs that don't have it
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
-        if "account" not in cols:
-            conn.execute("ALTER TABLE trades ADD COLUMN account TEXT NOT NULL DEFAULT 'My Account'")
-        conn.commit()
+    """Ensure the trades schema exists on the active backend."""
+    _store.ensure_schema()
 
 
 def paper_list_accounts(path: str = "trades.db") -> list:
     """Return sorted list of distinct account names."""
-    _ensure_paper_db(path)
-    with sqlite3.connect(path) as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT account FROM trades ORDER BY account"
-        ).fetchall()
-    names = [r[0] for r in rows if r[0]]
-    return names if names else ["My Account"]
+    return _store.list_accounts()
 
 
 def paper_rename_account(old_name: str, new_name: str, path: str = "trades.db"):
     """Rename an account across all its trades."""
-    with sqlite3.connect(path) as conn:
-        conn.execute("UPDATE trades SET account=? WHERE account=?", (new_name, old_name))
-        conn.commit()
+    _store.rename_account(old_name, new_name)
 
 
 def paper_delete_account(name: str, path: str = "trades.db"):
     """Delete all trades in an account."""
-    with sqlite3.connect(path) as conn:
-        conn.execute("DELETE FROM trades WHERE account=?", (name,))
-        conn.commit()
+    _store.delete_account(name)
 
 
 def paper_open_trade(ticker: str, price: float, qty: int,
@@ -906,55 +936,19 @@ def paper_open_trade(ticker: str, price: float, qty: int,
                      account: str = "My Account",
                      path: str = "trades.db") -> int:
     """Insert a new paper BUY trade. Returns new row id."""
-    _ensure_paper_db(path)
-    now = __import__("datetime").datetime.now().isoformat()
-    with sqlite3.connect(path) as conn:
-        cur = conn.execute(
-            "INSERT INTO trades (account,ticker,strategy,action,price,quantity,sl,tp,capital,reason,timestamp) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (account, ticker, "Manual", "BUY", price, qty, sl, tp, price * qty, reason, now)
-        )
-        conn.commit()
-        return cur.lastrowid
+    return _store.open_trade(ticker, price, qty, sl, tp, reason=reason, account=account)
 
 
 def paper_close_trade(trade_id: int, exit_price: float,
                       reason: str = "Manual close", path: str = "trades.db"):
     """Close an open paper trade by ID."""
-    now = __import__("datetime").datetime.now().isoformat()
-    with sqlite3.connect(path) as conn:
-        row = conn.execute(
-            "SELECT price, quantity FROM trades WHERE id=?", (trade_id,)
-        ).fetchone()
-        if not row:
-            return
-        entry_price, qty = row
-        pnl     = (exit_price - entry_price) * qty
-        pnl_pct = (exit_price / entry_price - 1) * 100 if entry_price > 0 else 0
-        conn.execute(
-            "UPDATE trades SET status='CLOSED', exit_price=?, exit_time=?, "
-            "exit_reason=?, pnl=?, pnl_pct=? WHERE id=?",
-            (exit_price, now, reason, pnl, pnl_pct, trade_id)
-        )
-        conn.commit()
+    _store.close_trade(trade_id, exit_price, reason=reason)
 
 
 def paper_edit_trade(trade_id: int, sl: float = None, tp: float = None,
                      reason: str = None, path: str = "trades.db"):
     """Edit stop-loss, target, or reason of an open trade."""
-    fields, vals = [], []
-    if sl is not None:
-        fields.append("sl=?"); vals.append(sl)
-    if tp is not None:
-        fields.append("tp=?"); vals.append(tp)
-    if reason is not None:
-        fields.append("reason=?"); vals.append(reason)
-    if not fields:
-        return
-    vals.append(trade_id)
-    with sqlite3.connect(path) as conn:
-        conn.execute(f"UPDATE trades SET {', '.join(fields)} WHERE id=?", vals)
-        conn.commit()
+    _store.edit_trade(trade_id, sl=sl, tp=tp, reason=reason)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1003,8 +997,8 @@ def _grade_color(grade: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _suggest_position(entry: float, sl: float,
-                      capital: float = 500_000.0,
-                      risk_pct: float = 1.0,
+                      capital: float = None,
+                      risk_pct: float = None,
                       max_alloc_pct: float = 20.0) -> dict:
     """
     Suggest share quantity for a trade using fixed-fractional risk sizing.
@@ -1012,8 +1006,15 @@ def _suggest_position(entry: float, sl: float,
     Sizes so that (entry - sl) × qty ≈ risk_pct% of capital, then caps the
     position at max_alloc_pct% of capital so a single name can't dominate.
 
+    capital / risk_pct default to the user's settings in session_state
+    (set in the sidebar), falling back to ₹5,00,000 and 1%.
+
     Returns: {qty, price, risk_per_share, capital_at_risk, position_value, basis}
     """
+    if capital is None:
+        capital = float(st.session_state.get("trade_capital", 500_000.0))
+    if risk_pct is None:
+        risk_pct = float(st.session_state.get("risk_pct", 1.0))
     entry = float(entry or 0)
     sl    = float(sl or 0)
     if entry <= 0:
@@ -1055,12 +1056,14 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
     """
     sugg  = _suggest_position(entry, sl)
     _tlbl = ticker.replace(".NS", "")
+    _cap  = float(st.session_state.get("trade_capital", 500_000.0))
+    _rkp  = float(st.session_state.get("risk_pct", 1.0))
     with st.popover(label, use_container_width=True):
         st.markdown(f"**{_tlbl}** — open paper trade")
         st.caption(
             f"💡 Suggested **{sugg['qty']} shares** — sizes your loss-to-stop to "
-            f"≈1% of ₹5,00,000 (₹{sugg['capital_at_risk']:,.0f} at risk). "
-            f"Adjust below if you want a different size."
+            f"≈{_rkp:.2g}% of ₹{_cap:,.0f} (₹{sugg['capital_at_risk']:,.0f} at risk). "
+            f"Change capital & risk in the sidebar; adjust qty below."
         )
         qty = st.number_input(
             "Quantity (shares)", min_value=1, max_value=1_000_000,
@@ -1103,15 +1106,7 @@ def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
     except Exception:
         pass
     try:
-        _ensure_paper_db(path)
-        with sqlite3.connect(path) as conn:
-            if account:
-                rows = pd.read_sql_query(
-                    "SELECT * FROM trades WHERE status='OPEN' AND account=?",
-                    conn, params=(account,))
-            else:
-                rows = pd.read_sql_query(
-                    "SELECT * FROM trades WHERE status='OPEN'", conn)
+        rows = _store.fetch_open(account)
         if rows.empty:
             return closed
 
@@ -1932,11 +1927,7 @@ elif page == "🎯 Command Centre":
 
     _cc_open_df = pd.DataFrame()
     try:
-        _ensure_paper_db()
-        with sqlite3.connect("trades.db") as _cc_conn:
-            _cc_open_df = pd.read_sql_query(
-                "SELECT * FROM trades WHERE status='OPEN' ORDER BY timestamp DESC", _cc_conn
-            )
+        _cc_open_df = _store.fetch_open()
     except Exception:
         pass
 
@@ -2096,13 +2087,8 @@ elif page == "🎯 Command Centre":
         if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
             st.cache_data.clear(); st.rerun()
 
-    _cc_prog = st.progress(0, text="Scoring your watchlist…")
-    _cc_scores: dict = {}
-    for _cci, _cct in enumerate(_cc_wl):
-        _cc_scores[_cct] = _score_for_cc(_cct, vix_regime=_cc_vix_r)
-        _cc_prog.progress((_cci + 1) / len(_cc_wl),
-                          text=f"Scoring {_cct.replace('.NS','')}… ({_cci+1}/{len(_cc_wl)})")
-    _cc_prog.empty()
+    with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 30 min)…"):
+        _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r)
 
     # Sort: BUY signals first, EXIT last
     _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
