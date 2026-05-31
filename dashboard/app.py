@@ -1030,16 +1030,33 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 5) -> dict:
     return {"buys": buys[:n], "sells": sells[:n]}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)   # 1-hour cache — heavy multi-fetch
+def _sector_ranking():
+    """
+    Rank all NSE sectors by constituent momentum (cached 1 h). Returns a
+    DataFrame indexed by sector with a 'Rank' column for score_stock(), or None.
+    """
+    try:
+        from analysis.sector_strength import rank_sectors
+        return rank_sectors()
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=600)
 def get_composite_score(ticker: str):
     """
     Score a stock using a fixed 1-year lookback.
     Scoring always uses 1Y regardless of what the chart display period is —
     SMA_200, RSI divergence, and momentum all need a full year to be valid.
+    Sector strength is fed in so the Sentiment component reflects real sector
+    leadership instead of a neutral default.
     """
     from analysis.score import score_stock
     vix_info = get_vix_info()
-    return score_stock(ticker, period="1y", vix_info=vix_info)
+    sectors  = _sector_ranking()
+    return score_stock(ticker, period="1y", vix_info=vix_info,
+                       sector_scores_df=sectors)
 
 
 def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
