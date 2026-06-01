@@ -1216,6 +1216,23 @@ def paper_edit_trade(trade_id: int, sl: float = None, tp: float = None,
     _store.edit_trade(trade_id, sl=sl, tp=tp, reason=reason)
 
 
+# ── Account product type (CNC = delivery, MIS = intraday) ─────────────────────
+def paper_account_type(name: str) -> str:
+    """Return 'MIS' (intraday) or 'CNC' (delivery) for an account; default CNC."""
+    try:
+        return _store.kv_get(f"acct_type:{name}", "CNC") or "CNC"
+    except Exception:
+        return "CNC"
+
+
+def set_paper_account_type(name: str, atype: str) -> None:
+    try:
+        _store.kv_set(f"acct_type:{name}", "MIS" if str(atype).upper().startswith("MIS")
+                      or "INTRA" in str(atype).upper() else "CNC")
+    except Exception:
+        pass
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def _portfolio_live_prices(tickers: tuple) -> dict:
     """
@@ -3796,23 +3813,33 @@ elif page == "📂 Paper Trades":
                 label_visibility="collapsed",
             )
             st.session_state["pt_account"] = _selected_account
-            st.caption(f"📂 Active: **{_selected_account}**")
+            _acc_type = paper_account_type(_selected_account)
+            _at_badge = ("🔆 INTRADAY (MIS)" if _acc_type == "MIS" else "📦 DELIVERY (CNC)")
+            _at_col   = "#ff9500" if _acc_type == "MIS" else "#5b8def"
+            st.markdown(
+                f'<span style="font-size:11px">📂 <b>{_selected_account}</b> '
+                f'<span style="color:{_at_col};font-weight:700">· {_at_badge}</span></span>',
+                unsafe_allow_html=True,
+            )
 
         with _acc_c2:
             _new_acc_name = st.text_input(
                 "New account name", value="", placeholder="New account…",
                 label_visibility="collapsed", key="pt_new_acc_input"
             ).strip()
+            _new_acc_type = st.radio(
+                "Type", ["Delivery", "Intraday"], horizontal=True,
+                label_visibility="collapsed", key="pt_new_acc_type",
+            )
 
         with _acc_c3:
             st.write("")
             if st.button("➕ Create", key="pt_create_acc", use_container_width=True):
                 if _new_acc_name and _new_acc_name not in _all_accounts:
-                    # Create account by inserting a placeholder row then deleting it —
-                    # simpler: just store the name in session_state; it appears on first trade.
-                    # So we just switch to it immediately.
+                    set_paper_account_type(_new_acc_name,
+                                           "MIS" if _new_acc_type == "Intraday" else "CNC")
                     st.session_state["pt_account"] = _new_acc_name
-                    st.success(f"Account **{_new_acc_name}** created. Open your first trade to save it.")
+                    st.success(f"**{_new_acc_name}** ({_new_acc_type}) created. Open your first trade to save it.")
                     st.rerun()
                 elif _new_acc_name in _all_accounts:
                     st.warning("Account already exists.")
@@ -3856,6 +3883,27 @@ elif page == "📂 Paper Trades":
                 st.session_state["pt_account"] = _remaining[0] if _remaining else "My Account"
                 st.success(f"Account **{_selected_account}** deleted.")
                 st.rerun()
+
+    # ── Intraday (MIS) square-off reminder ─────────────────────────────────────
+    if paper_account_type(_selected_account) == "MIS":
+        import datetime as _sqdt
+        _ist_now = _sqdt.datetime.now(_sqdt.timezone(_sqdt.timedelta(hours=5, minutes=30)))
+        _is_weekday = _ist_now.weekday() < 5
+        _mins_to_close = (15 * 60 + 20) - (_ist_now.hour * 60 + _ist_now.minute)  # to 3:20 PM
+        if _is_weekday and 0 < _mins_to_close <= 60:
+            st.markdown(
+                f'<div class="card-red pulse-red" style="margin:6px 0">'
+                f'⏰ <b>Intraday square-off in {_mins_to_close} min</b> (by 3:20 PM). '
+                f'Close MIS positions now — brokers auto-square-off intraday trades near close.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="card-yellow" style="margin:6px 0">'
+                '🔆 <b>Intraday (MIS) account</b> — positions are meant to be closed the same day '
+                '(by ~3:20 PM). Use tighter stops than delivery.</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
 
