@@ -714,6 +714,41 @@ with st.sidebar.expander(f"🔔 Notifications ({_nb_count})", expanded=_nb_count
     else:
         st.caption("✅ All clear — no positions at SL/TP, market calm.")
 
+# ── Sound + desktop alert on a NEW SL/TP hit (fires once per new alert) ────────
+try:
+    _sltp = [m for _i, m, _c in _notifs if "hit target" in m or "hit stop" in m]
+    _alert_key = "|".join(sorted(_sltp))
+    if _sltp and st.session_state.get("_last_alert_key") != _alert_key:
+        st.session_state["_last_alert_key"] = _alert_key
+        import streamlit.components.v1 as _components
+        _amsg = _sltp[0].replace('"', "'")[:90]
+        _components.html(
+            f"""<script>
+            try {{
+                var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                [880, 1175].forEach(function(f, i) {{
+                    var o = ctx.createOscillator(), g = ctx.createGain();
+                    o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+                    g.gain.setValueAtTime(0.0001, ctx.currentTime + i*0.18);
+                    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + i*0.18 + 0.02);
+                    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i*0.18 + 0.16);
+                    o.start(ctx.currentTime + i*0.18); o.stop(ctx.currentTime + i*0.18 + 0.17);
+                }});
+            }} catch(e) {{}}
+            try {{
+                var show = function() {{ new Notification("📈 NSE Smart Investor", {{ body: "{_amsg}" }}); }};
+                if (window.Notification) {{
+                    if (Notification.permission === "granted") show();
+                    else if (Notification.permission !== "denied")
+                        Notification.requestPermission().then(function(p) {{ if (p === "granted") show(); }});
+                }}
+            }} catch(e) {{}}
+            </script>""",
+            height=0,
+        )
+except Exception:
+    pass
+
 # ── Position-sizing settings (drive all suggested quantities) ─────────────────
 st.sidebar.markdown("---")
 with st.sidebar.expander("⚙️ Position Sizing", expanded=False):
@@ -3104,7 +3139,33 @@ elif page == "🏠 My Portfolio":
 
                 # ── Holdings cards (2-column grid) ────────────────────────
                 st.markdown("---")
-                st.subheader("📋 Your Holdings — What to Do")
+                _hh1, _hh2 = st.columns([3, 2])
+                _hh1.subheader("📋 Your Holdings — What to Do")
+                with _hh2:
+                    _h_sort = st.selectbox(
+                        "Sort by",
+                        ["Total P&L (high→low)", "Total P&L (low→high)", "Today's change",
+                         "Score (best first)", "Value (high→low)", "Action (buy→exit)"],
+                        key="pf_holdings_sort", label_visibility="collapsed",
+                    )
+                _ACT_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2, "HOLD": 3,
+                              "CAUTION": 4, "EXIT": 5}
+                _hold_sorted = list(summary.holdings)
+                try:
+                    if _h_sort == "Total P&L (high→low)":
+                        _hold_sorted.sort(key=lambda h: -h.pnl)
+                    elif _h_sort == "Total P&L (low→high)":
+                        _hold_sorted.sort(key=lambda h: h.pnl)
+                    elif _h_sort == "Today's change":
+                        _hold_sorted.sort(key=lambda h: -getattr(h, "pnl_pct", 0))
+                    elif _h_sort == "Score (best first)":
+                        _hold_sorted.sort(key=lambda h: -getattr(h, "score", 0))
+                    elif _h_sort == "Value (high→low)":
+                        _hold_sorted.sort(key=lambda h: -(h.current_price * h.quantity))
+                    elif _h_sort == "Action (buy→exit)":
+                        _hold_sorted.sort(key=lambda h: _ACT_ORDER.get(h.action, 9))
+                except Exception:
+                    _hold_sorted = list(summary.holdings)
 
                 _ACT_CARD_STYLE = {
                     "STRONG BUY": ("#26a69a", "#0a2a1a"), "BUY": ("#4CAF50", "#0d2510"),
@@ -3112,7 +3173,7 @@ elif page == "🏠 My Portfolio":
                     "CAUTION":    ("#FF9800", "#1a1200"),  "EXIT": ("#ef5350", "#2a0a0a"),
                 }
                 _hc_grid = st.columns(2)
-                for _hi, h in enumerate(summary.holdings):
+                for _hi, h in enumerate(_hold_sorted):
                     _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#9E9E9E", "#1a1a1a"))
                     _h_emoji = _action_emoji(h.action)
                     _h_pnl_c = "#26a69a" if h.pnl >= 0 else "#ef5350"
