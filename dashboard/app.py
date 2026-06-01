@@ -667,6 +667,53 @@ with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
     except Exception as _qe:
         st.caption(f"Quick view unavailable: {str(_qe)[:50]}")
 
+# ── Notification bell (sidebar — visible on every page) ───────────────────────
+_notifs = []
+try:
+    import trade_store as _nb
+    _nb_open = _nb.fetch_open()
+    if _nb_open is not None and not _nb_open.empty:
+        _nb_syms = tuple(_nb_open["ticker"].tolist())
+        _nb_lp = _qv_prices(_nb_syms)
+        for _, _nr in _nb_open.iterrows():
+            _ncur = _nb_lp.get(str(_nr["ticker"]), {}).get("price")
+            if _ncur is None:
+                continue
+            _nsl = float(_nr.get("sl", 0) or 0)
+            _ntp = float(_nr.get("tp", 0) or 0)
+            _nt = str(_nr["ticker"]).replace(".NS", "")
+            if _ntp and _ncur >= _ntp:
+                _notifs.append(("🎯", f"{_nt} hit target ₹{_ntp:,.2f}", "#00d4aa"))
+            elif _nsl and _ncur <= _nsl:
+                _notifs.append(("🚨", f"{_nt} hit stop ₹{_nsl:,.2f}", "#ff4757"))
+except Exception:
+    pass
+try:
+    from utils.vix import get_india_vix_regime as _nb_vix
+    _nvr = _nb_vix().get("regime", "normal")
+    if _nvr in ("fear", "panic"):
+        _notifs.append(("🔴", f"Market in {_nvr.upper()} (VIX) — protect capital", "#ff4757"))
+    elif _nvr == "complacency":
+        _notifs.append(("😴", "VIX complacent — tighten stops", "#ff9500"))
+except Exception:
+    pass
+
+st.sidebar.markdown("---")
+_nb_count = len(_notifs)
+_nb_color = "#ff4757" if any(c == "#ff4757" for _, _, c in _notifs) else ("#00d4aa" if _nb_count else "#4a5568")
+with st.sidebar.expander(f"🔔 Notifications ({_nb_count})", expanded=_nb_count > 0):
+    if _notifs:
+        for _ic, _msg, _col in _notifs:
+            st.markdown(
+                f'<div style="border-left:3px solid {_col};background:rgba(255,255,255,.02);'
+                f'border-radius:6px;padding:7px 11px;margin:4px 0;font-size:12px;color:#d0d0d0">'
+                f'{_ic} {_msg}</div>', unsafe_allow_html=True)
+        if st.button("🎯 Go to Command Centre", key="nb_goto_cc", use_container_width=True):
+            st.session_state["nav"] = "🎯 Command Centre"
+            st.rerun()
+    else:
+        st.caption("✅ All clear — no positions at SL/TP, market calm.")
+
 # ── Position-sizing settings (drive all suggested quantities) ─────────────────
 st.sidebar.markdown("---")
 with st.sidebar.expander("⚙️ Position Sizing", expanded=False):
@@ -902,6 +949,23 @@ _TICKER_TO_NAME = {v: k for k, v in STOCK_SEARCH_MAP.items()}
 def get_display_name(ticker: str) -> str:
     t = ticker if ticker.endswith(".NS") else ticker + ".NS"
     return _TICKER_TO_NAME.get(t, ticker.replace(".NS", ""))
+
+
+def _trade_type(headline: str) -> tuple:
+    """
+    Categorise a setup into a trade type from its narrative headline.
+    Returns (label, emoji, color). Zero extra data needed.
+    """
+    h = (headline or "").lower()
+    if any(k in h for k in ("breakout", "52-week high", "52w high", "new high", "all-time high")):
+        return ("Breakout", "🚀", "#00d4aa")
+    if any(k in h for k in ("oversold", "bounce", "reversal", "support")):
+        return ("Oversold Bounce", "🔄", "#5b8def")
+    if any(k in h for k in ("momentum", "uptrend", "above sma", "strong trend", "trending")):
+        return ("Momentum", "📈", "#ff9500")
+    if any(k in h for k in ("pullback", "dip")):
+        return ("Pullback", "🎯", "#a78bfa")
+    return ("Trend", "•", "#8899bb")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2442,14 +2506,21 @@ elif page == "🎯 Command Centre":
                 _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
                 _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
                             f'{_bs["qty"]} sh</span>') if _bs else ""
+                _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
+                _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
+                              else "B" if _b["score"] >= 62 else "")
+                _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
+                               f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
+                               f'GRADE {_grade_tag}</span>') if _grade_tag else ""
                 st.markdown(
                     f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
                     f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>'
+                    f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}</span>'
                     f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
                     f'</div>'
-                    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_b["headline"]}</div>'
+                    f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
+                    f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
                     + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
                        f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
                        if _b["entry"] else "")
