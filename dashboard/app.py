@@ -1957,6 +1957,67 @@ try:
 except Exception:
     pass  # live bar is cosmetic — never break the page over it
 
+# ── Index explorer: open any index to see its stocks + day changes ────────────
+# Maps each index label to its constituent ticker list (from the app universe).
+_INDEX_CONSTITUENTS = {
+    "NIFTY 50":     ("universe", "nifty50"),
+    "BANK NIFTY":   ("sector",   "Banking"),
+    "NIFTY IT":     ("sector",   "IT"),
+    "NIFTY AUTO":   ("sector",   "Auto"),
+    "NIFTY FMCG":   ("sector",   "FMCG"),
+    "NIFTY PHARMA": ("sector",   "Pharma"),
+    "NIFTY METAL":  ("sector",   "Metal"),
+    "NIFTY ENERGY": ("sector",   "Energy"),
+}
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _index_constituent_rows(index_label: str):
+    """Return [(ticker, price, chg%), …] for an index's constituents (live)."""
+    try:
+        kind, key = _INDEX_CONSTITUENTS.get(index_label, ("universe", "nifty50"))
+        if kind == "universe":
+            from data.universe import get_universe
+            tickers = get_universe(key)
+        else:
+            from data.universe import get_tickers_by_sector
+            tickers = get_tickers_by_sector(key)
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch(list(tickers), max_workers=12)
+        rows = []
+        for t in tickers:
+            q = raw.get(t)
+            if isinstance(q, dict) and q.get("price"):
+                rows.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
+        rows.sort(key=lambda x: -x[2])   # biggest gainers first
+        return rows
+    except Exception:
+        return []
+
+with st.expander("📑 Open an index — see its stocks & day changes", expanded=False):
+    _ix_pick = st.selectbox("Index", list(_INDEX_CONSTITUENTS.keys()),
+                            key="ix_explorer_sel", label_visibility="collapsed")
+    with st.spinner(f"Loading {_ix_pick} stocks…"):
+        _ix_rows = _index_constituent_rows(_ix_pick)
+    if _ix_rows:
+        _ix_up = sum(1 for _, _, c in _ix_rows if c >= 0)
+        st.caption(f"**{_ix_pick}** — {len(_ix_rows)} stocks · {_ix_up} up / {len(_ix_rows)-_ix_up} down")
+        # color-coded HTML grid
+        _ix_html = '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+        for _nm, _px, _ch in _ix_rows:
+            _cc = "#00d4aa" if _ch >= 0 else "#ff4757"
+            _ar = "▲" if _ch >= 0 else "▼"
+            _ix_html += (
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_cc};border-radius:7px;padding:6px 11px;min-width:120px">'
+                f'<div style="font-size:12px;font-weight:700;color:#f0f4ff">{_nm}</div>'
+                f'<div style="font-size:12px;color:#c8d0e0">₹{_px:,.2f} '
+                f'<span style="color:{_cc};font-weight:600">{_ar}{abs(_ch):.2f}%</span></div></div>'
+            )
+        _ix_html += '</div>'
+        st.markdown(_ix_html, unsafe_allow_html=True)
+    else:
+        st.caption("Couldn't load constituents — try again in a moment.")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE 0 — MARKET LIVE
 # ═══════════════════════════════════════════════════════════════════════════════
