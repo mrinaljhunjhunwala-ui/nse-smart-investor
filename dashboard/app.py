@@ -5440,77 +5440,96 @@ elif page == "⚡ Intraday Trader":
 
     # ── TAB 4: LIVE INTRADAY SIGNALS ─────────────────────────────────────────
     with tab_sigs:
-        st.subheader("🎯 Live Intraday Signals — ORB + VWAP + Supertrend")
-        st.caption("Runs all 3 intraday signal checks on the latest bar. Refresh during market hours.")
+        st.subheader("🎯 Live Intraday Signals — scan a list (ORB + VWAP + Supertrend)")
 
+        # Data-source indicator — intraday data prefers Angel One (real-time)
+        try:
+            from data.angel_fetcher import is_configured as _ls_ao_ok
+            _ls_ao = _ls_ao_ok()
+        except Exception:
+            _ls_ao = False
+        if _ls_ao:
+            st.markdown('<span class="pill-green">⚡ Live data: Angel One (real-time, no rate limits)</span>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="pill-yellow">Angel One not connected — falling back to Yahoo '
+                        '(15-min delayed). Connect in <b>Tools › Angel One</b> for real-time intraday.</span>',
+                        unsafe_allow_html=True)
+        st.caption("Scans every stock in your list for ORB breakout / VWAP / Supertrend signals on the latest bar. "
+                   "Best 9:30–11:00 AM and after 2 PM.")
+
+        _ls_def = "RELIANCE\nTCS\nHDFCBANK\nICICIBANK\nINFY\nSBIN\nBHARTIARTL\nAXISBANK\nLT\nMARUTI"
         _ls_c1, _ls_c2 = st.columns([3, 1])
         with _ls_c1:
-            _ls_ticker = st.text_input(
-                "Ticker to scan", value="RELIANCE",
-                key="ls_ticker",
-            ).strip().upper()
+            _ls_list_raw = st.text_area("Stocks to scan (one per line)",
+                                        value=_ls_def, height=150, key="ls_scan_list")
         with _ls_c2:
-            _ls_interval = st.selectbox("Interval", ["5m","15m"], key="ls_interval")
-            _ls_btn = st.button("🎯 Check Signals", type="primary", key="ls_btn")
+            _ls_interval = st.selectbox("Interval", ["5m", "15m"], key="ls_interval")
+            _ls_btn = st.button("🎯 Scan All", type="primary", key="ls_scan_all",
+                                use_container_width=True)
 
         if _ls_btn:
-            _ls_sym = _ls_ticker if _ls_ticker.endswith(".NS") else _ls_ticker + ".NS"
-            with st.spinner(f"Scanning {_ls_ticker} for intraday signals…"):
+            _ls_tickers = [t.strip().upper() for t in _ls_list_raw.split("\n") if t.strip()]
+            _rows, _fired = [], []
+            _prog = st.progress(0, text="Scanning…")
+            from trading.intraday_signals import scan_intraday
+            for _i, _t in enumerate(_ls_tickers):
+                _sym = _t if _t.endswith(".NS") else _t + ".NS"
                 try:
-                    from trading.intraday_signals import scan_intraday
-                    _ls_result = scan_intraday(_ls_sym, interval=_ls_interval)
-
-                    if "error" in _ls_result:
-                        st.warning(f"Could not load data: {_ls_result['error']}")
+                    _res = scan_intraday(_sym, interval=_ls_interval)
+                    if "error" in _res:
+                        _rows.append({"Stock": _t, "Price": None, "Trend": "—",
+                                      "CPR": "—", "Signal": "no data"})
                     else:
-                        # Status bar
-                        _ls_c_a, _ls_c_b, _ls_c_c, _ls_c_d = st.columns(4)
-                        _ls_c_a.metric("Price",     f"₹{_ls_result.get('price',0):,.2f}")
-                        _ls_c_b.metric("AVWAP",
-                                       f"₹{_ls_result.get('avwap',0):,.2f}" if _ls_result.get("avwap") else "N/A")
-                        _ls_c_c.metric("Supertrend Dir",
-                                       "🟢 Bullish" if _ls_result.get("st_dir",0)==1 else "🔴 Bearish")
-                        _ls_c_d.metric("CPR Zone",  _ls_result.get("cpr_zone","?").replace("_"," ").title())
+                        _sigs = _res.get("signals", [])
+                        _sig_txt = ", ".join(f'{s.get("action","")} {s.get("screen","")}'
+                                             for s in _sigs) if _sigs else "—"
+                        _rows.append({
+                            "Stock":  _t,
+                            "Price":  round(_res.get("price", 0), 2),
+                            "Trend":  "🟢 Bull" if _res.get("st_dir", 0) == 1 else "🔴 Bear",
+                            "CPR":    str(_res.get("cpr_zone", "?")).replace("_", " ").title(),
+                            "Signal": _sig_txt,
+                        })
+                        for s in _sigs:
+                            _fired.append((_t, _sym, s))
+                except Exception:
+                    _rows.append({"Stock": _t, "Price": None, "Trend": "—",
+                                  "CPR": "—", "Signal": "err"})
+                _prog.progress((_i + 1) / max(len(_ls_tickers), 1),
+                               text=f"Scanned {_t} ({_i+1}/{len(_ls_tickers)})")
+            _prog.empty()
 
-                        sigs = _ls_result.get("signals", [])
-                        if sigs:
-                            st.markdown("---")
-                            st.success(f"✅ {len(sigs)} signal(s) fired on {_ls_ticker}!")
-                            for _sig in sigs:
-                                _act   = _sig.get("action","")
-                                _scr   = _sig.get("screen","")
-                                _clr   = "card-green" if _act == "BUY" else "card-red"
-                                _icon  = "🟢" if _act == "BUY" else "🔴"
-                                _price = _sig.get("price",0)
-                                _sl    = _sig.get("sl",0)
-                                _tp    = _sig.get("tp",0)
-                                _rr    = _sig.get("rr_ratio",0)
-                                st.markdown(f"""
-                                <div class="{_clr}">
-                                <span class="signal-big">{_icon} {_act} — {_scr}</span><br>
-                                <b>Entry:</b> ₹{_price:,.2f} &nbsp;|&nbsp;
-                                <b>SL:</b> ₹{_sl:,.2f} &nbsp;|&nbsp;
-                                <b>TP:</b> ₹{_tp:,.2f} &nbsp;|&nbsp;
-                                <b>R:R:</b> {_rr:.1f}x<br>
-                                <small>{_sig.get('reason','')}</small>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        else:
-                            st.info(f"No signal on {_ls_ticker} at this moment. Check back during active trading hours.")
+            # ── Active signals first (with one-click paper trade) ──────────────
+            if _fired:
+                st.success(f"✅ {len(_fired)} live signal(s) across {len(_ls_tickers)} stocks")
+                for _t, _sym, _sig in _fired:
+                    _act  = _sig.get("action", "")
+                    _clr  = "card-green" if _act == "BUY" else "card-red"
+                    _icon = "🟢" if _act == "BUY" else "🔴"
+                    _p    = _sig.get("price", 0); _sl = _sig.get("sl", 0)
+                    _tp   = _sig.get("tp", 0);    _rr = _sig.get("rr_ratio", 0)
+                    st.markdown(
+                        f'<div class="{_clr}">'
+                        f'<span class="signal-big">{_icon} {_t} — {_act} ({_sig.get("screen","")})</span><br>'
+                        f'<b>Entry</b> ₹{_p:,.2f} &nbsp;|&nbsp; <b>SL</b> ₹{_sl:,.2f} &nbsp;|&nbsp; '
+                        f'<b>TP</b> ₹{_tp:,.2f} &nbsp;|&nbsp; <b>R:R</b> {_rr:.1f}x<br>'
+                        f'<small>{_sig.get("reason","")}</small></div>',
+                        unsafe_allow_html=True,
+                    )
+                    if _act == "BUY" and _p > 0:
+                        _paper_trade_popover(_sym, _p, _sl, _tp,
+                                             reason=f"Intraday {_sig.get('screen','')}: {_sig.get('reason','')[:50]}",
+                                             key=f"ls_pt_{_sym}", label=f"📌 Paper Trade {_t}")
+            else:
+                st.info("No active intraday signals right now across the list.")
 
-                        # ORB levels summary
-                        _ls_orb = _ls_result.get("orb", {})
-                        if _ls_orb and not pd.isna(_ls_orb.get("orb_high", float("nan"))):
-                            st.markdown("---")
-                            st.markdown(f"**Opening Range (15m):** "
-                                        f"High = ₹{_ls_orb['orb_high']:,.2f} | "
-                                        f"Low = ₹{_ls_orb['orb_low']:,.2f} | "
-                                        f"Range = {_ls_orb['orb_range_pct']:.2f}%")
-
-                except Exception as _ls_err:
-                    st.error(f"Signal scan failed: {_ls_err}")
+            # ── Full scan table ────────────────────────────────────────────────
+            st.markdown("#### 📋 Full scan")
+            if _rows:
+                st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True)
         else:
-            st.info("Enter a ticker and click **🎯 Check Signals** to run all 3 intraday checks.")
+            st.info("Add stocks (one per line) and click **🎯 Scan All**.")
 
     # ── TAB 5: LIVE POSITIONS (Angel One only) ─────────────────────────────────
     if tab_pos is not None:
