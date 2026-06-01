@@ -1349,6 +1349,33 @@ def _deep_confirmation(ticker: str) -> dict:
     return out
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _sparkline_closes(ticker: str, n: int = 22) -> list:
+    """Last `n` daily closes for a mini sparkline (cached 30 min)."""
+    try:
+        from data.fetcher import fetch_single
+        c = fetch_single(ticker, period="3mo")["Close"].dropna().tolist()
+        return [round(float(x), 2) for x in c[-n:]]
+    except Exception:
+        return []
+
+
+def _sparkline_svg(prices: list, w: int = 120, h: int = 28) -> str:
+    """Inline SVG sparkline from a price list — green if up over the window, else red."""
+    if not prices or len(prices) < 2:
+        return ""
+    lo, hi = min(prices), max(prices)
+    rng = (hi - lo) or 1
+    pts = " ".join(
+        f"{i/(len(prices)-1)*w:.1f},{h - (p-lo)/rng*(h-4) - 2:.1f}"
+        for i, p in enumerate(prices)
+    )
+    col = "#00d4aa" if prices[-1] >= prices[0] else "#ff4757"
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="display:block">'
+            f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="1.6" '
+            f'stroke-linejoin="round" stroke-linecap="round"/></svg>')
+
+
 def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -2475,6 +2502,43 @@ elif page == "🎯 Command Centre":
     st.title("🎯 Command Centre")
     st.caption("Market conditions · open positions needing action · watchlist decisions — no digging required.")
 
+    # ── 0. MORNING SUMMARY CARD — your daily brief ─────────────────────────────
+    import datetime as _mb_dt
+    _mb_now   = _mb_dt.datetime.now(_mb_dt.timezone(_mb_dt.timedelta(hours=5, minutes=30)))
+    _mb_greet = ("Good morning" if _mb_now.hour < 12 else
+                 "Good afternoon" if _mb_now.hour < 17 else "Good evening")
+    _mb_date  = _mb_now.strftime("%A, %d %b %Y · %H:%M IST")
+    _mb_open  = 0
+    try:
+        import trade_store as _mb_ts
+        _mbo = _mb_ts.fetch_open()
+        _mb_open = 0 if (_mbo is None or _mbo.empty) else len(_mbo)
+    except Exception:
+        pass
+    _mb_reg = get_vix_info().get("regime", "normal")
+    _mb_focus = {
+        "panic":       ("🚨", "Panic — protect capital, avoid new buys"),
+        "fear":        ("🔴", "Fearful — be defensive, small sizes only"),
+        "elevated":    ("🟠", "Elevated volatility — only high-conviction setups"),
+        "normal":      ("🟢", "Calm conditions — trade your setups normally"),
+        "complacency": ("😴", "Very calm — tighten stops, stay selective"),
+    }.get(_mb_reg, ("•", "Trade your plan"))
+    _mb_pos_txt = (f"You have <b style='color:#ff9500'>{_mb_open}</b> open paper position"
+                   f"{'s' if _mb_open != 1 else ''}." if _mb_open else
+                   "No open paper positions.")
+    st.markdown(
+        f'<div class="glass-panel" style="margin-bottom:14px;display:flex;'
+        f'justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">'
+        f'<div><div style="font-size:20px;font-weight:800;color:#f0f4ff">☀️ {_mb_greet}, Mrinal</div>'
+        f'<div style="font-size:12px;color:#8899bb;margin-top:2px">{_mb_date}</div></div>'
+        f'<div style="text-align:right">'
+        f'<div style="font-size:13px;color:#e0e0e0">{_mb_focus[0]} {_mb_focus[1]}</div>'
+        f'<div style="font-size:12px;color:#8899bb;margin-top:3px">{_mb_pos_txt} '
+        f'Scroll for today\'s picks &amp; watchlist.</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
     # ── 1. MARKET PULSE ────────────────────────────────────────────────────────
     _cc_vix_info = get_vix_info()
     _cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
@@ -2814,6 +2878,7 @@ elif page == "🎯 Command Centre":
                 + '</div>'
             )
 
+        _spark = _sparkline_svg(_sparkline_closes(_cct))   # 30-day mini chart
         _cc1, _cc2 = st.columns([5, 1])
         with _cc1:
             st.markdown(
@@ -2831,8 +2896,9 @@ elif page == "🎯 Command Centre":
                 f'<div style="font-size:13px;color:#ccc">{_hl}</div>'
                 f'{_price_block}'
                 f'</div>'
-                f'<div style="font-size:14px;color:#aaa;text-align:right;min-width:70px">'
-                f'{"₹" + f"{_price:,.2f}" if _price else ""}'
+                f'<div style="text-align:right;min-width:124px">'
+                f'<div style="font-size:14px;color:#aaa">{"₹" + f"{_price:,.2f}" if _price else ""}</div>'
+                f'<div style="margin-top:4px">{_spark}</div>'
                 f'</div>'
                 f'</div></div>',
                 unsafe_allow_html=True,
