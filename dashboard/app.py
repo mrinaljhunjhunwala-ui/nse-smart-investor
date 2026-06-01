@@ -597,6 +597,76 @@ if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
     st.session_state["watchlist"].remove(_wl_to_remove)
     st.rerun()
 
+# ── Portfolio quick-view (sidebar — value + today's P&L at a glance) ──────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _qv_prices(tickers: tuple) -> dict:
+    """Live prices for the sidebar quick-view (defined early; mirrors _portfolio_live_prices)."""
+    try:
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch(list(tickers))
+    except Exception:
+        raw = {}
+    res = {}
+    for t in tickers:
+        q = raw.get(t)
+        if isinstance(q, dict) and q.get("price"):
+            res[t] = {"price": q["price"], "prev": q["prev_close"], "chg": q["chg_pct"]}
+    return res
+
+
+st.sidebar.markdown("---")
+with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
+    try:
+        import pathlib as _qpl
+        _qcsv = _qpl.Path(_ROOT) / "portfolio.csv"
+        _qsrc = st.session_state.get("_ao_portfolio_path") or (_qcsv if _qcsv.exists() else None)
+        if _qsrc:
+            _qdf = pd.read_csv(_qsrc)
+            _qsyms = tuple((t if str(t).endswith(".NS") else f"{t}.NS")
+                           for t in _qdf["ticker"].tolist())
+            _qlp = _qv_prices(_qsyms)
+            _q_val = _q_today = _q_total = _q_inv = 0.0
+            _q_rows = []
+            for _qr in _qdf.itertuples():
+                _qsym = _qr.ticker if str(_qr.ticker).endswith(".NS") else f"{_qr.ticker}.NS"
+                _ql = _qlp.get(_qsym, {})
+                _qcur = _ql.get("price")
+                _qty  = getattr(_qr, "quantity", 0)
+                _qbuy = getattr(_qr, "avg_buy_price", 0)
+                if _qcur:
+                    _q_val   += _qcur * _qty
+                    _q_inv   += _qbuy * _qty
+                    _q_today += (_qcur - _ql.get("prev", _qcur)) * _qty
+                    _q_total += (_qcur - _qbuy) * _qty
+                    _q_rows.append((str(_qr.ticker).replace(".NS",""),
+                                    (_qcur/_qbuy-1)*100 if _qbuy else 0))
+            _tc = "#00d4aa" if _q_today >= 0 else "#ff4757"
+            _oc = "#00d4aa" if _q_total >= 0 else "#ff4757"
+            _op = (_q_total/_q_inv*100) if _q_inv else 0
+            st.markdown(
+                f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1px">Value</div>'
+                f'<div style="font-size:22px;font-weight:800;color:#f0f4ff">₹{_q_val:,.0f}</div>'
+                f'<div style="display:flex;gap:14px;margin-top:6px">'
+                f'<div><div style="font-size:10px;color:#4a5568">TODAY</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_tc}">{"▲" if _q_today>=0 else "▼"} ₹{abs(_q_today):,.0f}</div></div>'
+                f'<div><div style="font-size:10px;color:#4a5568">OVERALL</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_oc}">{"▲" if _q_total>=0 else "▼"} ₹{abs(_q_total):,.0f} ({_op:+.1f}%)</div></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            # best & worst holding
+            if _q_rows:
+                _q_rows.sort(key=lambda x: -x[1])
+                _best, _worst = _q_rows[0], _q_rows[-1]
+                st.caption(f"🏆 {_best[0]} {_best[1]:+.1f}%  ·  🔻 {_worst[0]} {_worst[1]:+.1f}%")
+            if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", use_container_width=True):
+                st.session_state["nav"] = "🏠 My Portfolio"
+                st.rerun()
+        else:
+            st.caption("No portfolio.csv found. Upload one on the My Portfolio page.")
+    except Exception as _qe:
+        st.caption(f"Quick view unavailable: {str(_qe)[:50]}")
+
 # ── Position-sizing settings (drive all suggested quantities) ─────────────────
 st.sidebar.markdown("---")
 with st.sidebar.expander("⚙️ Position Sizing", expanded=False):
@@ -1695,8 +1765,46 @@ except Exception:
     pass  # top bar is cosmetic — never break the page over it
 
 
-# ── Live ticker tape (NSE Pro — scrolling movers on every page) ───────────────
-@st.cache_data(ttl=90, show_spinner=False)
+# ── Live top bar: Nifty indices strip + scrolling ticker (auto-refresh 5 s) ───
+# All Nifty indices the strip tries to show (failures are skipped gracefully).
+_INDEX_STRIP = [
+    ("NIFTY 50",   "^NSEI"),      ("BANK NIFTY", "^NSEBANK"),
+    ("NIFTY IT",   "^CNXIT"),     ("NIFTY AUTO",  "^CNXAUTO"),
+    ("NIFTY FMCG", "^CNXFMCG"),   ("NIFTY PHARMA","^CNXPHARMA"),
+    ("NIFTY METAL","^CNXMETAL"),  ("NIFTY ENERGY","^CNXENERGY"),
+]
+
+
+@st.cache_data(ttl=5, show_spinner=False)        # 5-second freshness for live feel
+def _index_strip_data():
+    """Live value + day-change % for each Nifty index via Yahoo chart meta."""
+    import json, urllib.parse, urllib.request
+    try:
+        from data.fetcher import _get_yf_crumb
+        _opener, _crumb = _get_yf_crumb()
+    except Exception:
+        _opener, _crumb = None, ""
+    _qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
+    _open = _opener.open if _opener else urllib.request.urlopen
+    out = []
+    for label, sym in _INDEX_STRIP:
+        try:
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                   f"{urllib.parse.quote(sym)}?interval=1d&range=5d{_qs}")
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+            with _open(req, timeout=6) as r:
+                meta = json.loads(r.read())["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice")
+            prev  = meta.get("chartPreviousClose") or meta.get("previousClose")
+            if price and prev:
+                out.append((label, float(price), (float(price) / float(prev) - 1) * 100))
+        except Exception:
+            continue
+    return out
+
+
+@st.cache_data(ttl=30, show_spinner=False)
 def _ticker_tape_data():
     _names = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
               "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "AXISBANK.NS",
@@ -1713,25 +1821,57 @@ def _ticker_tape_data():
             out.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
     return out
 
-try:
-    _tt = _ticker_tape_data()
-    if _tt:
-        _tt_items = ""
-        for _sym, _px, _chg in _tt:
-            _tc = "#00d4aa" if _chg >= 0 else "#ff4757"
-            _ta = "▲" if _chg >= 0 else "▼"
-            _tt_items += (
-                f'<span style="margin:0 22px">'
-                f'<b style="color:#f0f4ff">{_sym}</b> '
-                f'<span style="color:#c8d0e0">₹{_px:,.2f}</span> '
-                f'<span style="color:{_tc}">{_ta}{abs(_chg):.2f}%</span></span>'
+
+@st.fragment(run_every="5s")     # auto-updates ONLY this bar every 5 s, no page reload
+def _live_top_bar():
+    # ── Nifty indices strip ──────────────────────────────────────────────────
+    try:
+        _idx = _index_strip_data()
+        if _idx:
+            _chips = ""
+            for _lbl, _val, _chg in _idx:
+                _c = "#00d4aa" if _chg >= 0 else "#ff4757"
+                _a = "▲" if _chg >= 0 else "▼"
+                _chips += (
+                    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                    f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
+                    f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
+                    f'<span style="font-size:11px;color:{_c}">{_a}{abs(_chg):.2f}%</span></div></div>'
+                )
+            st.markdown(
+                f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
+                unsafe_allow_html=True,
             )
-        st.markdown(
-            f'<div class="ticker-wrap"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
-            unsafe_allow_html=True,
-        )
+    except Exception:
+        pass
+
+    # ── Scrolling stock ticker ───────────────────────────────────────────────
+    try:
+        _tt = _ticker_tape_data()
+        if _tt:
+            _tt_items = ""
+            for _sym, _px, _chg in _tt:
+                _tc = "#00d4aa" if _chg >= 0 else "#ff4757"
+                _ta = "▲" if _chg >= 0 else "▼"
+                _tt_items += (
+                    f'<span style="margin:0 22px">'
+                    f'<b style="color:#f0f4ff">{_sym}</b> '
+                    f'<span style="color:#c8d0e0">₹{_px:,.2f}</span> '
+                    f'<span style="color:{_tc}">{_ta}{abs(_chg):.2f}%</span></span>'
+                )
+            st.markdown(
+                f'<div class="ticker-wrap"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
+
+
+try:
+    _live_top_bar()
 except Exception:
-    pass  # ticker tape is cosmetic — never break the page over it
+    pass  # live bar is cosmetic — never break the page over it
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE 0 — MARKET LIVE
