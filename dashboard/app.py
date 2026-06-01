@@ -1280,6 +1280,75 @@ def get_composite_score(ticker: str):
                        sector_scores_df=sectors)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _deep_confirmation(ticker: str) -> dict:
+    """
+    Confirmation layer on top of the composite score:
+      • Multi-timeframe — weekly trend (filters daily false signals)
+      • Relative strength — 1-month return vs Nifty (is it a leader?)
+      • Earnings proximity — days to next result (avoid buying into a gap)
+      • Signal agreement — how many of 9 checks are bullish (conviction)
+    """
+    out = {"weekly": None, "rel_strength": None, "rs_pct": None,
+           "earnings_days": None, "bull": 0, "total": 0, "signals": []}
+    try:
+        from data.fetcher import fetch_single
+        from utils.indicators import add_all_indicators
+        df  = add_all_indicators(fetch_single(ticker, period="2y")).dropna(axis=1, how="all")
+        cur = df.iloc[-1]
+        price = float(cur["Close"])
+
+        # Weekly trend
+        wk = df["Close"].resample("W").last().dropna()
+        if len(wk) >= 11:
+            _wma10 = float(wk.rolling(10).mean().iloc[-1])
+            _wkchg = (wk.iloc[-1] / wk.iloc[-5] - 1) * 100 if len(wk) >= 5 else 0
+            out["weekly"] = ("uptrend" if wk.iloc[-1] > _wma10 and _wkchg > 0
+                             else "downtrend" if wk.iloc[-1] < _wma10 and _wkchg < 0
+                             else "sideways")
+
+        # Relative strength vs Nifty (1 month ≈ 22 sessions)
+        try:
+            nf = fetch_single("^NSEI", period="6mo")["Close"].dropna()
+            if len(nf) >= 22 and len(df) >= 22:
+                _s1 = (price / float(df["Close"].iloc[-22]) - 1) * 100
+                _n1 = (float(nf.iloc[-1]) / float(nf.iloc[-22]) - 1) * 100
+                out["rs_pct"] = round(_s1 - _n1, 1)
+                out["rel_strength"] = "outperforming" if out["rs_pct"] > 0 else "underperforming"
+        except Exception:
+            pass
+
+        # Earnings proximity
+        try:
+            from data.events import get_earnings_date
+            import datetime as _ed_dt
+            ed = get_earnings_date(ticker)
+            if ed:
+                out["earnings_days"] = (ed - _ed_dt.datetime.now()).days
+        except Exception:
+            pass
+
+        # Signal agreement (9 checks)
+        rsi = float(cur.get("RSI", 50))
+        sigs = [
+            ("RSI not overbought (<70)",  rsi < 70),
+            ("MACD above signal",         float(cur.get("MACD", 0)) > float(cur.get("MACD_Signal", 0))),
+            ("Above 20-day avg",          price > float(cur.get("SMA_20", price * 1.1))),
+            ("Above 50-day avg",          price > float(cur.get("SMA_50", price * 1.1))),
+            ("Above 200-day avg",         price > float(cur.get("SMA_200", price * 1.1))),
+            ("Trend has strength (ADX>20)", float(cur.get("ADX", 0)) > 20),
+            ("Volume supportive",         float(cur.get("Volume_Ratio", 1)) >= 1.0),
+            ("No bearish divergence",     not bool(cur.get("RSI_Bear_Div", 0))),
+            ("Weekly trend not down",     out["weekly"] != "downtrend"),
+        ]
+        out["signals"] = sigs
+        out["bull"]    = sum(1 for _, ok in sigs if ok)
+        out["total"]   = len(sigs)
+    except Exception:
+        pass
+    return out
+
+
 def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -3564,6 +3633,54 @@ elif page == "🔍 Analyze Stock":
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )
+
+                # ── Multi-signal confirmation (timeframe + RS + earnings + agreement) ──
+                with st.spinner("Running deep confirmation…"):
+                    _dc = _deep_confirmation(ticker)
+                _wk_map = {"uptrend": ("🟢 Uptrend", "#00d4aa"), "downtrend": ("🔴 Downtrend", "#ff4757"),
+                           "sideways": ("🟡 Sideways", "#ff9500"), None: ("—", "#8899bb")}
+                _wk_txt, _wk_c = _wk_map.get(_dc["weekly"], ("—", "#8899bb"))
+                _rs_c   = "#00d4aa" if (_dc["rs_pct"] or 0) > 0 else "#ff4757"
+                _rs_txt = (f'{_dc["rel_strength"].title()} ({_dc["rs_pct"]:+.1f}% vs Nifty)'
+                           if _dc["rel_strength"] else "—")
+                _ed_days = _dc["earnings_days"]
+                if _ed_days is not None and 0 <= _ed_days <= 7:
+                    _ed_txt, _ed_c = f"⚠️ Results in {_ed_days}d — avoid fresh buys", "#ff4757"
+                elif _ed_days is not None and 0 <= _ed_days <= 21:
+                    _ed_txt, _ed_c = f"Results in {_ed_days}d", "#ff9500"
+                elif _ed_days is not None:
+                    _ed_txt, _ed_c = f"Results in {_ed_days}d (clear)", "#00d4aa"
+                else:
+                    _ed_txt, _ed_c = "Unknown", "#8899bb"
+                _bull, _tot = _dc["bull"], _dc["total"] or 9
+                _agr_pct = _bull / _tot * 100
+                _agr_c = "#00d4aa" if _agr_pct >= 67 else "#ff9500" if _agr_pct >= 40 else "#ff4757"
+
+                st.markdown(
+                    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.06);border-radius:12px;'
+                    f'padding:14px 18px;margin-bottom:12px">'
+                    f'<div style="font-size:11px;color:#5b8def;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:1px;margin-bottom:10px">🔬 Multi-Signal Confirmation</div>'
+                    f'<div style="display:flex;gap:22px;flex-wrap:wrap">'
+                    f'<div><div style="font-size:10px;color:#4a5568">WEEKLY TREND</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{_wk_c}">{_wk_txt}</div></div>'
+                    f'<div><div style="font-size:10px;color:#4a5568">RELATIVE STRENGTH</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{_rs_c}">{_rs_txt}</div></div>'
+                    f'<div><div style="font-size:10px;color:#4a5568">EARNINGS</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{_ed_c}">{_ed_txt}</div></div>'
+                    f'<div><div style="font-size:10px;color:#4a5568">SIGNAL AGREEMENT</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">{_bull} of {_tot} bullish</div></div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+                # Signal checklist (expandable)
+                with st.expander(f"🔎 See all {_tot} signals", expanded=False):
+                    for _sname, _sok in _dc["signals"]:
+                        st.markdown(
+                            f'<div style="font-size:13px;color:#ccc;padding:2px 0">'
+                            f'{"🟢" if _sok else "⚪"} {_sname}</div>',
+                            unsafe_allow_html=True,
+                        )
 
                 _as_c1, _as_c2, _as_c3, _as_c4 = st.columns([1, 1, 1, 3])
                 if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", use_container_width=True):
