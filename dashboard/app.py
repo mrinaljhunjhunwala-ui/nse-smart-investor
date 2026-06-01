@@ -289,8 +289,8 @@ st.sidebar.markdown("---")
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
     "Markets":   ["Market Live", "Market Overview", "Market Breadth", "Macro Dashboard"],
-    "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist"],
+    "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
     "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist"],
     "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
 }
@@ -358,6 +358,76 @@ _page_short = st.sidebar.radio(
 )
 _page_key   = _page_short.split(" ", 1)[1]   # strip emoji prefix
 page        = _PAGE_FULL_NAME.get(_page_key, _page_short)
+
+# ── Portfolio quick-view (right under the nav — value + today's P&L) ───────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _qv_prices(tickers: tuple) -> dict:
+    """Live prices for the sidebar quick-view."""
+    try:
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch(list(tickers))
+    except Exception:
+        raw = {}
+    res = {}
+    for t in tickers:
+        q = raw.get(t)
+        if isinstance(q, dict) and q.get("price"):
+            res[t] = {"price": q["price"], "prev": q["prev_close"], "chg": q["chg_pct"]}
+    return res
+
+
+st.sidebar.markdown("---")
+with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
+    try:
+        import pathlib as _qpl
+        _qcsv = _qpl.Path(_ROOT) / "portfolio.csv"
+        _qsrc = st.session_state.get("_ao_portfolio_path") or (_qcsv if _qcsv.exists() else None)
+        if _qsrc:
+            _qdf = pd.read_csv(_qsrc)
+            _qsyms = tuple((t if str(t).endswith(".NS") else f"{t}.NS")
+                           for t in _qdf["ticker"].tolist())
+            _qlp = _qv_prices(_qsyms)
+            _q_val = _q_today = _q_total = _q_inv = 0.0
+            _q_rows = []
+            for _qr in _qdf.itertuples():
+                _qsym = _qr.ticker if str(_qr.ticker).endswith(".NS") else f"{_qr.ticker}.NS"
+                _ql = _qlp.get(_qsym, {})
+                _qcur = _ql.get("price")
+                _qty  = getattr(_qr, "quantity", 0)
+                _qbuy = getattr(_qr, "avg_buy_price", 0)
+                if _qcur:
+                    _q_val   += _qcur * _qty
+                    _q_inv   += _qbuy * _qty
+                    _q_today += (_qcur - _ql.get("prev", _qcur)) * _qty
+                    _q_total += (_qcur - _qbuy) * _qty
+                    _q_rows.append((str(_qr.ticker).replace(".NS",""),
+                                    (_qcur/_qbuy-1)*100 if _qbuy else 0))
+            _tc = "#00d4aa" if _q_today >= 0 else "#ff4757"
+            _oc = "#00d4aa" if _q_total >= 0 else "#ff4757"
+            _op = (_q_total/_q_inv*100) if _q_inv else 0
+            st.markdown(
+                f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1px">Value</div>'
+                f'<div style="font-size:22px;font-weight:800;color:#f0f4ff">₹{_q_val:,.0f}</div>'
+                f'<div style="display:flex;gap:14px;margin-top:6px">'
+                f'<div><div style="font-size:10px;color:#4a5568">TODAY</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_tc}">{"▲" if _q_today>=0 else "▼"} ₹{abs(_q_today):,.0f}</div></div>'
+                f'<div><div style="font-size:10px;color:#4a5568">OVERALL</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_oc}">{"▲" if _q_total>=0 else "▼"} ₹{abs(_q_total):,.0f} ({_op:+.1f}%)</div></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if _q_rows:
+                _q_rows.sort(key=lambda x: -x[1])
+                _best, _worst = _q_rows[0], _q_rows[-1]
+                st.caption(f"🏆 {_best[0]} {_best[1]:+.1f}%  ·  🔻 {_worst[0]} {_worst[1]:+.1f}%")
+            if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", use_container_width=True):
+                st.session_state["nav_group"] = "💼 Portfolio"
+                st.session_state["nav"] = "🏠 My Portfolio"
+                st.rerun()
+        else:
+            st.caption("No portfolio.csv found. Upload one on the My Portfolio page.")
+    except Exception as _qe:
+        st.caption(f"Quick view unavailable: {str(_qe)[:50]}")
 
 st.sidebar.markdown("---")
 
@@ -596,76 +666,6 @@ for _wl_sym in list(st.session_state["watchlist"]):
 if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
     st.session_state["watchlist"].remove(_wl_to_remove)
     st.rerun()
-
-# ── Portfolio quick-view (sidebar — value + today's P&L at a glance) ──────────
-@st.cache_data(ttl=60, show_spinner=False)
-def _qv_prices(tickers: tuple) -> dict:
-    """Live prices for the sidebar quick-view (defined early; mirrors _portfolio_live_prices)."""
-    try:
-        from utils.live_price import get_live_prices_batch
-        raw = get_live_prices_batch(list(tickers))
-    except Exception:
-        raw = {}
-    res = {}
-    for t in tickers:
-        q = raw.get(t)
-        if isinstance(q, dict) and q.get("price"):
-            res[t] = {"price": q["price"], "prev": q["prev_close"], "chg": q["chg_pct"]}
-    return res
-
-
-st.sidebar.markdown("---")
-with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
-    try:
-        import pathlib as _qpl
-        _qcsv = _qpl.Path(_ROOT) / "portfolio.csv"
-        _qsrc = st.session_state.get("_ao_portfolio_path") or (_qcsv if _qcsv.exists() else None)
-        if _qsrc:
-            _qdf = pd.read_csv(_qsrc)
-            _qsyms = tuple((t if str(t).endswith(".NS") else f"{t}.NS")
-                           for t in _qdf["ticker"].tolist())
-            _qlp = _qv_prices(_qsyms)
-            _q_val = _q_today = _q_total = _q_inv = 0.0
-            _q_rows = []
-            for _qr in _qdf.itertuples():
-                _qsym = _qr.ticker if str(_qr.ticker).endswith(".NS") else f"{_qr.ticker}.NS"
-                _ql = _qlp.get(_qsym, {})
-                _qcur = _ql.get("price")
-                _qty  = getattr(_qr, "quantity", 0)
-                _qbuy = getattr(_qr, "avg_buy_price", 0)
-                if _qcur:
-                    _q_val   += _qcur * _qty
-                    _q_inv   += _qbuy * _qty
-                    _q_today += (_qcur - _ql.get("prev", _qcur)) * _qty
-                    _q_total += (_qcur - _qbuy) * _qty
-                    _q_rows.append((str(_qr.ticker).replace(".NS",""),
-                                    (_qcur/_qbuy-1)*100 if _qbuy else 0))
-            _tc = "#00d4aa" if _q_today >= 0 else "#ff4757"
-            _oc = "#00d4aa" if _q_total >= 0 else "#ff4757"
-            _op = (_q_total/_q_inv*100) if _q_inv else 0
-            st.markdown(
-                f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1px">Value</div>'
-                f'<div style="font-size:22px;font-weight:800;color:#f0f4ff">₹{_q_val:,.0f}</div>'
-                f'<div style="display:flex;gap:14px;margin-top:6px">'
-                f'<div><div style="font-size:10px;color:#4a5568">TODAY</div>'
-                f'<div style="font-size:14px;font-weight:700;color:{_tc}">{"▲" if _q_today>=0 else "▼"} ₹{abs(_q_today):,.0f}</div></div>'
-                f'<div><div style="font-size:10px;color:#4a5568">OVERALL</div>'
-                f'<div style="font-size:14px;font-weight:700;color:{_oc}">{"▲" if _q_total>=0 else "▼"} ₹{abs(_q_total):,.0f} ({_op:+.1f}%)</div></div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            # best & worst holding
-            if _q_rows:
-                _q_rows.sort(key=lambda x: -x[1])
-                _best, _worst = _q_rows[0], _q_rows[-1]
-                st.caption(f"🏆 {_best[0]} {_best[1]:+.1f}%  ·  🔻 {_worst[0]} {_worst[1]:+.1f}%")
-            if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", use_container_width=True):
-                st.session_state["nav"] = "🏠 My Portfolio"
-                st.rerun()
-        else:
-            st.caption("No portfolio.csv found. Upload one on the My Portfolio page.")
-    except Exception as _qe:
-        st.caption(f"Quick view unavailable: {str(_qe)[:50]}")
 
 # ── Notification bell (sidebar — visible on every page) ───────────────────────
 _notifs = []
@@ -1232,16 +1232,16 @@ def _sector_ranks_tuple() -> tuple:
 @st.cache_data(ttl=600)
 def get_composite_score(ticker: str):
     """
-    Score a stock using a fixed 1-year lookback.
-    Scoring always uses 1Y regardless of what the chart display period is —
-    SMA_200, RSI divergence, and momentum all need a full year to be valid.
-    Sector strength is fed in so the Sentiment component reflects real sector
-    leadership instead of a neutral default.
+    Deep-dive score over a 2-YEAR lookback (was 1y). The longer window means
+    every signal is computed on a full, valid history — SMA_200 (296 valid rows
+    vs ~49 on 1y), RSI divergence, candlestick patterns, ADX, volume trend and
+    momentum all have enough warmup, so the composite reflects real multi-signal
+    analysis, not just the latest bar. Sector strength + VIX are folded in too.
     """
     from analysis.score import score_stock
     vix_info = get_vix_info()
     sectors  = _sector_ranking()
-    return score_stock(ticker, period="1y", vix_info=vix_info,
+    return score_stock(ticker, period="2y", vix_info=vix_info,
                        sector_scores_df=sectors)
 
 
@@ -1819,58 +1819,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
     return fig
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PERSISTENT TOP BAR — shown on every page
-# ═══════════════════════════════════════════════════════════════════════════════
-try:
-    _tb_nifty  = _pulse.get("Nifty")
-    _tb_vix    = vix_val
-    _tb_vix_r  = vix_reg
-    _tb_col    = vix_col
-
-    _tb_parts = []
-    if _tb_nifty:
-        _n_p, _n_chg, _ = _tb_nifty
-        _nc = "#26a69a" if _n_chg >= 0 else "#ef5350"
-        _na = "▲" if _n_chg >= 0 else "▼"
-        _tb_parts.append(
-            f'<span style="margin-right:24px"><b style="color:#aaa;font-size:11px">NIFTY 50</b> '
-            f'<b style="font-size:15px">{_n_p:,.0f}</b> '
-            f'<span style="color:{_nc};font-size:12px">{_na}{abs(_n_chg):.2f}%</span></span>'
-        )
-    if _tb_vix:
-        _vc = "#26a69a" if _tb_vix < 16 else "#f9a825" if _tb_vix < 22 else "#ef5350"
-        _tb_parts.append(
-            f'<span style="margin-right:24px"><b style="color:#aaa;font-size:11px">VIX</b> '
-            f'<b style="font-size:15px;color:{_vc}">{_tb_vix:.1f}</b> '
-            f'<span style="color:#aaa;font-size:11px">{_tb_col} {_tb_vix_r}</span></span>'
-        )
-    _ms_tb = _mstatus() if "market_status" in dir() else None
-    try:
-        from utils.market_hours import market_status as _ms_fn2
-        _ms_tb = _ms_fn2()
-        _st_c = "#26a69a" if _ms_tb["is_open"] else "#ef5350"
-        _tb_parts.append(
-            f'<span style="margin-right:24px"><b style="color:#aaa;font-size:11px">MARKET</b> '
-            f'<b style="font-size:13px;color:{_st_c}">{_ms_tb["status"]}</b></span>'
-        )
-    except Exception:
-        pass
-
-    if _tb_parts:
-        st.markdown(
-            '<div style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);'
-            'border-radius:10px;padding:10px 18px;margin-bottom:8px;'
-            'display:flex;align-items:center;flex-wrap:wrap;gap:4px;'
-            'backdrop-filter:blur(8px)">'
-            + "".join(_tb_parts) +
-            '</div>',
-            unsafe_allow_html=True,
-        )
-except Exception:
-    pass  # top bar is cosmetic — never break the page over it
-
-
 # ── Live top bar: Nifty indices strip + scrolling ticker (auto-refresh 5 s) ───
 # All Nifty indices the strip tries to show (failures are skipped gracefully).
 _INDEX_STRIP = [
@@ -1930,21 +1878,51 @@ def _ticker_tape_data():
 
 @st.fragment(run_every="5s")     # auto-updates ONLY this bar every 5 s, no page reload
 def _live_top_bar():
-    # ── Nifty indices strip ──────────────────────────────────────────────────
+    # ── VIX + market-status chips, then Nifty indices strip ──────────────────
     try:
-        _idx = _index_strip_data()
-        if _idx:
-            _chips = ""
-            for _lbl, _val, _chg in _idx:
-                _c = "#00d4aa" if _chg >= 0 else "#ff4757"
-                _a = "▲" if _chg >= 0 else "▼"
+        _chips = ""
+        # India VIX chip
+        try:
+            from utils.vix import get_india_vix_regime as _ltb_vix
+            _vinfo = _ltb_vix()
+            _vv = _vinfo.get("vix")
+            if _vv:
+                _vcol = "#00d4aa" if _vv < 16 else "#ff9500" if _vv < 22 else "#ff4757"
                 _chips += (
                     f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
-                    f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
-                    f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
-                    f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
-                    f'<span style="font-size:11px;color:{_c}">{_a}{abs(_chg):.2f}%</span></div></div>'
+                    f'border-left:3px solid {_vcol};border-radius:8px;padding:6px 12px;min-width:96px">'
+                    f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{_vcol}">{_vv:.1f} '
+                    f'<span style="font-size:10px;color:#8899bb">{_vinfo.get("regime","").title()}</span></div></div>'
                 )
+        except Exception:
+            pass
+        # Market-status chip
+        try:
+            from utils.market_hours import market_status as _ltb_ms
+            _msd = _ltb_ms()
+            _scol = "#00d4aa" if _msd.get("is_open") else "#ff4757"
+            _chips += (
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_scol};border-radius:8px;padding:6px 12px;min-width:110px">'
+                f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">MARKET</div>'
+                f'<div style="font-size:13px;font-weight:700;color:{_scol}">{_msd.get("status","")}</div></div>'
+            )
+        except Exception:
+            pass
+
+        _idx = _index_strip_data()
+        for _lbl, _val, _chg in (_idx or []):
+            _c = "#00d4aa" if _chg >= 0 else "#ff4757"
+            _a = "▲" if _chg >= 0 else "▼"
+            _chips += (
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
+                f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
+                f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
+                f'<span style="font-size:11px;color:{_c}">{_a}{abs(_chg):.2f}%</span></div></div>'
+            )
+        if _chips:
             st.markdown(
                 f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
                 unsafe_allow_html=True,
@@ -3305,8 +3283,19 @@ elif page == "🔍 Analyze Stock":
 
         with st.spinner(f"Scoring {ticker}…"):
             try:
-                # Scoring always uses 1Y data — changing chart period won't re-fetch
+                # Deep-dive score over 2Y data — changing chart period won't re-fetch
                 cs = get_composite_score(ticker)
+                # Live price reconciliation: the score's price is the last DAILY close
+                # (used for all indicators); the live quote may be more recent.
+                _an_live = None
+                try:
+                    from utils.live_price import get_live_quote as _an_lq
+                    _anq = _an_lq(ticker)
+                    if isinstance(_anq, dict) and _anq.get("price"):
+                        _an_live = float(_anq["price"])
+                except Exception:
+                    _an_live = None
+                _an_drift = (abs(_an_live - cs.price) / cs.price * 100) if (_an_live and cs.price) else 0.0
                 # Full 2Y dataframe (all indicators valid at most-recent row)
                 df = load_ticker_df(ticker)
                 # Chart-display slice — only controls what the user SEES on the chart
@@ -3363,26 +3352,34 @@ elif page == "🔍 Analyze Stock":
                     prev   = df.iloc[-2]
                     day_chg = (latest["Close"] / prev["Close"] - 1) * 100
 
+                    # Show the LIVE price as the headline current price when available
+                    _disp_price = _an_live if _an_live else cs.price
                     mc1, mc2, mc3, mc4 = st.columns(4)
-                    mc1.metric("Close",      f"₹{cs.price:,.2f}", f"{day_chg:+.2f}%")
+                    mc1.metric("Price (live)" if _an_live else "Close",
+                               f"₹{_disp_price:,.2f}", f"{day_chg:+.2f}%")
                     mc2.metric("Sector",     cs.sector)
                     mc3.metric("VIX Regime", cs.vix_regime)
                     mc4.metric("Sector Rank",f"#{cs.sector_rank}")
 
-                    # Close-price status — settled EOD after 3:30, else live/intraday
+                    # Close-price status + live-vs-daily reconciliation
                     try:
                         from utils.market_hours import market_status as _an_ms
                         _ms_an = _an_ms()
                         try:
-                            _last_dt = df.index[-1]
-                            _dlabel = _last_dt.strftime("%d-%b")
+                            _dlabel = df.index[-1].strftime("%d-%b")
                         except Exception:
                             _dlabel = ""
-                        if _ms_an.get("is_open"):
-                            st.caption(f"🔴 LIVE · intraday price (market open) — the close settles after 3:30 PM.")
+                        if _an_live and _an_drift >= 0.5:
+                            st.caption(
+                                f"ℹ️ Live price **₹{_an_live:,.2f}** · indicators & levels computed on the "
+                                f"last daily close **₹{cs.price:,.2f}**{f' ({_dlabel})' if _dlabel else ''} "
+                                f"— {_an_drift:.1f}% apart, so treat the entry/target as a guide near the live price."
+                            )
+                        elif _ms_an.get("is_open"):
+                            st.caption("🔴 LIVE · market open — the official close settles after 3:30 PM.")
                         else:
                             st.caption(f"🟢 Settled EOD close{f' · {_dlabel}' if _dlabel else ''} "
-                                       f"(market closed — this is the official end-of-day price).")
+                                       f"(market closed — official end-of-day price).")
                     except Exception:
                         pass
 
