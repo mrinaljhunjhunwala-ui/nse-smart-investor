@@ -951,6 +951,31 @@ def get_display_name(ticker: str) -> str:
     return _TICKER_TO_NAME.get(t, ticker.replace(".NS", ""))
 
 
+def _plain_english(action: str, entry: float, sl: float, tp: float, rr: float) -> str:
+    """One-line 'what this means + what to do' for non-traders."""
+    risk_amt = entry - sl
+    rew_amt  = tp - entry
+    if action in ("STRONG BUY", "BUY"):
+        return (f"✅ <b>Looks like a good buy.</b> If you want in, buy near "
+                f"<b>₹{entry:,.2f}</b>. Set a stop-loss at <b>₹{sl:,.2f}</b> — that's your "
+                f"exit if it goes wrong (max loss ≈ ₹{risk_amt:,.2f}/share). Aim to take "
+                f"profit near <b>₹{tp:,.2f}</b> (≈ ₹{rew_amt:,.2f}/share gain). "
+                f"You're risking 1 to make {rr:.1f}.")
+    if action == "WATCHLIST":
+        return ("👀 <b>Not a buy yet.</b> It's close but not strong enough — add it to your "
+                "watchlist and wait for it to firm up before committing money.")
+    if action == "HOLD":
+        return ("🟡 <b>Hold, don't add.</b> If you already own it, keep holding. But this isn't "
+                "a good level to put fresh money in.")
+    if action == "CAUTION":
+        return ("⚠️ <b>Be careful.</b> Momentum is fading. If you own it, consider trimming or "
+                "tightening your stop. Not a place to buy more.")
+    if action == "EXIT":
+        return ("🔴 <b>Weak — avoid buying.</b> If you own it, consider selling and moving the "
+                "money to a stronger stock. The trend is against it right now.")
+    return ("This stock is in a neutral zone — no strong edge either way. Wait for a clearer setup.")
+
+
 def _trade_type(headline: str) -> tuple:
     """
     Categorise a setup into a trade type from its narrative headline.
@@ -2376,6 +2401,33 @@ elif page == "🎯 Command Centre":
         f'</div>',
         unsafe_allow_html=True,
     )
+    # ── Market Mood meter (Fear ↔ Greed composite) ─────────────────────────────
+    _mood_vix = {"complacency": 85, "normal": 65, "elevated": 45,
+                 "fear": 22, "panic": 6, "unknown": 50}.get(_cc_vix_r, 50)
+    _mood_nty = {"uptrend": 80, "sideways": 50, "downtrend": 20,
+                 "unknown": 50}.get(_cc_nifty_trend, 50)
+    _mood = int(round((_mood_vix + _mood_nty) / 2))
+    if   _mood < 20: _mood_lbl, _mood_c = "Extreme Fear", "#ff1744"
+    elif _mood < 40: _mood_lbl, _mood_c = "Fear", "#ff4757"
+    elif _mood < 60: _mood_lbl, _mood_c = "Neutral", "#FFC107"
+    elif _mood < 80: _mood_lbl, _mood_c = "Greed", "#26a69a"
+    else:            _mood_lbl, _mood_c = "Extreme Greed", "#00e5cc"
+    st.markdown(
+        f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);border-radius:10px;'
+        f'padding:12px 18px;margin-top:8px;display:flex;align-items:center;gap:16px">'
+        f'<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;min-width:96px">Market Mood</div>'
+        f'<div style="flex:1;position:relative;height:10px;border-radius:6px;'
+        f'background:linear-gradient(90deg,#ff1744,#ff4757,#FFC107,#26a69a,#00e5cc)">'
+        f'<div style="position:absolute;left:{_mood}%;top:-5px;transform:translateX(-50%);'
+        f'width:20px;height:20px;border-radius:50%;background:{_mood_c};border:3px solid #0d1526;'
+        f'box-shadow:0 0 8px {_mood_c}"></div></div>'
+        f'<div style="min-width:130px;text-align:right">'
+        f'<span style="font-size:20px;font-weight:800;color:{_mood_c}">{_mood}</span>'
+        f'<span style="font-size:13px;color:{_mood_c};font-weight:600"> · {_mood_lbl}</span></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
     _cc_ref_c = st.columns([6, 1])[1]
     if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=True):
         st.cache_data.clear(); st.rerun()
@@ -3317,6 +3369,23 @@ elif page == "🔍 Analyze Stock":
                     mc3.metric("VIX Regime", cs.vix_regime)
                     mc4.metric("Sector Rank",f"#{cs.sector_rank}")
 
+                    # Close-price status — settled EOD after 3:30, else live/intraday
+                    try:
+                        from utils.market_hours import market_status as _an_ms
+                        _ms_an = _an_ms()
+                        try:
+                            _last_dt = df.index[-1]
+                            _dlabel = _last_dt.strftime("%d-%b")
+                        except Exception:
+                            _dlabel = ""
+                        if _ms_an.get("is_open"):
+                            st.caption(f"🔴 LIVE · intraday price (market open) — the close settles after 3:30 PM.")
+                        else:
+                            st.caption(f"🟢 Settled EOD close{f' · {_dlabel}' if _dlabel else ''} "
+                                       f"(market closed — this is the official end-of-day price).")
+                    except Exception:
+                        pass
+
                     tc1, tc2, tc3, tc4 = st.columns(4)
                     tc1.metric("Entry (now)",  f"₹{cs.entry:,.2f}")
                     tc2.metric("Stop-Loss",    f"₹{cs.stop_loss:,.2f}",
@@ -3365,6 +3434,18 @@ elif page == "🔍 Analyze Stock":
                     f'</span></div>',
                     unsafe_allow_html=True,
                 )
+
+                # ── Plain-English explanation (easy to understand) ─────────
+                st.markdown(
+                    f'<div class="glass-panel" style="margin:8px 0 14px 0;padding:14px 18px">'
+                    f'<div style="font-size:11px;color:#ff9500;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:1px;margin-bottom:6px">💬 In plain English</div>'
+                    f'<div style="font-size:14px;line-height:1.7;color:#e0e0e0">'
+                    f'{_plain_english(cs.action, cs.entry, cs.stop_loss, cs.target, cs.risk_reward)}'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
                 _as_c1, _as_c2, _as_c3, _as_c4 = st.columns([1, 1, 1, 3])
                 if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", use_container_width=True):
                     _wl = st.session_state.setdefault("watchlist", [])
