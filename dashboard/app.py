@@ -342,6 +342,21 @@ _group_icons: dict = {
     "Analysis": "🔍", "Tools": "🛠",
 }
 
+# ── Programmatic navigation ───────────────────────────────────────────────────
+# Nav buttons across the app set st.session_state["_goto_page"] (a full page name)
+# instead of writing the "nav" widget key directly — Streamlit forbids modifying a
+# widget's key after it's instantiated. We resolve the request HERE, before the
+# nav widgets exist, by setting both the section and page widget defaults.
+if st.session_state.get("_goto_page"):
+    _goto = st.session_state.pop("_goto_page")
+    for _g, _pages in _NAV_GROUPS.items():
+        _match = next((p for p in _pages
+                       if _goto in (f"{_PAGE_EMOJI[p]} {p}", _PAGE_FULL_NAME.get(p, p))), None)
+        if _match:
+            st.session_state["nav_group"] = f"{_group_icons[_g]} {_g}"
+            st.session_state["nav"]       = f"{_PAGE_EMOJI[_match]} {_match}"
+            break
+
 _nav_group = st.sidebar.selectbox(
     "Section",
     [f"{_group_icons[g]} {g}" for g in _NAV_GROUPS],
@@ -421,8 +436,7 @@ with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
                 _best, _worst = _q_rows[0], _q_rows[-1]
                 st.caption(f"🏆 {_best[0]} {_best[1]:+.1f}%  ·  🔻 {_worst[0]} {_worst[1]:+.1f}%")
             if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", use_container_width=True):
-                st.session_state["nav_group"] = "💼 Portfolio"
-                st.session_state["nav"] = "🏠 My Portfolio"
+                st.session_state["_goto_page"] = "🏠 My Portfolio"
                 st.rerun()
         else:
             st.caption("No portfolio.csv found. Upload one on the My Portfolio page.")
@@ -709,7 +723,7 @@ with st.sidebar.expander(f"🔔 Notifications ({_nb_count})", expanded=_nb_count
                 f'border-radius:6px;padding:7px 11px;margin:4px 0;font-size:12px;color:#d0d0d0">'
                 f'{_ic} {_msg}</div>', unsafe_allow_html=True)
         if st.button("🎯 Go to Command Centre", key="nb_goto_cc", use_container_width=True):
-            st.session_state["nav"] = "🎯 Command Centre"
+            st.session_state["_goto_page"] = "🎯 Command Centre"
             st.rerun()
     else:
         st.caption("✅ All clear — no positions at SL/TP, market calm.")
@@ -2449,12 +2463,12 @@ if page == "📡 Market Live":
                         st.markdown(f"• {_rs}")
                 _da, _db, _dc = st.columns(3)
                 if _da.button("📊 Analyze", key=f"ml_an_{_dt_full}", use_container_width=True):
-                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.session_state["_goto_page"] ="🔍 Analyze Stock"
                     st.session_state["manual_ticker_input"] = _dt_label
                     st.session_state["last_analyzed"] = _dt_full
                     st.rerun()
                 if _db.button("📝 Paper Trade", key=f"ml_pt_{_dt_full}", use_container_width=True):
-                    st.session_state["nav"] = "📂 Paper Trades"
+                    st.session_state["_goto_page"] ="📂 Paper Trades"
                     st.session_state["pt_prefill_ticker"] = _dt_full
                     st.rerun()
                 if _dc.button("＋ Watchlist", key=f"ml_wl_{_dt_full}", use_container_width=True):
@@ -2813,7 +2827,7 @@ elif page == "🎯 Command Centre":
                 if st.button(f"🔍 Deep Dive {_svl}", key=f"cc_pick_dd_{_sv['ticker']}",
                              use_container_width=True):
                     st.session_state["analyze_ticker"] = _sv["ticker"]
-                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.session_state["_goto_page"] ="🔍 Analyze Stock"
                     st.rerun()
     else:
         st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
@@ -2914,7 +2928,7 @@ elif page == "🎯 Command Centre":
                 if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
                              use_container_width=True):
                     st.session_state["analyze_ticker"] = _cct
-                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.session_state["_goto_page"] ="🔍 Analyze Stock"
                     st.rerun()
 
     # ── 5. BACKGROUND TELEGRAM ALERTS (viewer) ─────────────────────────────────
@@ -3374,7 +3388,7 @@ elif page == "🏠 My Portfolio":
                         with _hb1:
                             if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}", use_container_width=True):
                                 st.session_state["analyze_ticker"] = h.ticker
-                                st.session_state["nav"] = "🔍 Analyze Stock"
+                                st.session_state["_goto_page"] ="🔍 Analyze Stock"
                                 st.rerun()
                         with _hb2:
                             _ph_price = h.current_price or h.avg_buy_price
@@ -3755,7 +3769,7 @@ elif page == "🔍 Analyze Stock":
                         _wl.append(ticker)
                     st.toast(f"{ticker.replace('.NS','')} added to watchlist ✓")
                 if _as_c2.button("📝 Paper Trade", key=f"as_pt_{ticker}", use_container_width=True):
-                    st.session_state["nav"] = "📂 Paper Trades"
+                    st.session_state["_goto_page"] ="📂 Paper Trades"
                     st.session_state["pt_prefill_ticker"] = ticker
                     st.rerun()
                 if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", use_container_width=True):
@@ -4065,13 +4079,13 @@ elif page == "📊 Market Overview":
                 btn_a, btn_b, btn_c = st.columns([1, 1, 1])
                 if btn_a.button("📊 Analyze", key=f"mover_analyze_{tick}",
                                 use_container_width=True):
-                    st.session_state["nav"] = "🔍 Analyze Stock"
+                    st.session_state["_goto_page"] ="🔍 Analyze Stock"
                     st.session_state["manual_ticker_input"] = short
                     st.session_state["last_analyzed"] = tick
                     st.rerun()
                 if btn_b.button("📝 Paper Trade", key=f"mover_trade_{tick}",
                                 use_container_width=True):
-                    st.session_state["nav"] = "📂 Paper Trades"
+                    st.session_state["_goto_page"] ="📂 Paper Trades"
                     st.session_state["pt_prefill_ticker"] = tick
                     st.rerun()
                 if btn_c.button("＋ Watchlist", key=f"mover_wl_{tick}",
