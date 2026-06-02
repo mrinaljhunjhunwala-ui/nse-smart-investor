@@ -3758,12 +3758,41 @@ elif page == "🔍 Analyze Stock":
                 _agr_pct = _bull / _tot * 100
                 _agr_c = "#00d4aa" if _agr_pct >= 67 else "#ff9500" if _agr_pct >= 40 else "#ff4757"
 
+                # ── Fold confirmation into a CONVICTION score (#7) ─────────────
+                _conf_delta, _conf_reasons = 0, []
+                if _dc["weekly"] == "uptrend":
+                    _conf_delta += 4; _conf_reasons.append("+4 weekly uptrend")
+                elif _dc["weekly"] == "downtrend":
+                    _conf_delta -= 6; _conf_reasons.append("−6 weekly downtrend")
+                if _dc["rs_pct"] is not None:
+                    if _dc["rs_pct"] > 3:
+                        _conf_delta += 4; _conf_reasons.append(f"+4 leads Nifty ({_dc['rs_pct']:+.1f}%)")
+                    elif _dc["rs_pct"] < -3:
+                        _conf_delta -= 4; _conf_reasons.append(f"−4 lags Nifty ({_dc['rs_pct']:+.1f}%)")
+                if _ed_days is not None and 0 <= _ed_days <= 7:
+                    _conf_delta -= 6; _conf_reasons.append(f"−6 earnings in {_ed_days}d")
+                if _agr_pct >= 80:
+                    _conf_delta += 5; _conf_reasons.append(f"+5 strong agreement ({_bull}/{_tot})")
+                elif _agr_pct <= 40:
+                    _conf_delta -= 5; _conf_reasons.append(f"−5 weak agreement ({_bull}/{_tot})")
+                _conf_delta  = max(-15, min(15, _conf_delta))
+                _conviction  = max(0, min(100, cs.score + _conf_delta))
+                _cv_c    = "#00d4aa" if _conviction >= 65 else "#ff9500" if _conviction >= 45 else "#ff4757"
+                _delta_c = "#00d4aa" if _conf_delta >= 0 else "#ff4757"
+                _delta_s = f"{_conf_delta:+d}" if _conf_delta else "±0"
+
                 st.markdown(
                     f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.06);border-radius:12px;'
                     f'padding:14px 18px;margin-bottom:12px">'
                     f'<div style="font-size:11px;color:#5b8def;font-weight:700;text-transform:uppercase;'
                     f'letter-spacing:1px;margin-bottom:10px">🔬 Multi-Signal Confirmation</div>'
-                    f'<div style="display:flex;gap:22px;flex-wrap:wrap">'
+                    f'<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">'
+                    # Conviction score — base folded with confirmation
+                    f'<div style="border-right:1px solid rgba(255,255,255,.08);padding-right:18px">'
+                    f'<div style="font-size:10px;color:#4a5568">CONVICTION</div>'
+                    f'<div style="font-size:24px;font-weight:800;color:{_cv_c}">{_conviction:.0f}'
+                    f'<span style="font-size:12px;color:#8899bb"> /100</span></div>'
+                    f'<div style="font-size:10px;color:{_delta_c}">base {cs.score:.0f} · {_delta_s} confirmation</div></div>'
                     f'<div><div style="font-size:10px;color:#4a5568">WEEKLY TREND</div>'
                     f'<div style="font-size:14px;font-weight:700;color:{_wk_c}">{_wk_txt}</div></div>'
                     f'<div><div style="font-size:10px;color:#4a5568">RELATIVE STRENGTH</div>'
@@ -3772,7 +3801,12 @@ elif page == "🔍 Analyze Stock":
                     f'<div style="font-size:14px;font-weight:700;color:{_ed_c}">{_ed_txt}</div></div>'
                     f'<div><div style="font-size:10px;color:#4a5568">SIGNAL AGREEMENT</div>'
                     f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">{_bull} of {_tot} bullish</div></div>'
-                    f'</div></div>',
+                    f'</div>'
+                    + (f'<div style="font-size:11px;color:#8899bb;margin-top:8px">Conviction adjustments: '
+                       f'{" · ".join(_conf_reasons)}</div>' if _conf_reasons else
+                       '<div style="font-size:11px;color:#8899bb;margin-top:8px">No adjustment — '
+                       'confirmation signals are neutral.</div>')
+                    + '</div>',
                     unsafe_allow_html=True,
                 )
                 # Signal checklist (expandable)
