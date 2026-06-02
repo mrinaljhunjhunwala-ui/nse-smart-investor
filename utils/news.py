@@ -84,24 +84,52 @@ _TICKER_SEARCH = {
     "DHANBANK":   "Dhanlaxmi Bank",
 }
 
-# ── Market-level RSS feeds (no search query needed) ───────────────────────────
+# ── Market-level RSS feeds — (source name, url). Broad set of reliable Indian
+#    financial publishers; unreachable ones are skipped gracefully. ────────────
 _MARKET_FEEDS = [
-    "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2811036.cms",
-    "https://www.business-standard.com/rss/markets-106.rss",
-    "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    ("Economic Times",      "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2811036.cms"),
+    ("Economic Times",      "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+    ("Business Standard",   "https://www.business-standard.com/rss/markets-106.rss"),
+    ("Livemint",            "https://www.livemint.com/rss/markets"),
+    ("Hindu BusinessLine",  "https://www.thehindubusinessline.com/markets/feeder/default.rss"),
+    ("NDTV Profit",         "https://feeds.feedburner.com/ndtvprofit-latest"),
+    ("Moneycontrol",        "https://www.moneycontrol.com/rss/MCtopnews.xml"),
+    ("Financial Express",   "https://www.financialexpress.com/market/feed/"),
 ]
 
 _RSS_TIMEOUT = 8   # seconds per feed
 
+# Normalise publisher names so the same source isn't listed twice
+_SOURCE_ALIASES = {
+    "the economic times":     "Economic Times",
+    "economictimes.com":      "Economic Times",
+    "businessline":           "Hindu BusinessLine",
+    "the hindu businessline": "Hindu BusinessLine",
+    "mint":                   "Livemint",
+    "ndtv profit":            "NDTV Profit",
+    "moneycontrol.com":       "Moneycontrol",
+    "business standard":      "Business Standard",
+}
 
-def _fetch_rss(url: str, max_items: int = 10) -> List[Dict]:
+
+def _norm_source(name: str) -> str:
+    n = (name or "").strip()
+    return _SOURCE_ALIASES.get(n.lower(), n)
+
+
+def _fetch_rss(url: str, max_items: int = 10, source_name: str = None) -> List[Dict]:
     """
     Fetch and parse one RSS feed.  Uses stdlib only — no third-party packages.
     Returns list of dicts: title, publisher, link, time, raw_time, sentiment.
+
+    source_name: if given, used as the publisher (clean name for direct feeds);
+                 otherwise the article's <source> tag or channel title is used.
     """
     try:
         req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
+            url, headers={"User-Agent":
+                          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
         )
         with urllib.request.urlopen(req, timeout=_RSS_TIMEOUT) as resp:
             data = resp.read()
@@ -121,12 +149,16 @@ def _fetch_rss(url: str, max_items: int = 10) -> List[Dict]:
             link = item.findtext("link") or "#"
             pub_date = item.findtext("pubDate") or ""
 
-            # Publisher from <source> tag or channel <title>
-            src = item.find("source")
-            publisher = src.text.strip() if (src is not None and src.text) else ""
-            if not publisher:
-                ch_title = channel.findtext("title") or ""
-                publisher = ch_title[:40]
+            # Publisher: explicit source_name (direct feeds) > <source> tag > channel
+            if source_name:
+                publisher = source_name
+            else:
+                src = item.find("source")
+                publisher = src.text.strip() if (src is not None and src.text) else ""
+                if not publisher:
+                    ch_title = channel.findtext("title") or ""
+                    publisher = ch_title.split(" - ")[0].split("|")[0].strip()[:40]
+            publisher = _norm_source(publisher)
 
             # Parse RFC-2822 date → epoch
             try:
@@ -199,18 +231,16 @@ def get_market_news(max_articles: int = 8) -> List[Dict]:
     """
     all_items: List[Dict] = []
 
-    # Static market feeds
-    for feed_url in _MARKET_FEEDS:
-        all_items.extend(_fetch_rss(feed_url, max_items=6))
+    # Direct publisher feeds (each tagged with its clean source name)
+    for src_name, feed_url in _MARKET_FEEDS:
+        all_items.extend(_fetch_rss(feed_url, max_items=5, source_name=src_name))
 
-    # Google News search for broad market
-    nifty_url = (
-        "https://news.google.com/rss/search?"
-        + urllib.parse.urlencode(
-            {"q": "Nifty 50 BSE Sensex India stock market", "hl": "en-IN", "gl": "IN", "ceid": "IN:en"}
-        )
-    )
-    all_items.extend(_fetch_rss(nifty_url, max_items=4))
+    # Google News search — aggregates ALL reliable publishers, real source names
+    for _q in ("Nifty 50 BSE Sensex India stock market",
+               "Indian stock market news today"):
+        g_url = ("https://news.google.com/rss/search?"
+                 + urllib.parse.urlencode({"q": _q, "hl": "en-IN", "gl": "IN", "ceid": "IN:en"}))
+        all_items.extend(_fetch_rss(g_url, max_items=6))
 
     # Deduplicate + sort newest-first
     seen: set = set()
