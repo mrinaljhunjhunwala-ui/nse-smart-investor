@@ -29,6 +29,28 @@ import streamlit as st
 
 warnings.filterwarnings("ignore")
 
+# ── NSE Pro Plotly template — themes every chart (registered once) ────────────
+import plotly.io as pio
+pio.templates["nse_pro"] = go.layout.Template(
+    layout=dict(
+        paper_bgcolor="#070c18",
+        plot_bgcolor="#0a1020",
+        font=dict(family="Inter, -apple-system, sans-serif", color="#8899bb", size=12),
+        title=dict(font=dict(size=15, color="#f0f4ff")),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", linecolor="rgba(255,255,255,0.06)",
+                   tickfont=dict(color="#4a5568", size=11), zeroline=False),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.04)", linecolor="rgba(255,255,255,0.06)",
+                   tickfont=dict(color="#4a5568", size=11), zeroline=False),
+        legend=dict(bgcolor="rgba(10,16,32,0.85)", bordercolor="rgba(255,255,255,0.06)",
+                    borderwidth=1, font=dict(color="#8899bb", size=11)),
+        hoverlabel=dict(bgcolor="#0d1526", bordercolor="rgba(255,255,255,0.12)",
+                        font=dict(color="#f0f4ff", family="Inter", size=12)),
+        colorway=["#5b8def", "#00d4aa", "#ff9500", "#a78bfa", "#ff4757", "#FFC107",
+                  "#26a69a", "#64b5f6"],
+    )
+)
+pio.templates.default = "nse_pro"
+
 # ── ensure project root is on sys.path ───────────────────────────────────────
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -3210,7 +3232,7 @@ elif page == "🏠 My Portfolio":
                         hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
                     )
                     _fig_hm.update_layout(
-                        template="plotly_dark", height=300,
+                        template="nse_pro", height=300,
                         margin=dict(l=0, r=0, t=40, b=0),
                         coloraxis_showscale=False,
                     )
@@ -3270,7 +3292,7 @@ elif page == "🏠 My Portfolio":
                                 color_discrete_sequence=px.colors.qualitative.Set3,
                             )
                             fig_pie.update_layout(
-                                template="plotly_dark", height=300,
+                                template="nse_pro", height=300,
                                 margin=dict(l=0, r=0, t=40, b=0),
                             )
                             st.plotly_chart(fig_pie, width="stretch")
@@ -3971,7 +3993,7 @@ elif page == "📊 Market Overview":
                                   line_width=0)
             fig_vix.update_layout(
                 title="India VIX — 1 Year",
-                template="plotly_dark", height=300,
+                template="nse_pro", height=300,
                 xaxis_rangeslider_visible=False,
                 margin=dict(l=0, r=0, t=40, b=0),
             )
@@ -4011,7 +4033,7 @@ elif page == "📊 Market Overview":
                         labels={"composite_score": "Score (%)"},
                     )
                     fig_bar.update_layout(
-                        template="plotly_dark", height=340, showlegend=False,
+                        template="nse_pro", height=340, showlegend=False,
                         margin=dict(l=0, r=0, t=40, b=0),
                     )
                     st.plotly_chart(fig_bar, width="stretch")
@@ -4872,7 +4894,7 @@ elif page == "📂 Paper Trades":
                         title="Realised P&L per Closed Trade (₹)",
                         labels={"pnl": "P&L (₹)", "ticker": "Stock"},
                     )
-                    _fig_pnl.update_layout(template="plotly_dark", height=320,
+                    _fig_pnl.update_layout(template="nse_pro", height=320,
                                            margin=dict(l=0, r=0, t=40, b=0))
                     st.plotly_chart(_fig_pnl, width="stretch")
 
@@ -4904,7 +4926,7 @@ elif page == "📂 Paper Trades":
                     _fig_eq.add_hline(y=0, line_dash="dot", line_color="rgba(150,150,150,0.5)")
                     _final_pnl = float(_eq_df["cumulative"].iloc[-1])
                     _fig_eq.update_layout(
-                        template="plotly_dark", height=320,
+                        template="nse_pro", height=320,
                         title=f"Equity Curve — Total P&L ₹{_final_pnl:+,.0f} "
                               f"over {len(_eq_df)} trades",
                         xaxis_title="Trade Number",
@@ -5064,7 +5086,7 @@ elif page == "🧪 Backtest":
                 title=f"Return (%) per Ticker",
                 labels={r_col: "Return (%)"},
             )
-            fig.update_layout(template="plotly_dark", height=400,
+            fig.update_layout(template="nse_pro", height=400,
                               margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig, width="stretch")
 
@@ -5196,7 +5218,7 @@ elif page == "🧪 Backtest":
             fig_comp.add_hline(y=100, line_dash="dot", line_color="gray")
             fig_comp.update_layout(
                 title="Normalised Price Performance (Base = 100)",
-                template="plotly_dark", height=400, yaxis_title="% of Start Price",
+                template="nse_pro", height=400, yaxis_title="% of Start Price",
                 margin=dict(l=0, r=0, t=40, b=0),
             )
             st.plotly_chart(fig_comp, width="stretch")
@@ -5252,7 +5274,7 @@ elif page == "🌍 Macro Dashboard":
                     ))
                 fig_norm.add_hline(y=100, line_dash="dot", line_color="white", opacity=0.3)
                 fig_norm.update_layout(
-                    template="plotly_dark", height=380,
+                    template="nse_pro", height=380,
                     yaxis_title="Indexed (start = 100)",
                     legend=dict(orientation="h", y=1.02),
                     margin=dict(l=0, r=0, t=40, b=0),
@@ -5271,7 +5293,7 @@ elif page == "🌍 Macro Dashboard":
                     title="30-Day Daily Return Correlation",
                 )
                 fig_corr.update_layout(
-                    template="plotly_dark", height=420,
+                    template="nse_pro", height=420,
                     margin=dict(l=0, r=0, t=40, b=0),
                 )
                 st.plotly_chart(fig_corr, width="stretch")
@@ -5349,7 +5371,7 @@ elif page == "📈 Market Breadth":
         bar_fig.add_hline(y=40, line_dash="dot", line_color="#F44336",
                           annotation_text="Weak (40%)", annotation_position="right")
         bar_fig.update_layout(
-            template="plotly_dark", height=340,
+            template="nse_pro", height=340,
             yaxis_title="% of stocks", yaxis_range=[0, 100],
             showlegend=False,
             margin=dict(l=0, r=0, t=20, b=0),
@@ -5383,7 +5405,7 @@ elif page == "📈 Market Breadth":
                 marker_colors=["#4CAF50", "#F44336"], hole=0.4,
             ))
             pie_fig.update_layout(
-                template="plotly_dark", height=260,
+                template="nse_pro", height=260,
                 margin=dict(l=0, r=0, t=20, b=0),
             )
             st.plotly_chart(pie_fig, width="stretch")
@@ -5407,7 +5429,7 @@ elif page == "📈 Market Breadth":
             textposition="auto",
         ))
         hl_fig.update_layout(
-            template="plotly_dark", height=260,
+            template="nse_pro", height=260,
             yaxis_title="Number of Nifty 50 stocks",
             margin=dict(l=0, r=0, t=20, b=0),
         )
@@ -5550,7 +5572,7 @@ elif page == "🏦 OI & Options Setup":
                                      annotation_text=f"Max Pain: {mp:,.0f}",
                                      annotation_font_color="#FFD700")
                     mp_fig.update_layout(
-                        template="plotly_dark", barmode="group", height=340,
+                        template="nse_pro", barmode="group", height=340,
                         title="Call vs Put OI by Strike",
                         margin=dict(l=0, r=0, t=40, b=0),
                     )
@@ -5713,7 +5735,7 @@ elif page == "⚡ Intraday Trader":
                     textposition="outside",
                 ))
                 fig_gap.update_layout(
-                    template="plotly_dark", height=320,
+                    template="nse_pro", height=320,
                     title="Gap % Distribution — Nifty 50",
                     xaxis_title="Stock", yaxis_title="Gap %",
                     showlegend=False,
@@ -5884,7 +5906,7 @@ elif page == "⚡ Intraday Trader":
                     ), row=2, col=1)
 
                     fig_ic.update_layout(
-                        template="plotly_dark", height=680,
+                        template="nse_pro", height=680,
                         title=f"{_ic_ticker} — {_ic_interval} Chart | CPR + ORB + AVWAP",
                         xaxis_rangeslider_visible=False,
                         showlegend=True,
