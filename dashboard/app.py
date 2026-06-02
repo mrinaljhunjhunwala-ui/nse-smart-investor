@@ -1022,6 +1022,25 @@ def get_display_name(ticker: str) -> str:
     return _TICKER_TO_NAME.get(t, ticker.replace(".NS", ""))
 
 
+def _validate_ticker(raw: str):
+    """
+    Validate a user-entered NSE symbol before any API call.
+    Returns (cleaned_symbol, error_message_or_None). cleaned_symbol has no
+    .NS/.BO suffix (callers add it). Allows letters, digits, '-' and '&'
+    (e.g. RELIANCE, M&M, BAJAJ-AUTO).
+    """
+    t = (raw or "").strip().upper().replace(" ", "")
+    if not t:
+        return "", None
+    t = t.replace(".NS", "").replace(".BO", "")
+    if not all(c.isalnum() or c in "-&" for c in t):
+        return t, (f"'{t}' doesn't look like a valid NSE symbol "
+                   f"(letters/digits only, e.g. RELIANCE, M&M, BAJAJ-AUTO).")
+    if len(t) > 20:
+        return t, f"'{t[:20]}…' is too long for an NSE symbol."
+    return t, None
+
+
 def _plain_english(action: str, entry: float, sl: float, tp: float, rr: float) -> str:
     """One-line 'what this means + what to do' for non-traders."""
     risk_amt = entry - sl
@@ -3587,10 +3606,16 @@ elif page == "🔍 Analyze Stock":
     )
     period = _AS_PERIOD_MAP[_ui_period]
 
+    # Validate the manually-typed symbol before any API call
+    _mt_clean, _mt_err = _validate_ticker(manual_ticker)
+    if _mt_err:
+        st.error(f"⚠️ {_mt_err}")
+        st.stop()
+
     # Resolve final ticker
     ticker = ""
-    if manual_ticker:
-        ticker = manual_ticker if manual_ticker.endswith(".NS") else manual_ticker + ".NS"
+    if _mt_clean:
+        ticker = _mt_clean + ".NS"
     elif selected_option != "— type to search —":
         # Extract ticker from "Company Name  (TICKER)" format
         raw_sym = selected_option.rsplit("(", 1)[-1].rstrip(")")
@@ -4551,10 +4576,15 @@ elif page == "📂 Paper Trades":
             _form_manual = st.text_input("Or type NSE ticker directly", key="pt_manual_tk",
                                          placeholder="e.g. INFY").strip().upper()
 
+        # Validate the manually-typed symbol before any API call
+        _pf_clean, _pf_err = _validate_ticker(_form_manual)
+        if _pf_err:
+            st.error(f"⚠️ {_pf_err}")
+
         # Resolve ticker
         _form_ticker = ""
-        if _form_manual:
-            _form_ticker = _form_manual if _form_manual.endswith(".NS") else _form_manual + ".NS"
+        if _pf_clean and not _pf_err:
+            _form_ticker = _pf_clean + ".NS"
         elif _form_sel != "— choose stock —":
             _raw = _form_sel.rsplit("(", 1)[-1].rstrip(")")
             _form_ticker = _raw + ".NS" if not _raw.endswith(".NS") else _raw

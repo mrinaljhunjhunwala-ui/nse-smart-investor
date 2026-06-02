@@ -28,8 +28,17 @@ ENV/
 # Streamlit secrets (NEVER commit these)
 .streamlit/secrets.toml
 
-# SQLite paper trades database (ephemeral — regenerated on startup)
+# SQLite databases (ephemeral — regenerated on startup)
 trades.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Personal portfolio holdings (use portfolio.csv.example as the template).
+# NOTE: portfolio.csv is currently still tracked to keep the cloud auto-load
+# working. To remove your real holdings from the public repo, run:
+#   git rm --cached portfolio.csv && git commit -m "stop tracking portfolio.csv"
+portfolio.csv
 
 # Background-alert de-dup state (managed by GitHub Actions cache, not source)
 data/alert_state.json
