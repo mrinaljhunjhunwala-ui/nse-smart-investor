@@ -2508,24 +2508,37 @@ if page == "📡 Market Live":
             disp["Change %"]  = disp["Change %"].map("{:+.2f}%".format)
             st.dataframe(disp, hide_index=True, use_container_width=True, height=400)
 
-    # ── Market News ────────────────────────────────────────────────────────────
+    # ── Market News (multi-source, with source badges) ─────────────────────────
     st.markdown("---")
     st.subheader("📰 Latest Market News")
-    with st.spinner("Loading news…"):
-        mkt_news = get_market_news(max_articles=8)
+    with st.spinner("Aggregating news from multiple sources…"):
+        mkt_news = get_market_news(max_articles=14)
 
     if mkt_news:
+        _srcs = sorted({a.get("publisher", "") for a in mkt_news if a.get("publisher")})
+        st.caption(f"🗞️ Aggregated from **{len(_srcs)} sources**: {', '.join(_srcs)}")
+        _src_palette = ["#5b8def", "#00d4aa", "#ff9500", "#a78bfa", "#FFC107",
+                        "#26a69a", "#64b5f6", "#ff6b9d", "#ffd700"]
+        _src_color = {s: _src_palette[i % len(_src_palette)] for i, s in enumerate(_srcs)}
         for article in mkt_news:
-            s = article["sentiment"]
-            icon = "🟢" if s == "positive" else ("🔴" if s == "negative" else "⚪")
+            _s   = article["sentiment"]
+            _sc  = "#00d4aa" if _s == "positive" else "#ff4757" if _s == "negative" else "#8899bb"
+            _si  = "▲" if _s == "positive" else "▼" if _s == "negative" else "•"
+            _pub = article.get("publisher", "—")
+            _pc  = _src_color.get(_pub, "#8899bb")
             st.markdown(
-                f'{icon} **[{article["title"]}]({article["link"]})**  \n'
-                f'<span style="font-size:11px;color:#aaa">'
-                f'{article["publisher"]} · {article["time"]}</span>',
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_sc};border-radius:8px;padding:10px 14px;margin-bottom:6px">'
+                f'<span style="background:{_pc}22;color:{_pc};border:1px solid {_pc};border-radius:5px;'
+                f'padding:1px 8px;font-size:10px;font-weight:700">{_pub}</span>'
+                f'<span style="font-size:10px;color:#4a5568">&nbsp; · {article["time"]} · '
+                f'<span style="color:{_sc};font-weight:600">{_si} {_s}</span></span><br>'
+                f'<a href="{article["link"]}" target="_blank" style="color:#e0e0e0;'
+                f'text-decoration:none;font-size:14px;font-weight:600">{article["title"]}</a></div>',
                 unsafe_allow_html=True,
             )
     else:
-        st.info("News unavailable — yfinance may be rate-limited. Try again shortly.")
+        st.info("News temporarily unavailable — refresh in a moment.")
 
     if ri > 0:
         st.caption(f"Auto-refreshes every {ri//60} minutes while market is open.")
@@ -2785,11 +2798,23 @@ elif page == "🎯 Command Centre":
         st.write("")
         _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
 
+    with st.expander(f"📋 Which {len(_HOME_SCAN_UNIVERSE)} stocks are scanned?", expanded=False):
+        st.caption("Top Picks scans only this curated set of liquid large/mid-caps (kept small "
+                   "so the scan stays fast). The strongest BUYs and clearest SELL/EXITs from "
+                   "these are surfaced — it is NOT scanning the whole market.")
+        st.markdown(
+            "<div style='font-size:12px;color:#c8d0e0;line-height:1.9'>" +
+            "  ·  ".join(f"<b>{t.replace('.NS','')}</b>" for t in _HOME_SCAN_UNIVERSE) +
+            "</div>", unsafe_allow_html=True,
+        )
+        st.caption("Want a different set scanned? Tell me which stocks and I'll update the list.")
+
     if _run_picks or st.session_state.get("cc_picks_loaded"):
         st.session_state["cc_picks_loaded"] = True
         with st.spinner("Scanning NSE for the strongest setups…"):
-            _picks = _home_top_picks(vix_regime=_cc_vix_r,
-                                     sector_ranks=_sector_ranks_tuple())
+            _sec_tuple = _sector_ranks_tuple()
+            st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
+            _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
 
         _pk_buy, _pk_sell = st.columns(2)
         with _pk_buy:
@@ -2867,9 +2892,12 @@ elif page == "🎯 Command Centre":
         if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
             st.cache_data.clear(); st.rerun()
 
+    # Speed: the watchlist uses the sector ranking only if it's already been
+    # computed this session (stored when Top Picks ran) — so the heavy ~10 s
+    # sector multi-fetch never blocks the Command Centre's first load.
+    _wl_sector = st.session_state.get("_sec_ranks_cache", ())
     with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 30 min)…"):
-        _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r,
-                                      sector_ranks=_sector_ranks_tuple())
+        _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r, sector_ranks=_wl_sector)
 
     # Sort: BUY signals first, EXIT last
     _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
