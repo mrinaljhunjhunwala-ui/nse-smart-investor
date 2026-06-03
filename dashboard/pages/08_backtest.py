@@ -120,8 +120,8 @@ if _bt_run:
                         "Win Rate (%)":    round(float(_stats["Win Rate [%]"]), 2),
                         "# Trades":        int(_stats["# Trades"]),
                     })
-            except Exception:
-                pass
+            except Exception as _e:
+                st.caption(f"⚠️ Backtest skipped {_bt_t.replace('.NS','')}: {_e}")
             _bt_prog.progress((_bi + 1) / max(len(_bt_tickers), 1),
                               text=f"Backtesting {_bt_t.replace('.NS','')} ({_bi+1}/{len(_bt_tickers)})")
         _bt_prog.empty()
@@ -183,8 +183,8 @@ if st.button("📊 Show Normalised Performance", key="compare_btn"):
                     x=d.index, y=norm, name=t.replace(".NS", ""),
                     line=dict(width=2),
                 ))
-            except Exception:
-                pass
+            except Exception as _e:
+                st.caption(f"⚠️ Couldn't add {t.replace('.NS','')} to comparison: {_e}")
     if fig_comp.data:
         fig_comp.add_hline(y=100, line_dash="dot", line_color="gray")
         fig_comp.update_layout(
