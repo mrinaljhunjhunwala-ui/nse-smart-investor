@@ -434,18 +434,24 @@ def _sector_df_from_tuple(sector_ranks: tuple):
 
 
 @st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache
-def _home_top_picks(vix_regime: str = "normal", n: int = 5, sector_ranks: tuple = ()) -> dict:
+@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache — the full scan is heavy
+def _home_top_picks(vix_regime: str = "normal", n: int = 12, sector_ranks: tuple = ()) -> dict:
     """
-    Scan a curated NSE large/mid-cap universe and return the strongest
-    BUY candidates and the clearest SELL/EXIT candidates for the day.
+    Scan the FULL NSE universe (~200+ liquid large/mid/small-caps) and return the
+    strongest long candidates and the clearest SELL/EXIT candidates for the day.
 
     Each stock's CompositeScore folds in trend, momentum, RSI, volume, VIX
     sentiment AND sector strength (via sector_ranks) — "self-analysis +
     volatility" in one number. Returns {"buys": [...], "sells": [...]}.
+
+    Cached 30 min: the first scan takes ~2 min (parallelised), every rerun after
+    that is instant until the cache expires or is cleared.
     """
     import concurrent.futures as _cf
     import sys, os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from data.universe import get_universe
+    _UNIV = get_universe("nifty500")        # the repo's full liquid NSE universe
     buys, sells = [], []
 
     _vix = {"regime": vix_regime, "vix": None,
@@ -474,16 +480,20 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 5, sector_ranks: tuple 
 
     results = []
     try:
-        with _cf.ThreadPoolExecutor(max_workers=8) as ex:
-            results = list(ex.map(_one, _HOME_SCAN_UNIVERSE))
+        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+            results = list(ex.map(_one, _UNIV))
     except Exception:
-        results = [_one(tk) for tk in _HOME_SCAN_UNIVERSE]
+        results = [_one(tk) for tk in _UNIV]
 
     for s in results:
         act = s.get("action", "")
-        if act in ("STRONG BUY", "BUY") and s.get("score", 0) > 0:
+        if s.get("score", 0) <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
+            continue
+        # long side includes WATCHLIST so we reliably surface 10+ candidates; cards
+        # show each stock's true action (STRONG BUY / BUY / WATCHLIST)
+        if act in ("STRONG BUY", "BUY", "WATCHLIST"):
             buys.append(s)
-        elif act in ("EXIT", "CAUTION") and s.get("score", 0) > 0:
+        elif act in ("EXIT", "CAUTION"):
             sells.append(s)
 
     buys.sort(key=lambda x: -x.get("score", 0))

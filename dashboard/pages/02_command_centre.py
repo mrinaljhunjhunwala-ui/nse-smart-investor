@@ -9,6 +9,7 @@ from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
+from data.universe import get_universe
 # Inject every shared module-level name so the verbatim body runs unchanged.
 for _m in (_dz, _cache, _tu, _ch):
     globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
@@ -164,27 +165,25 @@ st.markdown("---")
 _tp_h1, _tp_h2 = st.columns([5, 2])
 with _tp_h1:
     st.markdown("### 🔥 Today's Top Picks — NSE Scan")
-    st.caption("Best buy & sell setups from ~36 liquid large/mid-caps, "
-               "scored on trend + momentum + RSI + volume + sector + VIX. "
-               "Cached 30 min · first load ~20-40 s.")
+    st.caption("Best buy & sell setups scored across the **full liquid NSE universe** "
+               "on trend + momentum + RSI + volume + sector + VIX. "
+               "First scan ~2 min, then cached 30 min.")
 with _tp_h2:
     st.write("")
     _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
 
-with st.expander(f"📋 Which {len(_HOME_SCAN_UNIVERSE)} stocks are scanned?", expanded=False):
-    st.caption("Top Picks scans only this curated set of liquid large/mid-caps (kept small "
-               "so the scan stays fast). The strongest BUYs and clearest SELL/EXITs from "
-               "these are surfaced — it is NOT scanning the whole market.")
-    st.markdown(
-        "<div style='font-size:12px;color:#c8d0e0;line-height:1.9'>" +
-        "  ·  ".join(f"<b>{t.replace('.NS','')}</b>" for t in _HOME_SCAN_UNIVERSE) +
-        "</div>", unsafe_allow_html=True,
-    )
-    st.caption("Want a different set scanned? Tell me which stocks and I'll update the list.")
+_scan_univ = get_universe("nifty500")
+with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
+    st.caption(
+        f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
+        "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
+        "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
+        "surfaced (12 each). First scan ~2 min; results cached 30 min, so reopening the "
+        "page is instant.")
 
 if _run_picks or st.session_state.get("cc_picks_loaded"):
     st.session_state["cc_picks_loaded"] = True
-    with st.spinner("Scanning NSE for the strongest setups…"):
+    with st.spinner("Scanning the full NSE universe — first run ~2 min, then cached…"):
         _sec_tuple = _sector_ranks_tuple()
         st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
         _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)

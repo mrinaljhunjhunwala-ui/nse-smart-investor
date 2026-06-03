@@ -135,7 +135,9 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
     url = f"https://stooq.com/q/d/l/?s={sym}&d1={d1}&d2={d2}&i=d"
 
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=12) as r:
+    # Short timeout: when Stooq is congested, fail fast to the Yahoo fallback rather
+    # than blocking ~12 s per ticker (which makes a full-universe scan take minutes).
+    with urllib.request.urlopen(req, timeout=4) as r:
         raw = r.read().decode("utf-8", errors="replace")
 
     if not raw.strip() or "No data" in raw or len(raw) < 60:
