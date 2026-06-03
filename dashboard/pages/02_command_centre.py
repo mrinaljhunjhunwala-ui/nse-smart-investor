@@ -160,7 +160,100 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=
 
 st.markdown("---")
 
-# ── 2. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
+# ── 2. TODAY'S TOP PICKS — broad NSE scan (above open positions) ──────
+_tp_h1, _tp_h2 = st.columns([5, 2])
+with _tp_h1:
+    st.markdown("### 🔥 Today's Top Picks — NSE Scan")
+    st.caption("Best buy & sell setups from ~36 liquid large/mid-caps, "
+               "scored on trend + momentum + RSI + volume + sector + VIX. "
+               "Cached 30 min · first load ~20-40 s.")
+with _tp_h2:
+    st.write("")
+    _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+
+with st.expander(f"📋 Which {len(_HOME_SCAN_UNIVERSE)} stocks are scanned?", expanded=False):
+    st.caption("Top Picks scans only this curated set of liquid large/mid-caps (kept small "
+               "so the scan stays fast). The strongest BUYs and clearest SELL/EXITs from "
+               "these are surfaced — it is NOT scanning the whole market.")
+    st.markdown(
+        "<div style='font-size:12px;color:#c8d0e0;line-height:1.9'>" +
+        "  ·  ".join(f"<b>{t.replace('.NS','')}</b>" for t in _HOME_SCAN_UNIVERSE) +
+        "</div>", unsafe_allow_html=True,
+    )
+    st.caption("Want a different set scanned? Tell me which stocks and I'll update the list.")
+
+if _run_picks or st.session_state.get("cc_picks_loaded"):
+    st.session_state["cc_picks_loaded"] = True
+    with st.spinner("Scanning NSE for the strongest setups…"):
+        _sec_tuple = _sector_ranks_tuple()
+        st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
+        _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
+
+    _pk_buy, _pk_sell = st.columns(2)
+    with _pk_buy:
+        st.markdown("#### 🟢 Buy Candidates")
+        if not _picks["buys"]:
+            st.caption("No strong buy setups today — market not offering clean entries.")
+        for _b in _picks["buys"]:
+            _bl = _b["ticker"].replace(".NS", "")
+            _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
+            _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
+                        f'{_bs["qty"]} sh</span>') if _bs else ""
+            _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
+            _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
+                          else "B" if _b["score"] >= 62 else "")
+            _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
+                           f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
+                           f'GRADE {_grade_tag}</span>') if _grade_tag else ""
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
+                f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+                f'</div>'
+                f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
+                f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
+                + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
+                   if _b["entry"] else "")
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+            if _b["entry"]:
+                _paper_trade_popover(
+                    _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
+                    reason=f"Top Pick: {_b['headline'][:55]}",
+                    key=f"cc_pick_{_b['ticker']}",
+                    label=f"📌 Paper Trade {_bl}",
+                )
+            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
+            render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
+    with _pk_sell:
+        st.markdown("#### 🔴 Sell / Avoid")
+        if not _picks["sells"]:
+            st.caption("No clear sell signals — nothing flashing red in the scan.")
+        for _sv in _picks["sells"]:
+            _svl = _sv["ticker"].replace(".NS", "")
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
+                f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+                f'</div>'
+                f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
+            render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
+else:
+    st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
+
+st.markdown("---")
+
+# ── 3. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
 _cc_h1, _cc_h2 = st.columns([5, 2])
 _cc_h1.markdown("### 📌 Open Positions")
 with _cc_h2:
@@ -254,99 +347,6 @@ else:
                     paper_close_trade(_pos["id"], _pos["cur"],
                                       "Closed via Command Centre")
                     st.cache_data.clear(); st.rerun()
-
-st.markdown("---")
-
-# ── 3. TODAY'S TOP PICKS — broad NSE scan (shown ABOVE the watchlist) ──────
-_tp_h1, _tp_h2 = st.columns([5, 2])
-with _tp_h1:
-    st.markdown("### 🔥 Today's Top Picks — NSE Scan")
-    st.caption("Best buy & sell setups from ~36 liquid large/mid-caps, "
-               "scored on trend + momentum + RSI + volume + sector + VIX. "
-               "Cached 30 min · first load ~20-40 s.")
-with _tp_h2:
-    st.write("")
-    _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
-
-with st.expander(f"📋 Which {len(_HOME_SCAN_UNIVERSE)} stocks are scanned?", expanded=False):
-    st.caption("Top Picks scans only this curated set of liquid large/mid-caps (kept small "
-               "so the scan stays fast). The strongest BUYs and clearest SELL/EXITs from "
-               "these are surfaced — it is NOT scanning the whole market.")
-    st.markdown(
-        "<div style='font-size:12px;color:#c8d0e0;line-height:1.9'>" +
-        "  ·  ".join(f"<b>{t.replace('.NS','')}</b>" for t in _HOME_SCAN_UNIVERSE) +
-        "</div>", unsafe_allow_html=True,
-    )
-    st.caption("Want a different set scanned? Tell me which stocks and I'll update the list.")
-
-if _run_picks or st.session_state.get("cc_picks_loaded"):
-    st.session_state["cc_picks_loaded"] = True
-    with st.spinner("Scanning NSE for the strongest setups…"):
-        _sec_tuple = _sector_ranks_tuple()
-        st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
-        _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
-
-    _pk_buy, _pk_sell = st.columns(2)
-    with _pk_buy:
-        st.markdown("#### 🟢 Buy Candidates")
-        if not _picks["buys"]:
-            st.caption("No strong buy setups today — market not offering clean entries.")
-        for _b in _picks["buys"]:
-            _bl = _b["ticker"].replace(".NS", "")
-            _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
-            _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
-                        f'{_bs["qty"]} sh</span>') if _bs else ""
-            _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
-            _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
-                          else "B" if _b["score"] >= 62 else "")
-            _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
-                           f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
-                           f'GRADE {_grade_tag}</span>') if _grade_tag else ""
-            st.markdown(
-                f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
-                f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
-                f'</div>'
-                f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
-                f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
-                + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
-                   if _b["entry"] else "")
-                + '</div>',
-                unsafe_allow_html=True,
-            )
-            if _b["entry"]:
-                _paper_trade_popover(
-                    _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
-                    reason=f"Top Pick: {_b['headline'][:55]}",
-                    key=f"cc_pick_{_b['ticker']}",
-                    label=f"📌 Paper Trade {_bl}",
-                )
-            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
-            render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
-    with _pk_sell:
-        st.markdown("#### 🔴 Sell / Avoid")
-        if not _picks["sells"]:
-            st.caption("No clear sell signals — nothing flashing red in the scan.")
-        for _sv in _picks["sells"]:
-            _svl = _sv["ticker"].replace(".NS", "")
-            st.markdown(
-                f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
-                f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
-                f'</div>'
-                f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
-            render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
-else:
-    st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
 
 st.markdown("---")
 
