@@ -10,6 +10,7 @@ from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
 from data.universe import get_universe
+from data.angel_fetcher import is_configured as _ao_is_configured
 # Inject every shared module-level name so the verbatim body runs unchanged.
 for _m in (_dz, _cache, _tu, _ch):
     globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
@@ -180,6 +181,18 @@ with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=Fa
         "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
         "surfaced (12 each). First scan ~2 min; results cached 30 min, so reopening the "
         "page is instant.")
+
+# Data-source badge — shows whether the scan is using the fast broker feed or fallback
+try:
+    if _ao_is_configured():
+        st.caption("⚡ **Angel One configured** — the scan uses it first (Tier-0 broker "
+                   "feed, throttled to its rate limit). Stooq/Yahoo are only a last-resort "
+                   "fallback if an Angel call fails or its session has expired.")
+    else:
+        st.caption("ℹ️ **Using free sources** (Stooq → Yahoo). Set up **Angel One** on its "
+                   "page for faster, more reliable scans.")
+except Exception:
+    pass
 
 if _run_picks or st.session_state.get("cc_picks_loaded"):
     st.session_state["cc_picks_loaded"] = True
