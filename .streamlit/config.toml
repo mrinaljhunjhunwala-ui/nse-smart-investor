@@ -11,3 +11,9 @@ font                     = "sans serif"
 
 [server]
 headless = true
+
+# Hide Streamlit's auto-generated pages/ navigation — the app ships its own
+# grouped sidebar nav in dashboard/shared/nav.py (render_sidebar). Without this,
+# users would see TWO navigations stacked in the sidebar.
+[client]
+showSidebarNavigation = false

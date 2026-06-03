@@ -1,0 +1,149 @@
+"""My Watchlist - NSE Smart Investor (multipage page; body verbatim from app.py)."""
+import os, sys
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+import streamlit as st
+from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
+from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
+# Inject every shared module-level name so the verbatim body runs unchanged.
+for _m in (_dz, _cache, _tu, _ch):
+    globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
+
+apply_design()
+render_sidebar(current="My Watchlist")
+render_top_bar()
+
+# ───────────────────────── page body (de-indented from app.py) ─────────────────────────
+st.title("⭐ My Watchlist")
+st.markdown("Save stocks you're tracking. Scores and prices update automatically.")
+
+# SQLite-backed watchlist (same DB as paper trades)
+import sqlite3 as _sql
+_WL_DB = os.path.join(_ROOT, "dashboard", "paper_trades.db")
+
+def _wl_init():
+    with _sql.connect(_WL_DB) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker   TEXT NOT NULL UNIQUE,
+                notes    TEXT DEFAULT '',
+                added_at TEXT DEFAULT (datetime('now','localtime')),
+                target_price REAL DEFAULT NULL,
+                alert_sl     REAL DEFAULT NULL
+            )
+        """)
+    return _sql.connect(_WL_DB)
+
+_wl_con = _wl_init()
+
+def _wl_add(ticker: str, notes: str = "", target: float = None, sl: float = None):
+    try:
+        _wl_con.execute(
+            "INSERT OR IGNORE INTO watchlist(ticker, notes, target_price, alert_sl) VALUES(?,?,?,?)",
+            (ticker.upper(), notes, target, sl)
+        )
+        _wl_con.commit()
+        return True
+    except Exception:
+        return False
+
+def _wl_remove(ticker: str):
+    _wl_con.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))
+    _wl_con.commit()
+
+def _wl_get_all():
+    return pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", _wl_con)
+
+# Add to watchlist form
+with st.expander("➕ Add Stock to Watchlist", expanded=False):
+    _wl_f1, _wl_f2, _wl_f3, _wl_f4 = st.columns([2, 2, 1, 1])
+    with _wl_f1:
+        _new_tkr = st.text_input("Ticker (e.g. INFY)", key="wl_new_tkr").strip().upper()
+    with _wl_f2:
+        _new_notes = st.text_input("Notes (optional)", key="wl_new_notes")
+    with _wl_f3:
+        _new_target = st.number_input("Target ₹", 0.0, 100000.0, 0.0, key="wl_target", format="%.1f") or None
+    with _wl_f4:
+        _new_sl = st.number_input("Alert SL ₹", 0.0, 100000.0, 0.0, key="wl_sl", format="%.1f") or None
+    if st.button("⭐ Add", key="wl_page_add_btn") and _new_tkr:
+        _sym = _new_tkr if _new_tkr.endswith(".NS") else _new_tkr + ".NS"
+        if _wl_add(_sym, _new_notes, _new_target, _new_sl):
+            st.success(f"Added {_sym} to watchlist!")
+            st.rerun()
+
+# Display watchlist with live scores
+_wl_data = _wl_get_all()
+if _wl_data.empty:
+    st.info("Your watchlist is empty. Add stocks using the form above.")
+else:
+    _refresh_btn = st.button("🔄 Refresh Scores", key="wl_refresh")
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def _wl_scores(tickers_tuple):
+        rows = []
+        for tkr in tickers_tuple:
+            try:
+                cs = get_composite_score(tkr)
+                rows.append({
+                    "ticker":    tkr,
+                    "price":     cs.current_price,
+                    "score":     cs.composite_score,
+                    "signal":    cs.overall_signal,
+                    "rsi":       round(cs.technical_indicators.get("rsi", 0), 1),
+                    "change_1d": round(cs.technical_indicators.get("return_1d", 0) * 100, 2),
+                })
+            except Exception:
+                rows.append({"ticker": tkr, "price": None, "score": None,
+                             "signal": "Error", "rsi": None, "change_1d": None})
+        return rows
+
+    _tickers_tuple = tuple(_wl_data["ticker"].tolist())
+    with st.spinner("Loading scores…"):
+        _score_rows = _wl_scores(_tickers_tuple)
+
+    _score_map = {r["ticker"]: r for r in _score_rows}
+
+    # Merge with watchlist data
+    _merged = []
+    for _, row in _wl_data.iterrows():
+        tkr = row["ticker"]
+        sc  = _score_map.get(tkr, {})
+        _merged.append({
+            "⭐": "⭐",
+            "Ticker":       tkr.replace(".NS",""),
+            "Price ₹":      f"₹{sc.get('price',0):,.2f}" if sc.get("price") else "—",
+            "1d %":         f"{sc.get('change_1d',0):+.2f}%" if sc.get("change_1d") is not None else "—",
+            "Score":        sc.get("score", "—"),
+            "Signal":       sc.get("signal", "—"),
+            "RSI":          sc.get("rsi","—"),
+            "Target ₹":     f"₹{row['target_price']:.1f}" if row["target_price"] else "—",
+            "Alert SL ₹":   f"₹{row['alert_sl']:.1f}"   if row["alert_sl"]     else "—",
+            "Notes":        row["notes"] or "",
+            "Added":        str(row["added_at"])[:10],
+        })
+
+    _wl_display_df = pd.DataFrame(_merged)
+    st.dataframe(_wl_display_df, hide_index=True, use_container_width=True, height=420)
+
+    # Remove ticker
+    st.markdown("---")
+    _rm_col1, _rm_col2 = st.columns([3, 1])
+    with _rm_col1:
+        _rm_tkr = st.selectbox("Remove from watchlist", ["— select —"] + _wl_data["ticker"].tolist(),
+                               key="wl_remove_sel")
+    with _rm_col2:
+        st.write("")
+        st.write("")
+        if st.button("🗑️ Remove", key="wl_remove_btn") and _rm_tkr != "— select —":
+            _wl_remove(_rm_tkr)
+            st.success(f"Removed {_rm_tkr}")
+            st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE 11 — INVESTOR GUIDE (SOP)
+# ═══════════════════════════════════════════════════════════════════════════════
