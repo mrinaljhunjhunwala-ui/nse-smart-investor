@@ -301,6 +301,57 @@ if _csv_source is not None:
                 unsafe_allow_html=True
             )
 
+            # ── 🔔 Auto-Signal Monitor — flag holdings that flipped to BUY/SELL ──
+            # Recommendations only. The app NEVER auto-executes real trades.
+            _PF_BUY  = {"STRONG BUY", "BUY"}
+            _PF_SELL = {"CAUTION", "EXIT", "SELL", "REDUCE"}
+            _pf_cur  = {h.ticker: h.action for h in summary.holdings}
+            _pf_prev = st.session_state.get("_pf_prev_actions", {})
+            _pf_flips = []
+            for _tk, _ac in _pf_cur.items():
+                _pv = _pf_prev.get(_tk)
+                if _pv and _pv != _ac and (_ac in _PF_BUY or _ac in _PF_SELL):
+                    _pf_flips.append((_tk.replace(".NS", ""), _pv, _ac,
+                                      "buy" if _ac in _PF_BUY else "sell"))
+            st.session_state["_pf_prev_actions"] = _pf_cur
+
+            _sg1, _sg2 = st.columns([5, 2])
+            _sg1.markdown("### 🔔 Auto-Signal Monitor")
+            _pf_auto = _sg2.toggle("Auto-refresh (5 min)", key="pf_auto_signal")
+
+            _pf_buys  = [h for h in summary.holdings if h.action in _PF_BUY]
+            _pf_sells = [h for h in summary.holdings if h.action in _PF_SELL]
+
+            if _pf_flips:
+                _fl_rows = "".join(
+                    f'<div style="font-size:12.5px;color:#fff;margin:2px 0">'
+                    f'{"🟢" if _d == "buy" else "🔴"} <b>{_t}</b> '
+                    f'<span style="color:#9aa">{_p}</span> → '
+                    f'<b style="color:{"#26a69a" if _d == "buy" else "#ef5350"}">{_a}</b></div>'
+                    for _t, _p, _a, _d in _pf_flips)
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#2a1c05,#332208);'
+                    f'border-left:4px solid #ff9500;border-radius:10px;padding:10px 14px;'
+                    f'margin:4px 0 8px">'
+                    f'<div style="font-size:12px;font-weight:700;color:#ff9500;margin-bottom:3px">'
+                    f'⚡ {len(_pf_flips)} signal change(s) since your last check</div>'
+                    f'{_fl_rows}</div>', unsafe_allow_html=True)
+                for _t, _p, _a, _d in _pf_flips:
+                    st.toast(f"{'🟢' if _d == 'buy' else '🔴'} {_t}: {_p} → {_a}", icon="⚡")
+
+            st.caption(
+                f"📡 **{len(_pf_buys)}** holding(s) signalling **BUY**, "
+                f"**{len(_pf_sells)}** signalling **SELL/EXIT** right now — see the cards below. "
+                "Recommendations only; the app never auto-executes real trades. "
+                "Toggle **Auto-refresh** to keep this live while the page is open.")
+
+            if _pf_auto:
+                @st.fragment(run_every="300s")
+                def _pf_signal_tick():
+                    # a full rerun every 5 min re-scores holdings & re-checks flips
+                    st.rerun()
+                _pf_signal_tick()
+
             # ── Diversification ────────────────────────────────────────
             div = summary.diversification
             if div.sector_weights:
