@@ -1,34 +1,43 @@
-"""dashboard/shared/design.py ? NSE Pro CSS theme + Plotly template + design helpers.
-Each page calls apply_design() once at the top before rendering.
-"""
-import streamlit as st
+"""dashboard/shared/design.py - NSE Pro CSS theme, Plotly template, UI helpers."""
+from __future__ import annotations
+import os, sys, sqlite3, warnings, io, json, math, datetime
+import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import plotly.io as pio
-
-# ?? Plotly 'nse_pro' template (registered once at import) ??
-pio.templates["nse_pro"] = go.layout.Template(
-    layout=dict(
-        paper_bgcolor="#070c18",
-        plot_bgcolor="#0a1020",
-        font=dict(family="Inter, -apple-system, sans-serif", color="#8899bb", size=12),
-        title=dict(font=dict(size=15, color="#f0f4ff")),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", linecolor="rgba(255,255,255,0.06)",
-                   tickfont=dict(color="#4a5568", size=11), zeroline=False),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.04)", linecolor="rgba(255,255,255,0.06)",
-                   tickfont=dict(color="#4a5568", size=11), zeroline=False),
-        legend=dict(bgcolor="rgba(10,16,32,0.85)", bordercolor="rgba(255,255,255,0.06)",
-                    borderwidth=1, font=dict(color="#8899bb", size=11)),
-        hoverlabel=dict(bgcolor="#0d1526", bordercolor="rgba(255,255,255,0.12)",
-                        font=dict(color="#f0f4ff", family="Inter", size=12)),
-        colorway=["#5b8def", "#00d4aa", "#ff9500", "#a78bfa", "#ff4757", "#FFC107",
-                  "#26a69a", "#64b5f6"],
-    )
-)
-pio.templates.default = "nse_pro"
+from plotly.subplots import make_subplots
+import streamlit as st
+warnings.filterwarnings('ignore')
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 
-def apply_design() -> None:
-    """Inject the NSE Pro CSS theme. Call at the top of every page."""
+def apply_design():
+    """Register Plotly template + inject CSS. Idempotent across pages."""
+    if "nse_pro" not in pio.templates:
+        pio.templates["nse_pro"] = go.layout.Template(
+            layout=dict(
+                paper_bgcolor="#070c18",
+                plot_bgcolor="#0a1020",
+                font=dict(family="Inter, -apple-system, sans-serif", color="#8899bb", size=12),
+                title=dict(font=dict(size=15, color="#f0f4ff")),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.04)", linecolor="rgba(255,255,255,0.06)",
+                           tickfont=dict(color="#4a5568", size=11), zeroline=False),
+                yaxis=dict(gridcolor="rgba(255,255,255,0.04)", linecolor="rgba(255,255,255,0.06)",
+                           tickfont=dict(color="#4a5568", size=11), zeroline=False),
+                legend=dict(bgcolor="rgba(10,16,32,0.85)", bordercolor="rgba(255,255,255,0.06)",
+                            borderwidth=1, font=dict(color="#8899bb", size=11)),
+                hoverlabel=dict(bgcolor="#0d1526", bordercolor="rgba(255,255,255,0.12)",
+                                font=dict(color="#f0f4ff", family="Inter", size=12)),
+                colorway=["#5b8def", "#00d4aa", "#ff9500", "#a78bfa", "#ff4757", "#FFC107",
+                          "#26a69a", "#64b5f6"],
+            )
+        )
+        pio.templates.default = "nse_pro"
+
+    # ── NSE Pro Design System — trading-dashboard-design skill applied ─────────────
     st.markdown(
         """<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -207,10 +216,9 @@ def apply_design() -> None:
     )
 
 
-    # ── Design helper functions (NSE Pro — from trading-dashboard-design skill) ───
 
 
-# ?? Design helper functions ??
+# ── Design helper functions (NSE Pro — from trading-dashboard-design skill) ───
 def _glass_metric(label: str, value: str, delta: str = "", delta_pos: bool = True) -> str:
     d_color = "#00d4aa" if delta_pos else "#ff4757"
     d_sym   = "▲" if delta_pos else "▼"
@@ -267,6 +275,3 @@ def _signal_card(ticker, action, price, entry, stop, target, reason, score=None,
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Sidebar — grouped navigation
-# ─────────────────────────────────────────────────────────────────────────────
