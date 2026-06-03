@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import threading
 import datetime
 import urllib.request
 from typing import Dict, List, Optional, Tuple
@@ -43,6 +44,22 @@ import pandas as pd
 # ── In-process caches ─────────────────────────────────────────────────────────
 _SESSION:      Dict = {"jwt": None, "feed_token": None, "api_key": "", "ts": 0.0}
 _TOKEN_CACHE:  Dict[str, Optional[str]] = {}   # "RELIANCE" → "2885"
+
+# ── Historical-data rate limiter ──────────────────────────────────────────────
+# Angel's getCandleData is rate-capped (~3 req/s). A full-universe scan fires many
+# concurrent worker threads, so serialise their candle calls to stay under the cap
+# (otherwise calls get throttled and fall back to the slow free sources).
+_HIST_LOCK = threading.Lock()
+_HIST_LAST = [0.0]
+_HIST_MIN_INTERVAL = 0.4   # seconds between calls → ~2.5 req/s, safely under the cap
+
+
+def _hist_rate_limit() -> None:
+    with _HIST_LOCK:
+        _elapsed = time.time() - _HIST_LAST[0]
+        if _elapsed < _HIST_MIN_INTERVAL:
+            time.sleep(_HIST_MIN_INTERVAL - _elapsed)
+        _HIST_LAST[0] = time.time()
 
 _BASE = "https://apiconnect.angelbroking.com"
 
@@ -295,6 +312,7 @@ def fetch_historical(
             data=payload,
             headers=_auth_headers(session["jwt"], session["api_key"]),
         )
+        _hist_rate_limit()   # throttle concurrent scan workers to Angel's cap
         with urllib.request.urlopen(req, timeout=20) as r:
             data = json.loads(r.read())
 
