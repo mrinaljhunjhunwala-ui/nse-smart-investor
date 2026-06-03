@@ -1,0 +1,497 @@
+"""dashboard/shared/chart_helpers.py - charts, live top bar, index explorer."""
+from __future__ import annotations
+import os, sys, sqlite3, warnings, io, json, math, datetime
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+from plotly.subplots import make_subplots
+import streamlit as st
+warnings.filterwarnings('ignore')
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Macro / Breadth helpers  (for new pages 7–9)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=600)
+def load_macro_data():
+    """
+    Fetch 3-month daily history for macro instruments.
+    NSE indices via fetch_single() (Stooq first).
+    Commodities/FX via Yahoo Finance JSON history (cloud-safe direct HTTP).
+    """
+    import json, io, datetime, urllib.request
+    from data.fetcher import fetch_single
+
+    data = {}
+
+    # Indian index series — Stooq handles these reliably
+    index_map = {
+        "Nifty 50":  "^NSEI",
+        "BankNifty": "^NSEBANK",
+        "India VIX": "^INDIAVIX",
+    }
+    for name, sym in index_map.items():
+        try:
+            df = fetch_single(sym, period="3mo")
+            if not df.empty:
+                data[name] = df["Close"]
+        except Exception:
+            pass
+
+    # Commodities / FX — use Yahoo Finance JSON history (v8 chart API)
+    commodity_map = {
+        "Gold ($/oz)": "GC=F",
+        "Brent Crude": "BZ=F",
+        "USD/INR":     "USDINR=X",
+        "DXY":         "DX-Y.NYB",
+    }
+    for name, sym in commodity_map.items():
+        try:
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+                   "?interval=1d&range=3mo")
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                raw = json.loads(r.read())
+            res = raw["chart"]["result"][0]
+            ts  = res["timestamp"]
+            cl  = res["indicators"]["quote"][0]["close"]
+            df  = pd.DataFrame({"Close": cl},
+                               index=pd.to_datetime(ts, unit="s")).dropna()
+            if not df.empty:
+                data[name] = df["Close"]
+        except Exception:
+            pass
+
+    return pd.DataFrame(data).dropna(how="all")
+
+
+_NIFTY50_TICKERS = (
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "BHARTIARTL.NS",
+    "INFY.NS", "SBIN.NS", "HINDUNILVR.NS", "ITC.NS", "LT.NS",
+    "BAJFINANCE.NS", "HCLTECH.NS", "MARUTI.NS", "SUNPHARMA.NS", "ADANIENT.NS",
+    "KOTAKBANK.NS", "TITAN.NS", "ONGC.NS", "NTPC.NS", "AXISBANK.NS",
+    "WIPRO.NS", "ULTRACEMCO.NS", "ASIANPAINT.NS", "BAJAJFINSV.NS", "POWERGRID.NS",
+    "M&M.NS", "NESTLEIND.NS", "JSWSTEEL.NS", "TMPV.NS", "TATASTEEL.NS",
+    "TECHM.NS", "GRASIM.NS", "BPCL.NS", "ADANIPORTS.NS", "CIPLA.NS",
+    "BRITANNIA.NS", "EICHERMOT.NS", "DRREDDY.NS", "HINDALCO.NS", "COALINDIA.NS",
+    "DIVISLAB.NS", "TATACONSUM.NS", "SBILIFE.NS", "APOLLOHOSP.NS", "HDFCLIFE.NS",
+    "INDUSINDBK.NS", "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "ETERNAL.NS", "SHRIRAMFIN.NS",
+)
+
+
+@st.cache_data(ttl=900)  # 15-min cache
+def compute_market_breadth(tickers: tuple):
+    """
+    Fetch 1-year OHLCV for each ticker via Stooq (no rate limits) in parallel,
+    then compute advance/decline, SMA positions, and 52-week extremes.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from data.fetcher import fetch_single
+
+    tickers_list = list(tickers)
+
+    def _fetch_one(t):
+        try:
+            return t, fetch_single(t, period="1y")
+        except Exception:
+            return t, None
+
+    data_map = {}
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futs = {pool.submit(_fetch_one, t): t for t in tickers_list}
+        for fut in as_completed(futs, timeout=45):
+            try:
+                t, df = fut.result(timeout=0)
+                if df is not None and not df.empty:
+                    data_map[t] = df
+            except Exception:
+                pass
+
+    adv = dec = above_20 = above_50 = above_200 = near_hi = near_lo = counted = 0
+    for t in tickers_list:
+        try:
+            df = data_map.get(t)
+            if df is None or len(df) < 10:
+                continue
+            close = df["Close"]
+            curr  = float(close.iloc[-1])
+            prev  = float(close.iloc[-2])
+            counted += 1
+            if curr > prev:
+                adv += 1
+            else:
+                dec += 1
+            if len(df) >= 20 and curr > float(close.rolling(20).mean().iloc[-1]):
+                above_20 += 1
+            if len(df) >= 50 and curr > float(close.rolling(50).mean().iloc[-1]):
+                above_50 += 1
+            if len(df) >= 200 and curr > float(close.rolling(200).mean().iloc[-1]):
+                above_200 += 1
+            high52 = float(df["High"].max())
+            low52  = float(df["Low"].min())
+            if (high52 - curr) / max(high52, 1) * 100 < 5:
+                near_hi += 1
+            if (curr - low52) / max(low52, 1) * 100 < 5:
+                near_lo += 1
+        except Exception:
+            continue
+
+    n = max(counted, 1)
+    return {
+        "advance":       adv,
+        "decline":       dec,
+        "total":         counted,
+        "ad_ratio":      round(adv / max(dec, 1), 2),
+        "pct_above_20":  round(above_20  / n * 100, 1),
+        "pct_above_50":  round(above_50  / n * 100, 1),
+        "pct_above_200": round(above_200 / n * 100, 1),
+        "near_52w_high": near_hi,
+        "near_52w_low":  near_lo,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared chart builder
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
+    """
+    4-panel trading chart: Price (candlestick + SMAs + BB) / Volume / RSI / MACD.
+    Matches the layout of professional trading terminals.
+    """
+    fig = make_subplots(
+        rows=4, cols=1, shared_xaxes=True,
+        row_heights=[0.52, 0.14, 0.17, 0.17],
+        vertical_spacing=0.02,
+        subplot_titles=[f"{ticker} — Price", "Volume", "RSI (14)", "MACD"],
+    )
+
+    # ── Row 1: Candlestick ──────────────────────────────────────────────────
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"],
+        name="OHLC",
+        increasing_line_color="#26a69a", increasing_fillcolor="#26a69a",
+        decreasing_line_color="#ef5350", decreasing_fillcolor="#ef5350",
+    ), row=1, col=1)
+
+    if "BB_Upper" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["BB_Upper"],
+            line=dict(color="rgba(100,160,255,0.4)", dash="dash", width=1),
+            name="BB Upper", showlegend=False,
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["BB_Lower"],
+            fill="tonexty", fillcolor="rgba(100,160,255,0.06)",
+            line=dict(color="rgba(100,160,255,0.4)", dash="dash", width=1),
+            name="BB Lower", showlegend=False,
+        ), row=1, col=1)
+
+    for sma, color in [("SMA_20", "#FF9800"), ("SMA_50", "#2196F3"), ("SMA_200", "#9C27B0")]:
+        if sma in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index, y=df[sma], name=sma,
+                line=dict(color=color, width=1.2),
+            ), row=1, col=1)
+
+    # ── Row 2: Volume bars (green = up day, red = down day) ─────────────────
+    if "Volume" in df.columns:
+        vol_colors = [
+            "#26a69a" if c >= o else "#ef5350"
+            for c, o in zip(df["Close"], df["Open"])
+        ]
+        fig.add_trace(go.Bar(
+            x=df.index, y=df["Volume"],
+            marker_color=vol_colors,
+            name="Volume", showlegend=False,
+            opacity=0.7,
+        ), row=2, col=1)
+        # 20-day avg volume line
+        vol_ma = df["Volume"].rolling(20).mean()
+        fig.add_trace(go.Scatter(
+            x=df.index, y=vol_ma,
+            line=dict(color="#FFD700", width=1.2, dash="dot"),
+            name="Vol MA20", showlegend=False,
+        ), row=2, col=1)
+
+    # ── Row 3: RSI ──────────────────────────────────────────────────────────
+    if "RSI" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["RSI"], name="RSI",
+            line=dict(color="#CE93D8", width=1.5),
+        ), row=3, col=1)
+        for level, color in [(30, "#26a69a"), (70, "#ef5350"), (50, "rgba(150,150,150,0.5)")]:
+            fig.add_hline(y=level, line_dash="dot", line_color=color, row=3, col=1)
+        # RSI overbought / oversold shading
+        fig.add_hrect(y0=70, y1=100, fillcolor="rgba(239,83,80,0.06)",
+                      line_width=0, row=3, col=1)
+        fig.add_hrect(y0=0, y1=30, fillcolor="rgba(38,166,154,0.06)",
+                      line_width=0, row=3, col=1)
+
+    # ── Row 4: MACD ─────────────────────────────────────────────────────────
+    if "MACD" in df.columns and "MACD_Signal" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["MACD"], name="MACD",
+            line=dict(color="#2196F3", width=1.5),
+        ), row=4, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["MACD_Signal"], name="Signal",
+            line=dict(color="#FF9800", width=1.5),
+        ), row=4, col=1)
+        if "MACD_Hist" in df.columns:
+            hist_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in df["MACD_Hist"]]
+            fig.add_trace(go.Bar(
+                x=df.index, y=df["MACD_Hist"], name="Hist",
+                marker_color=hist_colors, opacity=0.6,
+            ), row=4, col=1)
+
+    # ── NSE Pro Plotly layout ────────────────────────────────────────────────
+    _NSE_GRID = dict(gridcolor="rgba(255,255,255,.04)", linecolor="rgba(255,255,255,.06)")
+    _NSE_TICK = dict(color="#4a5568", size=10)
+    fig.update_layout(
+        height=720,
+        paper_bgcolor="#070c18",
+        plot_bgcolor="#0a1020",
+        xaxis_rangeslider_visible=False,
+        font=dict(family="Inter, -apple-system, sans-serif", color="#8899bb", size=11),
+        legend=dict(
+            orientation="h", y=1.02, x=0,
+            bgcolor="rgba(7,12,24,.85)",
+            bordercolor="rgba(255,255,255,.06)", borderwidth=1,
+            font=dict(color="#8899bb", size=11),
+        ),
+        margin=dict(l=0, r=60, t=40, b=0),
+        hoverlabel=dict(
+            bgcolor="#0d1526", bordercolor="rgba(255,255,255,.1)",
+            font=dict(color="#f0f4ff", family="Inter", size=12),
+        ),
+        hovermode="x unified",
+    )
+    # Apply grid style to all rows
+    for row in range(1, 5):
+        fig.update_xaxes(
+            **_NSE_GRID, zeroline=False, tickfont=_NSE_TICK,
+            row=row, col=1,
+        )
+        fig.update_yaxes(
+            **_NSE_GRID, zeroline=False, tickfont=_NSE_TICK,
+            side="right", row=row, col=1,
+        )
+    fig.update_yaxes(title_text="₹ Price",  title_font=dict(size=10,color="#4a5568"), row=1, col=1)
+    fig.update_yaxes(title_text="Volume",   title_font=dict(size=10,color="#4a5568"), tickformat=".2s", row=2, col=1)
+    fig.update_yaxes(title_text="RSI",      title_font=dict(size=10,color="#4a5568"), range=[0,100], row=3, col=1)
+    fig.update_yaxes(title_text="MACD",     title_font=dict(size=10,color="#4a5568"), row=4, col=1)
+    # Spike lines for crosshair
+    fig.update_xaxes(showspikes=True, spikethickness=1, spikecolor="#5a6a8a", spikedash="dot")
+    fig.update_yaxes(showspikes=True, spikethickness=1, spikecolor="#5a6a8a")
+    return fig
+
+
+# ── Live top bar: Nifty indices strip + scrolling ticker (auto-refresh 5 s) ───
+# All Nifty indices the strip tries to show (failures are skipped gracefully).
+_INDEX_STRIP = [
+    ("NIFTY 50",   "^NSEI"),      ("BANK NIFTY", "^NSEBANK"),
+    ("NIFTY IT",   "^CNXIT"),     ("NIFTY AUTO",  "^CNXAUTO"),
+    ("NIFTY FMCG", "^CNXFMCG"),   ("NIFTY PHARMA","^CNXPHARMA"),
+    ("NIFTY METAL","^CNXMETAL"),  ("NIFTY ENERGY","^CNXENERGY"),
+]
+
+
+@st.cache_data(ttl=5, show_spinner=False)        # 5-second freshness for live feel
+def _index_strip_data():
+    """Live value + day-change % for each Nifty index via Yahoo chart meta."""
+    import json, urllib.parse, urllib.request
+    try:
+        from data.fetcher import _get_yf_crumb
+        _opener, _crumb = _get_yf_crumb()
+    except Exception:
+        _opener, _crumb = None, ""
+    _qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
+    _open = _opener.open if _opener else urllib.request.urlopen
+    out = []
+    for label, sym in _INDEX_STRIP:
+        try:
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                   f"{urllib.parse.quote(sym)}?interval=1d&range=5d{_qs}")
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+            with _open(req, timeout=6) as r:
+                meta = json.loads(r.read())["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice")
+            prev  = meta.get("chartPreviousClose") or meta.get("previousClose")
+            if price and prev:
+                out.append((label, float(price), (float(price) / float(prev) - 1) * 100))
+        except Exception:
+            continue
+    return out
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _ticker_tape_data():
+    _names = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
+              "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "AXISBANK.NS",
+              "MARUTI.NS", "TATAMOTORS.NS", "SUNPHARMA.NS", "TITAN.NS"]
+    try:
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch(_names, max_workers=10)
+    except Exception:
+        raw = {}
+    out = []
+    for t in _names:
+        q = raw.get(t)
+        if isinstance(q, dict) and q.get("price"):
+            out.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
+    return out
+
+
+@st.fragment(run_every="5s")     # auto-updates ONLY this bar every 5 s, no page reload
+def _live_top_bar():
+    # ── VIX + market-status chips, then Nifty indices strip ──────────────────
+    try:
+        _chips = ""
+        # India VIX chip
+        try:
+            from utils.vix import get_india_vix_regime as _ltb_vix
+            _vinfo = _ltb_vix()
+            _vv = _vinfo.get("vix")
+            if _vv:
+                _vcol = "#00d4aa" if _vv < 16 else "#ff9500" if _vv < 22 else "#ff4757"
+                _chips += (
+                    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                    f'border-left:3px solid {_vcol};border-radius:8px;padding:6px 12px;min-width:96px">'
+                    f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
+                    f'<div style="font-size:14px;font-weight:700;color:{_vcol}">{_vv:.1f} '
+                    f'<span style="font-size:10px;color:#8899bb">{_vinfo.get("regime","").title()}</span></div></div>'
+                )
+        except Exception:
+            pass
+        # Market-status chip
+        try:
+            from utils.market_hours import market_status as _ltb_ms
+            _msd = _ltb_ms()
+            _scol = "#00d4aa" if _msd.get("is_open") else "#ff4757"
+            _chips += (
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_scol};border-radius:8px;padding:6px 12px;min-width:110px">'
+                f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">MARKET</div>'
+                f'<div style="font-size:13px;font-weight:700;color:{_scol}">{_msd.get("status","")}</div></div>'
+            )
+        except Exception:
+            pass
+
+        _idx = _index_strip_data()
+        for _lbl, _val, _chg in (_idx or []):
+            _c = "#00d4aa" if _chg >= 0 else "#ff4757"
+            _a = "▲" if _chg >= 0 else "▼"
+            _chips += (
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
+                f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
+                f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
+                f'<span style="font-size:11px;color:{_c}">{_a}{abs(_chg):.2f}%</span></div></div>'
+            )
+        if _chips:
+            st.markdown(
+                f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
+
+    # ── Scrolling stock ticker ───────────────────────────────────────────────
+    try:
+        _tt = _ticker_tape_data()
+        if _tt:
+            _tt_items = ""
+            for _sym, _px, _chg in _tt:
+                _tc = "#00d4aa" if _chg >= 0 else "#ff4757"
+                _ta = "▲" if _chg >= 0 else "▼"
+                _tt_items += (
+                    f'<span style="margin:0 22px">'
+                    f'<b style="color:#f0f4ff">{_sym}</b> '
+                    f'<span style="color:#c8d0e0">₹{_px:,.2f}</span> '
+                    f'<span style="color:{_tc}">{_ta}{abs(_chg):.2f}%</span></span>'
+                )
+            st.markdown(
+                f'<div class="ticker-wrap"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
+
+
+# ── Index explorer: open any index to see its stocks + day changes ────────────
+# Maps each index label to its constituent ticker list (from the app universe).
+_INDEX_CONSTITUENTS = {
+    "NIFTY 50":     ("universe", "nifty50"),
+    "BANK NIFTY":   ("sector",   "Banking"),
+    "NIFTY IT":     ("sector",   "IT"),
+    "NIFTY AUTO":   ("sector",   "Auto"),
+    "NIFTY FMCG":   ("sector",   "FMCG"),
+    "NIFTY PHARMA": ("sector",   "Pharma"),
+    "NIFTY METAL":  ("sector",   "Metal"),
+    "NIFTY ENERGY": ("sector",   "Energy"),
+}
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _index_constituent_rows(index_label: str):
+    """Return [(ticker, price, chg%), …] for an index's constituents (live)."""
+    try:
+        kind, key = _INDEX_CONSTITUENTS.get(index_label, ("universe", "nifty50"))
+        if kind == "universe":
+            from data.universe import get_universe
+            tickers = get_universe(key)
+        else:
+            from data.universe import get_tickers_by_sector
+            tickers = get_tickers_by_sector(key)
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch(list(tickers), max_workers=12)
+        rows = []
+        for t in tickers:
+            q = raw.get(t)
+            if isinstance(q, dict) and q.get("price"):
+                rows.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
+        rows.sort(key=lambda x: -x[2])   # biggest gainers first
+        return rows
+    except Exception:
+        return []
+
+
+def render_top_bar():
+    """Live indices/ticker bar + index explorer. Call at top of each page."""
+    try:
+        _live_top_bar()
+    except Exception:
+        pass  # live bar is cosmetic — never break the page over it
+    with st.expander("📑 Open an index — see its stocks & day changes", expanded=False):
+        _ix_pick = st.selectbox("Index", list(_INDEX_CONSTITUENTS.keys()),
+                                key="ix_explorer_sel", label_visibility="collapsed")
+        with st.spinner(f"Loading {_ix_pick} stocks…"):
+            _ix_rows = _index_constituent_rows(_ix_pick)
+        if _ix_rows:
+            _ix_up = sum(1 for _, _, c in _ix_rows if c >= 0)
+            st.caption(f"**{_ix_pick}** — {len(_ix_rows)} stocks · {_ix_up} up / {len(_ix_rows)-_ix_up} down")
+            # color-coded HTML grid
+            _ix_html = '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+            for _nm, _px, _ch in _ix_rows:
+                _cc = "#00d4aa" if _ch >= 0 else "#ff4757"
+                _ar = "▲" if _ch >= 0 else "▼"
+                _ix_html += (
+                    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                    f'border-left:3px solid {_cc};border-radius:7px;padding:6px 11px;min-width:120px">'
+                    f'<div style="font-size:12px;font-weight:700;color:#f0f4ff">{_nm}</div>'
+                    f'<div style="font-size:12px;color:#c8d0e0">₹{_px:,.2f} '
+                    f'<span style="color:{_cc};font-weight:600">{_ar}{abs(_ch):.2f}%</span></div></div>'
+                )
+            _ix_html += '</div>'
+            st.markdown(_ix_html, unsafe_allow_html=True)
+        else:
+            st.caption("Couldn't load constituents — try again in a moment.")
