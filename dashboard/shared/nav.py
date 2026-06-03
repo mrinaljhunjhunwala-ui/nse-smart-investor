@@ -227,17 +227,16 @@ def render_sidebar(current: str = None) -> None:
         if _t:
             st.switch_page(_t)
 
+    # Callbacks only RECORD the desired target — they must not call st.switch_page /
+    # st.rerun (those are no-ops inside a callback). The actual switch happens in the
+    # script body below, after the widgets render.
     def _on_page_change():
-        _p = st.session_state.get('nav', '').split(' ', 1)[-1]
-        if _p != current:
-            _nav_to(_p)
+        st.session_state['_nav_target'] = st.session_state.get('nav', '').split(' ', 1)[-1]
 
     def _on_group_change():
         _g = st.session_state.get('nav_group', '').split(' ', 1)[-1]
         if _g in _NAV_GROUPS:
-            _first = _NAV_GROUPS[_g][0]
-            if _first != current:
-                _nav_to(_first)
+            st.session_state['_nav_target'] = _NAV_GROUPS[_g][0]   # section's first page
 
     # Programmatic nav: a button elsewhere set _goto_page to a full page name.
     if st.session_state.get('_goto_page'):
@@ -259,6 +258,11 @@ def render_sidebar(current: str = None) -> None:
     _selected_group = st.session_state['nav_group'].split(' ', 1)[1]
     st.sidebar.radio('Page', [f'{_PAGE_EMOJI[p]} {p}' for p in _NAV_GROUPS[_selected_group]],
                      key='nav', label_visibility='collapsed', on_change=_on_page_change)
+
+    # Resolve a pending nav request HERE (valid in the body; a no-op inside a callback).
+    _target = st.session_state.pop('_nav_target', None)
+    if _target and _target != current:
+        _nav_to(_target)
 
 
     # ── Portfolio quick-view (right under the nav — value + today's P&L) ───────────
