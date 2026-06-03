@@ -33,6 +33,11 @@ xgboost>=2.0.0
 # Uncomment only if running LSTM training locally (requires ~2 GB download):
 # torch>=2.0.0   # CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
+# ── Optional: "Ask AI" chat on Top Picks (Claude Haiku) ──────────────────────
+# Only used when an ANTHROPIC_API_KEY secret is set; the offline reason pointers
+# + Deep Dive narrative work without it. Kept installed so enabling needs no redeploy.
+anthropic>=0.40.0
+
 # ── TOTP generation (for Angel One SmartAPI authentication) ──────────────────
 pyotp>=2.8.0
 

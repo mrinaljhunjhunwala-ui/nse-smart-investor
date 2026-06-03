@@ -7,6 +7,7 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
 # Inject every shared module-level name so the verbatim body runs unchanged.
 for _m in (_dz, _cache, _tu, _ch):
@@ -323,6 +324,8 @@ if _run_picks or st.session_state.get("cc_picks_loaded"):
                     key=f"cc_pick_{_b['ticker']}",
                     label=f"📌 Paper Trade {_bl}",
                 )
+            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
+            render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
     with _pk_sell:
         st.markdown("#### 🔴 Sell / Avoid")
         if not _picks["sells"]:
@@ -340,11 +343,8 @@ if _run_picks or st.session_state.get("cc_picks_loaded"):
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            if st.button(f"🔍 Deep Dive {_svl}", key=f"cc_pick_dd_{_sv['ticker']}",
-                         use_container_width=True):
-                st.session_state["analyze_ticker"] = _sv["ticker"]
-                st.session_state["_goto_page"] ="🔍 Analyze Stock"
-                st.rerun()
+            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
+            render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
 else:
     st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
 
