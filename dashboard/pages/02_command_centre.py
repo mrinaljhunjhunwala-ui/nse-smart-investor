@@ -31,8 +31,8 @@ try:
     import trade_store as _mb_ts
     _mbo = _mb_ts.fetch_open()
     _mb_open = 0 if (_mbo is None or _mbo.empty) else len(_mbo)
-except Exception:
-    pass
+except Exception as _e:
+    st.caption(f"⚠️ Couldn't read open paper positions ({_e}) — showing 0.")
 _mb_reg = get_vix_info().get("regime", "normal")
 _mb_focus = {
     "panic":       ("🚨", "Panic — protect capital, avoid new buys"),
@@ -80,8 +80,8 @@ try:
             _cc_nifty_trend = "downtrend"
         else:
             _cc_nifty_trend = "sideways"
-except Exception:
-    pass
+except Exception as _e:
+    st.caption(f"⚠️ Couldn't load Nifty trend ({_e}) — market pulse may be incomplete.")
 
 _VIX_LBL = {
     "complacency": ("#FFC107", "😴", "COMPLACENT"), "normal":  ("#26a69a", "🟢", "CALM"),
@@ -182,8 +182,8 @@ if _cc_autoclose:
 _cc_open_df = pd.DataFrame()
 try:
     _cc_open_df = _store.fetch_open()
-except Exception:
-    pass
+except Exception as _e:
+    st.caption(f"⚠️ Couldn't load open paper positions ({_e}).")
 
 if _cc_open_df.empty:
     st.info("No open paper positions. Use **Paper Trades** or click **Paper Trade** on any BUY signal below.")
