@@ -42,6 +42,10 @@ def apply_design():
         """<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
+    /* ── Hide Streamlit's auto-generated pages/ nav (we ship our own grouped nav in
+          render_sidebar). Belt-and-suspenders with showSidebarNavigation=false. ── */
+    [data-testid="stSidebarNav"] { display: none !important; }
+
     /* ── Global ──────────────────────────────────────────────────────────────── */
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;

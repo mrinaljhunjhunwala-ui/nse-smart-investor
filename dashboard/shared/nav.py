@@ -216,29 +216,49 @@ def render_sidebar(current: str = None) -> None:
 
 
 
-    # Programmatic nav: a button set _goto_page; sync the widgets then switch.
+    # ── Grouped navigation ───────────────────────────────────────────────────
+    # The widgets are SYNCED to the page we're on each run (so the radio highlights
+    # the current page and no spurious switch fires on a fresh/deep-linked load).
+    # Navigation happens only via explicit user action: the on_change callbacks
+    # below (radio = pick page, selectbox = jump to a section's first page) and the
+    # _goto_page programmatic hook used by buttons across the app.
+    def _nav_to(_name):
+        _t = _PAGE_FILE.get(_name)
+        if _t:
+            st.switch_page(_t)
+
+    def _on_page_change():
+        _p = st.session_state.get('nav', '').split(' ', 1)[-1]
+        if _p != current:
+            _nav_to(_p)
+
+    def _on_group_change():
+        _g = st.session_state.get('nav_group', '').split(' ', 1)[-1]
+        if _g in _NAV_GROUPS:
+            _first = _NAV_GROUPS[_g][0]
+            if _first != current:
+                _nav_to(_first)
+
+    # Programmatic nav: a button elsewhere set _goto_page to a full page name.
     if st.session_state.get('_goto_page'):
         _goto = st.session_state.pop('_goto_page')
-        for _g, _pages in _NAV_GROUPS.items():
-            _match = next((p for p in _pages
-                           if _goto in (f'{_PAGE_EMOJI[p]} {p}', _PAGE_FULL_NAME.get(p, p))), None)
-            if _match:
-                st.session_state['nav_group'] = f'{_group_icons[_g]} {_g}'
-                st.session_state['nav']       = f'{_PAGE_EMOJI[_match]} {_match}'
-                if _match != current:
-                    st.switch_page(_PAGE_FILE[_match])
-                break
-    _nav_group = st.sidebar.selectbox('Section', [f'{_group_icons[g]} {g}' for g in _NAV_GROUPS],
-                                      key='nav_group', label_visibility='collapsed')
-    _selected_group = _nav_group.split(' ', 1)[1]
-    _page_short = st.sidebar.radio('Page', [f'{_PAGE_EMOJI[p]} {p}' for p in _NAV_GROUPS[_selected_group]],
-                                   key='nav', label_visibility='collapsed')
-    _page_key = _page_short.split(' ', 1)[1]
-    # User picked a different page via the radio -> navigate (guarded against self-switch loop).
-    if current and _page_key != current:
-        _target = _PAGE_FILE.get(_page_key)
-        if _target:
-            st.switch_page(_target)
+        _match = next((p for _g, _ps in _NAV_GROUPS.items() for p in _ps
+                       if _goto in (f'{_PAGE_EMOJI[p]} {p}', _PAGE_FULL_NAME.get(p, p))), None)
+        if _match and _match != current:
+            _nav_to(_match)
+
+    # Force both widgets to reflect the current page BEFORE they are instantiated.
+    _cur_grp = next((_g for _g, _ps in _NAV_GROUPS.items() if current in _ps), None)
+    if _cur_grp:
+        st.session_state['nav_group'] = f'{_group_icons[_cur_grp]} {_cur_grp}'
+        st.session_state['nav']       = f'{_PAGE_EMOJI[current]} {current}'
+
+    st.sidebar.selectbox('Section', [f'{_group_icons[g]} {g}' for g in _NAV_GROUPS],
+                         key='nav_group', label_visibility='collapsed',
+                         on_change=_on_group_change)
+    _selected_group = st.session_state['nav_group'].split(' ', 1)[1]
+    st.sidebar.radio('Page', [f'{_PAGE_EMOJI[p]} {p}' for p in _NAV_GROUPS[_selected_group]],
+                     key='nav', label_visibility='collapsed', on_change=_on_page_change)
 
 
     # ── Portfolio quick-view (right under the nav — value + today's P&L) ───────────
