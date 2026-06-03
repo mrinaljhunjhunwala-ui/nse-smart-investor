@@ -459,11 +459,18 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 5, sector_ranks: tuple 
             s = score_stock(tk, vix_info=_vix, sector_scores_df=_sec_df)
             return {"ticker": tk, "price": s.price, "score": s.score,
                     "grade": s.grade, "action": s.action, "headline": s.headline,
-                    "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward}
+                    "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
+                    # richer "why" payload (zero extra cost — already on the score object)
+                    "narrative": s.narrative, "sector": s.sector,
+                    "technical": s.technical_score, "momentum": s.momentum_score,
+                    "volume": s.volume_score, "pattern": s.pattern_score,
+                    "sentiment": s.sentiment_score}
         except Exception:
             return {"ticker": tk, "price": 0, "score": 0, "grade": "?",
                     "action": "UNAVAILABLE", "headline": "", "entry": 0,
-                    "sl": 0, "tp": 0, "rr": 0}
+                    "sl": 0, "tp": 0, "rr": 0, "narrative": "", "sector": "",
+                    "technical": 0, "momentum": 0, "volume": 0,
+                    "pattern": 0, "sentiment": 0}
 
     results = []
     try:
