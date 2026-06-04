@@ -53,7 +53,10 @@ def run_backtest(
         try:
             df = fetch_single(ticker, period=period)
             df = add_all_indicators(df)
-            df.dropna(inplace=True)
+            # Only require OHLCV present — dropping rows with ANY indicator NaN can punch
+            # mid-series gaps and distort bar timing. OHLCV is never NaN so bars stay
+            # contiguous; the strategy handles its own indicator warm-up.
+            df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
 
             if len(df) < 60:
                 print(f"SKIP (only {len(df)} rows after indicator warmup)")

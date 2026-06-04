@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import os
 from typing import Any, List, Optional
 
 import pandas as pd
 
+_log = logging.getLogger("trade_store")
 _SQLITE_PATH = "trades.db"
 
 
@@ -249,7 +251,12 @@ def load_by_account(account: str) -> pd.DataFrame:
             _q("SELECT * FROM trades WHERE account=? ORDER BY id DESC"),
             conn, params=(account,),
         )
-    except Exception:
+    except Exception as e:
+        # Was a silent swallow that returned an empty frame — indistinguishable from
+        # "no trades", so a broken DB looked like an empty account and the user could
+        # unknowingly re-open positions. Log it so the failure is diagnosable; the
+        # empty frame is still returned so the UI degrades instead of crashing.
+        _log.warning("load_by_account(%r) failed: %s", account, e)
         return pd.DataFrame()
     finally:
         conn.close()
