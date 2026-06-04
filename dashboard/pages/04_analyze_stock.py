@@ -7,6 +7,9 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+# Fundamentals (Phase 0): UI depends ONLY on the service facade + the schema/analytics.
+from analysis.fundamentals.service import default_service as _fund_service
+from analysis.fundamentals import analytics as _fund_analytics
 from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
 # Inject every shared module-level name so the verbatim body runs unchanged.
 for _m in (_dz, _cache, _tu, _ch):
@@ -445,6 +448,51 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     "📌 **Paper Trading** lets you test this signal without real money. "
                     "Track it in the **📂 Paper Trades** page to see if the model's calls are accurate."
                 )
+
+            # ── 📊 Fundamentals (Phase 0 — Yahoo-backed, provider-agnostic) ──────
+            st.markdown("---")
+            st.subheader("📊 Fundamentals (beta)")
+            try:
+                import datetime as _f_dt
+                _f_cf = _fund_service().get_fundamentals(ticker)          # facade only
+                _f_res = _fund_analytics.compute_all(_f_cf, cagr_years=5)
+                _f_fresh = "—"
+                if _f_cf.last_updated:
+                    _f_hrs = (_f_dt.datetime.now() - _f_cf.last_updated).total_seconds() / 3600
+                    _f_fresh = "just now" if _f_hrs < 1 else f"{_f_hrs:.0f}h ago"
+                st.caption(
+                    f"Provider: **{_f_cf.provider_name or '—'}**  ·  "
+                    f"Statement date: **{_f_cf.statement_date or '—'}**  ·  "
+                    f"Data freshness: **{_f_fresh}**"
+                )
+                if _f_cf.is_partial:
+                    st.warning(
+                        "⚠️ **Partial data** — some fundamentals are unavailable for this stock "
+                        f"from {_f_cf.provider_name or 'the provider'}. "
+                        f"Missing: {', '.join(_f_cf.missing_fields) or 'n/a'}."
+                    )
+
+                def _f_show(_col, _r):
+                    if _r.available and _r.value is not None:
+                        _txt = f"{_r.value:,.1f}%" if _r.unit == "%" else f"{_r.value:,.2f}x"
+                        _col.metric(_r.metric, _txt)
+                        _col.caption(f"confidence: {_r.confidence}"
+                                     + (f" · {_r.reason}" if _r.reason else ""))
+                    else:
+                        _col.metric(_r.metric, "N/A")          # never a fabricated 0
+                        _col.caption(f"⚠️ {_r.reason}")
+
+                _fc1, _fc2, _fc3, _fc4 = st.columns(4)
+                _f_show(_fc1, _f_res["revenue_cagr"])
+                _f_show(_fc2, _f_res["eps_cagr"])
+                _f_show(_fc3, _f_res["roe"])
+                _f_show(_fc4, _f_res["debt_to_equity"])
+                st.caption(
+                    "Phase 0 (architecture validation): Yahoo Finance data only (~4-yr depth), "
+                    "no paid provider yet. Informational — not investment advice."
+                )
+            except Exception as _f_e:
+                st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
 
         except Exception as e:
             st.error(f"Analysis failed: {e}")
