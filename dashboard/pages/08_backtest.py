@@ -107,7 +107,11 @@ if _bt_run:
                 _bd = _bt_fs(_bt_t, period=_bt_period)
                 _bd = _bt_ind(_bd)
                 _bd = _bd.dropna(axis=1, how="all")   # drop all-NaN cols (e.g. Supertrend)
-                _bd.dropna(inplace=True)               # then drop warmup rows
+                # Only require OHLCV to be present. Dropping every row with ANY indicator
+                # NaN (e.g. a sparse pattern/Fib column) could punch holes mid-series and
+                # silently distort bar timing in the backtest. OHLCV is never NaN, so the
+                # bar sequence stays contiguous; strategies compute/skip their own warm-up.
+                _bd = _bd.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
                 if len(_bd) >= 60:
                     _stats = _BT(_bd, _strat_cls, cash=1_000_000,
                                  commission=_BT_COST, exclusive_orders=True).run()

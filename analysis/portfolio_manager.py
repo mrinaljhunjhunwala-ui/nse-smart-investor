@@ -288,8 +288,15 @@ class PortfolioManager:
                 for fut in done:
                     try:
                         holdings.append(fut.result(timeout=0))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # A holding that fails here is retried by the sequential pass
+                        # below (it won't be in scored_tickers). Log so a holding that
+                        # fails BOTH paths — and silently drops out of the portfolio
+                        # total/P&L — is at least diagnosable.
+                        import logging as _lg
+                        _lg.getLogger("portfolio").warning(
+                            "parallel score failed for %s: %s (retrying sequentially)",
+                            futs.get(fut, "?"), e)
             finally:
                 pool.shutdown(wait=False)
             # Fall back to sequential for any that timed out
