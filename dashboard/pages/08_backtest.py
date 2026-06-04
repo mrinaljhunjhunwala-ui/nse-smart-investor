@@ -7,6 +7,7 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.disclosures import render_survivorship_notice, render_backtest_assumptions
 from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
 # Inject every shared module-level name so the verbatim body runs unchanged.
 for _m in (_dz, _cache, _tu, _ch):
@@ -19,6 +20,10 @@ render_top_bar()
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
 st.title("🧪 Backtest Results")
 st.caption("Historical strategy performance — how would these signals have done in the past?")
+
+# Transparency: survivorship-bias notice + the full assumptions/limitations section.
+render_survivorship_notice()
+render_backtest_assumptions()
 
 def load_backtest_csv(path: str = "portfolio_results.csv") -> pd.DataFrame:
     if os.path.exists(path):
