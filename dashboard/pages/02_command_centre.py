@@ -179,7 +179,7 @@ with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=Fa
         f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
         "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
         "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
-        "surfaced (12 each). First scan ~2 min; results cached 30 min, so reopening the "
+        "surfaced (10 each — buys and sells). First scan ~2 min; results cached 30 min, so reopening the "
         "page is instant.")
 
 # Data-source badge — shows whether the scan is using the fast broker feed or fallback

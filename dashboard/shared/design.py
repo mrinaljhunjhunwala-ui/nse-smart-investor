@@ -101,8 +101,16 @@ def apply_design():
         border-radius: 12px; padding: 14px 18px;
         box-shadow: 0 2px 12px rgba(0,0,0,.3);
     }
-    [data-testid="stMetricValue"] { font-weight:800; letter-spacing:-.5px; font-size:24px; }
+    [data-testid="stMetricValue"] { font-weight:800; letter-spacing:-.5px; font-size:21px; }
     [data-testid="stMetricLabel"] { font-size:11px; color:#4a5568; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+    /* Never clip/ellipsis metric text — always show the full value, label and delta */
+    [data-testid="stMetric"] { overflow: visible !important; }
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] *,
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] *,
+    [data-testid="stMetricDelta"], [data-testid="stMetricDelta"] * {
+        white-space: normal !important; overflow: visible !important;
+        text-overflow: clip !important; max-width: none !important;
+    }
 
     /* ── Buttons ─────────────────────────────────────────────────────────────── */
     .stButton > button {

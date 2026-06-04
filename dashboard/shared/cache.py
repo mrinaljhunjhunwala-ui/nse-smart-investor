@@ -435,7 +435,7 @@ def _sector_df_from_tuple(sector_ranks: tuple):
 
 @st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache
 @st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache — the full scan is heavy
-def _home_top_picks(vix_regime: str = "normal", n: int = 12, sector_ranks: tuple = ()) -> dict:
+def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
     """
     Scan the FULL NSE universe (~200+ liquid large/mid/small-caps) and return the
     strongest long candidates and the clearest SELL/EXIT candidates for the day.
