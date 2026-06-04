@@ -13,12 +13,18 @@ In-memory cache: each (ticker, period, interval) fetched only once per process.
 
 import http.cookiejar
 import io
+import logging
 import time
 import datetime
 import urllib.parse
 import urllib.request
 import pandas as pd
 from typing import List, Optional
+
+# Structured logging for the data-source fallback chain (Angel → Stooq → Yahoo).
+# Failures at each tier are logged at WARNING with provider + exception type + symbol;
+# the tier that ultimately serves the data is logged so a degraded path is diagnosable.
+_log = logging.getLogger("data.fetcher")
 
 # ── In-process cache  {(ticker, period, interval): DataFrame} ────────────────
 _FETCH_CACHE: dict = {}
@@ -352,7 +358,14 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         return _FETCH_CACHE[cache_key].copy()
 
     df = None
-    last_err = ""
+    served = None
+    failures = []        # [(provider, exception_type)] — for the final error + summary
+
+    def _fail(provider, exc):
+        """Record + log a tier failure (provider, exception type, symbol)."""
+        failures.append((provider, type(exc).__name__))
+        _log.warning("data fallback: provider=%s symbol=%s failed: %s: %s",
+                     provider, ticker, type(exc).__name__, exc)
 
     # ── Tier 0: Angel One SmartAPI (only if credentials configured) ───────────
     try:
@@ -360,32 +373,46 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         if _ao_ok():
             df = _ao_fetch(ticker, period=period, interval=interval)
             if df is not None and not df.empty:
-                print(f"  [AngelOne] {ticker}: {len(df)} rows")
-    except Exception as _e:
-        last_err = str(_e)
+                served = "AngelOne"
+            else:
+                _log.warning("data fallback: provider=AngelOne symbol=%s returned no data",
+                             ticker)
+    except Exception as e:
+        df = None
+        _fail("AngelOne", e)
 
     # ── Tier 1: Stooq CSV (daily bars only — no intraday support) ────────────
     if (df is None or df.empty) and interval == "1d":
         try:
             df = _fetch_stooq(ticker, period=period)
-            print(f"  [Stooq] {ticker}: {len(df)} rows")
+            served = "Stooq"
         except Exception as e:
-            last_err = str(e)
-            print(f"  [Stooq] {ticker} failed: {e} — trying Yahoo…")
-    elif df is None or df.empty:
-        print(f"  [intraday {interval}] {ticker} — skipping Stooq (daily-only)")
+            df = None
+            _fail("Stooq", e)
+    elif (df is None or df.empty) and served is None:
+        _log.debug("intraday %s for %s — skipping Stooq (daily-only)", interval, ticker)
 
     # ── Tier 2: Yahoo Finance v8 chart API (cookie+crumb auth) ───────────────
     if df is None or df.empty:
         try:
             df = _fetch_yahoo_direct(ticker, period=period, interval=interval)
-            print(f"  [Yahoo] {ticker}: {len(df)} rows")
+            served = "Yahoo"
         except Exception as e:
-            last_err = str(e)
-            print(f"  [Yahoo] {ticker} failed: {e}")
+            df = None
+            _fail("Yahoo", e)
 
     if df is None or df.empty:
-        raise ValueError(f"No data for {ticker}. All sources failed: {last_err}")
+        _log.error("data fetch FAILED: symbol=%s — all providers failed: %s",
+                   ticker, failures)
+        raise ValueError(f"No data for {ticker}. All sources failed: {failures}")
+
+    # Log the provider that ultimately succeeded — INFO when a fallback was needed
+    # (a degraded path worth noticing), DEBUG on a clean first-tier hit.
+    if failures:
+        _log.info("data served: symbol=%s provider=%s rows=%d (after failures: %s)",
+                  ticker, served, len(df), [p for p, _ in failures])
+    else:
+        _log.debug("data served: symbol=%s provider=%s rows=%d", ticker, served, len(df))
 
     _FETCH_CACHE[cache_key] = df
     return df.copy()
