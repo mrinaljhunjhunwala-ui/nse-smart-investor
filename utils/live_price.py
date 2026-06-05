@@ -16,11 +16,14 @@ Why not yfinance?
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional
+
+_log = logging.getLogger("live_price")
 
 
 # ─── Yahoo Finance direct quote API ─────────────────────────────────────────
@@ -54,8 +57,8 @@ def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
                 "price":      float(price),
                 "prev_close": float(prev_close) if prev_close else float(price),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("yahoo JSON quote failed for %s: %s", ticker_ns, e)  # tier fallback
     return None
 
 
@@ -80,8 +83,8 @@ def _get_nse_session():
         })
         try:
             s.get("https://www.nseindia.com/", timeout=6)
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("NSE session warm-up failed: %s", e)  # cookie may still work
         _nse_session = s
         _nse_session_ts = time.time()
     return _nse_session
@@ -101,8 +104,8 @@ def _nse_live_price(symbol: str) -> Optional[dict]:
         prev  = pi.get("previousClose") or pi.get("close")
         if price:
             return {"price": float(price), "prev_close": float(prev or price)}
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("NSE live price failed for %s: %s", symbol, e)  # tier fallback
     return None
 
 
@@ -131,7 +134,8 @@ def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
         price = float(df["Close"].iloc[-1])
         prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else price
         return {"price": price, "prev_close": prev}
-    except Exception:
+    except Exception as e:
+        _log.debug("Stooq EOD price failed for %s: %s", ticker_ns, e)  # last tier
         return None
 
 
@@ -167,8 +171,8 @@ def get_live_quote(symbol: str) -> Optional[dict]:
             q = _ao_quote(clean_ns)
             if q:
                 return q
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("Angel One live quote failed for %s: %s", clean_ns, e)  # tier 0 fallback
 
     # Tier 1–3: existing fallbacks
     for fetch_fn, arg in [
@@ -185,6 +189,8 @@ def get_live_quote(symbol: str) -> Optional[dict]:
                 "prev_close": pc,
                 "chg_pct":    (p / pc - 1) * 100 if pc > 0 else 0.0,
             }
+    # All tiers failed — this IS a data-loss event, so warn (not silent).
+    _log.warning("all live-price tiers failed for %s — no quote available", symbol)
     return None
 
 
@@ -206,7 +212,8 @@ def get_live_prices_batch(symbols: List[str], max_workers: int = 8) -> Dict[str,
                 val = fut.result(timeout=0)
                 # Ensure we only store proper dicts — never raw exceptions or other types
                 results[sym] = val if isinstance(val, dict) else None
-            except Exception:
+            except Exception as e:
+                _log.debug("batch quote failed for %s: %s", sym, e)
                 results[sym] = None
     finally:
         pool.shutdown(wait=False)

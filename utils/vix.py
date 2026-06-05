@@ -10,9 +10,11 @@ No yfinance dependency — safe on Streamlit Cloud.
 """
 
 from __future__ import annotations
+import logging
 import time
 from typing import Dict, Optional
 
+_log = logging.getLogger("vix")
 _VIX_CACHE: Optional[Dict] = None
 _VIX_CACHE_TTL = 600   # 10 minutes — VIX can spike intraday
 
@@ -50,7 +52,8 @@ def get_india_vix_regime() -> Dict:
                     _gate, headers={"User-Agent": _ua}
                 ), timeout=8)
                 break
-            except Exception:
+            except Exception as e:
+                _log.debug("VIX gateway %s failed: %s", _gate, e)  # try next gateway
                 continue
 
         # ── Step 2: get crumb token ───────────────────────────────────────────
@@ -68,7 +71,8 @@ def get_india_vix_regime() -> Dict:
                     if _raw and len(_raw) <= 25 and not _raw.startswith("<"):
                         crumb = _raw
                         break
-            except Exception:
+            except Exception as e:
+                _log.debug("VIX crumb %s failed: %s", _cu, e)  # try next crumb endpoint
                 continue
 
         # ── Step 3: fetch India VIX (^INDIAVIX) ──────────────────────────────
