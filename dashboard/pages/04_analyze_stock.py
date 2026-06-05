@@ -494,6 +494,59 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             except Exception as _f_e:
                 st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
 
+            # ── 🧭 Investment Thesis (Phase A1 — structured, rules-based, NO AI) ──
+            st.markdown("---")
+            st.subheader("🧭 Investment Thesis (structured)")
+            st.caption(
+                "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
+                "single verdict. Every point is traceable to its source. Not investment advice."
+            )
+            try:
+                from analysis.thesis import generate_thesis, build_inputs
+                _th = generate_thesis(build_inputs(ticker, composite=cs, deep=_dc))
+
+                _v_color = {"Strong Positive": "#00d4aa", "Positive": "#2ecc71",
+                            "Neutral": "#8899bb", "Negative": "#ff7043",
+                            "Strong Negative": "#ff4757"}.get(_th.verdict, "#8899bb")
+                st.markdown(
+                    f"<div style='font-size:1.15rem'>Verdict: "
+                    f"<b style='color:{_v_color}'>{_th.verdict}</b> "
+                    f"<span style='color:#8899bb'>(score {_th.verdict_score:+d})</span></div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(_th.verdict_rationale)
+
+                def _factor_list(_factors, _empty):
+                    if not _factors:
+                        st.caption(_empty)
+                        return
+                    for _f in _factors:
+                        st.markdown(
+                            f"- {_f.text}  \n"
+                            f"  <span style='color:#8899bb;font-size:0.85rem'>"
+                            f"· {_f.source}: {_f.evidence}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                _tc1, _tc2 = st.columns(2)
+                with _tc1:
+                    st.markdown("**🟢 Bull case**")
+                    _factor_list(_th.bull_factors, "No bull factors triggered.")
+                with _tc2:
+                    st.markdown("**🔴 Bear case**")
+                    _factor_list(_th.bear_factors, "No bear factors triggered.")
+
+                st.markdown("**⚠️ Key risks**")
+                _factor_list(_th.key_risks, "No specific risks flagged by the rules.")
+
+                st.caption(
+                    "Contributing subsystems: "
+                    + (", ".join(_th.inputs_present) or "none available")
+                    + ". Phase A1 — explainable rules only, no AI/LLM narration."
+                )
+            except Exception as _th_e:
+                st.caption(f"⚠️ Thesis unavailable: {_th_e}")
+
         except Exception as e:
             st.error(f"Analysis failed: {e}")
             import traceback
