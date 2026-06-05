@@ -41,10 +41,37 @@ SIGNAL_AGREE = 0.70        # fraction of deep-confirmation checks bullish
 EARNINGS_SOON = 7          # days — event/gap risk window
 COMPOSITE_STRONG = 70.0    # /100
 COMPOSITE_WEAK = 40.0      # /100
+ROCE_STRONG = 15.0         # %  — efficient use of capital (quality compounder)
+ROCE_WEAK = 8.0            # %  — poor capital efficiency
 
 
 def _pct(x: float) -> str:
     return f"{x:.1f}%"
+
+
+def _fmt_cr(x: float) -> str:
+    return f"₹{x:,.0f} cr"
+
+
+# ── sector-aware metric applicability (single source of truth in sector_classification) ──
+def _leverage_applies(inp: ThesisInputs) -> bool:
+    p = inp.sector_profile
+    return p is None or getattr(p, "leverage_warning_applies", True)
+
+
+def _roce_applies(inp: ThesisInputs) -> bool:
+    p = inp.sector_profile
+    return p is None or getattr(p, "roce_meaningful", True)
+
+
+def _fcf_applies(inp: ThesisInputs) -> bool:
+    p = inp.sector_profile
+    return p is None or getattr(p, "fcf_meaningful", True)
+
+
+def _fcf_caveat(inp: ThesisInputs) -> bool:
+    p = inp.sector_profile
+    return p is not None and getattr(p, "fcf_capex_caveat", False)
 
 
 # ──────────────────────────────── BULL FACTORS ──────────────────────────────────
@@ -65,9 +92,18 @@ def bull_factors(inp: ThesisInputs) -> List[Factor]:
     if inp.roe is not None and inp.roe >= ROE_STRONG:
         out.append(Factor("High return on equity", SRC_FUNDAMENTALS,
                           f"ROE = {_pct(inp.roe)}", BULL))
-    if inp.debt_to_equity is not None and inp.debt_to_equity < DE_LOW:
+    if inp.debt_to_equity is not None and inp.debt_to_equity < DE_LOW and _leverage_applies(inp):
         out.append(Factor("Conservative balance sheet (low debt)", SRC_FUNDAMENTALS,
                           f"D/E = {inp.debt_to_equity:.2f}x", BULL))
+    # ROCE — only where capital-employed is a meaningful concept (not financials)
+    if inp.roce is not None and _roce_applies(inp) and inp.roce >= ROCE_STRONG:
+        out.append(Factor("High return on capital employed", SRC_FUNDAMENTALS,
+                          f"ROCE = {_pct(inp.roce)}", BULL))
+    # FCF — positive cash generation (capex-aware wording)
+    if inp.fcf is not None and _fcf_applies(inp) and inp.fcf > 0:
+        txt = ("Positive free cash flow despite a capital-intensive model"
+               if _fcf_caveat(inp) else "Generates positive free cash flow")
+        out.append(Factor(txt, SRC_FUNDAMENTALS, f"FCF = {_fmt_cr(inp.fcf)}", BULL))
 
     # Technical / momentum
     if inp.technical_score is not None and inp.technical_score >= TECH_STRONG:
@@ -129,6 +165,14 @@ def bear_factors(inp: ThesisInputs) -> List[Factor]:
     if inp.roe is not None and inp.roe < ROE_WEAK:
         out.append(Factor("Weak return on equity", SRC_FUNDAMENTALS,
                           f"ROE = {_pct(inp.roe)}", BEAR))
+    if inp.roce is not None and _roce_applies(inp) and inp.roce < ROCE_WEAK:
+        out.append(Factor("Low return on capital employed", SRC_FUNDAMENTALS,
+                          f"ROCE = {_pct(inp.roce)}", BEAR))
+    # Negative FCF is a bear ONLY for non-capex businesses; for capital-intensive sectors
+    # it is contextual (handled as a sector note), not a simplistic negative.
+    if (inp.fcf is not None and _fcf_applies(inp) and inp.fcf < 0 and not _fcf_caveat(inp)):
+        out.append(Factor("Negative free cash flow (cash burn)", SRC_FUNDAMENTALS,
+                          f"FCF = {_fmt_cr(inp.fcf)}", BEAR))
 
     # Technical / momentum
     if inp.technical_score is not None and inp.technical_score < TECH_WEAK:
@@ -170,8 +214,10 @@ def key_risks(inp: ThesisInputs) -> List[Factor]:
         out.append(Factor("High market sensitivity — amplifies market moves (and losses)",
                           SRC_BETA, f"Beta = {inp.beta:.2f}", RISK))
 
-    # High debt / equity
-    if inp.debt_to_equity is not None and inp.debt_to_equity > DE_ELEVATED:
+    # High debt / equity — SUPPRESSED for financials (deposits/borrowings are the business
+    # model, not a leverage red flag). This is the core Phase D1 correctness fix.
+    if (inp.debt_to_equity is not None and inp.debt_to_equity > DE_ELEVATED
+            and _leverage_applies(inp)):
         label = "High leverage" if inp.debt_to_equity > DE_HIGH else "Elevated leverage"
         out.append(Factor(f"{label} — sensitive to rates and earnings shocks",
                           SRC_FUNDAMENTALS, f"D/E = {inp.debt_to_equity:.2f}x", RISK))
@@ -212,6 +258,27 @@ def key_risks(inp: ThesisInputs) -> List[Factor]:
     if inp.fundamentals_partial:
         out.append(Factor("Fundamental data is partial — some metrics unavailable",
                           SRC_FUNDAMENTALS, "Provider returned partial statements", RISK))
+    return out
+
+
+# ──────────────────────────── SECTOR-AWARE NOTES ────────────────────────────────
+def sector_notes(inp: ThesisInputs) -> List[str]:
+    """Explanatory context that REPLACES misleading outputs (Phase D1). Not factors —
+    these explain *why* certain industrial metrics were not applied."""
+    out: List[str] = []
+    p = inp.sector_profile
+    if p is None:
+        return out
+    if getattr(p, "is_financial", False):
+        note = getattr(p, "note", "")
+        if note:
+            out.append(note)
+    # Negative FCF in a capital-intensive sector → context, not a red flag.
+    if (getattr(p, "fcf_meaningful", True) and getattr(p, "fcf_capex_caveat", False)
+            and inp.fcf is not None and inp.fcf < 0):
+        out.append(f"Negative free cash flow ({_fmt_cr(inp.fcf)}) reflects an ongoing capex "
+                   "cycle, which is normal for capital-intensive sectors and not necessarily a "
+                   "red flag.")
     return out
 
 

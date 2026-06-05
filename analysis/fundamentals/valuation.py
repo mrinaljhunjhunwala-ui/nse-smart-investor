@@ -31,6 +31,10 @@ class ValuationContext:
     confidence: str = "none"            # high | medium | low | none
     missing_fields: List[str] = field(default_factory=list)
     source: Optional[str] = None        # provider name, for provenance
+    # ── sector awareness (Phase D1) ──
+    ev_ebitda_applicable: bool = True   # False for financials (not meaningful)
+    preferred_valuation: Optional[str] = None   # e.g. "P/B + ROE" for banks
+    notes: List[str] = field(default_factory=list)
 
     def available_count(self) -> int:
         return sum(1 for v in (self.pe, self.pb, self.ev_ebitda) if v is not None)
@@ -38,7 +42,8 @@ class ValuationContext:
     def to_dict(self) -> dict:
         return {"pe": self.pe, "pb": self.pb, "ev_ebitda": self.ev_ebitda,
                 "confidence": self.confidence, "missing_fields": list(self.missing_fields),
-                "source": self.source}
+                "source": self.source, "ev_ebitda_applicable": self.ev_ebitda_applicable,
+                "preferred_valuation": self.preferred_valuation, "notes": list(self.notes)}
 
 
 def _clean(v) -> Optional[float]:
@@ -54,18 +59,38 @@ def _clean(v) -> Optional[float]:
     return round(f, 2)
 
 
-def build_valuation_context(cf: Optional[CompanyFundamentals]) -> ValuationContext:
-    """Map the already-fetched multiples into a ValuationContext. Pure; no network."""
+def build_valuation_context(cf: Optional[CompanyFundamentals],
+                            sector_profile=None) -> ValuationContext:
+    """Map the already-fetched multiples into a ValuationContext. Pure; no network.
+
+    Sector-aware (Phase D1): for financials, EV/EBITDA is **not meaningful** — it is
+    suppressed (not shown, not counted as "missing") and replaced with explanatory context;
+    P/B + ROE is flagged as the right lens.
+    """
     ratios = getattr(cf, "ratios", None) if cf is not None else None
     vals = {f: _clean(getattr(ratios, f, None)) if ratios is not None else None for f in _FIELDS}
 
-    missing = [_LABELS[f] for f in _FIELDS if vals[f] is None]
-    present = len(_FIELDS) - len(missing)
-    confidence = ("high" if present == 3 else "medium" if present == 2
+    ev_applicable = sector_profile is None or getattr(sector_profile, "ev_ebitda_meaningful", True)
+    notes: List[str] = []
+    preferred = getattr(sector_profile, "preferred_valuation", None) if sector_profile else None
+
+    if not ev_applicable:
+        vals["ev_ebitda"] = None
+        notes.append("EV/EBITDA is not meaningful for financial companies — assessed on "
+                     "P/B and ROE instead.")
+
+    # Confidence + missing are computed over the APPLICABLE fields only, so suppressing an
+    # inapplicable metric never penalises coverage.
+    applicable = [f for f in _FIELDS if f != "ev_ebitda" or ev_applicable]
+    missing = [_LABELS[f] for f in applicable if vals[f] is None]
+    present = len(applicable) - len(missing)
+    n = len(applicable)
+    confidence = ("high" if present == n and n > 0 else "medium" if present >= 2
                   else "low" if present == 1 else "none")
 
     return ValuationContext(
         pe=vals["pe"], pb=vals["pb"], ev_ebitda=vals["ev_ebitda"],
         confidence=confidence, missing_fields=missing,
         source=getattr(cf, "provider_name", None) if cf is not None else None,
+        ev_ebitda_applicable=ev_applicable, preferred_valuation=preferred, notes=notes,
     )

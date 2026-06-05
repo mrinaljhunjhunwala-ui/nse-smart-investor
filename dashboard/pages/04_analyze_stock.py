@@ -487,9 +487,28 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 _f_show(_fc2, _f_res["eps_cagr"])
                 _f_show(_fc3, _f_res["roe"])
                 _f_show(_fc4, _f_res["debt_to_equity"])
+
+                # ── Sector-aware ROCE / FCF (Phase D1) — only where meaningful ──
+                from analysis.sector_classification import classify_sector as _classify
+                _sp = _classify(getattr(cs, "sector", None),
+                                name=getattr(cs, "company_name", None))
+                if _sp.is_financial:
+                    st.info(f"🏦 **{_sp.group}** — {_sp.note}")
+                else:
+                    _rc1, _rc2 = st.columns(2)
+                    _f_show(_rc1, _f_res["roce"])
+                    _rr = _f_res["fcf"]
+                    if _rr.available and _rr.value is not None:
+                        _rc2.metric("Free Cash Flow", f"₹{_rr.value:,.0f} cr")
+                        _cap = (" · capex-heavy: negative FCF can be a normal investment cycle"
+                                if _sp.fcf_capex_caveat else "")
+                        _rc2.caption(f"confidence: {_rr.confidence}{_cap}")
+                    else:
+                        _rc2.metric("Free Cash Flow", "N/A")
+                        _rc2.caption(f"⚠️ {_rr.reason}")
                 st.caption(
-                    "Phase 0 (architecture validation): Yahoo Finance data only (~4-yr depth), "
-                    "no paid provider yet. Informational — not investment advice."
+                    "Phase 0/D1: Yahoo Finance data only (~4-yr depth), no paid provider. "
+                    "ROCE/FCF shown only where economically meaningful. Not investment advice."
                 )
             except Exception as _f_e:
                 st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
@@ -503,12 +522,24 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             )
             try:
                 from analysis.fundamentals.valuation import build_valuation_context
-                _val = build_valuation_context(_fund_service().get_fundamentals(ticker))
+                from analysis.sector_classification import classify_sector as _classify_v
+                _spv = _classify_v(getattr(cs, "sector", None),
+                                   name=getattr(cs, "company_name", None))
+                _val = build_valuation_context(_fund_service().get_fundamentals(ticker),
+                                               sector_profile=_spv)
                 _vc1, _vc2, _vc3 = st.columns(3)
                 _vc1.metric("P/E", f"{_val.pe:,.1f}x" if _val.pe is not None else "N/A")
                 _vc2.metric("P/B", f"{_val.pb:,.1f}x" if _val.pb is not None else "N/A")
-                _vc3.metric("EV/EBITDA",
-                            f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A")
+                if _val.ev_ebitda_applicable:
+                    _vc3.metric("EV/EBITDA",
+                                f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A")
+                else:
+                    _vc3.metric("EV/EBITDA", "n/a")
+                    _vc3.caption("not meaningful for financials")
+                if _val.preferred_valuation:
+                    st.caption(f"📐 Right lens for this sector: **{_val.preferred_valuation}**")
+                for _vn in _val.notes:
+                    st.caption("ℹ️ " + _vn)
                 st.caption(
                     f"Coverage: **{_val.confidence}**"
                     + (f" · missing: {', '.join(_val.missing_fields)}" if _val.missing_fields else "")
@@ -591,10 +622,13 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 st.markdown("**⚠️ Key risks**")
                 _factor_list(_th.key_risks, "No specific risks flagged by the rules.")
 
+                for _tn in getattr(_th, "notes", []) or []:
+                    st.info("ℹ️ " + _tn)
+
                 st.caption(
                     "Contributing subsystems: "
                     + (", ".join(_th.inputs_present) or "none available")
-                    + ". Phase A1 — explainable rules only, no AI/LLM narration."
+                    + ". Phase A1/D1 — explainable, sector-aware rules; no AI/LLM narration."
                 )
             except Exception as _th_e:
                 _th = None
