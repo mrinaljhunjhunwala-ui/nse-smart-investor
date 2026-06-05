@@ -317,6 +317,73 @@ def test_no_forbidden_vocabulary_anywhere():
             assert word not in blob, f"forbidden word '{word}' in output"
 
 
+# ── PART 1: utilities vs commodity-energy cyclical split ─────────────────────────
+def _energy(**over):
+    """An Energy & Power input that meets the trough trigger (P/E>35 & ROCE<10)."""
+    from analysis.sector_classification import ENERGY_POWER
+    base = dict(sector_group=ENERGY_POWER, is_financial=False, fcf_capex_caveat=True,
+                pe=38, roce=9, eps_cagr=10, revenue_cagr=9,
+                net_income=1000, total_equity=8000,
+                eps_cagr_span_years=4, eps_cagr_points=4, eps_cagr_start_value=600)
+    base.update(over)
+    return ValuationInputs(**base)
+
+
+def test_powergrid_before_after_trough_split():
+    # BEFORE (treated as commodity-energy): trough guard fires → refusal.
+    before = assess(_energy(is_regulated_utility=False))
+    assert before.posture == INSUFFICIENT_EVIDENCE
+    assert before.triggered_guard == "TR-cyclical-trough"
+    # AFTER (regulated utility): trough guard does NOT fire → a valid posture.
+    after = assess(_energy(is_regulated_utility=True))
+    assert after.posture != INSUFFICIENT_EVIDENCE
+    assert after.triggered_guard is None
+    assert after.posture in (DEMANDING_VS_RETURNS, DEMANDING_VS_GROWTH, REASONABLE)
+
+
+def test_commodity_energy_still_trough_refused():
+    # SAIL/IOC-type commodity name (negative growth) → still correctly refused.
+    from analysis.sector_classification import METALS
+    r = assess(ValuationInputs(sector_group=METALS, is_financial=False, fcf_capex_caveat=True,
+                               pe=40, roce=6, eps_cagr=-5, revenue_cagr=-3,
+                               net_income=200, total_equity=5000))
+    assert r.posture == INSUFFICIENT_EVIDENCE and r.triggered_guard == "TR-cyclical-trough"
+
+
+def test_cyclical_peak_still_fires_on_commodity():
+    # Commodity-energy at a margin-led peak → G1 still refuses.
+    from analysis.sector_classification import METALS
+    r = assess(ValuationInputs(sector_group=METALS, is_financial=False, fcf_capex_caveat=True,
+                               pe=8, roce=24, eps_cagr=45, revenue_cagr=10,
+                               net_income=1000, total_equity=5000, is_regulated_utility=False))
+    assert r.posture == INSUFFICIENT_EVIDENCE and r.triggered_guard == "G1-cyclical-peak"
+
+
+def test_regulated_utility_at_peak_not_refused():
+    # Regulated utility meeting the G1 peak pattern → NOT refused (earnings are regulated).
+    r = assess(_energy(pe=9, roce=24, eps_cagr=45, revenue_cagr=10, is_regulated_utility=True))
+    assert r.posture != INSUFFICIENT_EVIDENCE
+    assert r.triggered_guard != "G1-cyclical-peak"
+
+
+def test_regulated_utility_low_growth_is_reasonable_not_refused():
+    # POWERGRID-type real profile: stable LOW growth (<5%) + moderate ROCE. As a commodity
+    # name this would refuse (growth-lens-off); as a regulated utility → Reasonable.
+    low_growth = dict(pe=16, roce=12, eps_cagr=3, revenue_cagr=3,
+                      net_income=15000, total_equity=70000,
+                      eps_cagr_span_years=4, eps_cagr_points=4, eps_cagr_start_value=13000)
+    util = assess(_energy(is_regulated_utility=True, **low_growth))
+    assert util.posture == REASONABLE and util.triggered_guard is None
+    commodity = assess(_energy(is_regulated_utility=False, **low_growth))
+    assert commodity.posture == INSUFFICIENT_EVIDENCE  # growth-lens-off for a commodity name
+
+
+def test_is_regulated_utility_detection():
+    from analysis.fundamentals.valuation_decision import is_regulated_utility as _iru
+    assert _iru("POWERGRID.NS") and _iru("NTPC") and _iru(None, "Power Grid Corporation of India")
+    assert not _iru("SAIL.NS") and not _iru("IOC.NS", "Indian Oil Corporation")
+
+
 def test_to_dict_serialisable():
     d = assess(_nonfin()).to_dict()
     assert d["posture"] and d["phrase"] and "confidence" in d

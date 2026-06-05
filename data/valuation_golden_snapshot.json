@@ -1,0 +1,403 @@
+{
+  "generated_at": "2026-06-06T02:19:56",
+  "schema_version": 1,
+  "source": "V1_NSE_VALIDATION_REPORT.md",
+  "tickers": {
+    "ABB": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "AXISBANK": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "BAJAJFINSV": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_ROE"
+    },
+    "BAJFINANCE": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "BANKBARODA": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "BEL": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_QUALITY"
+    },
+    "BHARTIARTL": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_GROWTH"
+    },
+    "BHEL": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "BRITANNIA": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "CHOLAFIN": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "COALINDIA": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "growth-lens-off"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "COFORGE": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "COLPAL": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "CUMMINSIND": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "DABUR": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "DEEPAKNITR": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "H3-missing-metric"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "DIXON": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "FEDERALBNK": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "GAIL": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "HAVELLS": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "HCLTECH": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "HDFCBANK": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_ROE"
+    },
+    "HDFCLIFE": {
+      "branch": "insurance",
+      "confidence": "none",
+      "guards_triggered": [
+        "H4-insurance"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "HINDALCO": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "HINDUNILVR": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "ICICIBANK": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_ROE"
+    },
+    "ICICIGI": {
+      "branch": "insurance",
+      "confidence": "none",
+      "guards_triggered": [
+        "H4-insurance"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "ICICIPRULI": {
+      "branch": "insurance",
+      "confidence": "none",
+      "guards_triggered": [
+        "H4-insurance"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "INDUSINDBK": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "INFY": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "IOC": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "TR-cyclical-trough"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "ITC": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "KOTAKBANK": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "LICHSGFIN": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "LT": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "LTIM": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "H3-missing-metric"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "MARICO": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "MARUTI": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_GROWTH"
+    },
+    "MUTHOOTFIN": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_ROE"
+    },
+    "NESTLEIND": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "NMDC": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_QUALITY"
+    },
+    "NTPC": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "ONGC": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "growth-lens-off"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "PERSISTENT": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_QUALITY"
+    },
+    "PNB": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "POLYCAB": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_QUALITY"
+    },
+    "POWERGRID": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "RELIANCE": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "growth-lens-off"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "SAIL": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "TR-cyclical-trough"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "SBICARD": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_ROE"
+    },
+    "SBILIFE": {
+      "branch": "insurance",
+      "confidence": "none",
+      "guards_triggered": [
+        "H4-insurance"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "SBIN": {
+      "branch": "financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "SHRIRAMFIN": {
+      "branch": "financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_ROE"
+    },
+    "SIEMENS": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "SRF": {
+      "branch": "non-financial",
+      "confidence": "none",
+      "guards_triggered": [
+        "TR-cyclical-trough"
+      ],
+      "posture": "INSUFFICIENT_EVIDENCE"
+    },
+    "TATACONSUM": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_RETURNS"
+    },
+    "TATAELXSI": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "TATASTEEL": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "TCS": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "SUPPORTED_BY_QUALITY"
+    },
+    "TECHM": {
+      "branch": "non-financial",
+      "confidence": "low",
+      "guards_triggered": [],
+      "posture": "REASONABLE"
+    },
+    "THERMAX": {
+      "branch": "non-financial",
+      "confidence": "medium",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    },
+    "WIPRO": {
+      "branch": "non-financial",
+      "confidence": "high",
+      "guards_triggered": [],
+      "posture": "DEMANDING_VS_GROWTH"
+    }
+  }
+}

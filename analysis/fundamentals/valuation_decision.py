@@ -25,7 +25,31 @@ from analysis.sector_classification import (
 )
 
 # Sectors where peak/trough cyclicality guards are active (commodity/cyclical earnings).
-CYCLICAL_GROUPS = {METALS, CHEMICALS, AUTO, MANUFACTURING, ENERGY_POWER}
+# Commodity-cyclical sectors — earnings swing with commodity/price cycles, so the
+# cyclical peak (G1) and trough guards apply. (Energy & Power is included because most of
+# it is commodity oil/gas/refining; regulated utilities within it are excluded below.)
+COMMODITY_CYCLICAL = {METALS, CHEMICALS, AUTO, MANUFACTURING, ENERGY_POWER}
+
+# Regulated utilities — stable, regulated-ROE earnings (power transmission/distribution,
+# grid infra, regulated generation). The cyclical peak/trough guards must NOT fire on these:
+# their earnings are regulated, not commodity-cyclical (V1 finding: POWERGRID was wrongly
+# trough-refused). Identified by ticker symbol or company-name keyword, since the sector
+# classifier groups them under "Energy & Power" alongside commodity-energy.
+REGULATED_UTILITY = {"POWERGRID", "NTPC", "NHPC", "SJVN", "NLCINDIA", "PGCIL"}
+_REG_UTIL_NAME_KW = ("power grid", "grid corporation", "transmission",
+                     "national thermal", "hydroelectric", "hydro power")
+
+# Back-compat alias (was the single combined set before the V1 utilities/commodity split).
+CYCLICAL_GROUPS = COMMODITY_CYCLICAL
+
+
+def is_regulated_utility(symbol=None, name=None) -> bool:
+    """True for regulated power utilities (trough/peak guards do not apply)."""
+    sym = (symbol or "").replace(".NS", "").replace(".BO", "").strip().upper()
+    if sym in REGULATED_UTILITY:
+        return True
+    nm = (name or "").lower()
+    return any(k in nm for k in _REG_UTIL_NAME_KW)
 
 # ── Posture constants (the ONLY permitted conclusions) ───────────────────────────
 SUPPORTED_BY_GROWTH_AND_QUALITY = "SUPPORTED_BY_GROWTH_AND_QUALITY"
@@ -103,10 +127,13 @@ class ValuationInputs:
     fcf: Optional[float] = None         # ₹ cr (sign meaningful)
     # flags
     is_psu: bool = False
+    is_regulated_utility: bool = False   # regulated power utility → cyclical guards OFF
 
     @property
     def is_cyclical(self) -> bool:
-        return self.sector_group in CYCLICAL_GROUPS
+        # Commodity-cyclical sectors fire the peak/trough guards — EXCEPT regulated
+        # utilities, whose earnings are regulated, not commodity-cyclical (V1 fix).
+        return (self.sector_group in COMMODITY_CYCLICAL) and not self.is_regulated_utility
 
     @property
     def is_insurance(self) -> bool:
@@ -366,6 +393,22 @@ def _assess_non_financial(inp: ValuationInputs, branch: str,
                 reasons=reasons,
                 caveats=caveats + ["High returns on capital but growth not assessable."],
                 inputs_used=used + ["ROCE"], sector_branch=branch)
+        # Regulated utilities are stable, low-growth BY DESIGN — "growth too low to assess"
+        # is an expected characteristic, not a data deficiency, so a regulated utility
+        # resolves to Reasonable (low confidence) rather than a refusal. (Part 1 / V1 fix:
+        # the same over-refusal that hit POWERGRID via the trough guard also reaches it here.)
+        if inp.is_regulated_utility:
+            reasons.append("Regulated utility — stable, low-growth regulated earnings.")
+            return ValuationAssessment(
+                posture=REASONABLE, phrase=PHRASES[REASONABLE],
+                justification="Regulated utility with stable, low-growth earnings — "
+                              "valuation not assessed against growth.",
+                confidence="low",
+                confidence_factors=["regulated utility: growth lens not applicable → low"],
+                reasons=reasons,
+                caveats=caveats + ["Regulated earnings; growth not the right lens."],
+                inputs_used=used + (["ROCE"] if inp.roce is not None else []),
+                sector_branch=branch)
         return _refuse("growth-lens-off",
                        "Growth cannot be assessed and quality is not exceptional — "
                        "insufficient basis for a valuation posture.", branch, used)
@@ -527,5 +570,8 @@ def assess_valuation(valuation_context, analytics: dict, sector_profile,
         total_equity=getattr(bal, "total_equity", None) if bal else None,
         operating_cash_flow=getattr(cfs, "operating_cash_flow", None) if cfs else None,
         fcf=_av("fcf"), is_psu=is_psu,
+        is_regulated_utility=is_regulated_utility(
+            getattr(cf, "symbol", None) if cf is not None else None,
+            getattr(cf, "company_name", None) if cf is not None else None),
     )
     return assess(inp)
