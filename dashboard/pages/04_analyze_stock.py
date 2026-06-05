@@ -545,7 +545,90 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     + ". Phase A1 — explainable rules only, no AI/LLM narration."
                 )
             except Exception as _th_e:
+                _th = None
                 st.caption(f"⚠️ Thesis unavailable: {_th_e}")
+
+            # ── 🧩 Portfolio Fit Assessment (Phase B — rules-based, NO AI) ──────
+            st.markdown("---")
+            st.subheader("🧩 Portfolio Fit Assessment")
+            st.caption(
+                "Is this a good *addition* to your current book? Marginal impact on "
+                "diversification, sector mix, beta and concentration. Not investment advice."
+            )
+            try:
+                import pandas as _pf_pd, pathlib as _pf_pl
+                _pf_csv = st.session_state.get("_ao_portfolio_path") \
+                    or (_pf_pl.Path(_ROOT) / "portfolio.csv")
+                _pf_holds = []
+                if _pf_csv and _pf_pl.Path(_pf_csv).exists():
+                    _pf_df = _pf_pd.read_csv(_pf_csv)
+                    for _, _r in _pf_df.iterrows():
+                        _t = str(_r.get("ticker", "")).strip()
+                        if _t and not _t.upper().endswith(".NS"):
+                            _t = _t + ".NS"
+                        _q = float(_r.get("quantity", 0) or 0)
+                        if _t and _q > 0:
+                            _pf_holds.append({"ticker": _t, "quantity": _q})
+
+                if not _pf_holds:
+                    st.info("No portfolio found — add holdings on the **📂 My Portfolio** page "
+                            "to see how this stock would fit your book.")
+                else:
+                    from analysis.thesis import build_fit_inputs, assess_fit
+                    with st.spinner("Assessing fit against your portfolio…"):
+                        _fit = assess_fit(build_fit_inputs(
+                            ticker, _pf_holds, candidate_thesis=_th))
+
+                    _fr_color = {"Strong Fit": "#00d4aa", "Fit": "#2ecc71",
+                                 "Neutral": "#8899bb", "Poor Fit": "#ff7043",
+                                 "Strong Conflict": "#ff4757"}.get(_fit.fit_rating, "#8899bb")
+                    st.markdown(
+                        f"<div style='font-size:1.15rem'>Fit rating: "
+                        f"<b style='color:{_fr_color}'>{_fit.fit_rating}</b> "
+                        f"<span style='color:#8899bb'>(score {_fit.fit_score:+d})</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    _im1, _im2 = st.columns(2)
+                    _im1.caption("📊 " + _fit.diversification_impact)
+                    _im1.caption("🏭 " + _fit.sector_impact)
+                    _im2.caption("📈 " + _fit.beta_impact)
+                    _im2.caption("⚖️ " + _fit.concentration_impact)
+
+                    def _fit_list(_factors, _empty):
+                        if not _factors:
+                            st.caption(_empty)
+                            return
+                        for _f in _factors:
+                            st.markdown(
+                                f"- {_f.text}  \n"
+                                f"  <span style='color:#8899bb;font-size:0.85rem'>"
+                                f"· {_f.source}: {_f.evidence}</span>",
+                                unsafe_allow_html=True,
+                            )
+
+                    _fp, _fn = st.columns(2)
+                    with _fp:
+                        st.markdown("**✅ Positive effects**")
+                        _fit_list(_fit.positive_effects, "No positive effects flagged.")
+                    with _fn:
+                        st.markdown("**❌ Negative effects**")
+                        _fit_list(_fit.negative_effects, "No negative effects flagged.")
+
+                    _ps_color = {"Large": "#00d4aa", "Moderate": "#ffa726",
+                                 "Small": "#ff7043"}.get(_fit.position_size_guidance, "#8899bb")
+                    st.markdown(
+                        f"**Position size guidance:** "
+                        f"<b style='color:{_ps_color}'>{_fit.position_size_guidance}</b>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(_fit.position_size_reason)
+                    st.caption(
+                        "Contributing subsystems: "
+                        + (", ".join(_fit.inputs_present) or "none")
+                        + ". Phase B — rules only, no buy/sell recommendation, no target price."
+                    )
+            except Exception as _pf_e:
+                st.caption(f"⚠️ Portfolio fit unavailable: {_pf_e}")
 
         except Exception as e:
             st.error(f"Analysis failed: {e}")
