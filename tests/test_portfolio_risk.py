@@ -200,5 +200,92 @@ def test_compute_methodology_notes_present(mock_beta):
     assert any("risk-free" in n for n in res.notes)
 
 
+# ───────────────── IMPROVE: recency detection / confidence / disclosure ─────────────────
+from datetime import date as _date    # noqa: E402
+
+
+def test_detect_recent_purchases_basic():
+    rec = PR.detect_recent_purchases(
+        {"A.NS": _date(2024, 6, 1), "B.NS": _date(2020, 1, 1)},   # A after window, B before
+        window_start=_date(2024, 1, 1), weights={"A.NS": 0.4, "B.NS": 0.6})
+    assert rec["n_affected"] == 1 and rec["affected_holdings"] == ["A"]
+    assert rec["affected_weight_pct"] == pytest.approx(40.0)
+
+
+def test_detect_recent_purchases_all_predate():
+    rec = PR.detect_recent_purchases(
+        {"A.NS": _date(2019, 1, 1), "B.NS": _date(2018, 1, 1)},
+        window_start=_date(2024, 1, 1), weights={"A.NS": 0.5, "B.NS": 0.5})
+    assert rec["n_affected"] == 0 and rec["affected_weight_pct"] == pytest.approx(0.0)
+
+
+def test_detect_recent_purchases_no_dates_returns_none():
+    rec = PR.detect_recent_purchases(
+        {"A.NS": None, "B.NS": None}, window_start=_date(2024, 1, 1),
+        weights={"A.NS": 0.5, "B.NS": 0.5})
+    assert rec["affected_weight_pct"] is None and rec["dated_coverage"] == 0
+
+
+def test_adjust_confidence_majority_bought_in_window_is_low():
+    conf, reason = PR.adjust_confidence("high", 60.0)
+    assert conf == "low" and "60%" in reason
+
+
+def test_adjust_confidence_quarter_downgrades_one_notch():
+    assert PR.adjust_confidence("high", 30.0)[0] == "medium"
+    assert PR.adjust_confidence("medium", 30.0)[0] == "low"
+
+
+def test_adjust_confidence_small_unaffected():
+    conf, _ = PR.adjust_confidence("high", 10.0)
+    assert conf == "high"
+
+
+def test_adjust_confidence_unknown_dates_unchanged():
+    conf, reason = PR.adjust_confidence("high", None)
+    assert conf == "high" and "unavailable" in reason.lower()
+
+
+def test_build_disclosure_specific_warning():
+    d = PR.build_disclosure("1y", {"affected_weight_pct": 34.0, "n_affected": 2})
+    assert "34%" in d and "1-year" in d and "hypothetical" in d and "realized" in d
+
+
+def test_build_disclosure_all_predate_reliable():
+    d = PR.build_disclosure("2y", {"affected_weight_pct": 0.0, "n_affected": 0})
+    assert "predate" in d and "2-year" in d
+
+
+def test_build_disclosure_unknown_dates():
+    d = PR.build_disclosure("3y", {"affected_weight_pct": None, "n_affected": 0})
+    assert "unavailable" in d.lower() and "hypothetical" in d
+
+
+def test_end_to_end_recency_and_disclosure(mock_beta):
+    rng = np.random.default_rng(11)
+    a = 100 * np.cumprod(1 + rng.normal(0.0005, 0.01, 200))   # panel starts 2023-01-02
+    b = 50 * np.cumprod(1 + rng.normal(0.0004, 0.012, 200))
+    loader = _loader_factory({"AAA.NS": _prices(a), "BBB.NS": _prices(b)})
+    res = PR.compute_portfolio_risk(
+        [{"ticker": "AAA.NS", "quantity": 10, "date_bought": "2023-06-01"},   # inside window
+         {"ticker": "BBB.NS", "quantity": 20, "date_bought": "2020-01-01"}],  # predates
+        period="1y", price_loader=loader)
+    assert res.error is None
+    assert "AAA" in res.affected_holdings and res.n_affected == 1
+    assert res.affected_weight_pct and res.affected_weight_pct > 0
+    assert "hypothetical" in res.disclosure and "%" in res.disclosure
+    assert res.purchase_dates_known is True
+
+
+def test_metric_groups_classification(mock_beta):
+    rng = np.random.default_rng(12)
+    loader = _loader_factory({"Z.NS": _prices(100 * np.cumprod(1 + rng.normal(0, 0.01, 200)))})
+    res = PR.compute_portfolio_risk([{"ticker": "Z.NS", "quantity": 1}], price_loader=loader)
+    perf = [m[0] for m in res.performance_metrics()]
+    risk = [m[0] for m in res.risk_metrics()]
+    assert "Sharpe" in perf and "Calmar" in perf and "CAGR (Ann. Return)" in perf
+    assert "Portfolio Beta" in risk and "Annualised Volatility" in risk
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

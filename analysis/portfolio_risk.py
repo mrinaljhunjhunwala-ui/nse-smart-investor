@@ -69,7 +69,35 @@ class PortfolioRiskResult:
     rf_annual: float = DEFAULT_RF_ANNUAL
     confidence: str = "none"
     notes: List[str] = field(default_factory=list)
+    # ── interpretation layer (IMPROVE: detect/disclose, no NAV change) ──────
+    affected_weight_pct: Optional[float] = None   # % of weight bought within the lookback
+    affected_holdings: List[str] = field(default_factory=list)
+    n_affected: int = 0
+    window_start: Optional[date] = None
+    purchase_dates_known: bool = False
+    disclosure: str = ""
+    confidence_reason: str = ""
     error: Optional[str] = None
+
+    # ── metric classification (display robust vs hypothetical separately) ───
+    def performance_metrics(self):
+        """HYPOTHETICAL performance metrics — biased by the constant-holdings curve."""
+        return [("CAGR (Ann. Return)", self.annualized_return_pct, "%"),
+                ("Total Return", self.total_return_pct, "%"),
+                ("Sharpe", self.sharpe, ""), ("Sortino", self.sortino, ""),
+                ("Calmar", self.calmar, ""), ("Max Drawdown", self.max_drawdown_pct, "%")]
+
+    def risk_metrics(self):
+        """ROBUST risk metrics — current-book snapshots, unaffected by the assumption."""
+        return [("Portfolio Beta", self.portfolio_beta, ""),
+                ("Annualised Volatility", self.annualized_vol_pct, "%")]
+
+
+# Fixed taxonomy (per PORTFOLIO_NAV_ASSUMPTION_AUDIT.md severity findings)
+ROBUST_RISK_METRICS = ("Portfolio Beta", "Annualised Volatility", "Correlation",
+                       "Risk Contribution")
+HYPOTHETICAL_PERF_METRICS = ("CAGR (Ann. Return)", "Total Return", "Sharpe", "Sortino",
+                             "Calmar", "Max Drawdown")
 
 
 # ── individual, unit-testable metric functions ─────────────────────────────────
@@ -142,14 +170,88 @@ def risk_contributions(returns_df: pd.DataFrame, weights: Dict[str, float]
     return {c: round(float(cctr[i] / port_var * 100), 2) for i, c in enumerate(cols)}
 
 
+# ── interpretation helpers (detect / classify / disclose — no NAV change) ──────
+def _window_label(period: str) -> str:
+    return {"6mo": "6-month", "1y": "1-year", "2y": "2-year", "3y": "3-year",
+            "5y": "5-year"}.get(period, period)
+
+
+def detect_recent_purchases(holdings_dates: Dict[str, Optional[date]],
+                            window_start: Optional[date],
+                            weights: Dict[str, float]) -> dict:
+    """Which holdings were bought INSIDE the lookback window (date_bought > window_start),
+    and what % of portfolio weight they represent. holdings_dates: ticker -> date_bought|None."""
+    affected, affected_w, dated = [], 0.0, 0
+    for tkr, w in weights.items():
+        db = holdings_dates.get(tkr)
+        if db is not None:
+            dated += 1
+            if window_start is not None and db > window_start:
+                affected.append(tkr.replace(".NS", ""))
+                affected_w += w
+    return {"affected_holdings": affected, "n_affected": len(affected),
+            "affected_weight_pct": round(affected_w * 100, 1) if dated else None,
+            "dated_coverage": dated}
+
+
+def adjust_confidence(base: str, affected_weight_pct: Optional[float]) -> Tuple[str, str]:
+    """Downgrade confidence when a large weight was bought inside the window."""
+    order = ["low", "medium", "high"]
+    if affected_weight_pct is None:
+        return base, "Purchase dates unavailable — confidence reflects lookback length only."
+    if affected_weight_pct >= 50:
+        return "low", (f"{affected_weight_pct:.0f}% of weight was bought within the lookback — "
+                       "reward ratios are largely hypothetical, so confidence is capped at low.")
+    if affected_weight_pct >= 25:
+        downgraded = order[max(0, order.index(base) - 1)]
+        return downgraded, (f"{affected_weight_pct:.0f}% of weight was bought within the lookback — "
+                            f"reward ratios are partly hypothetical, so confidence reduced to "
+                            f"{downgraded}.")
+    return base, (f"Only {affected_weight_pct:.0f}% of weight was bought within the lookback — "
+                  "reward ratios are largely representative of a held book.")
+
+
+def build_disclosure(period: str, rec: dict) -> str:
+    """Specific, weight-aware disclosure string."""
+    wl = _window_label(period)
+    awp = rec.get("affected_weight_pct")
+    n = rec.get("n_affected", 0)
+    if awp is None:
+        return (f"Purchase dates unavailable — cannot verify how much of the book was held for the "
+                f"full {wl} lookback. Treat the performance ratios (Sharpe / Sortino / Calmar / CAGR) "
+                f"as hypothetical current-book analytics; risk metrics remain valid.")
+    if awp <= 0.0:
+        return (f"All holdings predate the {wl} lookback — the NAV matches a true buy-and-hold, so "
+                f"the performance ratios are reliable for this book.")
+    plural = "s" if n != 1 else ""
+    return (f"{awp:.0f}% of portfolio weight ({n} holding{plural}) was purchased within the selected "
+            f"{wl} lookback period. Performance ratios should be interpreted as hypothetical "
+            f"current-book analytics rather than realized portfolio performance. Risk metrics "
+            f"(beta, correlation, risk contribution, volatility) remain valid.")
+
+
+def _parse_date(x) -> Optional[date]:
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return None
+    if isinstance(x, date):
+        return x
+    try:
+        return pd.Timestamp(x).date()
+    except Exception:
+        return None
+
+
 # ── orchestrator ────────────────────────────────────────────────────────────
 def compute_portfolio_risk(holdings: List[Dict], period: str = "1y",
                            rf_annual: float = DEFAULT_RF_ANNUAL,
                            price_loader=None) -> PortfolioRiskResult:
     """holdings: list of {"ticker": str, "quantity": float}. price_loader is injectable
     for tests (defaults to data.fetcher.fetch_single)."""
-    holds = [(h.get("ticker"), float(h.get("quantity") or 0)) for h in holdings
-             if h.get("ticker") and (h.get("quantity") or 0) > 0]
+    holds = []
+    for h in holdings:
+        t, q = h.get("ticker"), float(h.get("quantity") or 0)
+        if t and q > 0:
+            holds.append((t, q, _parse_date(h.get("date_bought"))))
     res = PortfolioRiskResult(period=period, n_holdings=len(holds), rf_annual=rf_annual,
                               holdings_used=[], holdings_dropped=[])
     if not holds:
@@ -161,7 +263,8 @@ def compute_portfolio_risk(holdings: List[Dict], period: str = "1y",
 
     closes: Dict[str, pd.Series] = {}
     qty: Dict[str, float] = {}
-    for tkr, q in holds:
+    dates: Dict[str, Optional[date]] = {}
+    for tkr, q, db in holds:
         try:
             df = price_loader(tkr, period=period)
             s = df["Close"].dropna() if df is not None and not df.empty else None
@@ -173,6 +276,7 @@ def compute_portfolio_risk(holdings: List[Dict], period: str = "1y",
             continue
         closes[tkr] = s
         qty[tkr] = q
+        dates[tkr] = db
         res.holdings_used.append(tkr.replace(".NS", ""))
 
     if not closes:
@@ -233,14 +337,27 @@ def compute_portfolio_risk(holdings: List[Dict], period: str = "1y",
             risk_contribution_pct=rc.get(t)))
     res.risk_contributions.sort(key=lambda p: (p.risk_contribution_pct or -1), reverse=True)
 
-    # confidence + methodology notes
-    res.confidence = ("low" if res.n_days < 90 else "medium" if res.n_days < 180 else "high")
+    # ── interpretation: detect recent purchases, adjust confidence, disclose ──
+    res.window_start = _as_date(nav.index[0])
+    rec = detect_recent_purchases({t: dates.get(t) for t in panel.columns},
+                                  res.window_start, weights)
+    res.affected_weight_pct = rec["affected_weight_pct"]
+    res.affected_holdings = rec["affected_holdings"]
+    res.n_affected = rec["n_affected"]
+    res.purchase_dates_known = rec["dated_coverage"] > 0
+    res.disclosure = build_disclosure(period, rec)
+
+    base_conf = "low" if res.n_days < 90 else "medium" if res.n_days < 180 else "high"
+    res.confidence, res.confidence_reason = adjust_confidence(base_conf, res.affected_weight_pct)
+
     res.notes = [
         "NAV reconstructed from current holdings held constant over the lookback "
         "(ignores past buys/sells, dividends, costs) — a 'what-if you held this book' curve.",
         f"Annualised on {TRADING_DAYS} trading days; risk-free rate {rf_annual*100:.1f}% p.a.",
         "Beta is vs Nifty 50 (reused analysis/hedging engine).",
-        f"Lookback: {res.n_days} trading days → {res.confidence} confidence.",
+        f"Lookback: {res.n_days} trading days (base confidence "
+        f"{'low' if res.n_days < 90 else 'medium' if res.n_days < 180 else 'high'}).",
+        res.confidence_reason,
     ]
     if res.holdings_dropped:
         res.notes.append("Excluded (insufficient history): " + ", ".join(res.holdings_dropped))
