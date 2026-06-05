@@ -384,6 +384,85 @@ if _csv_source is not None:
                             unsafe_allow_html=True
                         )
 
+            # ── 📉 Portfolio Risk & Performance (Phase 1) ─────────────────
+            st.markdown("---")
+            _rh1, _rh2 = st.columns([5, 2])
+            _rh1.subheader("📉 Portfolio Risk & Performance")
+            with _rh2:
+                _risk_period = st.selectbox(
+                    "Lookback", ["6mo", "1y", "2y", "3y"], index=1,
+                    key="pf_risk_period", label_visibility="collapsed")
+            _risk_holds = tuple((h.ticker, float(getattr(h, "quantity", 0) or 0))
+                                for h in summary.holdings if getattr(h, "quantity", 0))
+
+            @st.cache_data(ttl=900, show_spinner=False)
+            def _pf_risk(_holds, _period):
+                from analysis.portfolio_risk import compute_portfolio_risk
+                return compute_portfolio_risk(
+                    [{"ticker": t, "quantity": q} for t, q in _holds], period=_period)
+
+            if not _risk_holds:
+                st.caption("No holdings with quantity to analyze.")
+            else:
+                with st.spinner("Reconstructing NAV & computing risk metrics…"):
+                    _rr = _pf_risk(_risk_holds, _risk_period)
+                if _rr.error:
+                    st.warning(f"⚠️ Risk analytics unavailable: {_rr.error}")
+                else:
+                    def _rm(_col, _label, _val, _suff=""):
+                        _col.metric(_label, f"{_val:.2f}{_suff}" if _val is not None else "N/A")
+                    _rkA = st.columns(4)
+                    _rm(_rkA[0], "Sharpe", _rr.sharpe)
+                    _rm(_rkA[1], "Sortino", _rr.sortino)
+                    _rm(_rkA[2], "Calmar", _rr.calmar)
+                    _rm(_rkA[3], "Max Drawdown", _rr.max_drawdown_pct, "%")
+                    _rkB = st.columns(4)
+                    _rm(_rkB[0], "Ann. Return", _rr.annualized_return_pct, "%")
+                    _rm(_rkB[1], "Ann. Volatility", _rr.annualized_vol_pct, "%")
+                    _rm(_rkB[2], "Portfolio Beta", _rr.portfolio_beta)
+                    _rm(_rkB[3], "Total Return", _rr.total_return_pct, "%")
+                    if _rr.confidence in ("low", "medium"):
+                        st.caption(f"⚠️ Confidence: **{_rr.confidence}** "
+                                   f"({_rr.n_days} trading days) — short lookbacks make "
+                                   "risk ratios noisy.")
+
+                    if _rr.nav_curve is not None:
+                        _nav_df = _rr.nav_curve.rename("NAV").reset_index()
+                        _nav_df.columns = ["Date", "NAV"]
+                        _fig_nav = px.area(_nav_df, x="Date", y="NAV",
+                                           title="Portfolio NAV / Equity Curve (reconstructed)")
+                        _fig_nav.update_layout(template="nse_pro", height=300,
+                                               margin=dict(l=0, r=0, t=40, b=0))
+                        st.plotly_chart(_fig_nav, width="stretch")
+
+                    _rcL, _rcR = st.columns([1, 1])
+                    with _rcL:
+                        if _rr.correlation_matrix is not None:
+                            _figc = px.imshow(_rr.correlation_matrix, text_auto=True,
+                                              color_continuous_scale="RdBu_r",
+                                              zmin=-1, zmax=1, aspect="auto",
+                                              title="Holdings Correlation")
+                            _figc.update_layout(template="nse_pro", height=360,
+                                                margin=dict(l=0, r=0, t=40, b=0))
+                            st.plotly_chart(_figc, width="stretch")
+                        else:
+                            st.caption("Correlation needs ≥2 holdings with shared history.")
+                    with _rcR:
+                        st.markdown("**Risk contribution by position**")
+                        _rc_df = pd.DataFrame(
+                            [{"Stock": p.ticker, "Weight %": p.weight_pct,
+                              "Beta": p.beta, "Risk %": p.risk_contribution_pct}
+                             for p in _rr.risk_contributions])
+                        st.dataframe(_rc_df, width="stretch", hide_index=True)
+                        st.caption("**Risk %** = share of portfolio *variance* from each "
+                                   "position — concentration of risk, which can differ from "
+                                   "capital weight.")
+
+                    with st.expander("ℹ️ Methodology & assumptions", expanded=False):
+                        for _n in _rr.notes:
+                            st.markdown(f"- {_n}")
+                        st.caption("Informational analytics — not investment advice.")
+
             # ── Holdings cards (2-column grid) ────────────────────────
             st.markdown("---")
             _hh1, _hh2 = st.columns([3, 2])
