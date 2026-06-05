@@ -8,12 +8,36 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.picks_ui import render_pick_analysis
-from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
-from data.universe import get_universe
-from data.angel_fetcher import is_configured as _ao_is_configured
-# Inject every shared module-level name so the verbatim body runs unchanged.
-for _m in (_dz, _cache, _tu, _ch):
-    globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
+# P3: explicit imports (was a dynamic shared-namespace injection)
+import os
+import pandas as pd
+import streamlit as st
+import sys
+import trade_store as _store
+from dashboard.shared.design import (
+    apply_design,
+)
+from dashboard.shared.cache import (
+    _home_top_picks,
+    _score_watchlist,
+    _sector_ranks_tuple,
+    _sparkline_closes,
+    _sparkline_svg,
+    _trade_type,
+    get_vix_info,
+)
+from dashboard.shared.trade_utils import (
+    _auto_close_breached,
+    _paper_trade_popover,
+    _portfolio_live_prices,
+    _render_autoclose_banner,
+    _suggest_position,
+    paper_close_trade,
+)
+from dashboard.shared.chart_helpers import (
+    _ROOT,
+    render_top_bar,
+)
 
 apply_design()
 render_sidebar(current="Command Centre")

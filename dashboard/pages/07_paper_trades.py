@@ -7,10 +7,39 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
-# Inject every shared module-level name so the verbatim body runs unchanged.
-for _m in (_dz, _cache, _tu, _ch):
-    globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
+# P3: explicit imports (was a dynamic shared-namespace injection)
+import os
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+import sys
+from dashboard.shared.design import (
+    apply_design,
+)
+from dashboard.shared.cache import (
+    STOCK_SEARCH_MAP,
+    _validate_ticker,
+)
+from dashboard.shared.trade_utils import (
+    _auto_close_breached,
+    _ensure_paper_db,
+    _portfolio_live_prices,
+    _render_autoclose_banner,
+    load_trades_by_account,
+    paper_account_type,
+    paper_close_trade,
+    paper_delete_account,
+    paper_edit_trade,
+    paper_list_accounts,
+    paper_open_trade,
+    paper_rename_account,
+    set_paper_account_type,
+)
+from dashboard.shared.chart_helpers import (
+    _ROOT,
+    render_top_bar,
+)
 
 apply_design()
 render_sidebar(current="Paper Trades")

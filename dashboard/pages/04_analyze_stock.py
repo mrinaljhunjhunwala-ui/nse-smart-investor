@@ -10,10 +10,34 @@ from dashboard.shared.chart_helpers import render_top_bar
 # Fundamentals (Phase 0): UI depends ONLY on the service facade + the schema/analytics.
 from analysis.fundamentals.service import default_service as _fund_service
 from analysis.fundamentals import analytics as _fund_analytics
-from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
-# Inject every shared module-level name so the verbatim body runs unchanged.
-for _m in (_dz, _cache, _tu, _ch):
-    globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
+# P3: explicit imports (was a dynamic shared-namespace injection)
+import os
+import streamlit as st
+import sys
+from dashboard.shared.design import (
+    apply_design,
+)
+from dashboard.shared.cache import (
+    STOCK_SEARCH_MAP,
+    _deep_confirmation,
+    _plain_english,
+    _trim_to_period,
+    _validate_ticker,
+    get_composite_score,
+    get_display_name,
+    load_ticker_df,
+)
+from dashboard.shared.trade_utils import (
+    _action_color,
+    _action_emoji,
+    _grade_color,
+    paper_open_trade,
+)
+from dashboard.shared.chart_helpers import (
+    _ROOT,
+    build_price_chart,
+    render_top_bar,
+)
 
 apply_design()
 render_sidebar(current="Analyze Stock")
