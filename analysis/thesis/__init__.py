@@ -12,10 +12,17 @@ from .thesis_models import (
 )
 from .thesis_engine import generate_thesis, build_inputs, thesis_for_ticker
 from . import thesis_rules
+from .portfolio_fit import (
+    FitFactor, PortfolioFitInputs, PortfolioFitResult, FIT_RATINGS,
+    POSITIVE, NEGATIVE, assess_fit, build_fit_inputs, fit_for_candidate,
+)
 
 __all__ = [
     "Factor", "ThesisInputs", "ThesisResult", "VERDICTS",
     "BULL", "BEAR", "RISK",
     "generate_thesis", "build_inputs", "thesis_for_ticker",
     "thesis_rules",
+    # Phase B — Portfolio Fit
+    "FitFactor", "PortfolioFitInputs", "PortfolioFitResult", "FIT_RATINGS",
+    "POSITIVE", "NEGATIVE", "assess_fit", "build_fit_inputs", "fit_for_candidate",
 ]
