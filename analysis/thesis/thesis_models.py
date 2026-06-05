@@ -86,7 +86,12 @@ class ThesisInputs:
     eps_cagr: Optional[float] = None              # %
     roe: Optional[float] = None                   # %
     debt_to_equity: Optional[float] = None        # x
+    roce: Optional[float] = None                  # % (Phase D1)
+    fcf: Optional[float] = None                   # ₹ cr (Phase D1)
     fundamentals_partial: bool = False
+
+    # ── Sector awareness (Phase D1) ──
+    sector_profile: Optional[object] = None       # analysis.sector_classification.SectorProfile
 
     # ── Market risk ──
     beta: Optional[float] = None
@@ -111,6 +116,7 @@ class ThesisResult:
     bear_factors: List[Factor] = field(default_factory=list)
     key_risks: List[Factor] = field(default_factory=list)
     inputs_present: List[str] = field(default_factory=list)   # subsystems that contributed
+    notes: List[str] = field(default_factory=list)            # explanatory context (Phase D1)
     generated_at: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict:
@@ -123,5 +129,6 @@ class ThesisResult:
             "bear_factors": [f.to_dict() for f in self.bear_factors],
             "key_risks": [f.to_dict() for f in self.key_risks],
             "inputs_present": list(self.inputs_present),
+            "notes": list(self.notes),
             "generated_at": self.generated_at.isoformat(),
         }

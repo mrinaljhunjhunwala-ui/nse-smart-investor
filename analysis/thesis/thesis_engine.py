@@ -44,7 +44,8 @@ def generate_thesis(inputs: ThesisInputs) -> ThesisResult:
                                    inputs.earnings_days, inputs.signal_total)):
         present.append(SRC_DEEP)
     if any(v is not None for v in (inputs.revenue_cagr, inputs.eps_cagr,
-                                   inputs.roe, inputs.debt_to_equity)):
+                                   inputs.roe, inputs.debt_to_equity,
+                                   inputs.roce, inputs.fcf)):
         present.append(SRC_FUNDAMENTALS)
     if inputs.beta is not None:
         present.append(SRC_BETA)
@@ -62,6 +63,7 @@ def generate_thesis(inputs: ThesisInputs) -> ThesisResult:
         bear_factors=bear,
         key_risks=risks,
         inputs_present=present,
+        notes=rules.sector_notes(inputs),
     )
 
 
@@ -108,6 +110,8 @@ def _from_fundamentals(inp: ThesisInputs, fa: Any) -> None:
     inp.eps_cagr = val("eps_cagr")
     inp.roe = val("roe")
     inp.debt_to_equity = val("debt_to_equity")
+    inp.roce = val("roce")
+    inp.fcf = val("fcf")
     inp.fundamentals_partial = bool(fa.get("partial"))
 
 
@@ -178,6 +182,15 @@ def build_inputs(ticker: str, *,
             sector = None
     inp.sector = inp.sector or sector
     inp.news_sentiment = news_sentiment
+
+    # Sector classification (Phase D1) — single source of truth; drives metric applicability
+    try:
+        from analysis.sector_classification import classify_sector
+        inp.sector_profile = classify_sector(inp.sector,
+                                             name=getattr(cs, "company_name", None)
+                                             if cs is not None and not isinstance(cs, dict) else None)
+    except Exception:
+        inp.sector_profile = None
 
     # Liquidity (Phase C1) — from existing OHLCV; accept a pre-computed LiquidityContext
     lq = liquidity

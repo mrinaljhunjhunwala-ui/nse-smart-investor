@@ -152,10 +152,54 @@ def debt_to_equity(cf: CompanyFundamentals) -> AnalyticResult:
     return _na("Debt/Equity", "x", "missing total debt or shareholders' equity")
 
 
+def roce(cf: CompanyFundamentals) -> AnalyticResult:
+    """Return on Capital Employed.
+
+    Formula:  ROCE = EBIT / Capital Employed
+              EBIT            = IncomeStatement.operating_income (latest)
+              Capital Employed = BalanceSheet.total_assets − current_liabilities (latest)
+
+    Data source: existing normalized statements only (no provider/network change).
+    Edge cases: any input missing → unavailable (None, never 0); non-positive capital
+    employed → unavailable (ROCE not meaningful).
+    """
+    inc = cf.latest_income()
+    bal = cf.latest_balance()
+    ebit = inc.operating_income if inc else None
+    if ebit is None:
+        return _na("ROCE", "%", "missing operating income (EBIT)")
+    if bal is None or bal.total_assets is None or bal.current_liabilities is None:
+        return _na("ROCE", "%", "missing total assets or current liabilities")
+    ce = bal.total_assets - bal.current_liabilities
+    if ce <= 0:
+        return _na("ROCE", "%", f"capital employed non-positive ({ce:.0f}) — ROCE not meaningful")
+    return AnalyticResult("ROCE", round(ebit / ce * 100, 2), "%", True, "high",
+                          detail={"ebit": ebit, "capital_employed": ce,
+                                  "total_assets": bal.total_assets,
+                                  "current_liabilities": bal.current_liabilities,
+                                  "source": cf.provider_name})
+
+
+def free_cash_flow(cf: CompanyFundamentals) -> AnalyticResult:
+    """Latest Free Cash Flow, in ₹ crore.
+
+    Data source: CashFlow.free_cash_flow (already populated, or derived as OCF − capex in
+    the provider). Never fabricated — missing → unavailable.
+    """
+    cfs = cf.latest_cashflow()
+    fv = cfs.free_cash_flow if cfs else None
+    if fv is None:
+        return _na("Free Cash Flow", "₹cr", "missing free cash flow (no OCF/capex either)")
+    return AnalyticResult("Free Cash Flow", round(fv / 1e7, 2), "₹cr", True, "high",
+                          detail={"fcf_rupees": fv, "source": cf.provider_name})
+
+
 def compute_all(cf: CompanyFundamentals, cagr_years: int = 5) -> Dict[str, AnalyticResult]:
     return {
         "revenue_cagr": revenue_cagr(cf, cagr_years),
         "eps_cagr":     eps_cagr(cf, cagr_years),
         "roe":          roe(cf),
         "debt_to_equity": debt_to_equity(cf),
+        "roce":         roce(cf),
+        "fcf":          free_cash_flow(cf),
     }
