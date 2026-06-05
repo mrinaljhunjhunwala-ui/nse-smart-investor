@@ -35,6 +35,7 @@ SRC_DEEP = "DeepConfirmation"
 SRC_BETA = "Beta"
 SRC_SENTIMENT = "Sentiment"
 SRC_COMPOSITE = "Composite"
+SRC_LIQUIDITY = "Liquidity"
 
 
 @dataclass
@@ -93,6 +94,10 @@ class ThesisInputs:
     # ── Context ──
     sector: Optional[str] = None
     news_sentiment: Optional[str] = None          # "positive" | "negative" | "neutral"
+
+    # ── Liquidity (Phase C1 — from existing OHLCV) ──
+    liquidity_tier: Optional[str] = None          # "High" | "Medium" | "Low" | "Illiquid"
+    avg_daily_turnover: Optional[float] = None    # ₹ (30d)
 
 
 @dataclass

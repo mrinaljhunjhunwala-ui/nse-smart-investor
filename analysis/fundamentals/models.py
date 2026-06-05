@@ -83,6 +83,7 @@ class RatioSnapshot:
     net_margin: Optional[float] = None
     pe: Optional[float] = None
     pb: Optional[float] = None
+    ev_ebitda: Optional[float] = None           # EV/EBITDA (x)
 
 
 @dataclass

@@ -494,6 +494,57 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             except Exception as _f_e:
                 st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
 
+            # ── 💰 Valuation Context (Phase C1 — surface existing multiples, NO judgment) ──
+            st.markdown("---")
+            st.subheader("💰 Valuation Context")
+            st.caption(
+                "Valuation multiples already available from the fundamentals provider. "
+                "Factual context only — no cheap/expensive judgment, no peer comparison yet."
+            )
+            try:
+                from analysis.fundamentals.valuation import build_valuation_context
+                _val = build_valuation_context(_fund_service().get_fundamentals(ticker))
+                _vc1, _vc2, _vc3 = st.columns(3)
+                _vc1.metric("P/E", f"{_val.pe:,.1f}x" if _val.pe is not None else "N/A")
+                _vc2.metric("P/B", f"{_val.pb:,.1f}x" if _val.pb is not None else "N/A")
+                _vc3.metric("EV/EBITDA",
+                            f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A")
+                st.caption(
+                    f"Coverage: **{_val.confidence}**"
+                    + (f" · missing: {', '.join(_val.missing_fields)}" if _val.missing_fields else "")
+                    + (f" · source: {_val.source}" if _val.source else "")
+                    + ". Values are None when unavailable — never fabricated."
+                )
+            except Exception as _val_e:
+                st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
+
+            # ── 💧 Liquidity Context (Phase C1 — from existing OHLCV) ──
+            st.markdown("---")
+            st.subheader("💧 Liquidity Context")
+            _liq_ctx = None
+            try:
+                from analysis.liquidity import compute_liquidity, format_turnover
+                _liq_ctx = compute_liquidity(df)
+                _lt_color = {"High": "#00d4aa", "Medium": "#2ecc71",
+                             "Low": "#ffa726", "Illiquid": "#ff4757"}.get(
+                                 _liq_ctx.liquidity_tier, "#8899bb")
+                st.markdown(
+                    f"Liquidity tier: <b style='color:{_lt_color}'>{_liq_ctx.liquidity_tier}</b>",
+                    unsafe_allow_html=True)
+                _lc1, _lc2, _lc3 = st.columns(3)
+                _lc1.metric("Avg daily turnover (30d)",
+                            format_turnover(_liq_ctx.avg_daily_turnover_30d))
+                _lc2.metric("Avg daily volume (30d)",
+                            f"{_liq_ctx.avg_daily_volume_30d:,.0f}"
+                            if _liq_ctx.avg_daily_volume_30d is not None else "N/A")
+                _lc3.metric("Volume trend (30d vs 90d)",
+                            (_liq_ctx.volume_trend or "—").title(),
+                            f"{_liq_ctx.volume_trend_ratio:.2f}x"
+                            if _liq_ctx.volume_trend_ratio is not None else None)
+                st.caption(_liq_ctx.reason + " · computed from existing OHLCV (no new data source).")
+            except Exception as _liq_e:
+                st.caption(f"⚠️ Liquidity context unavailable: {_liq_e}")
+
             # ── 🧭 Investment Thesis (Phase A1 — structured, rules-based, NO AI) ──
             st.markdown("---")
             st.subheader("🧭 Investment Thesis (structured)")
@@ -503,7 +554,8 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             )
             try:
                 from analysis.thesis import generate_thesis, build_inputs
-                _th = generate_thesis(build_inputs(ticker, composite=cs, deep=_dc))
+                _th = generate_thesis(build_inputs(ticker, composite=cs, deep=_dc,
+                                                   liquidity=_liq_ctx))
 
                 _v_color = {"Strong Positive": "#00d4aa", "Positive": "#2ecc71",
                             "Neutral": "#8899bb", "Negative": "#ff7043",

@@ -20,7 +20,7 @@ from typing import Any, Optional
 from .thesis_models import (
     ThesisInputs, ThesisResult,
     SRC_FUNDAMENTALS, SRC_TECHNICAL, SRC_MOMENTUM, SRC_DEEP, SRC_BETA, SRC_SENTIMENT,
-    SRC_COMPOSITE,
+    SRC_COMPOSITE, SRC_LIQUIDITY,
 )
 from . import thesis_rules as rules
 
@@ -50,6 +50,8 @@ def generate_thesis(inputs: ThesisInputs) -> ThesisResult:
         present.append(SRC_BETA)
     if inputs.news_sentiment is not None:
         present.append(SRC_SENTIMENT)
+    if inputs.liquidity_tier is not None:
+        present.append(SRC_LIQUIDITY)
 
     return ThesisResult(
         ticker=inputs.ticker,
@@ -115,7 +117,8 @@ def build_inputs(ticker: str, *,
                  fundamentals: Any = None,
                  beta: Optional[float] = None,
                  sector: Optional[str] = None,
-                 news_sentiment: Optional[str] = None) -> ThesisInputs:
+                 news_sentiment: Optional[str] = None,
+                 liquidity: Any = None) -> ThesisInputs:
     """Assemble a ThesisInputs from existing platform capabilities.
 
     Any piece passed in is used as-is (the UI passes the score + deep-confirmation it
@@ -174,8 +177,20 @@ def build_inputs(ticker: str, *,
         except Exception:
             sector = None
     inp.sector = inp.sector or sector
-
     inp.news_sentiment = news_sentiment
+
+    # Liquidity (Phase C1) — from existing OHLCV; accept a pre-computed LiquidityContext
+    lq = liquidity
+    if lq is None:
+        try:
+            from analysis.liquidity import liquidity_for_ticker
+            lq = liquidity_for_ticker(ticker)
+        except Exception:
+            lq = None
+    if lq is not None:
+        tier = getattr(lq, "liquidity_tier", None)
+        inp.liquidity_tier = tier if tier and tier != "Unknown" else None
+        inp.avg_daily_turnover = getattr(lq, "avg_daily_turnover_30d", None)
     return inp
 
 

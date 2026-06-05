@@ -73,6 +73,7 @@ class PortfolioFitInputs:
     candidate_vol_pct: Optional[float] = None        # annualised %
     candidate_verdict: Optional[str] = None          # thesis verdict label
     candidate_verdict_score: Optional[int] = None    # -2 … +2
+    candidate_liquidity_tier: Optional[str] = None   # High | Medium | Low | Illiquid (Phase C1)
 
     # Candidate vs current holdings
     avg_correlation: Optional[float] = None          # mean corr to existing holdings
@@ -281,9 +282,16 @@ def assess_fit(inp: PortfolioFitInputs) -> PortfolioFitResult:
         pressures.append(f"high volatility ({inp.candidate_vol_pct:.0f}%)")
     if new_sector_pct is not None and new_sector_pct >= SECTOR_HIGH:
         pressures.append(f"sector concentration ({new_sector_pct:.0f}%)")
+    if inp.candidate_liquidity_tier == "Low":
+        pressures.append("low liquidity")
 
     weak_thesis = inp.candidate_verdict_score is not None and inp.candidate_verdict_score <= -1
-    if weak_thesis:
+    illiquid = inp.candidate_liquidity_tier == "Illiquid"
+    if illiquid:
+        guidance = "Small"
+        size_reason = ("Small — the stock is illiquid; a large position would be hard to exit. "
+                       "Cap the size regardless of other factors.")
+    elif weak_thesis:
         guidance = "Small"
         size_reason = (f"Small — the candidate's own thesis is weak "
                        f"({inp.candidate_verdict or inp.candidate_verdict_score}); size conservatively.")
@@ -441,6 +449,14 @@ def build_fit_inputs(candidate_ticker: str,
             cs = cdf["Close"].dropna() if cdf is not None and not cdf.empty else None
         except Exception:
             cs = None
+        if cdf is not None and not getattr(cdf, "empty", True):
+            try:
+                from analysis.liquidity import compute_liquidity
+                _lq = compute_liquidity(cdf)
+                inp.candidate_liquidity_tier = (_lq.liquidity_tier
+                                                if _lq.liquidity_tier != "Unknown" else None)
+            except Exception:
+                pass
         if cs is not None and len(cs) >= 30:
             cret = _pct_returns(cs)
             inp.candidate_vol_pct = round(float(cret.std()) * math.sqrt(TRADING_DAYS) * 100, 2)
