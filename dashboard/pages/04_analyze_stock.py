@@ -525,8 +525,8 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 from analysis.sector_classification import classify_sector as _classify_v
                 _spv = _classify_v(getattr(cs, "sector", None),
                                    name=getattr(cs, "company_name", None))
-                _val = build_valuation_context(_fund_service().get_fundamentals(ticker),
-                                               sector_profile=_spv)
+                _val_cf = _fund_service().get_fundamentals(ticker)
+                _val = build_valuation_context(_val_cf, sector_profile=_spv)
                 _vc1, _vc2, _vc3 = st.columns(3)
                 _vc1.metric("P/E", f"{_val.pe:,.1f}x" if _val.pe is not None else "N/A")
                 _vc2.metric("P/B", f"{_val.pb:,.1f}x" if _val.pb is not None else "N/A")
@@ -546,6 +546,35 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     + (f" · source: {_val.source}" if _val.source else "")
                     + ". Values are None when unavailable — never fabricated."
                 )
+
+                # ── Valuation Assessment (Phase E1-v2 — descriptive posture, NO judgment) ──
+                st.markdown("**🧮 Valuation Assessment** *(growth- & quality-adjusted, descriptive)*")
+                try:
+                    from analysis.fundamentals.valuation_decision import assess_valuation
+                    _va_res = _fund_analytics.compute_all(_val_cf)
+                    _va = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
+                    _va_color = {"high": "#00d4aa", "medium": "#ffa726",
+                                 "low": "#8899bb", "none": "#8899bb"}.get(_va.confidence, "#8899bb")
+                    st.markdown(
+                        f"> {_va.phrase}  \n"
+                        f"<span style='color:{_va_color}'>confidence: {_va.confidence}</span>",
+                        unsafe_allow_html=True)
+                    if _va.justification and _va.posture != "INSUFFICIENT_EVIDENCE":
+                        st.caption("Basis: " + _va.justification)
+                    if _va.triggered_guard:
+                        st.caption(f"Guard: {_va.triggered_guard}")
+                    for _rz in _va.reasons:
+                        st.caption("• " + _rz)
+                    for _cv in _va.caveats:
+                        st.caption("⚠️ " + _cv)
+                    if _va.confidence_factors:
+                        st.caption("Confidence factors: " + " · ".join(_va.confidence_factors))
+                    st.caption(
+                        "Descriptive only — relates the multiple to growth & quality. No buy/sell, "
+                        "no fair/intrinsic value, no cheap/expensive label."
+                    )
+                except Exception as _va_e:
+                    st.caption(f"⚠️ Valuation assessment unavailable: {_va_e}")
             except Exception as _val_e:
                 st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
 
