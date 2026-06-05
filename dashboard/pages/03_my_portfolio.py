@@ -392,14 +392,33 @@ if _csv_source is not None:
                 _risk_period = st.selectbox(
                     "Lookback", ["6mo", "1y", "2y", "3y"], index=1,
                     key="pf_risk_period", label_visibility="collapsed")
-            _risk_holds = tuple((h.ticker, float(getattr(h, "quantity", 0) or 0))
-                                for h in summary.holdings if getattr(h, "quantity", 0))
+            # purchase dates (from the raw holdings) feed the recency/interpretation layer
+            _db_map = {}
+            for _hr in getattr(pm, "holdings_raw", []) or []:
+                _rt = str(_hr.get("ticker", "")).strip().upper()
+                if _rt and not _rt.endswith(".NS"):
+                    _rt += ".NS"
+                if _rt:
+                    _db_map[_rt] = _hr.get("date_bought")
+            _risk_holds = tuple(
+                (h.ticker, float(getattr(h, "quantity", 0) or 0),
+                 _db_map.get(str(h.ticker).upper()))
+                for h in summary.holdings if getattr(h, "quantity", 0))
 
             @st.cache_data(ttl=900, show_spinner=False)
             def _pf_risk(_holds, _period):
                 from analysis.portfolio_risk import compute_portfolio_risk
                 return compute_portfolio_risk(
-                    [{"ticker": t, "quantity": q} for t, q in _holds], period=_period)
+                    [{"ticker": t, "quantity": q, "date_bought": db}
+                     for t, q, db in _holds], period=_period)
+
+            def _rm(_col, _label, _val, _unit=""):
+                if _val is None:
+                    _col.metric(_label, "N/A")
+                elif _unit == "%":
+                    _col.metric(_label, f"{_val:.1f}%")
+                else:
+                    _col.metric(_label, f"{_val:.2f}")
 
             if not _risk_holds:
                 st.caption("No holdings with quantity to analyze.")
@@ -409,32 +428,39 @@ if _csv_source is not None:
                 if _rr.error:
                     st.warning(f"⚠️ Risk analytics unavailable: {_rr.error}")
                 else:
-                    def _rm(_col, _label, _val, _suff=""):
-                        _col.metric(_label, f"{_val:.2f}{_suff}" if _val is not None else "N/A")
-                    _rkA = st.columns(4)
-                    _rm(_rkA[0], "Sharpe", _rr.sharpe)
-                    _rm(_rkA[1], "Sortino", _rr.sortino)
-                    _rm(_rkA[2], "Calmar", _rr.calmar)
-                    _rm(_rkA[3], "Max Drawdown", _rr.max_drawdown_pct, "%")
-                    _rkB = st.columns(4)
-                    _rm(_rkB[0], "Ann. Return", _rr.annualized_return_pct, "%")
-                    _rm(_rkB[1], "Ann. Volatility", _rr.annualized_vol_pct, "%")
-                    _rm(_rkB[2], "Portfolio Beta", _rr.portfolio_beta)
-                    _rm(_rkB[3], "Total Return", _rr.total_return_pct, "%")
-                    if _rr.confidence in ("low", "medium"):
-                        st.caption(f"⚠️ Confidence: **{_rr.confidence}** "
-                                   f"({_rr.n_days} trading days) — short lookbacks make "
-                                   "risk ratios noisy.")
+                    # specific, weight-aware disclosure (severe → warning, else info)
+                    if (_rr.affected_weight_pct or 0) >= 25 or not _rr.purchase_dates_known:
+                        st.warning(f"⚠️ {_rr.disclosure}")
+                    else:
+                        st.info(f"ℹ️ {_rr.disclosure}")
+                    st.caption(f"Confidence: **{_rr.confidence}** — {_rr.confidence_reason}")
 
+                    # ── Group 1: HYPOTHETICAL performance (biased by the assumption) ──
+                    st.markdown("##### 📈 Hypothetical Performance — *if you'd held today's exact book*")
+                    _perf = _rr.performance_metrics()
+                    _p1 = st.columns(3)
+                    for _i, (_l, _v, _u) in enumerate(_perf[:3]):
+                        _rm(_p1[_i], _l, _v, _u)
+                    _p2 = st.columns(3)
+                    for _i, (_l, _v, _u) in enumerate(_perf[3:]):
+                        _rm(_p2[_i], _l, _v, _u)
                     if _rr.nav_curve is not None:
                         _nav_df = _rr.nav_curve.rename("NAV").reset_index()
                         _nav_df.columns = ["Date", "NAV"]
                         _fig_nav = px.area(_nav_df, x="Date", y="NAV",
                                            title="Portfolio NAV / Equity Curve (reconstructed)")
-                        _fig_nav.update_layout(template="nse_pro", height=300,
+                        _fig_nav.update_layout(template="nse_pro", height=280,
                                                margin=dict(l=0, r=0, t=40, b=0))
                         st.plotly_chart(_fig_nav, width="stretch")
 
+                    # ── Group 2: ROBUST risk profile (unaffected by the assumption) ──
+                    st.markdown("##### 🛡️ Risk Profile (current book) — *robust to the holdings assumption*")
+                    _rk = _rr.risk_metrics()
+                    _rcols = st.columns(4)
+                    _rm(_rcols[0], _rk[0][0], _rk[0][1], _rk[0][2])    # Portfolio Beta
+                    _rm(_rcols[1], _rk[1][0], _rk[1][1], _rk[1][2])    # Annualised Volatility
+                    _rcols[2].metric("Holdings analysed", len(_rr.holdings_used))
+                    _rcols[3].metric("Lookback (days)", _rr.n_days)
                     _rcL, _rcR = st.columns([1, 1])
                     with _rcL:
                         if _rr.correlation_matrix is not None:
@@ -459,6 +485,15 @@ if _csv_source is not None:
                                    "capital weight.")
 
                     with st.expander("ℹ️ Methodology & assumptions", expanded=False):
+                        st.markdown("**Two metric groups, two interpretations:**")
+                        st.markdown("- **Hypothetical Performance** (Sharpe, Sortino, Calmar, CAGR, "
+                                    "Total Return, Max Drawdown) assumes today's holdings were held "
+                                    "over the whole lookback — read as *current-book hypothetical*, "
+                                    "not realised returns. Optimistically biased when names were "
+                                    "bought recently (see the notice above).")
+                        st.markdown("- **Risk Profile** (Beta, Volatility, Correlation, Risk "
+                                    "Contribution) are current-book snapshots — **unaffected** by the "
+                                    "holdings assumption and safe to trust.")
                         for _n in _rr.notes:
                             st.markdown(f"- {_n}")
                         st.caption("Informational analytics — not investment advice.")

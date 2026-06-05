@@ -76,3 +76,39 @@ the headline insight — it shows where your *risk*, not your capital, is concen
 | Max Drawdown | shallower | deep DD = painful peak-to-trough |
 | Beta | matches your risk appetite | > 1.2 → consider a hedge |
 | Risk % vs Weight % | aligned | Risk % ≫ Weight % → hidden risk concentration |
+
+---
+
+## Interpretation layer — metric classification & current-book reconstruction
+
+(Added per `PORTFOLIO_NAV_ASSUMPTION_AUDIT.md`. The NAV methodology is **unchanged** — this is
+detection + disclosure only.)
+
+### Current-book reconstruction (restated)
+The NAV is `Σ qty_today × close_t` — a hypothetical curve of **today's exact holdings projected
+backward**, not your realised trade history. Names bought recently are shown "held all along";
+names you sold are absent. This is fine for measuring the *current book's risk character*, but
+**inflates the return path** (you appear to have held today's winners the whole time).
+
+### Two metric groups, two interpretations
+| Group | Metrics | Interpretation | Trust |
+|---|---|---|---|
+| **Robust Risk** | Beta, Volatility, Correlation, Risk Contribution | Current-book snapshots — weight/return-relationship statistics, independent of the holdings-path assumption | ✅ Safe to trust |
+| **Hypothetical Performance** | CAGR, Total Return, Sharpe, Sortino, Calmar, Max Drawdown | *"What if you'd held today's exact book over the period"* — **not** realised returns; optimistically biased when holdings were bought recently | ⚠️ Read as hypothetical |
+
+### Holding-age detection & confidence
+Using each holding's `date_bought`, the engine flags holdings purchased **inside** the lookback
+(`date_bought > NAV start`), and reports the **% of portfolio weight** they represent. Confidence
+(from lookback length) is then **downgraded**: ≥ 50% of weight bought in-window → capped at *low*;
+≥ 25% → one notch down. The exact reason is shown to the user.
+
+### Why the risk metrics stay robust
+The daily NAV return is a weighted blend of the holdings' day-*t* returns at today's composition, so
+**volatility, beta, correlation and risk-contribution describe the current book correctly** — the
+constant-holdings projection is exactly the right input for them. The bias is confined to the
+**mean-return numerator**, which is why only the *performance* group is caveated.
+
+### Limitations (unchanged, surfaced)
+Constant-holdings projection; dividends excluded (price-return only, a small opposite-sign effect);
+cash flows ignored; survivorship of current names; historical-window estimates for beta/correlation.
+A faithful realised-return curve would require full transaction history (out of scope).
