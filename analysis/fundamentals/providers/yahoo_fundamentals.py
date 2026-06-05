@@ -212,6 +212,8 @@ class YahooFundamentalProvider(FundamentalProvider):
             net_margin=_f(info.get("profitMargins")),
             pe=_f(info.get("trailingPE")),
             pb=_f(info.get("priceToBook")),
+            # already present in the Yahoo `info` we fetch — just surfaced now (Phase C1)
+            ev_ebitda=_f(info.get("enterpriseToEbitda")),
         )
 
     def company_info(self, symbol: str) -> dict:

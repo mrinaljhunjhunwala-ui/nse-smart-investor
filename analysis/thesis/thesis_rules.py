@@ -15,7 +15,7 @@ from .thesis_models import (
     Factor, ThesisInputs,
     BULL, BEAR, RISK,
     SRC_FUNDAMENTALS, SRC_TECHNICAL, SRC_MOMENTUM, SRC_DEEP, SRC_BETA,
-    SRC_SENTIMENT, SRC_COMPOSITE, VERDICT_BY_SCORE,
+    SRC_SENTIMENT, SRC_COMPOSITE, SRC_LIQUIDITY, VERDICT_BY_SCORE,
 )
 
 # ── Thresholds (single source of truth) ─────────────────────────────────────────
@@ -105,6 +105,13 @@ def bull_factors(inp: ThesisInputs) -> List[Factor]:
     if inp.news_sentiment == "positive":
         out.append(Factor("Positive recent news flow", SRC_SENTIMENT,
                           "News sentiment: positive", BULL))
+
+    # Liquidity (factual — high liquidity eases entry/exit)
+    if inp.liquidity_tier == "High":
+        from analysis.liquidity import format_turnover
+        ev = (f"Avg daily turnover {format_turnover(inp.avg_daily_turnover)} (High tier)"
+              if inp.avg_daily_turnover is not None else "Liquidity tier: High")
+        out.append(Factor("High liquidity supports easy entry and exit", SRC_LIQUIDITY, ev, BULL))
     return out
 
 
@@ -192,6 +199,14 @@ def key_risks(inp: ThesisInputs) -> List[Factor]:
     if inp.technical_score is not None and inp.technical_score < TECH_WEAK:
         out.append(Factor("Technical weakness / trend breakdown", SRC_TECHNICAL,
                           f"Technical score {inp.technical_score:.0f}/40", RISK))
+
+    # Low liquidity → execution risk (factual)
+    if inp.liquidity_tier in ("Low", "Illiquid"):
+        from analysis.liquidity import format_turnover
+        ev = (f"Avg daily turnover {format_turnover(inp.avg_daily_turnover)} "
+              f"({inp.liquidity_tier} tier)" if inp.avg_daily_turnover is not None
+              else f"Liquidity tier: {inp.liquidity_tier}")
+        out.append(Factor("Low liquidity may increase execution risk", SRC_LIQUIDITY, ev, RISK))
 
     # Data-quality caveat
     if inp.fundamentals_partial:
