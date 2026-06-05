@@ -66,7 +66,8 @@ def _get_yf_crumb():
                 _gate, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             ), timeout=10)
             break
-        except Exception:
+        except Exception as e:
+            _log.debug("YF consent gate %s failed: %s", _gate, e)  # try next gate
             continue
 
     # Step 2 — crumb endpoint (short alpha-numeric token, ≤ 20 chars)
@@ -83,7 +84,8 @@ def _get_yf_crumb():
                 if _raw and len(_raw) <= 25 and not _raw.startswith("<"):
                     crumb = _raw
                     break
-        except Exception:
+        except Exception as e:
+            _log.debug("YF crumb %s failed: %s", _cu, e)  # try next crumb endpoint
             continue
 
     _YF_SESSION.update({"opener": opener, "crumb": crumb, "ts": now})
@@ -326,8 +328,8 @@ def fetch_data(
                 t, df = fut.result(timeout=0)
                 if df is not None and not df.empty:
                     results[t] = df
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("batch fetch worker failed: %s", e)  # name simply omitted from results
 
     if not results:
         raise ValueError(f"No data returned for tickers: {tickers}")
@@ -471,8 +473,8 @@ def fetch_intraday(
         mkt_open  = _dt.time(9, 15)
         mkt_close = _dt.time(15, 30)
         df = df[(times >= mkt_open) & (times <= mkt_close)]
-    except Exception:
-        pass   # index may already be date-only on fallback
+    except Exception as e:
+        _log.debug("intraday market-hours filter skipped: %s", e)  # index may be date-only
 
     return df
 

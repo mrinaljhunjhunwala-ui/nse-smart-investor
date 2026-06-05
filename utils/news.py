@@ -16,11 +16,14 @@ Architecture:
 from __future__ import annotations
 
 import email.utils
+import logging
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, List
+
+_log = logging.getLogger("news")
 
 
 # ── Ticker → human-friendly search term map ──────────────────────────────────
@@ -179,7 +182,8 @@ def _fetch_rss(url: str, max_items: int = 10, source_name: str = None) -> List[D
             })
         return items
 
-    except Exception:
+    except Exception as e:
+        _log.warning("news RSS fetch/parse failed: %s", e)  # empty list masks a real failure
         return []
 
 
@@ -282,7 +286,8 @@ def _yfinance_stock_fallback(ticker: str, max_articles: int) -> List[Dict]:
                 "sentiment": _quick_sentiment(title),
             })
         return result
-    except Exception:
+    except Exception as e:
+        _log.warning("news fetch failed: %s", e)
         return []
 
 
@@ -311,10 +316,11 @@ def _yfinance_market_fallback(max_articles: int) -> List[Dict]:
                         "time":      time_str,
                         "sentiment": _quick_sentiment(title),
                     })
-            except Exception:
+            except Exception as e:
+                _log.debug("yfinance news failed for %s: %s", sym, e)  # try next symbol
                 continue
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("yfinance market-news fallback unavailable: %s", e)
     return results[:max_articles]
 
 
