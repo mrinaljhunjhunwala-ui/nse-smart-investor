@@ -181,12 +181,22 @@ def _persist_user_state():
             st.session_state.get("risk_pct"),
         )
         if st.session_state.get("_user_state_snapshot") != _snap:
-            _ts_p.kv_set("watchlist", list(st.session_state.get("watchlist", [])))
-            _ts_p.kv_set("trade_capital", st.session_state.get("trade_capital", 500_000))
-            _ts_p.kv_set("risk_pct", st.session_state.get("risk_pct", 1.0))
-            st.session_state["_user_state_snapshot"] = _snap
-    except Exception:
-        pass
+            _ok = all([
+                _ts_p.kv_set("watchlist", list(st.session_state.get("watchlist", []))),
+                _ts_p.kv_set("trade_capital", st.session_state.get("trade_capital", 500_000)),
+                _ts_p.kv_set("risk_pct", st.session_state.get("risk_pct", 1.0)),
+            ])
+            # Only advance the snapshot if the writes actually persisted, so a transient
+            # failure retries next run instead of being silently dropped.
+            if _ok:
+                st.session_state["_user_state_snapshot"] = _snap
+                st.session_state.pop("_persist_failed", None)
+            else:
+                st.session_state["_persist_failed"] = True
+    except Exception as e:
+        import logging as _lg
+        _lg.getLogger("nav").warning("user-state persist failed: %s", e)
+        st.session_state["_persist_failed"] = True
 
 @st.cache_data(ttl=60, show_spinner=False)
 
@@ -567,15 +577,28 @@ def render_sidebar(current: str = None) -> None:
     # Persist watchlist + sizing settings whenever they change (survives refresh)
     _persist_user_state()
 
-    # ── Storage backend badge (paper trades persistence) ──────────────────────────
+    # ── Storage backend badge + startup persistence validation (P1) ──────────────
     try:
         import trade_store as _ts_badge
-        if _ts_badge.backend_name() == "postgres":
-            st.sidebar.caption("🟢 Paper trades: cloud DB (persistent)")
+        # Validate once per session (cheap; cached in session_state).
+        _pv = st.session_state.get("_persistence_status")
+        if _pv is None:
+            _pv = _ts_badge.validate_persistence()
+            st.session_state["_persistence_status"] = _pv
+        if not _pv.get("reachable"):
+            st.sidebar.error("🔴 Storage unreachable — data will NOT be saved. "
+                             + (_pv.get("error") or ""))
+        elif _pv.get("ephemeral"):
+            st.sidebar.caption("🟡 Paper trades & watchlist: local SQLite — **resets on "
+                               "redeploy**. Set DATABASE_URL to persist (DEPLOYMENT_CHECKLIST.md).")
         else:
-            st.sidebar.caption("🟡 Paper trades: local (resets on redeploy) — see dashboard/DB_SETUP.md")
-    except Exception:
-        pass
+            st.sidebar.caption("🟢 Paper trades & watchlist: cloud DB (persistent)")
+        if st.session_state.get("_persist_failed"):
+            st.sidebar.warning("⚠️ Last settings save did not persist — check storage.")
+    except Exception as e:
+        import logging as _lg
+        _lg.getLogger("nav").warning("persistence badge failed: %s", e)
+        st.sidebar.caption("⚠️ Persistence status unknown — see logs.")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(

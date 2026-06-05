@@ -57,6 +57,53 @@ def backend_name() -> str:
     return "postgres" if _database_url() else "sqlite"
 
 
+def validate_persistence() -> dict:
+    """Startup validation for the persistence layer (P1).
+
+    Checks, in order: (1) is a DATABASE_URL configured, (2) is the database reachable,
+    (3) is the schema valid (both `trades` and `user_kv` queryable). Returns a structured
+    status dict; NEVER raises — callers surface `warnings`/`error` to the user.
+    """
+    backend = backend_name()
+    url_present = bool(_database_url())
+    ephemeral = (backend == "sqlite")
+    status = {
+        "backend": backend,
+        "db_url_present": url_present,
+        "reachable": False,
+        "schema_ok": False,
+        "ephemeral": ephemeral,
+        "warnings": [],
+        "error": None,
+    }
+    if ephemeral:
+        status["warnings"].append(
+            "SQLite backend: storage is EPHEMERAL on Streamlit Cloud — paper trades, "
+            "watchlist and saved settings RESET on every redeploy. Set DATABASE_URL "
+            "(Postgres) to persist them. See DEPLOYMENT_CHECKLIST.md."
+        )
+    try:
+        ensure_schema()
+        _kv_ensure()
+        conn = _connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM trades LIMIT 1")
+            cur.execute("SELECT 1 FROM user_kv LIMIT 1")
+            status["reachable"] = True
+            status["schema_ok"] = True
+        finally:
+            conn.close()
+    except Exception as e:
+        status["error"] = f"{type(e).__name__}: {e}"
+        status["warnings"].append(
+            f"Database not reachable / schema invalid ({backend}): {e}. "
+            "Reads will return empty and writes will fail — fix before relying on persistence."
+        )
+        _log.error("validate_persistence failed (%s): %s", backend, e)
+    return status
+
+
 def _is_pg() -> bool:
     return backend_name() == "postgres"
 
@@ -274,7 +321,10 @@ def fetch_open(account: str = None) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT * FROM trades WHERE status='OPEN' ORDER BY timestamp DESC", conn
         )
-    except Exception:
+    except Exception as e:
+        # P2: was a silent swallow — an empty frame looked like "no open trades", masking a
+        # broken DB. Log so the failure is diagnosable; still degrade to an empty frame.
+        _log.warning("fetch_open(account=%r) failed: %s", account, e)
         return pd.DataFrame()
     finally:
         conn.close()
@@ -308,12 +358,21 @@ def kv_get(key: str, default: Any = None) -> Any:
             return json.loads(row[0]) if row and row[0] is not None else default
         finally:
             conn.close()
-    except Exception:
+    except Exception as e:
+        # P2: log (not silent) — a read failure here silently reverted user settings to
+        # defaults, which is indistinguishable from "never set". The default is still
+        # returned so the UI degrades gracefully.
+        _log.warning("kv_get(%r) failed: %s", key, e)
         return default
 
 
-def kv_set(key: str, value: Any) -> None:
-    """Upsert a JSON-serialisable setting. Silently no-ops on failure."""
+def kv_set(key: str, value: Any) -> bool:
+    """Upsert a JSON-serialisable setting. Returns True on success, False on failure.
+
+    P2: previously a silent no-op on failure, which could lose a user's watchlist /
+    settings without any signal. It now LOGS and returns a success flag so callers can
+    surface a save failure to the user — a persistence error is never silent.
+    """
     try:
         _kv_ensure()
         payload = json.dumps(value)
@@ -332,5 +391,7 @@ def kv_set(key: str, value: Any) -> None:
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        _log.error("kv_set(%r) FAILED — setting not persisted: %s", key, e)
+        return False
