@@ -7,10 +7,18 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared import design as _dz, cache as _cache, trade_utils as _tu, chart_helpers as _ch
-# Inject every shared module-level name so the verbatim body runs unchanged.
-for _m in (_dz, _cache, _tu, _ch):
-    globals().update({k: v for k, v in vars(_m).items() if not k.startswith('__')})
+# P3: explicit imports (was a dynamic shared-namespace injection)
+import os
+import pandas as pd
+import streamlit as st
+import sys
+from dashboard.shared.design import (
+    apply_design,
+)
+from dashboard.shared.chart_helpers import (
+    _ROOT,
+    render_top_bar,
+)
 
 apply_design()
 render_sidebar(current="Investor Guide")
