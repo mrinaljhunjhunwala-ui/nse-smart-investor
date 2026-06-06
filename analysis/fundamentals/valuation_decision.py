@@ -536,9 +536,10 @@ def _confidence_non_financial(inp, growth_valid, qtier, peg, pegt, capex_soft, p
 
 
 # ── integration seam ─────────────────────────────────────────────────────────────
-def assess_valuation(valuation_context, analytics: dict, sector_profile,
-                     cf=None, is_psu: bool = False) -> ValuationAssessment:
-    """Build ValuationInputs from existing objects, then assess. Defensive/wrapped."""
+def build_valuation_inputs(valuation_context, analytics: dict, sector_profile,
+                           cf=None, is_psu: bool = False) -> ValuationInputs:
+    """Build a ValuationInputs from existing objects (the live-data adapter). Exposed
+    separately so the regression harness can capture the exact inputs for offline replay."""
     def _av(key):
         a = analytics.get(key) if analytics else None
         return a.value if (a is not None and getattr(a, "available", False)
@@ -574,4 +575,11 @@ def assess_valuation(valuation_context, analytics: dict, sector_profile,
             getattr(cf, "symbol", None) if cf is not None else None,
             getattr(cf, "company_name", None) if cf is not None else None),
     )
-    return assess(inp)
+    return inp
+
+
+def assess_valuation(valuation_context, analytics: dict, sector_profile,
+                     cf=None, is_psu: bool = False) -> ValuationAssessment:
+    """Build ValuationInputs from existing objects, then assess. Defensive/wrapped."""
+    return assess(build_valuation_inputs(valuation_context, analytics, sector_profile,
+                                         cf=cf, is_psu=is_psu))

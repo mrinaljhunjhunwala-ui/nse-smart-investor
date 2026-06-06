@@ -57,11 +57,13 @@ SEED_TICKERS = [
 
 
 def assess_ticker(ticker: str) -> dict:
-    """Run E1-v2 live for one ticker. Returns the comparable result fields or raises."""
+    """Run E1-v2 live for one ticker. Returns the comparable result fields + the captured
+    ValuationInputs (for deterministic offline replay) — or raises on fetch failure."""
+    import dataclasses
     from analysis.fundamentals.service import default_service
     from analysis.fundamentals import analytics as A
     from analysis.fundamentals.valuation import build_valuation_context
-    from analysis.fundamentals.valuation_decision import assess_valuation
+    from analysis.fundamentals.valuation_decision import build_valuation_inputs, assess
     from analysis.sector_classification import classify_sector
     from data.universe import get_sector
 
@@ -70,12 +72,15 @@ def assess_ticker(ticker: str) -> dict:
     an = A.compute_all(cf)
     sp = classify_sector(get_sector(tk), name=cf.company_name)
     vc = build_valuation_context(cf, sp)
-    va = assess_valuation(vc, an, sp, cf)
+    inp = build_valuation_inputs(vc, an, sp, cf)
+    va = assess(inp)
     return {
         "posture": va.posture,
         "confidence": va.confidence,
         "branch": va.sector_branch,
         "guards_triggered": [va.triggered_guard] if va.triggered_guard else [],
+        # captured inputs → the offline test replays these through assess() (no network)
+        "inputs": dataclasses.asdict(inp),
     }
 
 

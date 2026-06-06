@@ -1,6 +1,7 @@
 """dashboard/shared/trade_utils.py - paper-trade DB helpers + position sizing."""
 from __future__ import annotations
 import os, sys, sqlite3, warnings, io, json, math, datetime
+import logging
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -8,6 +9,7 @@ import plotly.express as px
 import plotly.io as pio
 from plotly.subplots import make_subplots
 import streamlit as st
+_log = logging.getLogger("dashboard.trade_utils")
 warnings.filterwarnings('ignore')
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -21,7 +23,8 @@ def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
     with sqlite3.connect(path) as conn:
         try:
             return pd.read_sql_query("SELECT * FROM trades ORDER BY id DESC", conn)
-        except Exception:
+        except Exception as _e:
+            _log.warning("trade_utils.%s degraded: %s", "load_trades_db", _e)
             return pd.DataFrame()
 
 
@@ -80,7 +83,8 @@ def paper_account_type(name: str) -> str:
     """Return 'MIS' (intraday) or 'CNC' (delivery) for an account; default CNC."""
     try:
         return _store.kv_get(f"acct_type:{name}", "CNC") or "CNC"
-    except Exception:
+    except Exception as _e:
+        _log.debug("trade_utils.%s degraded: %s", "paper_account_type", _e)
         return "CNC"
 
 
@@ -88,7 +92,8 @@ def set_paper_account_type(name: str, atype: str) -> None:
     try:
         _store.kv_set(f"acct_type:{name}", "MIS" if str(atype).upper().startswith("MIS")
                       or "INTRA" in str(atype).upper() else "CNC")
-    except Exception:
+    except Exception as _e:
+        _log.debug("trade_utils.%s degraded: %s", "set_paper_account_type", _e)
         pass
 
 
@@ -244,7 +249,8 @@ def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
         from utils.market_hours import market_status as _msx
         if not _msx().get("is_open", False):
             return closed
-    except Exception:
+    except Exception as _e:
+        _log.debug("trade_utils.%s degraded: %s", "_auto_close_breached", _e)
         pass
     try:
         rows = _store.fetch_open(account)
@@ -276,7 +282,8 @@ def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
                     "exit": exit_px, "pnl": (exit_px - ep) * qty,
                     "account": str(r.get("account", "My Account")),
                 })
-    except Exception:
+    except Exception as _e:
+        _log.debug("trade_utils.%s degraded: %s", "_auto_close_breached", _e)
         pass
     return closed
 

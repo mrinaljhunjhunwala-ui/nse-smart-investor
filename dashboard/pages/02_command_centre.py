@@ -14,6 +14,10 @@ import pandas as pd
 import streamlit as st
 import sys
 import trade_store as _store
+# Restored (these module-level imports sat inside the old globals() block and were
+# dropped by the P3 transform; the page-smoke test caught the resulting NameError).
+from data.universe import get_universe
+from data.angel_fetcher import is_configured as _ao_is_configured
 from dashboard.shared.design import (
     apply_design,
 )

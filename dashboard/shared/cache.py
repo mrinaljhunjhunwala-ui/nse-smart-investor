@@ -1,6 +1,7 @@
 """dashboard/shared/cache.py - shared cached data + display/validation helpers."""
 from __future__ import annotations
 import os, sys, sqlite3, warnings, io, json, math, datetime
+import logging
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,6 +14,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 import trade_store as _store
+_log = logging.getLogger("dashboard.cache")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -318,11 +320,13 @@ def load_vix_data():
     from data.fetcher import fetch_single
     try:
         vix   = fetch_single("^INDIAVIX", period="1y")
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "load_vix_data", _e)
         vix   = pd.DataFrame()
     try:
         nifty = fetch_single("^NSEI", period="1y")
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "load_vix_data", _e)
         nifty = pd.DataFrame()
     return vix, nifty
 
@@ -334,7 +338,8 @@ def get_vix_info():
     try:
         from utils.vix import get_india_vix_regime
         return get_india_vix_regime()
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "get_vix_info", _e)
         return {"vix": 18.0, "regime": "normal", "allow_buy": True, "vix_pct_chg": 0.0}
 
 
@@ -401,7 +406,8 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: t
         with _cf.ThreadPoolExecutor(max_workers=min(8, max(1, len(tickers)))) as ex:
             for tk, sc in ex.map(_one, tickers):
                 out[tk] = sc
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_score_watchlist", _e)
         for tk in tickers:
             _tk, _sc = _one(tk)
             out[_tk] = _sc
@@ -429,7 +435,8 @@ def _sector_df_from_tuple(sector_ranks: tuple):
             [{"Rank": int(r)} for _, r in sector_ranks],
             index=[str(s) for s, _ in sector_ranks],
         )
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_sector_df_from_tuple", _e)
         return None
 
 
@@ -471,7 +478,8 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
                     "technical": s.technical_score, "momentum": s.momentum_score,
                     "volume": s.volume_score, "pattern": s.pattern_score,
                     "sentiment": s.sentiment_score}
-        except Exception:
+        except Exception as _e:
+            _log.debug("cache.%s degraded: %s", "_one", _e)
             return {"ticker": tk, "price": 0, "score": 0, "grade": "?",
                     "action": "UNAVAILABLE", "headline": "", "entry": 0,
                     "sl": 0, "tp": 0, "rr": 0, "narrative": "", "sector": "",
@@ -482,7 +490,8 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
     try:
         with _cf.ThreadPoolExecutor(max_workers=10) as ex:
             results = list(ex.map(_one, _UNIV))
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_home_top_picks", _e)
         results = [_one(tk) for tk in _UNIV]
 
     for s in results:
@@ -510,7 +519,8 @@ def _sector_ranking():
     try:
         from analysis.sector_strength import rank_sectors
         return rank_sectors()
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_sector_ranking", _e)
         return None
 
 
@@ -521,7 +531,8 @@ def _sector_ranks_tuple() -> tuple:
         return ()
     try:
         return tuple((str(idx), int(row["Rank"])) for idx, row in df.iterrows())
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_sector_ranks_tuple", _e)
         return ()
 
 
@@ -576,7 +587,8 @@ def _deep_confirmation(ticker: str) -> dict:
                 _n1 = (float(nf.iloc[-1]) / float(nf.iloc[-22]) - 1) * 100
                 out["rs_pct"] = round(_s1 - _n1, 1)
                 out["rel_strength"] = "outperforming" if out["rs_pct"] > 0 else "underperforming"
-        except Exception:
+        except Exception as _e:
+            _log.debug("cache.%s degraded: %s", "_deep_confirmation", _e)
             pass
 
         # Earnings proximity
@@ -586,7 +598,8 @@ def _deep_confirmation(ticker: str) -> dict:
             ed = get_earnings_date(ticker)
             if ed:
                 out["earnings_days"] = (ed - _ed_dt.datetime.now()).days
-        except Exception:
+        except Exception as _e:
+            _log.debug("cache.%s degraded: %s", "_deep_confirmation", _e)
             pass
 
         # Signal agreement (9 checks)
@@ -605,7 +618,8 @@ def _deep_confirmation(ticker: str) -> dict:
         out["signals"] = sigs
         out["bull"]    = sum(1 for _, ok in sigs if ok)
         out["total"]   = len(sigs)
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_deep_confirmation", _e)
         pass
     return out
 
@@ -617,7 +631,8 @@ def _sparkline_closes(ticker: str, n: int = 22) -> list:
         from data.fetcher import fetch_single
         c = fetch_single(ticker, period="3mo")["Close"].dropna().tolist()
         return [round(float(x), 2) for x in c[-n:]]
-    except Exception:
+    except Exception as _e:
+        _log.debug("cache.%s degraded: %s", "_sparkline_closes", _e)
         return []
 
 
