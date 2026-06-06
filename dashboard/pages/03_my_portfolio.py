@@ -421,10 +421,29 @@ if _csv_source is not None:
 
             @st.cache_data(ttl=900, show_spinner=False)
             def _pf_risk(_holds, _period):
+                import pandas as _pd
                 from analysis.portfolio_risk import compute_portfolio_risk
+                from data.fetcher import fetch_single as _fs
+
+                def _tz_safe_loader(_tkr, period="1y"):
+                    # The tiered fetcher (Angel/Stooq/Yahoo) can return tz-AWARE indexes for
+                    # some tickers and tz-NAIVE for others; pandas then refuses to align them
+                    # ("Cannot join tz-naive with tz-aware DatetimeIndex") when the NAV panel
+                    # is built. Normalise every frame to tz-naive so they always align.
+                    _df = _fs(_tkr, period=period)
+                    try:
+                        if _df is not None and not getattr(_df, "empty", True):
+                            _ix = _df.index
+                            if isinstance(_ix, _pd.DatetimeIndex) and _ix.tz is not None:
+                                _df = _df.copy()
+                                _df.index = _ix.tz_localize(None)
+                    except Exception:
+                        pass
+                    return _df
+
                 return compute_portfolio_risk(
                     [{"ticker": t, "quantity": q, "date_bought": db}
-                     for t, q, db in _holds], period=_period)
+                     for t, q, db in _holds], period=_period, price_loader=_tz_safe_loader)
 
             def _rm(_col, _label, _val, _unit=""):
                 if _val is None:
