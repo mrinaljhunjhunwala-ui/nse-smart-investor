@@ -31,6 +31,7 @@ How to get totp_secret:
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 import time
@@ -40,6 +41,8 @@ import urllib.request
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+
+_log = logging.getLogger("angel_fetcher")
 
 # ── In-process caches ─────────────────────────────────────────────────────────
 _SESSION:      Dict = {"jwt": None, "feed_token": None, "api_key": "", "ts": 0.0}
@@ -100,7 +103,8 @@ def _get_credentials() -> Dict[str, str]:
             "password":    str(ao.get("password",    "")),
             "totp_secret": str(ao.get("totp_secret", "")),
         }
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "_get_credentials", _e)
         pass
 
     # 2. Environment variables (fallback / local dev)
@@ -191,7 +195,8 @@ def _get_session() -> Optional[Dict]:
         })
         return _SESSION
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "_get_session", _e)
         return None
 
 
@@ -240,7 +245,8 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
         _TOKEN_CACHE[key] = token
         return token
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "_get_token", _e)
         _TOKEN_CACHE[key] = None
         return None
 
@@ -331,7 +337,8 @@ def fetch_historical(
 
         return df if not df.empty else None
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "fetch_historical", _e)
         # JWT may have expired — force refresh on next call
         _SESSION["jwt"] = None
         return None
@@ -385,7 +392,8 @@ def get_live_quote(ticker: str) -> Optional[Dict]:
             "chg_pct":    (price / prev_close - 1) * 100 if prev_close > 0 else 0.0,
         }
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_live_quote", _e)
         return None
 
 
@@ -461,7 +469,8 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
             "net_chg":         price - prev_close,
         }
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_full_quote", _e)
         return None
 
 
@@ -540,7 +549,8 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
                     "week_52_low":     float(q.get("52weeklow",  0) or 0),
                     "net_chg":         price - prev_close,
                 }
-        except Exception:
+        except Exception as _e:
+            _log.debug("angel_fetcher.%s unavailable: %s", "get_batch_quotes", _e)
             continue
 
     return results
@@ -618,7 +628,8 @@ def get_market_depth(ticker: str) -> Optional[Dict]:
                                if total_sell_qty > 0 else None),
         }
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_market_depth", _e)
         return None
 
 
@@ -678,7 +689,8 @@ def get_holdings() -> Optional[List[Dict]]:
 
         return sorted(holdings, key=lambda x: x["value_rs"], reverse=True)
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_holdings", _e)
         return None
 
 
@@ -733,7 +745,8 @@ def get_positions() -> Optional[Dict]:
             "net": _parse_positions(raw.get("net") or []),
         }
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_positions", _e)
         return None
 
 
@@ -772,7 +785,8 @@ def get_funds() -> Optional[Dict]:
             "m2m":             float(d.get("m2munrealisedprofit",     0) or 0),
         }
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_funds", _e)
         return None
 
 
@@ -817,7 +831,8 @@ def get_order_book() -> Optional[List[Dict]]:
             })
         return orders
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_order_book", _e)
         return None
 
 
@@ -855,7 +870,8 @@ def get_trade_book() -> Optional[List[Dict]]:
             })
         return trades
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_trade_book", _e)
         return None
 
 
@@ -1013,7 +1029,8 @@ def cancel_order(order_id: str, variety: str = "NORMAL") -> bool:
 
         return bool(resp.get("status"))
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "cancel_order", _e)
         return False
 
 
@@ -1123,7 +1140,8 @@ def get_gtt_list() -> Optional[List[Dict]]:
             })
         return gtts
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_gtt_list", _e)
         return None
 
 
@@ -1158,7 +1176,8 @@ def cancel_gtt(rule_id: str, symbol: str, exchange: str = "NSE") -> bool:
 
         return bool(resp.get("status"))
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "cancel_gtt", _e)
         return False
 
 
@@ -1198,5 +1217,6 @@ def get_profile() -> Optional[Dict]:
             "broker":    d.get("broker",    "Angel One"),
         }
 
-    except Exception:
+    except Exception as _e:
+        _log.debug("angel_fetcher.%s unavailable: %s", "get_profile", _e)
         return None
