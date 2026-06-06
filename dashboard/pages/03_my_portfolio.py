@@ -677,9 +677,12 @@ if _csv_source is not None:
             )
 
         except Exception as e:
-            st.error(f"Portfolio analysis failed: {e}")
-            import traceback
-            st.code(traceback.format_exc())
+            import logging as _pf_logging, traceback as _pf_tb
+            _pf_logging.getLogger("dashboard.my_portfolio").error(
+                "Portfolio analysis failed: %s", e, exc_info=True)   # diagnosable in logs too
+            st.error(f"Portfolio analysis failed: {type(e).__name__}: {e}")
+            with st.expander("Show technical details (for debugging)"):
+                st.code(_pf_tb.format_exc())
 else:
     # Empty state guidance
     st.markdown("---")

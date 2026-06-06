@@ -474,31 +474,31 @@ else:
         f'margin-bottom:16px;border-left:5px solid #2196F3">'
         f'<div style="font-size:11px;color:#5c8dd6;text-transform:uppercase;'
         f'letter-spacing:1.5px;margin-bottom:12px">📂 {_ac_name}</div>'
-        f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">'
+        f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
 
-        f'<div style="min-width:140px">'
+        f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s P&amp;L</div>'
         f'<div style="font-size:22px;font-weight:700;color:{_td_col}">{_td_arr} ₹{abs(_pt_today_pnl):,.0f}</div>'
         f'</div>'
 
-        f'<div style="min-width:170px">'
+        f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Unrealised P&amp;L</div>'
         f'<div style="font-size:22px;font-weight:700;color:{_ur_col}">{_ur_arr} ₹{abs(_pt_unrealised):,.0f} '
         f'<span style="font-size:13px">({_pt_unr_pct:+.1f}%)</span></div>'
         f'</div>'
 
-        f'<div style="min-width:170px">'
+        f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">'
         f'Realised P&amp;L &nbsp;<span style="color:#888">({_wins_cnt}/{_n_closed} won)</span></div>'
         f'<div style="font-size:22px;font-weight:700;color:{_re_col}">{_re_arr} ₹{abs(_pt_realised):,.0f}</div>'
         f'</div>'
 
-        f'<div style="min-width:140px">'
+        f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Deployed Capital</div>'
         f'<div style="font-size:22px;font-weight:700;color:#fff">₹{_pt_deployed:,.0f}</div>'
         f'</div>'
 
-        f'<div style="min-width:110px">'
+        f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Positions</div>'
         f'<div style="font-size:20px;font-weight:700">'
         f'<span style="color:#26a69a">{_n_open}</span> open &nbsp; '
@@ -568,10 +568,10 @@ else:
                     # Row 2: Entry → Current bar
                     f'<div style="margin-bottom:6px">'
                     f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:3px">'
-                    f'<span>SL ₹{_sl:,.2f}</span>'
-                    f'<span>Entry ₹{_ep:,.2f}</span>'
-                    f'<span>Now ₹{_cur:,.2f}</span>'
-                    f'<span>Target ₹{_tp:,.2f}</span>'
+                    f'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px">SL ₹{_sl:,.2f}</span>'
+                    f'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px">Entry ₹{_ep:,.2f}</span>'
+                    f'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px">Now ₹{_cur:,.2f}</span>'
+                    f'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px">Target ₹{_tp:,.2f}</span>'
                     f'</div>'
                     f'<div style="width:100%;height:8px;background:#2a3a4c;border-radius:4px;position:relative;overflow:visible">'
                     # Entry marker
@@ -585,7 +585,8 @@ else:
                     + '</div>',
                     unsafe_allow_html=True,
                 )
-                # Action buttons inline
+                # Action buttons inline (Fix 5: align the row's items to the top)
+                st.markdown('<div style="align-items:flex-start">', unsafe_allow_html=True)
                 _cb1, _cb2, _cb3, _cb4 = st.columns([2, 2, 2, 1])
                 if _cb1.button(f"❌ Close @ ₹{_cur:,.2f}", key=f"cl_live_{_tid}", use_container_width=True):
                     paper_close_trade(_tid, _cur, "Closed at live price")
@@ -603,6 +604,7 @@ else:
                     if st.button("Save", key=f"esv_{_tid}"):
                         paper_edit_trade(_tid, sl=_nsl, tp=_ntp)
                         st.cache_data.clear(); st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)   # Fix 5: close button-row wrapper
 
         st.markdown("---")
 
@@ -634,7 +636,7 @@ else:
             f'<th style="{_CTL}">Exit Reason</th>'
             f'<th style="{_CTH}">P&amp;L ₹</th>'
             f'<th style="{_CTH}">P&amp;L %</th>'
-            f'<th style="{_CTL}">Date</th>'
+            f'<th style="{_CTH}">Date</th>'
             f'</tr></thead><tbody>'
         )
         for _, _cr in _cl_disp.iterrows():
@@ -660,7 +662,7 @@ else:
                 f'<td style="{_CTX}">{_c_xr}</td>'
                 f'<td style="{_CTD};color:{_c_col};font-weight:700">₹{_c_pnl:+,.0f}</td>'
                 f'<td style="{_CTD};color:{_c_col}">{_c_pct:+.1f}%</td>'
-                f'<td style="{_CTX}">{_c_dt}</td>'
+                f'<td style="{_CTD}">{_c_dt}</td>'
                 f'</tr>'
             )
         _ct_html += '</tbody></table>'

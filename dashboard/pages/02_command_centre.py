@@ -190,6 +190,21 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=
 
 st.markdown("---")
 
+# ── Top Picks last-updated strip (Part 2) ─────────────────────────────
+_scan_t = st.session_state.get("_picks_scan_time")
+if _scan_t:
+    st.markdown(
+        f'<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
+        f'padding:7px 14px;margin-bottom:10px;display:flex;justify-content:space-between;'
+        f'align-items:center">'
+        f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last updated: '
+        f'<b>{_scan_t}</b></span>'
+        f'<span style="font-size:11px;color:#555">Refreshes every 30 min · '
+        f'tap Scan Now to force refresh</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 # ── 2. TODAY'S TOP PICKS — broad NSE scan (above open positions) ──────
 _tp_h1, _tp_h2 = st.columns([5, 2])
 with _tp_h1:
@@ -228,6 +243,16 @@ if _run_picks or st.session_state.get("cc_picks_loaded"):
         _sec_tuple = _sector_ranks_tuple()
         st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
         _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
+
+    # ── Auto-update notification (Part 2): toast when a new scan completes ──
+    import datetime as _dt
+    _prev_scan = st.session_state.get("_picks_last_scan")
+    _now_str = _dt.datetime.now().strftime("%H:%M")
+    if _prev_scan != _now_str:
+        st.session_state["_picks_last_scan"] = _now_str
+        if _prev_scan is not None:        # don't toast on first load
+            st.toast("🔄 Top Picks updated — new scan complete", icon="📊")
+    st.session_state["_picks_scan_time"] = _now_str
 
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
