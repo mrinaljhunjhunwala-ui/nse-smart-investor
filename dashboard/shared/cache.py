@@ -510,6 +510,93 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
     return {"buys": buys[:n], "sells": sells[:n]}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)   # 1hr cache — EOD signal, not intraday
+def _tomorrow_watchlist(n: int = 15) -> dict:
+    """
+    Scan the Nifty 500 universe for NEXT-SESSION setups (based on today's close),
+    distinct from intraday Top Picks. Reuses the composite-score infrastructure
+    (score_stock folds in trend, momentum, RSI, volume, VIX + sector strength), so
+    the component scores are the encoded form of the breakout/volume/RSI criteria —
+    no extra fetches beyond the standard scan.
+
+    Returns: {
+        "breakout_candidates": [...],   # setting up for a breakout at next open
+        "breakdown_watch":     [...],   # below support, momentum weakening
+        "reversal_watch":      [...],   # divergence / oversold-overbought extremes
+        "scan_time": "DD Mon HH:MM"
+    }
+    Each item: {ticker, score, headline, signal_type, key_level, action, entry, sl, tp}.
+    """
+    import concurrent.futures as _cf
+    import datetime as _dtm
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from data.universe import get_universe
+
+    scan_time = _dtm.datetime.now().strftime("%d %b %H:%M")
+    out = {"breakout_candidates": [], "breakdown_watch": [], "reversal_watch": [],
+           "scan_time": scan_time}
+    try:
+        _UNIV = get_universe("nifty500")
+    except Exception as _e:
+        _log.debug("cache._tomorrow_watchlist universe failed: %s", _e)
+        return out
+
+    def _one(tk):
+        try:
+            from analysis.score import score_stock
+            s = score_stock(tk)
+            return {"ticker": tk, "price": s.price, "score": s.score, "grade": s.grade,
+                    "action": s.action, "headline": s.headline, "entry": s.entry,
+                    "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
+                    "technical": s.technical_score, "momentum": s.momentum_score,
+                    "volume": s.volume_score, "pattern": s.pattern_score}
+        except Exception as _e:
+            _log.debug("cache._tomorrow_watchlist score failed for %s: %s", tk, _e)
+            return None
+
+    results = []
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+            results = [r for r in ex.map(_one, _UNIV) if r]
+    except Exception as _e:
+        _log.debug("cache._tomorrow_watchlist scan degraded: %s", _e)
+        results = [r for r in (_one(tk) for tk in _UNIV) if r]
+
+    def _item(s, signal_type, key_level):
+        return {"ticker": s["ticker"], "score": s["score"], "headline": s["headline"],
+                "signal_type": signal_type, "key_level": key_level,
+                "action": s["action"], "entry": s["entry"], "sl": s["sl"], "tp": s["tp"]}
+
+    for s in results:
+        act, sc = s.get("action", ""), s.get("score", 0)
+        if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
+            continue
+        tech, mom, vol = s.get("technical", 0), s.get("momentum", 0), s.get("volume", 0)
+        ent = s.get("entry", 0)
+        kl = f"₹{ent:,.0f}" if ent else "—"
+        # Breakout: constructive action, momentum building, volume buildup, room left
+        if act in ("STRONG BUY", "BUY", "WATCHLIST") and sc >= 55 and mom >= 15 and vol >= 9:
+            out["breakout_candidates"].append(_item(s, "🚀 Breakout setup", kl))
+        # Breakdown: weak score / below MAs, distribution volume
+        elif (act in ("EXIT", "CAUTION") or sc < 40) and tech < 18 and vol >= 7:
+            out["breakdown_watch"].append(_item(s, "🔻 Breakdown risk",
+                                                f"₹{s.get('sl', 0):,.0f}" if s.get("sl") else kl))
+        # Reversal: divergence (price weak but momentum building, or vice-versa)
+        elif (35 <= sc <= 58 and mom >= 15 and tech < 22):
+            out["reversal_watch"].append(_item(s, "🔄 Bullish divergence", kl))
+        elif (45 <= sc <= 68 and mom < 8 and tech >= 24):
+            out["reversal_watch"].append(_item(s, "🔄 Bearish divergence", kl))
+
+    out["breakout_candidates"].sort(key=lambda x: -x["score"])
+    out["breakdown_watch"].sort(key=lambda x: x["score"])
+    out["reversal_watch"].sort(key=lambda x: -x["score"])
+    out["breakout_candidates"] = out["breakout_candidates"][:n]
+    out["breakdown_watch"] = out["breakdown_watch"][:n]
+    out["reversal_watch"] = out["reversal_watch"][:n]
+    return out
+
+
 @st.cache_data(ttl=3600, show_spinner=False)   # 1-hour cache — heavy multi-fetch
 def _sector_ranking():
     """

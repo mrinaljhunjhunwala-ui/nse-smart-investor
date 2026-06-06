@@ -14,7 +14,7 @@ import trade_store as _store
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
     "Markets":   ["Market Live", "Market Overview", "Market Breadth", "Macro Dashboard"],
-    "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist"],
+    "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
     "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist"],
     "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
@@ -32,6 +32,7 @@ _PAGE_EMOJI: dict = {
     "My Portfolio":    "🏠",
     "Paper Trades":    "📂",
     "My Watchlist":    "⭐",
+    "Tomorrow's Watchlist": "📅",
     "Analyze Stock":   "🔍",
     "Backtest":        "🧪",
     "Swing Checklist": "✅",
@@ -52,6 +53,7 @@ _PAGE_FULL_NAME: dict = {
     "My Portfolio":    "🏠 My Portfolio",
     "Paper Trades":    "📂 Paper Trades",
     "My Watchlist":    "⭐ My Watchlist",
+    "Tomorrow's Watchlist": "📅 Tomorrow's Watchlist",
     "Analyze Stock":   "🔍 Analyze Stock",
     "Backtest":        "🧪 Backtest",
     "Swing Checklist": "✅ Swing Checklist",
@@ -85,6 +87,7 @@ _PAGE_FILE = {
     "My Watchlist":    "pages/15_my_watchlist.py",
     "Investor Guide":  "pages/16_investor_guide.py",
     "Angel One":       "pages/17_angel_one.py",
+    "Tomorrow's Watchlist": "pages/18_tomorrow_watchlist.py",
 }
 
 

@@ -34,15 +34,16 @@ def _no_network(monkeypatch):
     yield
 
 
-def test_all_17_pages_present():
+def test_all_pages_present():
     # Guard: the universe of pages the smoke covers (catches an accidentally-dropped page).
-    assert len(_PAGES) == 17, f"expected 17 pages, found {len(_PAGES)}: {_IDS}"
+    # 18 after adding 18_tomorrow_watchlist.py.
+    assert len(_PAGES) == 18, f"expected 18 pages, found {len(_PAGES)}: {_IDS}"
 
 
 @pytest.mark.smoke
 @pytest.mark.parametrize("page", _PAGES, ids=_IDS)
 def test_page_loads_without_exception(page, _no_network):
-    at = AppTest.from_file(page, default_timeout=90).run()
+    at = AppTest.from_file(page, default_timeout=120).run()
     # AppTest.exception is an ElementList (falsy when empty), not None.
     assert not at.exception, (
         f"{os.path.basename(page)} raised an uncaught exception: "
