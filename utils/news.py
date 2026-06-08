@@ -168,7 +168,8 @@ def _fetch_rss(url: str, max_items: int = 10, source_name: str = None) -> List[D
                 ts = email.utils.parsedate_to_datetime(pub_date)
                 time_str = ts.strftime("%d %b %H:%M")
                 raw_time = ts.timestamp()
-            except Exception:
+            except Exception as _e:
+                _log.debug("news.%s degraded: %s", "_fetch_rss", _e)
                 time_str = "—"
                 raw_time = 0
 
@@ -276,7 +277,8 @@ def _yfinance_stock_fallback(ticker: str, max_articles: int) -> List[Dict]:
             ts = item.get("providerPublishTime", 0)
             try:
                 time_str = datetime.fromtimestamp(ts).strftime("%d %b %H:%M")
-            except Exception:
+            except Exception as _e:
+                _log.debug("news.%s degraded: %s", "_yfinance_stock_fallback", _e)
                 time_str = "—"
             result.append({
                 "title":     title,
@@ -307,7 +309,8 @@ def _yfinance_market_fallback(max_articles: int) -> List[Dict]:
                     ts = item.get("providerPublishTime", 0)
                     try:
                         time_str = datetime.fromtimestamp(ts).strftime("%d %b %H:%M")
-                    except Exception:
+                    except Exception as _e:
+                        _log.debug("news.%s degraded: %s", "_yfinance_market_fallback", _e)
                         time_str = "—"
                     results.append({
                         "title":     title,

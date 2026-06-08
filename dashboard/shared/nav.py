@@ -13,7 +13,7 @@ import trade_store as _store
 
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
-    "Markets":   ["Market Live", "Market Overview", "Market Breadth", "Macro Dashboard"],
+    "Markets":   ["Market Live", "Market Overview", "Market Internals"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
     "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist"],
@@ -24,8 +24,7 @@ _PAGE_EMOJI: dict = {
     "Command Centre":  "🎯",
     "Market Live":     "📡",
     "Market Overview": "📊",
-    "Market Breadth":  "📈",
-    "Macro Dashboard": "🌍",
+    "Market Internals": "🌍",
     "Intraday Trader": "⚡",
     "Smart Screener":  "🔎",
     "OI & Options":    "🏦",
@@ -45,8 +44,7 @@ _PAGE_FULL_NAME: dict = {
     "Command Centre":  "🎯 Command Centre",
     "Market Live":     "📡 Market Live",
     "Market Overview": "📊 Market Overview",
-    "Market Breadth":  "📈 Market Breadth",
-    "Macro Dashboard": "🌍 Macro Dashboard",
+    "Market Internals": "🌍 Market Internals",
     "Intraday Trader": "⚡ Intraday Trader",
     "Smart Screener":  "🔎 Smart Screener",
     "OI & Options":    "🏦 OI & Options Setup",
@@ -78,18 +76,20 @@ _PAGE_FILE = {
     "Smart Screener":  "pages/06_smart_screener.py",
     "Paper Trades":    "pages/07_paper_trades.py",
     "Backtest":        "pages/08_backtest.py",
-    "Macro Dashboard": "pages/09_macro_dashboard.py",
-    "Market Breadth":  "pages/10_market_breadth.py",
-    "OI & Options":    "pages/11_oi_options.py",
-    "Intraday Trader": "pages/12_intraday_trader.py",
-    "Position Sizer":  "pages/13_position_sizer.py",
-    "Swing Checklist": "pages/14_swing_checklist.py",
-    "My Watchlist":    "pages/15_my_watchlist.py",
-    "Investor Guide":  "pages/16_investor_guide.py",
-    "Angel One":       "pages/17_angel_one.py",
-    "Tomorrow's Watchlist": "pages/18_tomorrow_watchlist.py",
+    "Market Internals": "pages/09_market_internals.py",
+    "OI & Options":    "pages/10_oi_options.py",
+    "Intraday Trader": "pages/11_intraday_trader.py",
+    "Position Sizer":  "pages/12_position_sizer.py",
+    "Swing Checklist": "pages/13_swing_checklist.py",
+    "My Watchlist":    "pages/14_my_watchlist.py",
+    "Investor Guide":  "pages/15_investor_guide.py",
+    "Angel One":       "pages/16_angel_one.py",
+    "Tomorrow's Watchlist": "pages/17_tomorrow_watchlist.py",
 }
 
+
+import logging as _logging
+_log = _logging.getLogger("dashboard.nav")
 
 @st.cache_data(ttl=60, show_spinner=False)
 
@@ -98,7 +98,8 @@ def _qv_prices(tickers: tuple) -> dict:
     try:
         from utils.live_price import get_live_prices_batch
         raw = get_live_prices_batch(list(tickers))
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "_qv_prices", _e)
         raw = {}
     res = {}
     for t in tickers:
@@ -137,7 +138,8 @@ def _sidebar_all():
                 q = fut.result(timeout=0)
                 if q:
                     results[name] = q   # {"price": float, "prev_close": float}
-            except Exception:
+            except Exception as _e:
+                _log.debug("nav.%s degraded: %s", "_sidebar_all", _e)
                 pass
     finally:
         pool.shutdown(wait=False)
@@ -157,7 +159,8 @@ def _sidebar_all():
             elif val < 28: reg, col = "Fear",      "🔴"
             else:          reg, col = "PANIC",     "🔴"
             vix_data = (val, chg, reg, col)
-        except Exception:
+        except Exception as _e:
+            _log.debug("nav.%s degraded: %s", "_sidebar_all", _e)
             pass
 
     # Parse macro pulse
@@ -169,7 +172,8 @@ def _sidebar_all():
                 c  = results[name]["price"]
                 pc = results[name]["prev_close"]
                 pulse[name] = (c, (c / pc - 1) * 100 if pc > 0 else 0.0, dp_map[name])
-            except Exception:
+            except Exception as _e:
+                _log.debug("nav.%s degraded: %s", "_sidebar_all", _e)
                 pass
 
     return vix_data, pulse
@@ -337,7 +341,8 @@ def render_sidebar(current: str = None) -> None:
     try:
         _vix_data, _pulse = _sidebar_all()
         vix_val, vix_chg, vix_reg, vix_col = _vix_data
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         vix_val, vix_chg, vix_reg, vix_col = None, None, "Unknown", "⚪"
         _pulse = {}
 
@@ -377,7 +382,8 @@ def render_sidebar(current: str = None) -> None:
             if st.sidebar.button("🔄 Refresh Prices", key="sidebar_refresh"):
                 st.cache_data.clear()
                 st.rerun()
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass
 
     # ── Angel One connection status ───────────────────────────────────────────────
@@ -395,7 +401,8 @@ def render_sidebar(current: str = None) -> None:
                 '— go to Tools › Angel One to set up</span>',
                 unsafe_allow_html=True,
             )
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         _ao_on = False
 
     st.sidebar.markdown("---")
@@ -415,7 +422,8 @@ def render_sidebar(current: str = None) -> None:
             ]
             st.session_state["trade_capital"] = float(_ts_init.kv_get("trade_capital", 500_000))
             st.session_state["risk_pct"]      = float(_ts_init.kv_get("risk_pct", 1.0))
-        except Exception:
+        except Exception as _e:
+            _log.warning("nav.%s storage failure: %s", "_on_group_change", _e)
             st.session_state.setdefault("watchlist",
                 ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"])
         st.session_state["_user_state_loaded"] = True
@@ -445,7 +453,8 @@ def render_sidebar(current: str = None) -> None:
     _wl_tickers = tuple(st.session_state["watchlist"])
     try:
         _wl_prices = _watchlist_prices(_wl_tickers)
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         _wl_prices = {}
 
     _wl_to_remove = None
@@ -494,7 +503,8 @@ def render_sidebar(current: str = None) -> None:
                     _notifs.append(("🎯", f"{_nt} hit target ₹{_ntp:,.2f}", "#00d4aa"))
                 elif _nsl and _ncur <= _nsl:
                     _notifs.append(("🚨", f"{_nt} hit stop ₹{_nsl:,.2f}", "#ff4757"))
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass
     try:
         from utils.vix import get_india_vix_regime as _nb_vix
@@ -503,7 +513,8 @@ def render_sidebar(current: str = None) -> None:
             _notifs.append(("🔴", f"Market in {_nvr.upper()} (VIX) — protect capital", "#ff4757"))
         elif _nvr == "complacency":
             _notifs.append(("😴", "VIX complacent — tighten stops", "#ff9500"))
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass
 
     st.sidebar.markdown("---")
@@ -554,7 +565,8 @@ def render_sidebar(current: str = None) -> None:
                 </script>""",
                 height=0,
             )
-    except Exception:
+    except Exception as _e:
+        _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass
 
     # ── Position-sizing settings (drive all suggested quantities) ─────────────────

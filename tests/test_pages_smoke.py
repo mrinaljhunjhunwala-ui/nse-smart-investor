@@ -36,8 +36,8 @@ def _no_network(monkeypatch):
 
 def test_all_pages_present():
     # Guard: the universe of pages the smoke covers (catches an accidentally-dropped page).
-    # 18 after adding 18_tomorrow_watchlist.py.
-    assert len(_PAGES) == 18, f"expected 18 pages, found {len(_PAGES)}: {_IDS}"
+    # 17 after merging Macro Dashboard + Market Breadth → Market Internals.
+    assert len(_PAGES) == 17, f"expected 17 pages, found {len(_PAGES)}: {_IDS}"
 
 
 @pytest.mark.smoke

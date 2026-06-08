@@ -26,6 +26,9 @@ from . import thesis_rules as rules
 
 
 # ─────────────────────────────── pure core ──────────────────────────────────────
+import logging as _logging
+_log = _logging.getLogger("analysis.thesis.thesis_engine")
+
 def generate_thesis(inputs: ThesisInputs) -> ThesisResult:
     """Run the deterministic rules. No network, no subsystem calls."""
     bull = rules.bull_factors(inputs)
@@ -137,7 +140,8 @@ def build_inputs(ticker: str, *,
         try:
             from analysis.score import score_stock
             cs = score_stock(ticker)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
             cs = None
     _from_composite(inp, cs)
 
@@ -147,7 +151,8 @@ def build_inputs(ticker: str, *,
         try:
             from dashboard.shared.cache import _deep_confirmation
             dc = _deep_confirmation(ticker)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
             dc = None
     _from_deep(inp, dc)
 
@@ -159,7 +164,8 @@ def build_inputs(ticker: str, *,
             from analysis.fundamentals import analytics as _fa
             cf = default_service().get_fundamentals(ticker)
             fa = {"results": _fa.compute_all(cf), "partial": bool(getattr(cf, "is_partial", False))}
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
             fa = None
     _from_fundamentals(inp, fa)
 
@@ -169,7 +175,8 @@ def build_inputs(ticker: str, *,
             from analysis.hedging import calculate_stock_beta
             b = calculate_stock_beta(ticker)
             beta = None if (b is None or (isinstance(b, float) and math.isnan(b))) else float(b)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
             beta = None
     inp.beta = beta
 
@@ -178,7 +185,8 @@ def build_inputs(ticker: str, *,
         try:
             from data.universe import get_sector
             sector = get_sector(ticker)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
             sector = None
     inp.sector = inp.sector or sector
     inp.news_sentiment = news_sentiment
@@ -189,7 +197,8 @@ def build_inputs(ticker: str, *,
         inp.sector_profile = classify_sector(inp.sector,
                                              name=getattr(cs, "company_name", None)
                                              if cs is not None and not isinstance(cs, dict) else None)
-    except Exception:
+    except Exception as _e:
+        _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
         inp.sector_profile = None
 
     # Liquidity (Phase C1) — from existing OHLCV; accept a pre-computed LiquidityContext
@@ -198,7 +207,8 @@ def build_inputs(ticker: str, *,
         try:
             from analysis.liquidity import liquidity_for_ticker
             lq = liquidity_for_ticker(ticker)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_inputs", _e)
             lq = None
     if lq is not None:
         tier = getattr(lq, "liquidity_tier", None)
