@@ -512,6 +512,19 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 _f_show(_fc3, _f_res["roe"])
                 _f_show(_fc4, _f_res["debt_to_equity"])
 
+                # Option A — honest CAGR confidence disclosure (only when not all "high")
+                _cagr_results = [r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
+                                 if r is not None and getattr(r, "available", False)]
+                if _cagr_results and any(r.confidence in ("medium", "low") for r in _cagr_results):
+                    st.caption(
+                        "📊 **Data depth note:** CAGR confidence reflects Yahoo Finance's "
+                        "available history (~4–5 years for most NSE names). "
+                        "\"Medium\" confidence means the trend is directionally reliable "
+                        "but not enough history exists for statistical certainty. "
+                        "Interpretation: treat Medium-confidence CAGR as a directional signal, "
+                        "not a precise forecast."
+                    )
+
                 # ── Sector-aware ROCE / FCF (Phase D1) — only where meaningful ──
                 from analysis.sector_classification import classify_sector as _classify
                 _sp = _classify(getattr(cs, "sector", None),

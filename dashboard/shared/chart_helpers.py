@@ -18,6 +18,9 @@ if _ROOT not in sys.path:
 # Macro / Breadth helpers  (for new pages 7–9)
 # ─────────────────────────────────────────────────────────────────────────────
 
+import logging as _logging
+_log = _logging.getLogger("dashboard.chart_helpers")
+
 @st.cache_data(ttl=600)
 def load_macro_data():
     """
@@ -41,7 +44,8 @@ def load_macro_data():
             df = fetch_single(sym, period="3mo")
             if not df.empty:
                 data[name] = df["Close"]
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "load_macro_data", _e)
             pass
 
     # Commodities / FX — use Yahoo Finance JSON history (v8 chart API)
@@ -66,7 +70,8 @@ def load_macro_data():
                                index=pd.to_datetime(ts, unit="s")).dropna()
             if not df.empty:
                 data[name] = df["Close"]
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "load_macro_data", _e)
             pass
 
     return pd.DataFrame(data).dropna(how="all")
@@ -100,7 +105,8 @@ def compute_market_breadth(tickers: tuple):
     def _fetch_one(t):
         try:
             return t, fetch_single(t, period="1y")
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "_fetch_one", _e)
             return t, None
 
     data_map = {}
@@ -111,7 +117,8 @@ def compute_market_breadth(tickers: tuple):
                 t, df = fut.result(timeout=0)
                 if df is not None and not df.empty:
                     data_map[t] = df
-            except Exception:
+            except Exception as _e:
+                _log.debug("chart_helpers.%s degraded: %s", "_fetch_one", _e)
                 pass
 
     adv = dec = above_20 = above_50 = above_200 = near_hi = near_lo = counted = 0
@@ -140,7 +147,8 @@ def compute_market_breadth(tickers: tuple):
                 near_hi += 1
             if (curr - low52) / max(low52, 1) * 100 < 5:
                 near_lo += 1
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "_fetch_one", _e)
             continue
 
     n = max(counted, 1)
@@ -312,7 +320,8 @@ def _index_strip_data():
     try:
         from data.fetcher import _get_yf_crumb
         _opener, _crumb = _get_yf_crumb()
-    except Exception:
+    except Exception as _e:
+        _log.debug("chart_helpers.%s degraded: %s", "_index_strip_data", _e)
         _opener, _crumb = None, ""
     _qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
     _open = _opener.open if _opener else urllib.request.urlopen
@@ -329,7 +338,8 @@ def _index_strip_data():
             prev  = meta.get("chartPreviousClose") or meta.get("previousClose")
             if price and prev:
                 out.append((label, float(price), (float(price) / float(prev) - 1) * 100))
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "_index_strip_data", _e)
             continue
     return out
 
@@ -342,7 +352,8 @@ def _ticker_tape_data():
     try:
         from utils.live_price import get_live_prices_batch
         raw = get_live_prices_batch(_names, max_workers=10)
-    except Exception:
+    except Exception as _e:
+        _log.debug("chart_helpers.%s degraded: %s", "_ticker_tape_data", _e)
         raw = {}
     out = []
     for t in _names:
@@ -371,7 +382,8 @@ def _live_top_bar():
                     f'<div style="font-size:14px;font-weight:700;color:{_vcol}">{_vv:.1f} '
                     f'<span style="font-size:10px;color:#8899bb">{_vinfo.get("regime","").title()}</span></div></div>'
                 )
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
             pass
         # Market-status chip
         try:
@@ -384,7 +396,8 @@ def _live_top_bar():
                 f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">MARKET</div>'
                 f'<div style="font-size:13px;font-weight:700;color:{_scol}">{_msd.get("status","")}</div></div>'
             )
-        except Exception:
+        except Exception as _e:
+            _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
             pass
 
         _idx = _index_strip_data()
@@ -403,7 +416,8 @@ def _live_top_bar():
                 f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
                 unsafe_allow_html=True,
             )
-    except Exception:
+    except Exception as _e:
+        _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
         pass
 
     # ── Scrolling stock ticker ───────────────────────────────────────────────
@@ -424,7 +438,8 @@ def _live_top_bar():
                 f'<div class="ticker-wrap"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
                 unsafe_allow_html=True,
             )
-    except Exception:
+    except Exception as _e:
+        _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
         pass
 
 
@@ -461,7 +476,8 @@ def _index_constituent_rows(index_label: str):
                 rows.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
         rows.sort(key=lambda x: -x[2])   # biggest gainers first
         return rows
-    except Exception:
+    except Exception as _e:
+        _log.debug("chart_helpers.%s degraded: %s", "_index_constituent_rows", _e)
         return []
 
 

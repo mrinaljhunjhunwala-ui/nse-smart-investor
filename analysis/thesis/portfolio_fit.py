@@ -48,6 +48,9 @@ VOL_HIGH = 40.0            # candidate annualised vol % → sizing pressure
 BETA_HIGH = 1.30           # candidate beta → sizing pressure
 
 
+import logging as _logging
+_log = _logging.getLogger("analysis.thesis.portfolio_fit")
+
 @dataclass
 class FitFactor:
     """A single traceable fit effect: text + source + evidence + polarity."""
@@ -364,7 +367,8 @@ def build_fit_inputs(candidate_ticker: str,
     if price_loader is None:
         try:
             from data.fetcher import fetch_single as price_loader
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             price_loader = None
 
     # Candidate sector
@@ -372,7 +376,8 @@ def build_fit_inputs(candidate_ticker: str,
         try:
             from data.universe import get_sector
             candidate_sector = get_sector(candidate_ticker)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             candidate_sector = None
     inp.candidate_sector = candidate_sector
 
@@ -382,7 +387,8 @@ def build_fit_inputs(candidate_ticker: str,
         try:
             from .thesis_engine import thesis_for_ticker
             th = thesis_for_ticker(candidate_ticker)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             th = None
     if th is not None:
         inp.candidate_verdict = getattr(th, "verdict", None)
@@ -394,7 +400,8 @@ def build_fit_inputs(candidate_ticker: str,
             from analysis.hedging import calculate_stock_beta
             b = calculate_stock_beta(candidate_ticker, period=period)
             candidate_beta = None if (b is None or (isinstance(b, float) and math.isnan(b))) else float(b)
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             candidate_beta = None
     inp.candidate_beta = candidate_beta
 
@@ -405,7 +412,8 @@ def build_fit_inputs(candidate_ticker: str,
         from analysis.portfolio_risk import TRADING_DAYS
         try:
             from data.universe import get_sector
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             get_sector = lambda t: "Unknown"   # noqa: E731
 
         closes, values, sector_val = {}, {}, {}
@@ -413,7 +421,8 @@ def build_fit_inputs(candidate_ticker: str,
             try:
                 df = price_loader(tkr, period=period)
                 s = df["Close"].dropna() if df is not None and not df.empty else None
-            except Exception:
+            except Exception as _e:
+                _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
                 s = None
             if s is None or len(s) < 30:
                 continue
@@ -440,14 +449,16 @@ def build_fit_inputs(candidate_ticker: str,
                 [{"ticker": t, "value_rs": values[t]} for t in closes], period=period)
             pb = bo.get("portfolio_beta")
             inp.portfolio_beta = None if (pb is None or (isinstance(pb, float) and math.isnan(pb))) else pb
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             inp.portfolio_beta = None
 
         # Candidate vs holdings correlation + candidate vol
         try:
             cdf = price_loader(candidate_ticker, period=period)
             cs = cdf["Close"].dropna() if cdf is not None and not cdf.empty else None
-        except Exception:
+        except Exception as _e:
+            _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
             cs = None
         if cdf is not None and not getattr(cdf, "empty", True):
             try:
@@ -455,7 +466,8 @@ def build_fit_inputs(candidate_ticker: str,
                 _lq = compute_liquidity(cdf)
                 inp.candidate_liquidity_tier = (_lq.liquidity_tier
                                                 if _lq.liquidity_tier != "Unknown" else None)
-            except Exception:
+            except Exception as _e:
+                _log.debug("thesis.%s degraded: %s", "build_fit_inputs", _e)
                 pass
         if cs is not None and len(cs) >= 30:
             cret = _pct_returns(cs)
