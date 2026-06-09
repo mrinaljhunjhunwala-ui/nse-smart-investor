@@ -25,6 +25,9 @@ from dashboard.shared.chart_helpers import (
     _ROOT,
     render_top_bar,
 )
+# Copilot Phase 4 modules — concentration (HHI) + fundamental quality
+from analysis.portfolio_concentration import analyze_concentration, concentration_grade
+from analysis.portfolio_fundamentals import batch_fetch_fundamentals, compute_quality_score
 
 apply_design()
 render_sidebar(current="My Portfolio")
@@ -530,6 +533,96 @@ if _csv_source is not None:
                         for _n in _rr.notes:
                             st.markdown(f"- {_n}")
                         st.caption("Informational analytics — not investment advice.")
+
+            # ── Concentration & Diversification (HHI) ─────────────────
+            st.markdown("---")
+            st.markdown("##### 🎯 Concentration & Diversification")
+            try:
+                _conc_holdings = []
+                _tot_val = sum(max(h.current_price * h.quantity, 0) for h in summary.holdings)
+                if _tot_val > 0:
+                    for h in summary.holdings:
+                        _w = (h.current_price * h.quantity) / _tot_val * 100
+                        _row = {"ticker": h.ticker.replace(".NS", ""), "weight_pct": _w}
+                        _sec = getattr(h, "sector", None)
+                        if _sec:
+                            _row["sector"] = _sec
+                        _conc_holdings.append(_row)
+
+                _conc = analyze_concentration(_conc_holdings)
+                _grade = concentration_grade(_conc.hhi)
+                _risk_color = {"LOW": "#26a69a", "MEDIUM": "#ff9500",
+                               "HIGH": "#ff4757"}.get(_conc.risk_level, "#8899bb")
+
+                _cc = st.columns(4)
+                _cc[0].markdown(
+                    f'<div class="metric-box"><div class="metric-lbl">HHI Index</div>'
+                    f'<div class="metric-val" style="color:{_risk_color}">{_conc.hhi:,.0f}</div>'
+                    f'<div style="font-size:11px;color:#8899bb">{_conc.hhi_category} · Grade {_grade}</div></div>',
+                    unsafe_allow_html=True)
+                _cc[1].metric("Largest Position", f"{_conc.top_1_weight:.1f}%")
+                _cc[2].metric("Top 5 Weight", f"{_conc.top_5_weight:.1f}%")
+                _cc[3].metric("Holdings", _conc.total_holdings)
+
+                _cm = "card-green" if _conc.risk_level == "LOW" else (
+                    "card-yellow" if _conc.risk_level == "MEDIUM" else "card-red")
+                st.markdown(
+                    f'<div class="{_cm}"><b>Concentration risk: {_conc.risk_level}</b><br>'
+                    f'<span class="narrative">{_conc.recommendation}</span></div>',
+                    unsafe_allow_html=True)
+                if _conc.sector_concentration is not None:
+                    st.caption(f"Sector HHI: {_conc.sector_concentration:,.0f} "
+                               "(higher = more concentrated by sector).")
+                st.caption("**HHI** = Σ(weight%)². <1500 diversified · 1500–2500 moderate · "
+                           ">2500 concentrated. Informational, not advice.")
+            except Exception as _conc_err:
+                st.caption(f"Concentration analysis unavailable: {_conc_err}")
+
+            # ── Fundamental Quality (Phase 4, on-demand — network) ────
+            st.markdown("##### 🔬 Fundamental Quality Scores")
+            st.caption("Quality score (0–100) from ROE/ROCE, revenue & EPS CAGR, "
+                       "leverage, and FCF health. Fetches live fundamentals — opt-in.")
+            if st.button("📊 Score my holdings on fundamentals", key="pf_fund_btn"):
+                _fund_tickers = [h.ticker for h in summary.holdings]
+
+                @st.cache_data(ttl=86400, show_spinner=False)
+                def _cached_fundamentals(tickers_tuple: tuple):
+                    rows = []
+                    for _f in batch_fetch_fundamentals(list(tickers_tuple)):
+                        try:
+                            _q = compute_quality_score(_f)
+                        except Exception:
+                            _q = None
+                        rows.append({
+                            "Stock":     str(_f.get("ticker", "")).replace(".NS", ""),
+                            "Quality":   round(_q, 0) if _q is not None else None,
+                            "ROE %":     _f.get("roe"),
+                            "ROCE %":    _f.get("roce"),
+                            "Rev CAGR %": _f.get("revenue_cagr_5y") or _f.get("revenue_cagr_3y"),
+                            "EPS CAGR %": _f.get("eps_cagr_5y") or _f.get("eps_cagr_3y"),
+                            "D/E":       _f.get("debt_to_equity"),
+                        })
+                    return rows
+
+                with st.spinner("Fetching fundamentals for your holdings…"):
+                    _fund_rows = _cached_fundamentals(tuple(_fund_tickers))
+
+                if _fund_rows:
+                    _fdf = pd.DataFrame(_fund_rows).sort_values(
+                        "Quality", ascending=False, na_position="last")
+                    st.dataframe(
+                        _fdf.style.format({
+                            "Quality": "{:.0f}", "ROE %": "{:.1f}", "ROCE %": "{:.1f}",
+                            "Rev CAGR %": "{:.1f}", "EPS CAGR %": "{:.1f}", "D/E": "{:.2f}",
+                        }, na_rep="—").background_gradient(
+                            subset=["Quality"], cmap="RdYlGn", vmin=0, vmax=100),
+                        hide_index=True, width="stretch")
+                    _avg_q = _fdf["Quality"].dropna().mean()
+                    if pd.notna(_avg_q):
+                        st.caption(f"Average portfolio quality: **{_avg_q:.0f}/100** "
+                                   f"across {_fdf['Quality'].notna().sum()} scored holdings.")
+                else:
+                    st.info("No fundamental data could be retrieved (source may be rate-limited).")
 
             # ── Holdings cards (2-column grid) ────────────────────────
             st.markdown("---")
