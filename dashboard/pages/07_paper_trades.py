@@ -79,6 +79,36 @@ try:
     # One-click connection test — confirms the DB is reachable & schema is valid
     with st.expander("🔌 Test storage connection", expanded=False):
         if st.button("Run connection test", key="pers_test_btn"):
+            # ── Diagnostic: is the secret even being READ? (password masked) ──
+            _secret_seen = False
+            _masked = "—"
+            _which = "—"
+            try:
+                _raw = _pers_ts._database_url()
+                if _raw:
+                    _secret_seen = True
+                    # mask user:password → ***
+                    import re as _re
+                    _masked = _re.sub(r"://[^@]*@", "://***@", str(_raw))
+                # where did it come from?
+                try:
+                    import streamlit as _sst
+                    if "database" in _sst.secrets and "url" in _sst.secrets["database"]:
+                        _which = "[database].url"
+                    elif "DATABASE_URL" in _sst.secrets:
+                        _which = "DATABASE_URL (flat)"
+                    else:
+                        _which = "not found in st.secrets"
+                except Exception as _we:
+                    _which = f"secrets read error: {_we}"
+            except Exception as _de:
+                _which = f"diag error: {_de}"
+
+            st.caption(f"🔎 Secret detected by app: **{'YES' if _secret_seen else 'NO'}**  ·  "
+                       f"source: `{_which}`")
+            if _secret_seen:
+                st.caption(f"🔎 Using (password masked): `{_masked}`")
+
             _r = _pers_ts.validate_persistence()
             _c1, _c2, _c3 = st.columns(3)
             _c1.metric("Backend", _r.get("backend", "—"))
@@ -89,12 +119,17 @@ try:
             elif _r.get("reachable") and _r.get("schema_ok") and not _r.get("ephemeral"):
                 st.success("Connection good — persistence is working. Open a test trade, "
                            "then reopen this page after a redeploy to confirm it persists.")
-            elif _r.get("ephemeral"):
-                st.warning("Still on temporary SQLite — the DATABASE_URL secret isn't being "
-                           "picked up. Re-check the secret name/format and reboot the app.")
+            elif _r.get("ephemeral") and not _secret_seen:
+                st.warning("The DATABASE_URL secret is **not being read** by the app. "
+                           "Either the new code hasn't deployed yet (Reboot the app from "
+                           "'Manage app'), or the secret name/section is off. The diagnostic "
+                           "line above shows what the app sees.")
+            elif _r.get("ephemeral") and _secret_seen:
+                st.warning("Secret IS read but backend is still SQLite — likely the running "
+                           "code is the old version. Reboot the app from 'Manage app'.")
         else:
             st.caption("Click to verify the database is connected and the schema is valid. "
-                       "Your connection string is never shown.")
+                       "Your connection string is never shown (password is masked).")
 except Exception:
     pass
 
