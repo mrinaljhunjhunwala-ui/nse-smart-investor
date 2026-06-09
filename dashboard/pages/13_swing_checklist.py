@@ -15,6 +15,9 @@ import sys
 from dashboard.shared.design import (
     apply_design,
 )
+from dashboard.shared.cache import (
+    STOCK_SEARCH_MAP,
+)
 from dashboard.shared.chart_helpers import (
     _ROOT,
     render_top_bar,
@@ -31,18 +34,41 @@ st.markdown(
     "Green = factor confirms the trade. Red = caution. Need ≥ 5/7 green to enter."
 )
 
-_sc_c1, _sc_c2 = st.columns([3, 1])
+# ── Stock picker: searchable name/symbol list + manual entry (same as Analyze Stock) ──
+_sc_search_options = sorted(
+    f"{name}  ({sym.replace('.NS', '')})"
+    for name, sym in STOCK_SEARCH_MAP.items()
+)
+_sc_c1, _sc_c2, _sc_c3 = st.columns([3, 2, 1])
 with _sc_c1:
-    _sc_ticker = st.text_input("NSE Ticker", value="RELIANCE",
-                               placeholder="RELIANCE / TCS / INFY",
-                               key="sc_ticker").strip().upper()
+    _sc_selected = st.selectbox(
+        "Search by company name or symbol",
+        options=["— type to search —"] + _sc_search_options,
+        index=0,
+        key="sc_search_select",
+    )
 with _sc_c2:
+    _sc_manual = st.text_input(
+        "Or type ticker directly",
+        value="",
+        placeholder="e.g. INFY or INFY.NS",
+        key="sc_manual_input",
+    ).strip().upper()
+with _sc_c3:
     st.write("")
     st.write("")
     _sc_btn = st.button("✅ Run Checklist", type="primary", key="sc_btn")
 
-if _sc_btn and _sc_ticker:
-    _sc_sym = _sc_ticker if _sc_ticker.endswith(".NS") else _sc_ticker + ".NS"
+# Resolve final symbol — manual entry wins, else the dropdown selection
+_sc_sym = ""
+if _sc_manual:
+    _sc_sym = _sc_manual if _sc_manual.endswith(".NS") else _sc_manual + ".NS"
+elif _sc_selected != "— type to search —":
+    _sc_raw = _sc_selected.rsplit("(", 1)[-1].rstrip(")")
+    _sc_sym = _sc_raw if _sc_raw.endswith(".NS") else _sc_raw + ".NS"
+_sc_ticker = _sc_sym.replace(".NS", "")
+
+if _sc_btn and _sc_sym:
     with st.spinner(f"Running confluence checklist for {_sc_ticker}…"):
         try:
             from data.fetcher import fetch_single
