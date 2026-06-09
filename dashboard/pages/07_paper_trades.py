@@ -560,6 +560,11 @@ else:
 
             _unr_c = "#26a69a" if _unr >= 0 else "#ef5350"
             _td_c  = "#26a69a" if _today_pnl >= 0 else "#ef5350"
+            # Live LTP vs previous close — shown prominently in the card
+            _ltp_chg = (_cur / _prv - 1) * 100 if _prv > 0 else 0
+            _ltp_c   = "#26a69a" if _ltp_chg >= 0 else "#ef5350"
+            _ltp_arr = "▲" if _ltp_chg >= 0 else "▼"
+            _has_live = bool(_lp.get("price"))
 
             # Progress bar: SL → current → target
             _rng = max(_tp - _sl, 0.01)
@@ -583,6 +588,12 @@ else:
                     f'<span style="font-size:17px;font-weight:700;color:#fff">{_tk.replace(".NS","")}</span>'
                     f'&nbsp;<span style="font-size:11px;color:{_st_bdr};font-weight:600">{_st_badge}</span>'
                     f'<span style="font-size:11px;color:#888;margin-left:8px">{_qty} shares</span>'
+                    # Prominent live price line
+                    f'<div style="font-size:15px;color:#fff;margin-top:4px">'
+                    f'{"🔴 Live" if _has_live else "⏸ Last"} <b>₹{_cur:,.2f}</b> '
+                    f'<span style="color:{_ltp_c};font-size:12px;font-weight:600">{_ltp_arr}{abs(_ltp_chg):.2f}%</span>'
+                    f'<span style="font-size:11px;color:#888;margin-left:8px">vs entry ₹{_ep:,.2f}</span>'
+                    f'</div>'
                     f'</div>'
                     f'<div style="text-align:right">'
                     f'<div style="font-size:17px;font-weight:700;color:{_unr_c}">₹{_unr:+,.0f} ({_unr_pct:+.1f}%)</div>'
@@ -608,9 +619,8 @@ else:
                     + '</div>',
                     unsafe_allow_html=True,
                 )
-                # Action buttons inline (Fix 5: align the row's items to the top)
-                st.markdown('<div style="align-items:flex-start">', unsafe_allow_html=True)
-                _cb1, _cb2, _cb3, _cb4 = st.columns([2, 2, 2, 1])
+                # Action buttons — three equal-width close buttons
+                _cb1, _cb2, _cb3 = st.columns(3)
                 if _cb1.button(f"❌ Close @ ₹{_cur:,.2f}", key=f"cl_live_{_tid}", use_container_width=True):
                     paper_close_trade(_tid, _cur, "Closed at live price")
                     st.cache_data.clear(); st.rerun()
@@ -620,14 +630,32 @@ else:
                 if _cb3.button(f"🎯 Close @ Target ₹{_tp:,.2f}", key=f"cl_tp_{_tid}", use_container_width=True):
                     paper_close_trade(_tid, _tp, "Target reached")
                     st.cache_data.clear(); st.rerun()
-                with _cb4.expander("✏️ Edit"):
+
+                # Edit SL / Target — full-width expander so the inputs are large & clear
+                with st.expander("✏️ Edit Stop-Loss / Target"):
                     _ne1, _ne2 = st.columns(2)
-                    _nsl = _ne1.number_input("New SL", value=float(_sl), format="%.2f", key=f"esl_{_tid}")
-                    _ntp = _ne2.number_input("New TP", value=float(_tp), format="%.2f", key=f"etp_{_tid}")
-                    if st.button("Save", key=f"esv_{_tid}"):
+                    _nsl = _ne1.number_input(
+                        "New Stop-Loss (₹)", min_value=0.01, value=float(_sl),
+                        step=0.05, format="%.2f", key=f"esl_{_tid}",
+                        help="Price at which the position is stopped out.",
+                    )
+                    _ntp = _ne2.number_input(
+                        "New Target (₹)", min_value=0.01, value=float(_tp),
+                        step=0.05, format="%.2f", key=f"etp_{_tid}",
+                        help="Price at which you'll book profit.",
+                    )
+                    _new_rr = ((_ntp - _ep) / (_ep - _nsl)) if (_ep - _nsl) > 0.01 else 0
+                    st.caption(
+                        f"Entry ₹{_ep:,.2f} · Risk ₹{max(_ep - _nsl, 0):,.2f}/sh · "
+                        f"Reward ₹{max(_ntp - _ep, 0):,.2f}/sh · "
+                        f"R:R {_new_rr:.2f}x" if _new_rr else
+                        f"Entry ₹{_ep:,.2f} — set SL below and target above entry."
+                    )
+                    if st.button("💾 Save changes", key=f"esv_{_tid}",
+                                 type="primary", use_container_width=True):
                         paper_edit_trade(_tid, sl=_nsl, tp=_ntp)
+                        st.toast(f"Updated SL ₹{_nsl:,.2f} · TP ₹{_ntp:,.2f}", icon="✅")
                         st.cache_data.clear(); st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)   # Fix 5: close button-row wrapper
 
         st.markdown("---")
 

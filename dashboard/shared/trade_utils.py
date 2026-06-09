@@ -44,18 +44,61 @@ def _ensure_paper_db(path: str = "trades.db"):
 
 
 def paper_list_accounts(path: str = "trades.db") -> list:
-    """Return sorted list of distinct account names."""
-    return _store.list_accounts()
+    """Return sorted distinct account names.
+
+    Unions accounts that already have trades with any account that was *created*
+    but is still empty (registered in the kv store). Without this, a freshly
+    created account vanished on the next rerun — list_accounts() only sees
+    accounts that appear in the trades table — so the user could never select it
+    to open its first trade. Now an empty account is selectable immediately.
+    """
+    names = set()
+    try:
+        names.update(_store.list_accounts())
+    except Exception as _e:
+        _log.warning("trade_utils.paper_list_accounts (trades) degraded: %s", _e)
+    try:
+        names.update(_store.kv_get("paper_accounts", []) or [])
+    except Exception as _e:
+        _log.debug("trade_utils.paper_list_accounts (registry) degraded: %s", _e)
+    names.add("My Account")
+    return sorted(names)
+
+
+def _register_paper_account(name: str) -> None:
+    """Add an account name to the kv registry so empty accounts survive reruns."""
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        if name not in reg:
+            reg.add(name)
+            _store.kv_set("paper_accounts", sorted(reg))
+    except Exception as _e:
+        _log.debug("trade_utils._register_paper_account degraded: %s", _e)
 
 
 def paper_rename_account(old_name: str, new_name: str, path: str = "trades.db"):
-    """Rename an account across all its trades."""
+    """Rename an account across all its trades and in the kv registry."""
     _store.rename_account(old_name, new_name)
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        reg.discard(old_name)
+        reg.add(new_name)
+        _store.kv_set("paper_accounts", sorted(reg))
+        # carry the account type (MIS/CNC) over to the new name
+        _store.kv_set(f"acct_type:{new_name}", paper_account_type(old_name))
+    except Exception as _e:
+        _log.debug("trade_utils.paper_rename_account registry degraded: %s", _e)
 
 
 def paper_delete_account(name: str, path: str = "trades.db"):
-    """Delete all trades in an account."""
+    """Delete all trades in an account and drop it from the kv registry."""
     _store.delete_account(name)
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        reg.discard(name)
+        _store.kv_set("paper_accounts", sorted(reg))
+    except Exception as _e:
+        _log.debug("trade_utils.paper_delete_account registry degraded: %s", _e)
 
 
 def paper_open_trade(ticker: str, price: float, qty: int,
@@ -92,6 +135,8 @@ def set_paper_account_type(name: str, atype: str) -> None:
     try:
         _store.kv_set(f"acct_type:{name}", "MIS" if str(atype).upper().startswith("MIS")
                       or "INTRA" in str(atype).upper() else "CNC")
+        # Register so a newly created (still empty) account is listed/selectable
+        _register_paper_account(name)
     except Exception as _e:
         _log.debug("trade_utils.%s degraded: %s", "set_paper_account_type", _e)
         pass
