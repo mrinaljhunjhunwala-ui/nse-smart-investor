@@ -70,8 +70,31 @@ try:
         st.error(f"🗄️ Persistence issue: {_pers['error']} — trades may not be saving. "
                  "Check your DATABASE_URL.")
     else:
-        st.caption("🗄️ Persistent storage active (Postgres) — your trade history survives "
-                   "redeploys.")
+        st.success(
+            f"🗄️ Persistent storage active (**{_pers.get('backend','postgres')}**) — "
+            "your trades, accounts and watchlist now survive redeploys.",
+            icon="✅",
+        )
+
+    # One-click connection test — confirms the DB is reachable & schema is valid
+    with st.expander("🔌 Test storage connection", expanded=False):
+        if st.button("Run connection test", key="pers_test_btn"):
+            _r = _pers_ts.validate_persistence()
+            _c1, _c2, _c3 = st.columns(3)
+            _c1.metric("Backend", _r.get("backend", "—"))
+            _c2.metric("Reachable", "✅ Yes" if _r.get("reachable") else "❌ No")
+            _c3.metric("Schema OK", "✅ Yes" if _r.get("schema_ok") else "❌ No")
+            if _r.get("error"):
+                st.error(f"Error: {_r['error']}")
+            elif _r.get("reachable") and _r.get("schema_ok") and not _r.get("ephemeral"):
+                st.success("Connection good — persistence is working. Open a test trade, "
+                           "then reopen this page after a redeploy to confirm it persists.")
+            elif _r.get("ephemeral"):
+                st.warning("Still on temporary SQLite — the DATABASE_URL secret isn't being "
+                           "picked up. Re-check the secret name/format and reboot the app.")
+        else:
+            st.caption("Click to verify the database is connected and the schema is valid. "
+                       "Your connection string is never shown.")
 except Exception:
     pass
 
