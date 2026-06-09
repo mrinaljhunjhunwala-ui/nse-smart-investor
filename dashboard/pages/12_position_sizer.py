@@ -14,6 +14,12 @@ import sys
 from dashboard.shared.design import (
     apply_design,
 )
+from dashboard.shared.cache import (
+    STOCK_SEARCH_MAP,
+)
+from dashboard.shared.trade_utils import (
+    _live_quote_price,
+)
 from dashboard.shared.chart_helpers import (
     _ROOT,
     render_top_bar,
@@ -36,17 +42,50 @@ with _ps_tab1:
     st.subheader("Fixed-Risk Position Sizing")
     st.caption("Most common approach: risk a fixed % of capital per trade.")
 
+    # ── Optional: auto-fill entry/SL/TP from a stock's LIVE price ──────────────
+    for _k, _v in (("ps_entry", 500.0), ("ps_sl", 480.0), ("ps_tp", 550.0)):
+        st.session_state.setdefault(_k, _v)
+    _ps_opts = sorted(
+        f"{n}  ({s.replace('.NS', '')})" for n, s in STOCK_SEARCH_MAP.items()
+    )
+    _ps_pc1, _ps_pc2 = st.columns([3, 1])
+    with _ps_pc1:
+        _ps_pick = st.selectbox(
+            "Auto-fill from a stock (optional) — pulls the live price",
+            ["— none —"] + _ps_opts, index=0, key="ps_pick",
+        )
+    with _ps_pc2:
+        st.write("")
+        st.write("")
+        if st.button("⚡ Use live price", key="ps_fetch", use_container_width=True):
+            if _ps_pick != "— none —":
+                _psym = _ps_pick.rsplit("(", 1)[-1].rstrip(")")
+                _psym = _psym if _psym.endswith(".NS") else _psym + ".NS"
+                _plive = _live_quote_price(_psym)
+                if _plive:
+                    # default SL 2% below, TP 4% above — user can adjust
+                    st.session_state["ps_entry"] = round(_plive, 2)
+                    st.session_state["ps_sl"]    = round(_plive * 0.98, 2)
+                    st.session_state["ps_tp"]    = round(_plive * 1.04, 2)
+                    st.toast(f"⚡ Loaded live ₹{_plive:,.2f} for "
+                             f"{_psym.replace('.NS','')}", icon="✅")
+                    st.rerun()
+                else:
+                    st.warning("Live price unavailable — enter values manually.")
+            else:
+                st.info("Pick a stock from the list first.")
+
     _psc1, _psc2 = st.columns(2)
     with _psc1:
         _ps_capital   = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="ps_cap")
         _ps_risk_pct  = st.slider("Risk per trade (%)", 0.5, 3.0, 1.0, 0.25, key="ps_risk_pct")
-        _ps_entry     = st.number_input("Entry Price (₹)", 1.0, 100_000.0, 500.0, 0.5, key="ps_entry",
-                                        format="%.2f")
+        _ps_entry     = st.number_input("Entry Price (₹)", min_value=1.0, max_value=100_000.0,
+                                        step=0.5, key="ps_entry", format="%.2f")
     with _psc2:
-        _ps_sl        = st.number_input("Stop-Loss Price (₹)", 1.0, 100_000.0, 480.0, 0.5, key="ps_sl",
-                                        format="%.2f")
-        _ps_tp        = st.number_input("Target Price (₹)", 1.0, 200_000.0, 550.0, 0.5, key="ps_tp",
-                                        format="%.2f")
+        _ps_sl        = st.number_input("Stop-Loss Price (₹)", min_value=1.0, max_value=100_000.0,
+                                        step=0.5, key="ps_sl", format="%.2f")
+        _ps_tp        = st.number_input("Target Price (₹)", min_value=1.0, max_value=200_000.0,
+                                        step=0.5, key="ps_tp", format="%.2f")
         _ps_lot_size  = st.number_input("Lot / Board Lot (shares, 1 for equity)", 1, 10000, 1, key="ps_lot")
 
     if _ps_entry > _ps_sl > 0:

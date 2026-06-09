@@ -52,6 +52,29 @@ st.markdown(
     "and measure your decision quality over time. All prices are from live market data."
 )
 
+# ── Persistence status banner — explains why history can vanish ─────────────
+try:
+    import trade_store as _pers_ts
+    _pers = _pers_ts.validate_persistence()
+    if _pers.get("ephemeral"):
+        st.warning(
+            "⚠️ **Your paper trades are stored on temporary disk and will RESET when the "
+            "app redeploys** (typically every few days on Streamlit Cloud, or on any code "
+            "update). That's why older trades disappear. **To keep full history permanently**, "
+            "connect a free Postgres database (Neon or Supabase, 5-min setup): add a "
+            "`DATABASE_URL` in the app's Secrets. See `dashboard/DB_SETUP.md`. "
+            "Until then, export your trades below to keep a copy.",
+            icon="🗄️",
+        )
+    elif _pers.get("error"):
+        st.error(f"🗄️ Persistence issue: {_pers['error']} — trades may not be saving. "
+                 "Check your DATABASE_URL.")
+    else:
+        st.caption("🗄️ Persistent storage active (Postgres) — your trade history survives "
+                   "redeploys.")
+except Exception:
+    pass
+
 # Pre-fill ticker if navigated from Market Live / Market Overview "Trade" button
 if "pt_prefill_ticker" in st.session_state and st.session_state["pt_prefill_ticker"]:
     _pf_sym = st.session_state.pop("pt_prefill_ticker")
@@ -404,7 +427,7 @@ with _hcol:
     st.markdown(f"#### 📂 {st.session_state.get('pt_account', 'My Account')}")
 with _tcol:
     _pt_autoclose = st.toggle(
-        "🤖 Auto-close SL/TP", value=st.session_state.get("auto_close_on", True),
+        "🤖 Auto-close SL/TP", value=st.session_state.get("auto_close_on", False),
         key="pt_autoclose_toggle",
         help="Automatically close any position that hits its target or stop-loss "
              "on page load — during market hours only, on live prices.",

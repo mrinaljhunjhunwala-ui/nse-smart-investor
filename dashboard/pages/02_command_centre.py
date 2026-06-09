@@ -88,6 +88,68 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ── 0b. PAPER TRADES OVERVIEW (quick view) ─────────────────────────────────
+try:
+    import trade_store as _pto_ts
+    _pto_open  = _pto_ts.fetch_open()
+    _pto_accts = _pto_ts.list_accounts()
+    _pto_all   = (pd.concat([_pto_ts.load_by_account(_a) for _a in _pto_accts],
+                            ignore_index=True)
+                  if _pto_accts else pd.DataFrame())
+
+    _pto_n = 0 if (_pto_open is None or _pto_open.empty) else len(_pto_open)
+
+    # Unrealised P&L on open positions — uses LIVE prices
+    _pto_unreal = 0.0
+    if _pto_n:
+        _pto_syms = tuple(_pto_open["ticker"].tolist())
+        _pto_lp   = _portfolio_live_prices(_pto_syms)
+        for _, _por in _pto_open.iterrows():
+            _pep = float(_por.get("price", 0) or 0)
+            _pqt = int(_por.get("quantity", 0) or 0)
+            _pcur = _pto_lp.get(str(_por["ticker"]), {}).get("price", _pep)
+            _pto_unreal += (_pcur - _pep) * _pqt
+
+    # Realised P&L + win rate from closed history
+    _pto_real, _pto_wins, _pto_tot = 0.0, 0, 0
+    if not _pto_all.empty and "status" in _pto_all.columns:
+        _pto_closed = _pto_all[_pto_all["status"].isin(["CLOSED", "STOPPED"])]
+        if not _pto_closed.empty and "pnl" in _pto_closed.columns:
+            _pnl_series = _pto_closed["pnl"].fillna(0)
+            _pto_real = float(_pnl_series.sum())
+            _pto_tot  = int(len(_pto_closed))
+            _pto_wins = int((_pnl_series > 0).sum())
+    _pto_wr = (_pto_wins / _pto_tot * 100) if _pto_tot else 0.0
+
+    _u_clr = "#00d4aa" if _pto_unreal >= 0 else "#ff4757"
+    _r_clr = "#00d4aa" if _pto_real   >= 0 else "#ff4757"
+    _wr_clr = "#00d4aa" if _pto_wr >= 50 else ("#ff9500" if _pto_wr >= 35 else "#ff4757")
+
+    def _pto_cell(_lbl, _val, _clr="#f0f4ff", _sub=""):
+        return (f'<div style="flex:1;text-align:center;padding:6px 10px">'
+                f'<div style="font-size:10px;color:#4a5568;text-transform:uppercase;'
+                f'letter-spacing:1px">{_lbl}</div>'
+                f'<div style="font-size:22px;font-weight:800;color:{_clr}">{_val}</div>'
+                + (f'<div style="font-size:11px;color:#8899bb">{_sub}</div>' if _sub else "")
+                + '</div>')
+
+    st.markdown(
+        '<div class="glass-panel" style="margin-bottom:14px;padding:10px 8px">'
+        '<div style="font-size:11px;font-weight:700;color:#5a6a8a;text-transform:uppercase;'
+        'letter-spacing:1.2px;padding:0 10px 4px">📊 Paper Trades Overview</div>'
+        '<div style="display:flex;flex-wrap:wrap">'
+        + _pto_cell("Open Positions", f"{_pto_n}")
+        + _pto_cell("Unrealised P&amp;L", f"₹{_pto_unreal:+,.0f}", _u_clr, "live prices")
+        + _pto_cell("Realised P&amp;L", f"₹{_pto_real:+,.0f}", _r_clr,
+                    f"{_pto_tot} closed")
+        + _pto_cell("Win Rate", f"{_pto_wr:.0f}%", _wr_clr,
+                    f"{_pto_wins}/{_pto_tot} wins" if _pto_tot else "no closed trades")
+        + '</div></div>',
+        unsafe_allow_html=True,
+    )
+except Exception as _pto_e:
+    st.caption(f"⚠️ Paper trades overview unavailable ({_pto_e}).")
+
 # ── 1. MARKET PULSE ────────────────────────────────────────────────────────
 _cc_vix_info = get_vix_info()
 _cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
@@ -254,6 +316,12 @@ if _run_picks or st.session_state.get("cc_picks_loaded"):
             st.toast("🔄 Top Picks updated — new scan complete", icon="📊")
     st.session_state["_picks_scan_time"] = _now_str
 
+    # Live prices for the picks — the scan scores on last daily close, but the
+    # cards (and any paper trade) should reflect the real-time market price.
+    _pk_all_syms = tuple({*(b["ticker"] for b in _picks["buys"]),
+                          *(s["ticker"] for s in _picks["sells"])})
+    _pk_lp = _portfolio_live_prices(_pk_all_syms) if _pk_all_syms else {}
+
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
         st.markdown("#### 🟢 Buy Candidates")
@@ -261,6 +329,18 @@ if _run_picks or st.session_state.get("cc_picks_loaded"):
             st.caption("No strong buy setups today — market not offering clean entries.")
         for _b in _picks["buys"]:
             _bl = _b["ticker"].replace(".NS", "")
+            _blq = _pk_lp.get(_b["ticker"], {})
+            _blive = _blq.get("price")
+            _bchg  = _blq.get("chg")
+            _blive_html = ""
+            if _blive:
+                _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
+                _barr = "▲" if (_bchg or 0) >= 0 else "▼"
+                _blive_html = (
+                    f'<div style="font-size:12px;color:#fff;margin-top:3px">'
+                    f'🔴 Live <b>₹{_blive:,.2f}</b> '
+                    f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span></div>'
+                )
             _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
             _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
                         f'{_bs["qty"]} sh</span>') if _bs else ""
@@ -279,6 +359,7 @@ if _run_picks or st.session_state.get("cc_picks_loaded"):
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
+                + _blive_html
                 + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
                    f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
                    if _b["entry"] else "")
@@ -323,7 +404,7 @@ _cc_h1, _cc_h2 = st.columns([5, 2])
 _cc_h1.markdown("### 📌 Open Positions")
 with _cc_h2:
     _cc_autoclose = st.toggle(
-        "🤖 Auto-close on SL/TP", value=st.session_state.get("auto_close_on", True),
+        "🤖 Auto-close on SL/TP", value=st.session_state.get("auto_close_on", False),
         key="cc_autoclose_toggle",
         help="When ON, paper trades that hit their target or stop-loss are "
              "closed automatically on page load (during market hours only, "
