@@ -37,17 +37,36 @@ _SQLITE_PATH = "trades.db"
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _database_url() -> Optional[str]:
-    """Return a Postgres URL from Streamlit secrets or env, else None."""
+    """Return a Postgres URL from Streamlit secrets or env, else None.
+
+    Reads BOTH supported secret shapes, robustly:
+        [database]            →  st.secrets["database"]["url"]
+        url = "postgresql://"
+      ── or ──
+        DATABASE_URL = "postgresql://"   (flat top-level key)
+
+    Streamlit returns a secrets *section* as an AttrDict (a Mapping, NOT a dict
+    subclass), so the old `isinstance(_db, dict)` check silently dropped the
+    `[database].url` form. We now use key/attribute access via try/except, which
+    works for AttrDict and plain dict alike.
+    """
     url = None
     try:
         import streamlit as st
-        _db = st.secrets.get("database", {}) if hasattr(st, "secrets") else {}
-        url = (_db or {}).get("url") if isinstance(_db, dict) else None
-        if not url:
+        secrets = getattr(st, "secrets", None)
+        if secrets is not None:
+            # 1) [database] section with a `url` key
             try:
-                url = st.secrets.get("DATABASE_URL")
+                _db = secrets["database"]
+                url = _db["url"]
             except Exception:
                 url = None
+            # 2) flat top-level DATABASE_URL
+            if not url:
+                try:
+                    url = secrets["DATABASE_URL"]
+                except Exception:
+                    url = None
     except Exception:
         url = None
     return (url or os.environ.get("DATABASE_URL")) or None
