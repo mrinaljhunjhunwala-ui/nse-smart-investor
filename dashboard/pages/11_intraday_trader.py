@@ -19,6 +19,9 @@ from dashboard.shared.design import (
 from dashboard.shared.trade_utils import (
     _paper_trade_popover,
 )
+from dashboard.shared.cache import (
+    STOCK_SEARCH_MAP,
+)
 from dashboard.shared.chart_helpers import (
     _ROOT,
     make_subplots,
@@ -141,12 +144,21 @@ with tab_gap:
 with tab_chart:
     st.subheader("📈 Intraday Chart — CPR + ORB + AVWAP + Supertrend")
 
-    _ic_c1, _ic_c2, _ic_c3 = st.columns([3, 1, 1])
+    _ic_search_opts = sorted(
+        f"{name}  ({sym.replace('.NS', '')})"
+        for name, sym in STOCK_SEARCH_MAP.items()
+    )
+    _ic_c1, _ic_c1b, _ic_c2, _ic_c3 = st.columns([3, 2, 1, 1])
     with _ic_c1:
-        _ic_ticker = st.text_input(
-            "NSE Ticker", value="RELIANCE",
-            placeholder="RELIANCE / HDFCBANK / TCS",
-            key="ic_ticker",
+        _ic_sel = st.selectbox(
+            "Search stock",
+            options=["— type to search —"] + _ic_search_opts,
+            index=0, key="ic_search_select",
+        )
+    with _ic_c1b:
+        _ic_manual = st.text_input(
+            "Or type ticker", value="", placeholder="e.g. TCS",
+            key="ic_manual",
         ).strip().upper()
     with _ic_c2:
         _ic_interval = st.selectbox("Interval", ["5m","15m","30m"], key="ic_interval")
@@ -154,6 +166,14 @@ with tab_chart:
         _ic_days = st.selectbox("Days", [1, 2, 3, 5], index=2, key="ic_days")
         st.write("")
         _ic_load = st.button("📈 Load Chart", type="primary", key="ic_load")
+
+    # Resolve ticker — manual entry wins, else dropdown selection, else default
+    if _ic_manual:
+        _ic_ticker = _ic_manual
+    elif _ic_sel != "— type to search —":
+        _ic_ticker = _ic_sel.rsplit("(", 1)[-1].rstrip(")")
+    else:
+        _ic_ticker = "RELIANCE"
 
     @st.cache_data(ttl=180, show_spinner=False)
     def _load_intraday_chart(tkr: str, intv: str, days: int):

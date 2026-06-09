@@ -192,20 +192,70 @@ def _suggest_position(entry: float, sl: float,
     }
 
 
+def _live_quote_price(ticker: str) -> Optional[float]:
+    """Best-effort live LTP for a ticker (Angel One → Yahoo). None if unavailable."""
+    try:
+        from utils.live_price import get_live_quote
+        q = get_live_quote(ticker)
+        if isinstance(q, dict) and q.get("price"):
+            return float(q["price"])
+    except Exception as _e:
+        _log.debug("trade_utils._live_quote_price degraded: %s", _e)
+    return None
+
+
 def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
                          reason: str, key: str, label: str = "📌 Paper Trade") -> None:
     """
-    Render a popover that lets the user review & adjust quantity (pre-filled
-    with the risk-based suggestion) BEFORE opening a paper trade.
+    Open-a-paper-trade popover that enters at the **live market price** by default.
 
-    Confirmation uses st.toast so feedback survives the popover closing on rerun.
+    Why: the analysis entry/SL/TP come from the last *daily close*. If you open a
+    trade at that stale price while the market has moved, the position shows a
+    phantom gain/loss from the first tick. So we fetch the live LTP, default the
+    entry to it, and re-anchor SL & TP by preserving the analysis *distances*
+    (entry−SL and TP−entry) — the risk/reward stays identical, but the trade is
+    grounded in the real price you'd actually get. Entry remains editable for
+    limit-style planning. Confirmation uses st.toast so it survives the rerun.
     """
-    sugg  = _suggest_position(entry, sl)
     _tlbl = ticker.replace(".NS", "")
     _cap  = float(st.session_state.get("trade_capital", 500_000.0))
     _rkp  = float(st.session_state.get("risk_pct", 1.0))
+
+    _analysis_entry = float(entry or 0)
+    # Preserve SL/TP distances from the analysis so R:R is invariant under re-anchoring
+    _sl_dist = (_analysis_entry - float(sl)) if (sl and _analysis_entry) else None
+    _tp_dist = (float(tp) - _analysis_entry) if (tp and _analysis_entry) else None
+
     with st.popover(label, use_container_width=True):
         st.markdown(f"**{_tlbl}** — open paper trade")
+
+        # Live LTP fetched when the popover opens
+        _live = _live_quote_price(ticker)
+        _default_entry = _live if (_live and _live > 0) else _analysis_entry
+
+        if _live and _analysis_entry and abs(_live - _analysis_entry) / _analysis_entry > 0.002:
+            _drift = (_live / _analysis_entry - 1) * 100
+            st.caption(
+                f"🔴 **Live ₹{_live:,.2f}** vs analysis ₹{_analysis_entry:,.2f} "
+                f"({_drift:+.2f}%). Entry defaults to live; SL/TP re-anchored to keep "
+                f"the same risk/reward."
+            )
+        elif _live:
+            st.caption(f"🟢 Entering at **live ₹{_live:,.2f}** (matches analysis).")
+        else:
+            st.caption("⚠️ Live price unavailable — using the analysis entry. "
+                       "Verify before trusting the fill.")
+
+        entry_use = st.number_input(
+            "Entry price (₹) — defaults to LIVE, editable for a limit",
+            min_value=0.01, value=round(float(_default_entry or 0.01), 2),
+            step=0.05, format="%.2f", key=f"{key}_entry",
+        )
+        # Re-anchor SL/TP to the chosen entry, preserving the analysis distances
+        sl_use = round(entry_use - _sl_dist, 2) if _sl_dist is not None else (float(sl) if sl else 0.0)
+        tp_use = round(entry_use + _tp_dist, 2) if _tp_dist is not None else (float(tp) if tp else 0.0)
+
+        sugg = _suggest_position(entry_use, sl_use)
         st.caption(
             f"💡 Suggested **{sugg['qty']} shares** — sizes your loss-to-stop to "
             f"≈{_rkp:.2g}% of ₹{_cap:,.0f} (₹{sugg['capital_at_risk']:,.0f} at risk). "
@@ -215,21 +265,24 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
             "Quantity (shares)", min_value=1, max_value=1_000_000,
             value=int(sugg["qty"]), step=1, key=f"{key}_qty",
         )
-        _val  = qty * entry
-        _risk = abs(entry - (sl or entry)) * qty
+        _val  = qty * entry_use
+        _risk = abs(entry_use - (sl_use or entry_use)) * qty
         _c1, _c2, _c3 = st.columns(3)
-        _c1.metric("Entry", f"₹{entry:,.2f}")
+        _c1.metric("Entry", f"₹{entry_use:,.2f}")
         _c2.metric("Position", f"₹{_val:,.0f}")
         _c3.metric("At Risk", f"₹{_risk:,.0f}")
-        if sl or tp:
-            st.caption(f"🛑 SL ₹{(sl or 0):,.2f}  ·  🎯 Target ₹{(tp or 0):,.2f}")
+        if sl_use or tp_use:
+            _rr = ((tp_use - entry_use) / (entry_use - sl_use)
+                   if (entry_use - sl_use) > 0.01 and tp_use else 0)
+            st.caption(f"🛑 SL ₹{(sl_use or 0):,.2f}  ·  🎯 Target ₹{(tp_use or 0):,.2f}"
+                       + (f"  ·  R:R {_rr:.1f}x" if _rr else ""))
         if st.button("✅ Confirm & Open", key=f"{key}_confirm",
                      type="primary", use_container_width=True):
             _id = paper_open_trade(
-                ticker, float(entry), int(qty), sl=sl, tp=tp, reason=reason,
+                ticker, float(entry_use), int(qty), sl=sl_use, tp=tp_use, reason=reason,
                 account=st.session_state.get("pt_account", "My Account"),
             )
-            st.toast(f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry:,.2f}", icon="✅")
+            st.toast(f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f}", icon="✅")
             st.cache_data.clear()
             st.rerun()
 
