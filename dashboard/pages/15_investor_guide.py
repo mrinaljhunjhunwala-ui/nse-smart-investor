@@ -78,6 +78,27 @@ with tab_g1:
     ]), hide_index=True)
 
     st.markdown("---")
+    st.subheader("Fundamentals — and the Revenue Growth signal")
+    st.markdown(
+        "The **Analyze Stock** page also shows fundamentals (Revenue growth, EPS "
+        "growth, ROE, Debt/Equity) from audited financial statements. These are "
+        "**separate from the Trend Quality Score** — deliberately, because "
+        "research found blending them in reduced signal quality."
+    )
+    st.info(
+        "🔬 **Revenue growth** has been the **strongest return-predictive signal** "
+        "identified in platform research (2022–2025 validation: the highest "
+        "rank-correlation with 6–12-month forward returns of any metric tested, "
+        "with returns rising monotonically across growth quintiles, in both bull "
+        "and bear regimes). It is shown as a first-class metric on Analyze Stock. "
+        "**It is a measured, research-backed observation — not a recommendation**, "
+        "and historical relationships may not persist in future market "
+        "environments. High growth alone says nothing about valuation, risk, or "
+        "timing.",
+        icon="📈",
+    )
+
+    st.markdown("---")
     st.subheader("VIX Regime — Market Fear Gauge")
     st.markdown(
         "**India VIX** measures how much volatility the market expects over the next 30 days. "

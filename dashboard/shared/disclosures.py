@@ -125,3 +125,16 @@ def render_regime_reliability_note() -> None:
             "trend-quality rankings have been most informative (see Investor Guide → "
             "scores)."
         )
+
+
+def render_revenue_growth_evidence() -> None:
+    """Brief evidence disclosure for revenue growth (Revenue Growth Visibility
+    Phase 1, R4). Same honesty discipline as the trend-quality components:
+    states the research finding, avoids recommendation/forecast/certainty.
+    Source: FUNDAMENTAL_QUALITY_REPORT.md (4,266 point-in-time observations)."""
+    st.caption(
+        "🔬 Revenue growth has been the **strongest return-predictive signal** "
+        "identified in platform research (2022–2025 validation). Historical "
+        "relationships may not persist in future market environments — a "
+        "measured observation, not a buy signal."
+    )
