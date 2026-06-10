@@ -36,6 +36,12 @@ if _wl is None:
 st.caption(f"🕒 Scanned: **{_wl.get('scan_time', '—')}** · Runs EOD, cached until the next "
            "session · not intraday. Levels are based on today's daily close.")
 
+# Phase 1 (UI honesty): regime reliability note next to scored candidates
+from dashboard.shared.disclosures import (
+    render_regime_reliability_note as _tw_regime_note,
+)
+_tw_regime_note()
+
 # Accent colour per watch type
 _ACCENT = {"breakout": "#26a69a", "breakdown": "#ef5350", "reversal": "#ab8bff"}
 _BG = {"breakout": "linear-gradient(135deg,#0a2a1a,#0f3320)",

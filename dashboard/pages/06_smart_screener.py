@@ -36,8 +36,17 @@ st.title("🔎 Smart Stock Screener")
 st.markdown(
     "Scan the NSE universe using 4 proven screens — oversold bounce, "
     "momentum leaders, breakouts, and pullback entries.  \n"
-    "Each match is enriched with a composite score."
+    "Each match is enriched with a **trend-quality score** (0–100 — trend health, "
+    "not a return forecast)."
 )
+
+# Phase 1 (UI honesty): regime reliability next to live score output
+from dashboard.shared.disclosures import (
+    render_regime_reliability_note as _scr_regime_note,
+    render_score_methodology as _scr_score_methodology,
+)
+_scr_regime_note()
+_scr_score_methodology()
 
 sc1, sc2, sc3 = st.columns(3)
 with sc1:
@@ -68,8 +77,8 @@ with sc2:
     }
     screen_key = screen_map[screen_choice]
 with sc3:
-    enrich_scores = st.checkbox("Enrich with composite score", value=True,
-                                help="Adds 0-100 score to each result (slower)")
+    enrich_scores = st.checkbox("Enrich with trend-quality score", value=True,
+                                help="Adds the 0-100 trend-quality score to each result (slower)")
 
 scan_btn = st.button("🔍 Run Screen", type="primary")
 

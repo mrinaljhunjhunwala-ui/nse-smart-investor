@@ -45,7 +45,15 @@ render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
 st.title("🔍 Analyze Any NSE Stock")
-st.markdown("Search by company name or ticker — get a full AI score, chart, stop-loss, and plain-English recommendation.")
+st.markdown("Search by company name or ticker — get a full **trend-quality score**, chart, stop-loss, and plain-English read of the setup.")
+
+# Phase 1 (UI honesty): what the score measures + current-regime reliability
+from dashboard.shared.disclosures import (
+    render_score_methodology as _render_score_methodology,
+    render_regime_reliability_note as _render_regime_note,
+)
+_render_regime_note()
+_render_score_methodology()
 
 # ── Stock search: name autocomplete + manual ticker ────────────────────────
 search_options = [f"{name}  ({sym.replace('.NS','')})"

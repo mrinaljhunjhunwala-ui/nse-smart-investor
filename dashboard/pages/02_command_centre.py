@@ -271,8 +271,9 @@ if _scan_t:
 _tp_h1, _tp_h2 = st.columns([5, 2])
 with _tp_h1:
     st.markdown("### 🔥 Today's Top Picks — NSE Scan")
-    st.caption("Best buy & sell setups scored across the **full liquid NSE universe** "
-               "on trend + momentum + RSI + volume + sector + VIX. "
+    st.caption("Strongest and weakest **trend-quality** setups across the **full liquid "
+               "NSE universe** (trend + momentum + RSI + volume + sector + VIX). "
+               "Scores rank trend health — they are **not a forecast of returns**. "
                "First scan ~2 min, then cached 30 min.")
 with _tp_h2:
     st.write("")
@@ -286,6 +287,14 @@ with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=Fa
         "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
         "surfaced (10 each — buys and sells). First scan ~2 min; results cached 30 min, so reopening the "
         "page is instant.")
+
+# Phase 1 (UI honesty): regime reliability + score methodology next to live picks
+from dashboard.shared.disclosures import (
+    render_regime_reliability_note as _cc_regime_note,
+    render_score_methodology as _cc_score_methodology,
+)
+_cc_regime_note()
+_cc_score_methodology()
 
 # Data-source badge — shows whether the scan is using the fast broker feed or fallback
 try:
