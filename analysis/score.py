@@ -3,12 +3,20 @@ analysis/score.py
 Composite Stock Score — 0 to 100 — with grade, action verdict,
 entry/SL/TP levels, and a plain-English narrative for non-traders.
 
-Score breakdown (100 pts total):
+Score breakdown (90 pts max):
     Technical   40 pts  — RSI, MACD, SMA stack, ADX
     Momentum    25 pts  — 5d / 20d / 60d returns
     Volume      15 pts  — Volume ratio, OBV trend
-    Pattern     10 pts  — Candlestick pattern confirmation
     Sentiment   10 pts  — India VIX regime + sector rank
+
+Candlestick patterns are detected and shown in the narrative but are NOT
+scored. The 5-year variant study (RESEARCH_SCORE_VARIANTS.md, 40,663
+observations) found the 10-pt pattern component contributed zero-to-negative
+ranking power in every market regime; removing it improved return correlation
+and decile monotonicity. The freed points are deliberately NOT redistributed
+(that reweighting would need its own evidence) — the composite now tops out
+at 90, which makes high grades/actions slightly stricter by design.
+See PATTERN_REMOVAL_MIGRATION.md for the measured behavioural impact.
 
 Grades:   A+ (≥88) | A (≥75) | B (≥62) | C (≥48) | D (≥32) | F (<32)
 Actions:  STRONG BUY | BUY | WATCHLIST | HOLD | CAUTION | EXIT
@@ -217,7 +225,8 @@ def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sub-scorer: Pattern  (10 pts)
+# Pattern detection — INFORMATIONAL ONLY (excluded from the composite score;
+# the detected patterns still feed the narrative). See RESEARCH_SCORE_VARIANTS.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _score_pattern(df: pd.DataFrame) -> Tuple[float, Dict]:
@@ -549,10 +558,12 @@ def score_dataframe(
     tech_pts,  tech_detail  = _score_technical(df)
     mom_pts,   mom_detail   = _score_momentum(df)
     vol_pts,   vol_detail   = _score_volume(df)
-    pat_pts,   pat_detail   = _score_pattern(df)
+    # Patterns: detected for the narrative only — excluded from the composite
+    # (variant study: zero-to-negative ranking power in every regime).
+    _pat_pts_info, pat_detail = _score_pattern(df)
     sent_pts,  sent_detail  = _score_sentiment(vix_info, sector_rank, n_sectors)
 
-    total = tech_pts + mom_pts + vol_pts + pat_pts + sent_pts
+    total = tech_pts + mom_pts + vol_pts + sent_pts
     total = round(min(max(total, 0), 100), 1)
 
     grade  = _grade(total)
@@ -578,7 +589,7 @@ def score_dataframe(
         technical_score = tech_pts,
         momentum_score  = mom_pts,
         volume_score    = vol_pts,
-        pattern_score   = pat_pts,
+        pattern_score   = 0.0,   # informational only — not part of the composite
         sentiment_score = sent_pts,
         entry           = entry,
         stop_loss       = sl,
