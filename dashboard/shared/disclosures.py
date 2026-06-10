@@ -72,13 +72,14 @@ def render_score_methodology(expanded: bool = False) -> None:
     """
     with st.expander("ℹ️ What this score measures", expanded=expanded):
         st.markdown(
-            "This is a **Trend Quality Score (0–100)** built from four price-based "
+            "This is a **Trend Quality Score (max 90)** built from four price-based "
             "pillars:\n"
             "- **Trend strength** — moving-average alignment (price vs SMA 20/50/200) and ADX\n"
             "- **Trend persistence** — multi-horizon momentum (5/20/60-day returns)\n"
             "- **Momentum quality** — RSI zone and MACD state\n"
-            "- **Technical confirmation** — volume behaviour (accumulation vs distribution) "
-            "and candlestick context\n\n"
+            "- **Technical confirmation** — volume behaviour (accumulation vs "
+            "distribution). Candlestick patterns are shown for context but are "
+            "not scored — a 5-year study found they added no ranking power.\n\n"
             "**What a high score means:** the stock is in a strong uptrend that has "
             "historically tended to *persist* (5-year validation: +0.41 rank correlation "
             "with staying in an uptrend over the following month).\n\n"

@@ -38,12 +38,15 @@ tab_g1, tab_g2, tab_g3, tab_g4, tab_g5 = st.tabs([
 
 # ── TAB 1: SCORES & SIGNALS ───────────────────────────────────────────────
 with tab_g1:
-    st.subheader("Trend Quality Score (0 – 100)")
+    st.subheader("Trend Quality Score (0 – 90)")
     st.markdown(
-        "Every stock gets a **Trend Quality Score from 0 to 100**. "
-        "This combines five factors: Technical (40 pts) + Momentum (25 pts) + "
-        "Volume (15 pts) + Candlestick Pattern (10 pts) + Market Sentiment "
-        "(10 pts — VIX regime + sector strength)."
+        "Every stock gets a **Trend Quality Score (maximum 90)**. "
+        "This combines four factors: Technical (40 pts) + Momentum (25 pts) + "
+        "Volume (15 pts) + Market Sentiment (10 pts — VIX regime + sector "
+        "strength). Candlestick patterns are still detected and shown in the "
+        "narrative, but a 5-year validation found they added no ranking power, "
+        "so they no longer contribute points — making top grades slightly "
+        "stricter."
     )
     st.info(
         "📐 **What this score is — and isn't.** A 5-year validation study "
@@ -70,8 +73,8 @@ with tab_g1:
         {"Component":    "Technical (40 pts)",  "What It Measures": "RSI, MACD, Bollinger Bands, SMA trends — is the stock in a healthy uptrend?"},
         {"Component":    "Momentum (25 pts)",   "What It Measures": "Recent price performance over 5/20/60 days. Is the trend persisting?"},
         {"Component":    "Volume (15 pts)",     "What It Measures": "Is trading volume higher than normal? Big moves on high volume are more reliable."},
-        {"Component":    "Candlestick (10 pts)","What It Measures": "Bullish/bearish candle patterns in last 3 days (Hammer, Engulfing, Doji, etc.)"},
         {"Component":    "Sentiment (10 pts)",  "What It Measures": "Market backdrop: India-VIX regime (6 pts) + the stock's sector strength rank (4 pts)."},
+        {"Component":    "Candlestick (0 pts — info only)", "What It Measures": "Patterns (Hammer, Engulfing, Doji…) are detected and mentioned in the narrative, but a 5-year study found they add no ranking power, so they are not scored."},
     ]), hide_index=True)
 
     st.markdown("---")
