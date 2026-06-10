@@ -133,6 +133,20 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             # Chart-display slice — only controls what the user SEES on the chart
             df_chart = _trim_to_period(df, period)
 
+            # ── Revenue growth for the hero chip (R2 — evidence-backed signal) ──
+            # Service + engine caches make this cheap; the Fundamentals section
+            # below reuses the same cached object. None → "—", never a fake 0.
+            _rg_val, _rg_conf = None, ""
+            try:
+                _rg_cf = _fund_service().get_fundamentals(ticker)
+                if _rg_cf is not None:
+                    _rg_res = _fund_analytics.revenue_cagr(_rg_cf, years=5)
+                    if getattr(_rg_res, "available", False) and _rg_res.value is not None:
+                        _rg_val = float(_rg_res.value)
+                        _rg_conf = str(_rg_res.confidence)
+            except Exception:
+                pass
+
             # ── Score hero section ─────────────────────────────────────
             st.markdown("---")
             hero_col, detail_col = st.columns([1, 2])
@@ -154,17 +168,17 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     unsafe_allow_html=True
                 )
                 st.markdown("")
-                # Score breakdown mini-table
+                # Score breakdown mini-table (pattern is no longer scored —
+                # see PATTERN_REMOVAL_MIGRATION.md — so its row is gone)
                 score_breakdown = {
                     "Technical (40)":  cs.technical_score,
                     "Momentum (25)":   cs.momentum_score,
                     "Volume (15)":     cs.volume_score,
-                    "Pattern (10)":    cs.pattern_score,
                     "Sentiment (10)":  cs.sentiment_score,
                 }
                 for label, val in score_breakdown.items():
                     pct = val / {"Technical (40)": 40, "Momentum (25)": 25,
-                                 "Volume (15)": 15, "Pattern (10)": 10,
+                                 "Volume (15)": 15,
                                  "Sentiment (10)": 10}[label] * 100
                     bar_color = "#26a69a" if pct >= 60 else "#f9a825" if pct >= 35 else "#ef5350"
                     st.markdown(
@@ -186,12 +200,27 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
 
                 # Show the LIVE price as the headline current price when available
                 _disp_price = _an_live if _an_live else cs.price
-                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
                 mc1.metric("Price (live)" if _an_live else "Close",
                            f"₹{_disp_price:,.2f}", f"{day_chg:+.2f}%")
                 mc2.metric("Sector",     cs.sector)
                 mc3.metric("VIX Regime", cs.vix_regime)
                 mc4.metric("Sector Rank",f"#{cs.sector_rank}")
+                # R2: first-class revenue-growth chip (evidence-backed signal)
+                mc5.metric(
+                    "Rev Growth /yr",
+                    f"{_rg_val:+.1f}%" if _rg_val is not None else "—",
+                    help=("Annualised revenue growth from audited statements"
+                          + (f" · confidence: {_rg_conf}" if _rg_conf else "")
+                          + ". The strongest return-linked metric in platform "
+                            "research (2022–2025) — a measured observation, "
+                            "not a buy signal."),
+                )
+                if _rg_val is not None:
+                    from dashboard.shared.disclosures import (
+                        render_revenue_growth_evidence as _rg_evidence,
+                    )
+                    _rg_evidence()
 
                 # Close-price status + live-vs-daily reconciliation
                 try:
@@ -483,7 +512,7 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
 
             # ── 📊 Fundamentals (Phase 0 — Yahoo-backed, provider-agnostic) ──────
             st.markdown("---")
-            st.subheader("📊 Fundamentals (beta)")
+            st.subheader("📊 Fundamentals")
             try:
                 import datetime as _f_dt
                 _f_cf = _fund_service().get_fundamentals(ticker)          # facade only
@@ -519,6 +548,11 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 _f_show(_fc2, _f_res["eps_cagr"])
                 _f_show(_fc3, _f_res["roe"])
                 _f_show(_fc4, _f_res["debt_to_equity"])
+                # R4: evidence context for the revenue-growth metric
+                from dashboard.shared.disclosures import (
+                    render_revenue_growth_evidence as _f_rg_evidence,
+                )
+                _f_rg_evidence()
 
                 # Option A — honest CAGR confidence disclosure (only when not all "high")
                 _cagr_results = [r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
