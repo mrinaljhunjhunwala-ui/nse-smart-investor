@@ -80,6 +80,28 @@ with sc3:
     enrich_scores = st.checkbox("Enrich with trend-quality score", value=True,
                                 help="Adds the 0-100 trend-quality score to each result (slower)")
 
+# ── Revenue-growth filter (R1 — per REVENUE_GROWTH_DISCOVERY_AUDIT.md) ────────
+# Thresholds capped at 15%: the audit showed >20% concentrates results into one
+# sector and silently removes 19/21 top trend-quality names. Default "Any" so
+# the column informs without filtering; missing data is included by default.
+rgf1, rgf2 = st.columns([2, 3])
+with rgf1:
+    rg_filter = st.selectbox(
+        "Revenue growth filter",
+        ["Any", "> 0%", "> 5%", "> 10%", "> 15%"],
+        index=0, key="scr_rg_filter",
+        help="Filters results by annualised revenue growth (audited statements). "
+             "Capped at 15% — higher thresholds were shown to distort discovery.",
+    )
+with rgf2:
+    st.write("")
+    rg_excl_missing = st.toggle(
+        "Exclude stocks without growth data",
+        value=False, key="scr_rg_excl",
+        help="Off (default): stocks with no growth data stay visible and show '—'. "
+             "Only ~4% of the universe lacks data.",
+    )
+
 scan_btn = st.button("🔍 Run Screen", type="primary")
 
 if scan_btn:
@@ -118,6 +140,63 @@ if scan_btn:
                 prog.progress((i + 1) / len(signals))
             signals = sorted(scored_signals, key=lambda x: x.get("composite_score", 0), reverse=True)
 
+        # ── Revenue-growth enrichment (R1) — bounded fetch, graceful "—" ──────
+        # Per the discovery audit: never block indefinitely; anything not back
+        # within the time budget renders as "—". Display/filter only — the
+        # ordering above (composite score) is never touched.
+        with st.spinner("Fetching revenue growth for results…"):
+            from concurrent.futures import ThreadPoolExecutor, wait as _fwait
+
+            def _rg_for(sig):
+                try:
+                    from analysis.fundamentals.service import default_service
+                    from analysis.fundamentals.analytics import revenue_cagr
+                    cf = default_service().get_fundamentals(sig["ticker"])
+                    if cf is not None:
+                        r = revenue_cagr(cf, years=5)
+                        if getattr(r, "available", False) and r.value is not None:
+                            return float(r.value)
+                except Exception:
+                    pass
+                return None
+
+            _rg_pool = ThreadPoolExecutor(max_workers=8)
+            try:
+                _rg_futs = {_rg_pool.submit(_rg_for, s): s for s in signals}
+                _done, _ = _fwait(list(_rg_futs.keys()), timeout=30)
+                for _f in _done:
+                    try:
+                        _rg_futs[_f]["rev_growth"] = _f.result(timeout=0)
+                    except Exception:
+                        _rg_futs[_f]["rev_growth"] = None
+            finally:
+                _rg_pool.shutdown(wait=False)
+            for s in signals:
+                s.setdefault("rev_growth", None)
+
+        # ── Apply the growth filter (subsets only — never reorders) ───────────
+        _rg_th = {"Any": None, "> 0%": 0.0, "> 5%": 5.0,
+                  "> 10%": 10.0, "> 15%": 15.0}[rg_filter]
+        _n_before = len(signals)
+        if _rg_th is not None or rg_excl_missing:
+            def _passes(s):
+                g = s.get("rev_growth")
+                if g is None:
+                    return not rg_excl_missing
+                return True if _rg_th is None else g > _rg_th
+            signals = [s for s in signals if _passes(s)]
+            _n_missing_kept = sum(1 for s in signals if s.get("rev_growth") is None)
+            st.caption(
+                f"🔎 Revenue-growth filter: **{len(signals)} of {_n_before}** setups kept"
+                + (f" (incl. {_n_missing_kept} without growth data — shown as '—')"
+                   if _n_missing_kept else "")
+                + ". Ordering is unchanged — the filter only narrows the list."
+            )
+        from dashboard.shared.disclosures import (
+            render_revenue_growth_evidence as _scr_rg_evidence,
+        )
+        _scr_rg_evidence()
+
         # Display results as Trade Setup Cards
         for sig in signals[:30]:  # cap at 30 for performance
             t      = sig["ticker"].replace(".NS", "")
@@ -141,8 +220,9 @@ if scan_btn:
                        + (f"|  {_s_rr_str}  " if _s_rr_str else "")
                        + (f"|  {_s_sector}  " if _s_sector else "")
                        + _s_score_str)
+            _s_rg = sig.get("rev_growth")
             with st.expander(_header, expanded=False):
-                d1, d2, d3, d4, d5 = st.columns(5)
+                d1, d2, d3, d4, d5, d6 = st.columns(6)
                 d1.metric("Entry",  f"₹{_s_price:,.2f}")
                 d2.metric("Stop-Loss", f"₹{_s_sl:,.2f}",
                           delta=f"({_s_stop_type})",
@@ -152,6 +232,10 @@ if scan_btn:
                           delta="✅ Good" if (_s_rr or 0) >= 2 else "⚠️ Low",
                           delta_color="normal" if (_s_rr or 0) >= 2 else "inverse")
                 d5.metric("Sector", _s_sector or "—")
+                d6.metric("Rev Growth /yr",
+                          f"{_s_rg:+.1f}%" if _s_rg is not None else "—",
+                          help="Annualised revenue growth from audited statements — "
+                               "a research-backed observation, not a buy signal.")
                 if sig.get("reason"):
                     st.caption(f"📌 {sig['reason']}")
                 if enrich_scores and sig.get("narrative"):
