@@ -804,7 +804,7 @@ else:
         "**Required columns:** `ticker, quantity, avg_buy_price, date_bought`  \n"
         "**What you'll see:**  \n"
         "- 🟢 Green = BUY MORE  |  🟡 Yellow = HOLD  |  🔴 Red = Consider Selling  \n"
-        "- Composite score (0–100) for each stock — higher is better  \n"
+        "- Trend-quality score (0–100) for each stock — higher = stronger, more persistent trend (not a return forecast)  \n"
         "- Plain English explanation and suggested stop-loss / target per holding"
     )
     col_ex1, col_ex2, col_ex3 = st.columns(3)

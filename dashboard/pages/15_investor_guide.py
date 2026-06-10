@@ -38,29 +38,40 @@ tab_g1, tab_g2, tab_g3, tab_g4, tab_g5 = st.tabs([
 
 # ── TAB 1: SCORES & SIGNALS ───────────────────────────────────────────────
 with tab_g1:
-    st.subheader("Composite Score (0 – 100)")
+    st.subheader("Trend Quality Score (0 – 100)")
     st.markdown(
-        "Every stock gets a **Composite Score from 0 to 100**. "
+        "Every stock gets a **Trend Quality Score from 0 to 100**. "
         "This combines five factors: Technical (40 pts) + Momentum (25 pts) + "
-        "Volume (15 pts) + Candlestick Pattern (10 pts) + News Sentiment (10 pts)."
+        "Volume (15 pts) + Candlestick Pattern (10 pts) + Market Sentiment "
+        "(10 pts — VIX regime + sector strength)."
+    )
+    st.info(
+        "📐 **What this score is — and isn't.** A 5-year validation study "
+        "(40,667 observations across bull, bear and sideways markets) found the score "
+        "is a strong gauge of **trend persistence** — high-score stocks reliably stay "
+        "in uptrends (+0.41 rank correlation). It is **not a forecast of future "
+        "returns** (only ≈ +0.04 correlation with next-month returns), and its "
+        "rankings become unreliable in elevated-fear / high-VIX regimes. Read the "
+        "signals below as *trend health*, then apply your own entry and risk rules.",
+        icon="🔬",
     )
     st.dataframe(pd.DataFrame([
-        {"Score Range": "80 – 100", "Grade": "A+", "Signal": "STRONG BUY 🚀",   "What It Means": "Everything aligned — strong trend, good momentum, high volume. Ideal entry."},
-        {"Score Range": "65 – 79",  "Grade": "A",  "Signal": "BUY 🟢",           "What It Means": "Positive trend with good momentum. Entry is favourable."},
-        {"Score Range": "50 – 64",  "Grade": "B",  "Signal": "WATCHLIST 👀",     "What It Means": "Mixed signals. Worth watching but wait for clearer confirmation."},
-        {"Score Range": "40 – 49",  "Grade": "C",  "Signal": "HOLD 🟡",          "What It Means": "Balanced picture — neither buy nor sell. Hold your existing position."},
-        {"Score Range": "25 – 39",  "Grade": "D",  "Signal": "CAUTION ⚠️",       "What It Means": "Deteriorating momentum. Tighten stop-loss, don't add more."},
-        {"Score Range": "0 – 24",   "Grade": "F",  "Signal": "EXIT 🔴",          "What It Means": "Technicals broken. Consider exiting to protect capital."},
+        {"Score Range": "80 – 100", "Grade": "A+", "Signal": "STRONG BUY 🚀",   "What It Means": "Very strong trend quality — everything aligned and historically likely to keep trending. Not a return guarantee; size and stop as usual."},
+        {"Score Range": "65 – 79",  "Grade": "A",  "Signal": "BUY 🟢",           "What It Means": "Strong trend quality — healthy uptrend with good momentum. Favourable structure for trend-following entries."},
+        {"Score Range": "50 – 64",  "Grade": "B",  "Signal": "WATCHLIST 👀",     "What It Means": "Moderate trend quality — mixed signals. Worth watching for clearer confirmation."},
+        {"Score Range": "40 – 49",  "Grade": "C",  "Signal": "HOLD 🟡",          "What It Means": "Neutral trend — no edge either way. Hold existing positions; no fresh signal."},
+        {"Score Range": "25 – 39",  "Grade": "D",  "Signal": "CAUTION ⚠️",       "What It Means": "Weak/deteriorating trend. Tighten stop-loss, don't add more."},
+        {"Score Range": "0 – 24",   "Grade": "F",  "Signal": "EXIT 🔴",          "What It Means": "Trend broken. Consider exiting to protect capital — though note beaten-down names can rebound sharply in fear regimes."},
     ]), hide_index=True)
 
     st.markdown("---")
     st.subheader("Score Sub-Components")
     st.dataframe(pd.DataFrame([
         {"Component":    "Technical (40 pts)",  "What It Measures": "RSI, MACD, Bollinger Bands, SMA trends — is the stock in a healthy uptrend?"},
-        {"Component":    "Momentum (25 pts)",   "What It Measures": "Recent price performance vs moving averages. Is the stock accelerating?"},
+        {"Component":    "Momentum (25 pts)",   "What It Measures": "Recent price performance over 5/20/60 days. Is the trend persisting?"},
         {"Component":    "Volume (15 pts)",     "What It Measures": "Is trading volume higher than normal? Big moves on high volume are more reliable."},
         {"Component":    "Candlestick (10 pts)","What It Measures": "Bullish/bearish candle patterns in last 3 days (Hammer, Engulfing, Doji, etc.)"},
-        {"Component":    "Sentiment (10 pts)",  "What It Measures": "News tone: positive articles boost score, negative articles reduce it."},
+        {"Component":    "Sentiment (10 pts)",  "What It Measures": "Market backdrop: India-VIX regime (6 pts) + the stock's sector strength rank (4 pts)."},
     ]), hide_index=True)
 
     st.markdown("---")
