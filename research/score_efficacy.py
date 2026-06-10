@@ -65,11 +65,11 @@ _NEUTRAL_SECTOR_RANK = 7
 # Historical VIX regime labels (breakdown only — not a score input)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _vix_regime_series() -> Optional[pd.Series]:
+def _vix_regime_series(period: str = "2y") -> Optional[pd.Series]:
     """Daily ^INDIAVIX close → regime label, for tagging each sample date."""
     try:
         from data.fetcher import fetch_single
-        vdf = fetch_single("^INDIAVIX", period="2y")
+        vdf = fetch_single("^INDIAVIX", period=period)
         if vdf is None or vdf.empty:
             return None
         v = vdf["Close"].astype(float)
@@ -102,8 +102,8 @@ def _regime_for(date, regimes: Optional[pd.Series]) -> str:
 # Per-ticker walk-forward
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _prepare_ticker(ticker: str) -> Optional[pd.DataFrame]:
-    """Fetch 2y daily bars and enrich with the production indicator set.
+def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
+    """Fetch daily bars (default 2y) and enrich with the production indicators.
 
     Indicators are rolling/causal, so computing them once on the full frame and
     then slicing df.iloc[:i+1] is identical to recomputing on each slice — no
@@ -112,7 +112,7 @@ def _prepare_ticker(ticker: str) -> Optional[pd.DataFrame]:
     try:
         from data.fetcher import fetch_single
         from utils.indicators import add_all_indicators
-        df = fetch_single(ticker, period="2y")
+        df = fetch_single(ticker, period=period)
         if df is None or df.empty or len(df) < 280:
             return None
         df = add_all_indicators(df)
