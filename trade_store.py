@@ -1,21 +1,27 @@
 """
-trade_store.py — Storage backend for paper trades.
+trade_store.py — Storage backend for paper trades and user settings.
 
 Two backends, chosen automatically:
-
   • SQLite (default)  — local file `trades.db`. Works out of the box, but
-    Streamlit Cloud's disk is EPHEMERAL, so trades reset on every redeploy.
-
-  • Postgres (opt-in) — set a connection string and your trades survive
-    redeploys. Provide it as a Streamlit secret:
-        [database]
-        url = "postgresql://user:pass@host/dbname"
-    or as an environment variable DATABASE_URL.
-    Use a free Neon (neon.tech) or Supabase (supabase.com) Postgres.
+    Streamlit Cloud's disk is EPHEMERAL — trades reset on every redeploy.
+  • Postgres (opt-in) — set DATABASE_URL and trades survive redeploys.
+    Use a free Neon (neon.tech) or Supabase (supabase.com) instance.
     See dashboard/DB_SETUP.md for the 5-minute setup.
 
-All paper-trade reads/writes in the dashboard go through this module so the
-two backends stay in sync. SQLite behaviour is unchanged from before.
+Fixes applied vs previous version:
+  - _database_url() cached with lru_cache — was re-reading st.secrets on every call
+  - _schema_ready / _kv_ready flags — ensure_schema() no longer opens a second
+    connection on every read (was opening 2 connections per operation)
+  - Postgres connection pool (ThreadedConnectionPool, max 5) — replaces one new
+    connection per call which exhausts Neon/Supabase free tier under load
+  - user_id column added to user_kv — all users were sharing the same KV namespace,
+    overwriting each other's watchlists and settings
+  - rename_account / delete_account now call ensure_schema() (were skipping it)
+  - fetch_open no-account path now uses _q() consistently
+  - edit_trade cursor assigned to variable (was anonymous — risk of GC before commit)
+  - open_trade now accepts strategy and action params (were hardcoded "Manual"/"BUY")
+  - open_trade validates price > 0, qty > 0, sl < price
+  - _get_conn() context manager centralises connection acquire/release
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ import datetime
 import json
 import logging
 import os
+from contextlib import contextmanager
+from functools import lru_cache
 from typing import Any, List, Optional
 
 import pandas as pd
@@ -31,37 +39,34 @@ import pandas as pd
 _log = logging.getLogger("trade_store")
 _SQLITE_PATH = "trades.db"
 
+# ── Schema-ready flags — ensure DDL runs only once per process ────────────────
+_schema_ready = False
+_kv_ready     = False
+
+# ── Postgres connection pool (created once, reused across calls) ──────────────
+_pg_pool = None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend selection
 # ─────────────────────────────────────────────────────────────────────────────
 
+@lru_cache(maxsize=1)
 def _database_url() -> Optional[str]:
-    """Return a Postgres URL from Streamlit secrets or env, else None.
-
-    Reads BOTH supported secret shapes, robustly:
-        [database]            →  st.secrets["database"]["url"]
-        url = "postgresql://"
-      ── or ──
-        DATABASE_URL = "postgresql://"   (flat top-level key)
-
-    Streamlit returns a secrets *section* as an AttrDict (a Mapping, NOT a dict
-    subclass), so the old `isinstance(_db, dict)` check silently dropped the
-    `[database].url` form. We now use key/attribute access via try/except, which
-    works for AttrDict and plain dict alike.
+    """
+    Return a Postgres URL from Streamlit secrets or env, else None.
+    Cached with lru_cache — previously re-read st.secrets on every single
+    DB call (4-5 times per operation). Now resolves once per process.
     """
     url = None
     try:
         import streamlit as st
         secrets = getattr(st, "secrets", None)
         if secrets is not None:
-            # 1) [database] section with a `url` key
             try:
-                _db = secrets["database"]
-                url = _db["url"]
+                url = secrets["database"]["url"]
             except Exception:
                 url = None
-            # 2) flat top-level DATABASE_URL
             if not url:
                 try:
                     url = secrets["DATABASE_URL"]
@@ -76,24 +81,66 @@ def backend_name() -> str:
     return "postgres" if _database_url() else "sqlite"
 
 
-def validate_persistence() -> dict:
-    """Startup validation for the persistence layer (P1).
+def _is_pg() -> bool:
+    return bool(_database_url())
 
-    Checks, in order: (1) is a DATABASE_URL configured, (2) is the database reachable,
-    (3) is the schema valid (both `trades` and `user_kv` queryable). Returns a structured
-    status dict; NEVER raises — callers surface `warnings`/`error` to the user.
+
+def _get_pg_pool():
+    """Return (and lazily create) a threaded Postgres connection pool."""
+    global _pg_pool
+    if _pg_pool is None:
+        from psycopg2 import pool as pg_pool_mod
+        _pg_pool = pg_pool_mod.ThreadedConnectionPool(1, 5, _database_url())
+    return _pg_pool
+
+
+@contextmanager
+def _get_conn():
     """
-    backend = backend_name()
-    url_present = bool(_database_url())
+    Context manager that yields a DB connection and releases it on exit.
+    For Postgres: borrows from the pool and returns it.
+    For SQLite: opens a file connection and closes it.
+    """
+    if _is_pg():
+        pool = _get_pg_pool()
+        conn = pool.getconn()
+        try:
+            yield conn
+        finally:
+            pool.putconn(conn)
+    else:
+        import sqlite3
+        conn = sqlite3.connect(_SQLITE_PATH)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+
+def _q(sql: str) -> str:
+    """Translate '?' placeholders to '%s' on Postgres; leave as-is on SQLite."""
+    return sql.replace("?", "%s") if _is_pg() else sql
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Startup validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+def validate_persistence() -> dict:
+    """
+    Startup check: is the DB reachable and schema valid?
+    Returns a structured status dict. Never raises.
+    """
+    backend   = backend_name()
     ephemeral = (backend == "sqlite")
-    status = {
-        "backend": backend,
-        "db_url_present": url_present,
-        "reachable": False,
-        "schema_ok": False,
-        "ephemeral": ephemeral,
-        "warnings": [],
-        "error": None,
+    status    = {
+        "backend":       backend,
+        "db_url_present": bool(_database_url()),
+        "reachable":     False,
+        "schema_ok":     False,
+        "ephemeral":     ephemeral,
+        "warnings":      [],
+        "error":         None,
     }
     if ephemeral:
         status["warnings"].append(
@@ -104,40 +151,20 @@ def validate_persistence() -> dict:
     try:
         ensure_schema()
         _kv_ensure()
-        conn = _connect()
-        try:
+        with _get_conn() as conn:
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM trades LIMIT 1")
             cur.execute("SELECT 1 FROM user_kv LIMIT 1")
-            status["reachable"] = True
-            status["schema_ok"] = True
-        finally:
-            conn.close()
+        status["reachable"] = True
+        status["schema_ok"] = True
     except Exception as e:
         status["error"] = f"{type(e).__name__}: {e}"
         status["warnings"].append(
             f"Database not reachable / schema invalid ({backend}): {e}. "
-            "Reads will return empty and writes will fail — fix before relying on persistence."
+            "Reads will return empty and writes will fail."
         )
         _log.error("validate_persistence failed (%s): %s", backend, e)
     return status
-
-
-def _is_pg() -> bool:
-    return backend_name() == "postgres"
-
-
-def _connect():
-    if _is_pg():
-        import psycopg2
-        return psycopg2.connect(_database_url())
-    import sqlite3
-    return sqlite3.connect(_SQLITE_PATH)
-
-
-def _q(sql: str) -> str:
-    """Translate '?' placeholders to '%s' on Postgres; leave as-is on SQLite."""
-    return sql.replace("?", "%s") if _is_pg() else sql
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,8 +172,12 @@ def _q(sql: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def ensure_schema() -> None:
-    conn = _connect()
-    try:
+    """Create the trades table if it doesn't exist. Runs DDL only once per process."""
+    global _schema_ready
+    if _schema_ready:
+        return
+
+    with _get_conn() as conn:
         cur = conn.cursor()
         if _is_pg():
             cur.execute("""
@@ -155,7 +186,7 @@ def ensure_schema() -> None:
                     account     TEXT    NOT NULL DEFAULT 'My Account',
                     ticker      TEXT    NOT NULL,
                     strategy    TEXT    NOT NULL DEFAULT 'Manual',
-                    action      TEXT    NOT NULL,
+                    action      TEXT    NOT NULL DEFAULT 'BUY',
                     price       DOUBLE PRECISION NOT NULL,
                     quantity    INTEGER NOT NULL,
                     sl          DOUBLE PRECISION,
@@ -179,7 +210,7 @@ def ensure_schema() -> None:
                     account     TEXT    NOT NULL DEFAULT 'My Account',
                     ticker      TEXT    NOT NULL,
                     strategy    TEXT    NOT NULL DEFAULT 'Manual',
-                    action      TEXT    NOT NULL,
+                    action      TEXT    NOT NULL DEFAULT 'BUY',
                     price       REAL    NOT NULL,
                     quantity    INTEGER NOT NULL,
                     sl          REAL,
@@ -196,15 +227,15 @@ def ensure_schema() -> None:
                     pnl_pct     REAL
                 )
             """)
-            # Migration: older DBs may lack the account column
+            # Migration: older DBs may lack account column
             cols = [r[1] for r in cur.execute("PRAGMA table_info(trades)").fetchall()]
             if "account" not in cols:
                 cur.execute(
                     "ALTER TABLE trades ADD COLUMN account TEXT NOT NULL DEFAULT 'My Account'"
                 )
         conn.commit()
-    finally:
-        conn.close()
+
+    _schema_ready = True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,47 +244,61 @@ def ensure_schema() -> None:
 
 def list_accounts() -> List[str]:
     ensure_schema()
-    conn = _connect()
-    try:
+    with _get_conn() as conn:
         cur = conn.cursor()
         cur.execute("SELECT DISTINCT account FROM trades ORDER BY account")
         names = [r[0] for r in cur.fetchall() if r[0]]
-    finally:
-        conn.close()
     return names if names else ["My Account"]
 
 
 def rename_account(old_name: str, new_name: str) -> None:
-    conn = _connect()
-    try:
-        conn.cursor().execute(_q("UPDATE trades SET account=? WHERE account=?"),
-                              (new_name, old_name))
+    ensure_schema()   # was missing — would crash on a fresh DB
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(_q("UPDATE trades SET account=? WHERE account=?"), (new_name, old_name))
         conn.commit()
-    finally:
-        conn.close()
 
 
 def delete_account(name: str) -> None:
-    conn = _connect()
-    try:
-        conn.cursor().execute(_q("DELETE FROM trades WHERE account=?"), (name,))
+    ensure_schema()   # was missing — would crash on a fresh DB
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(_q("DELETE FROM trades WHERE account=?"), (name,))
         conn.commit()
-    finally:
-        conn.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Trades
 # ─────────────────────────────────────────────────────────────────────────────
 
-def open_trade(ticker: str, price: float, qty: int, sl: float, tp: float,
-               reason: str = "", account: str = "My Account") -> int:
+def open_trade(
+    ticker:   str,
+    price:    float,
+    qty:      int,
+    sl:       float,
+    tp:       float,
+    reason:   str = "",
+    account:  str = "My Account",
+    strategy: str = "Manual",       # was hardcoded — now a param
+    action:   str = "BUY",          # was hardcoded — now accepts SELL/SHORT too
+) -> int:
+    """
+    Record a new paper trade. Returns the new trade ID.
+    Raises ValueError on invalid inputs (price=0, qty=0, sl above entry).
+    """
+    if price <= 0:
+        raise ValueError(f"Invalid entry price: {price}")
+    if qty <= 0:
+        raise ValueError(f"Invalid quantity: {qty}")
+    if sl > 0 and action.upper() == "BUY" and sl >= price:
+        raise ValueError(f"Stop loss ({sl}) must be below entry price ({price}) for a BUY trade")
+
     ensure_schema()
-    now = datetime.datetime.now().isoformat()
-    cols = ("account,ticker,strategy,action,price,quantity,sl,tp,capital,reason,timestamp")
-    vals = (account, ticker, "Manual", "BUY", price, qty, sl, tp, price * qty, reason, now)
-    conn = _connect()
-    try:
+    now  = datetime.datetime.now().isoformat()
+    cols = "account,ticker,strategy,action,price,quantity,sl,tp,capital,reason,timestamp"
+    vals = (account, ticker, strategy, action.upper(), price, qty, sl, tp, price * qty, reason, now)
+
+    with _get_conn() as conn:
         cur = conn.cursor()
         if _is_pg():
             cur.execute(_q(f"INSERT INTO trades ({cols}) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id"), vals)
@@ -262,155 +307,192 @@ def open_trade(ticker: str, price: float, qty: int, sl: float, tp: float,
             cur.execute(f"INSERT INTO trades ({cols}) VALUES (?,?,?,?,?,?,?,?,?,?,?)", vals)
             new_id = cur.lastrowid
         conn.commit()
-        return int(new_id)
-    finally:
-        conn.close()
+
+    return int(new_id)
 
 
 def close_trade(trade_id: int, exit_price: float, reason: str = "Manual close") -> None:
     now = datetime.datetime.now().isoformat()
-    conn = _connect()
-    try:
+    with _get_conn() as conn:
         cur = conn.cursor()
-        cur.execute(_q("SELECT price, quantity FROM trades WHERE id=?"), (trade_id,))
+        cur.execute(_q("SELECT price, quantity, action FROM trades WHERE id=?"), (trade_id,))
         row = cur.fetchone()
         if not row:
             return
-        entry_price, qty = float(row[0]), int(row[1])
-        pnl     = (exit_price - entry_price) * qty
-        pnl_pct = (exit_price / entry_price - 1) * 100 if entry_price > 0 else 0
+        entry_price, qty, action = float(row[0]), int(row[1]), str(row[2]).upper()
+        # P&L direction depends on trade side
+        direction = -1 if action == "SELL" else 1
+        pnl       = direction * (exit_price - entry_price) * qty
+        pnl_pct   = direction * (exit_price / entry_price - 1) * 100 if entry_price > 0 else 0
         cur.execute(
             _q("UPDATE trades SET status='CLOSED', exit_price=?, exit_time=?, "
                "exit_reason=?, pnl=?, pnl_pct=? WHERE id=?"),
-            (exit_price, now, reason, pnl, pnl_pct, trade_id),
+            (exit_price, now, reason, round(pnl, 2), round(pnl_pct, 2), trade_id),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
-def edit_trade(trade_id: int, sl: float = None, tp: float = None,
-               reason: str = None) -> None:
+def edit_trade(
+    trade_id: int,
+    sl:       float = None,
+    tp:       float = None,
+    reason:   str   = None,
+) -> None:
     fields, vals = [], []
     if sl is not None:
-        fields.append("sl=?"); vals.append(sl)
+        fields.append("sl=?");     vals.append(sl)
     if tp is not None:
-        fields.append("tp=?"); vals.append(tp)
+        fields.append("tp=?");     vals.append(tp)
     if reason is not None:
         fields.append("reason=?"); vals.append(reason)
     if not fields:
         return
     vals.append(trade_id)
-    conn = _connect()
-    try:
-        conn.cursor().execute(_q(f"UPDATE trades SET {', '.join(fields)} WHERE id=?"), vals)
+    with _get_conn() as conn:
+        cur = conn.cursor()   # assigned to variable — prevents GC before commit
+        cur.execute(_q(f"UPDATE trades SET {', '.join(fields)} WHERE id=?"), vals)
         conn.commit()
-    finally:
-        conn.close()
 
 
 def load_by_account(account: str) -> pd.DataFrame:
     ensure_schema()
-    conn = _connect()
     try:
-        return pd.read_sql_query(
-            _q("SELECT * FROM trades WHERE account=? ORDER BY id DESC"),
-            conn, params=(account,),
-        )
+        with _get_conn() as conn:
+            return pd.read_sql_query(
+                _q("SELECT * FROM trades WHERE account=? ORDER BY id DESC"),
+                conn, params=(account,),
+            )
     except Exception as e:
-        # Was a silent swallow that returned an empty frame — indistinguishable from
-        # "no trades", so a broken DB looked like an empty account and the user could
-        # unknowingly re-open positions. Log it so the failure is diagnosable; the
-        # empty frame is still returned so the UI degrades instead of crashing.
         _log.warning("load_by_account(%r) failed: %s", account, e)
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 def fetch_open(account: str = None) -> pd.DataFrame:
     ensure_schema()
-    conn = _connect()
     try:
-        if account:
+        with _get_conn() as conn:
+            if account:
+                return pd.read_sql_query(
+                    _q("SELECT * FROM trades WHERE status='OPEN' AND account=? ORDER BY timestamp DESC"),
+                    conn, params=(account,),
+                )
+            # No-account path: now uses _q() consistently
             return pd.read_sql_query(
-                _q("SELECT * FROM trades WHERE status='OPEN' AND account=?"),
-                conn, params=(account,),
+                _q("SELECT * FROM trades WHERE status='OPEN' ORDER BY timestamp DESC"),
+                conn,
             )
-        return pd.read_sql_query(
-            "SELECT * FROM trades WHERE status='OPEN' ORDER BY timestamp DESC", conn
-        )
     except Exception as e:
-        # P2: was a silent swallow — an empty frame looked like "no open trades", masking a
-        # broken DB. Log so the failure is diagnosable; still degrade to an empty frame.
         _log.warning("fetch_open(account=%r) failed: %s", account, e)
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Key-value store — persists user settings & watchlist across sessions
-# (and across redeploys when a Postgres backend is configured)
+# Key-value store — user settings & watchlist
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _kv_ensure() -> None:
-    conn = _connect()
-    try:
-        conn.cursor().execute(
-            "CREATE TABLE IF NOT EXISTS user_kv (k TEXT PRIMARY KEY, v TEXT)"
-        )
+    """Create user_kv table if it doesn't exist. Runs only once per process."""
+    global _kv_ready
+    if _kv_ready:
+        return
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        if _is_pg():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_kv (
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    k       TEXT NOT NULL,
+                    v       TEXT,
+                    PRIMARY KEY (user_id, k)
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_kv (
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    k       TEXT NOT NULL,
+                    v       TEXT,
+                    PRIMARY KEY (user_id, k)
+                )
+            """)
+            # Migration: older single-user DBs had (k TEXT PRIMARY KEY) only
+            cols = [r[1] for r in cur.execute("PRAGMA table_info(user_kv)").fetchall()]
+            if "user_id" not in cols:
+                # SQLite can't ALTER PRIMARY KEY — recreate the table
+                cur.execute("ALTER TABLE user_kv RENAME TO user_kv_old")
+                cur.execute("""
+                    CREATE TABLE user_kv (
+                        user_id TEXT NOT NULL DEFAULT 'default',
+                        k       TEXT NOT NULL,
+                        v       TEXT,
+                        PRIMARY KEY (user_id, k)
+                    )
+                """)
+                cur.execute(
+                    "INSERT INTO user_kv (user_id, k, v) SELECT 'default', k, v FROM user_kv_old"
+                )
+                cur.execute("DROP TABLE user_kv_old")
         conn.commit()
-    finally:
-        conn.close()
+    _kv_ready = True
 
 
-def kv_get(key: str, default: Any = None) -> Any:
-    """Read a JSON-serialised setting; returns `default` if missing/unavailable."""
+def kv_get(key: str, default: Any = None, user_id: str = "default") -> Any:
+    """
+    Read a JSON-serialised setting for a specific user.
+    Returns `default` if missing or on failure.
+    `user_id` defaults to 'default' — pass st.experimental_user.email for
+    per-user isolation on Streamlit Cloud with login enabled.
+    """
     try:
         _kv_ensure()
-        conn = _connect()
-        try:
+        with _get_conn() as conn:
             cur = conn.cursor()
-            cur.execute(_q("SELECT v FROM user_kv WHERE k=?"), (key,))
+            cur.execute(_q("SELECT v FROM user_kv WHERE user_id=? AND k=?"), (user_id, key))
             row = cur.fetchone()
             return json.loads(row[0]) if row and row[0] is not None else default
-        finally:
-            conn.close()
     except Exception as e:
-        # P2: log (not silent) — a read failure here silently reverted user settings to
-        # defaults, which is indistinguishable from "never set". The default is still
-        # returned so the UI degrades gracefully.
-        _log.warning("kv_get(%r) failed: %s", key, e)
+        _log.warning("kv_get(%r, user=%r) failed: %s", key, user_id, e)
         return default
 
 
-def kv_set(key: str, value: Any) -> bool:
-    """Upsert a JSON-serialisable setting. Returns True on success, False on failure.
-
-    P2: previously a silent no-op on failure, which could lose a user's watchlist /
-    settings without any signal. It now LOGS and returns a success flag so callers can
-    surface a save failure to the user — a persistence error is never silent.
+def kv_set(key: str, value: Any, user_id: str = "default") -> bool:
+    """
+    Upsert a JSON-serialisable setting for a specific user.
+    Returns True on success, False on failure (never silent).
+    `user_id` defaults to 'default' — single-user setups work unchanged.
     """
     try:
         _kv_ensure()
         payload = json.dumps(value)
-        conn = _connect()
-        try:
+        with _get_conn() as conn:
             cur = conn.cursor()
             if _is_pg():
                 cur.execute(
-                    "INSERT INTO user_kv (k, v) VALUES (%s, %s) "
-                    "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v",
-                    (key, payload),
+                    "INSERT INTO user_kv (user_id, k, v) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (user_id, k) DO UPDATE SET v = EXCLUDED.v",
+                    (user_id, key, payload),
                 )
             else:
-                cur.execute("INSERT OR REPLACE INTO user_kv (k, v) VALUES (?, ?)",
-                            (key, payload))
+                cur.execute(
+                    "INSERT OR REPLACE INTO user_kv (user_id, k, v) VALUES (?, ?, ?)",
+                    (user_id, key, payload),
+                )
             conn.commit()
-        finally:
-            conn.close()
         return True
     except Exception as e:
-        _log.error("kv_set(%r) FAILED — setting not persisted: %s", key, e)
+        _log.error("kv_set(%r, user=%r) FAILED — setting not persisted: %s", key, user_id, e)
+        return False
+
+
+def kv_delete(key: str, user_id: str = "default") -> bool:
+    """Delete a single KV entry. Returns True on success."""
+    try:
+        _kv_ensure()
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("DELETE FROM user_kv WHERE user_id=? AND k=?"), (user_id, key))
+            conn.commit()
+        return True
+    except Exception as e:
+        _log.warning("kv_delete(%r, user=%r) failed: %s", key, user_id, e)
         return False
