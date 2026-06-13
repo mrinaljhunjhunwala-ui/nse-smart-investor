@@ -5,7 +5,7 @@ Smoke tests for the scoring engine (analysis/score.py) and technical indicators
 These are intentionally lightweight behavioural checks — they feed known synthetic
 OHLCV (a clean uptrend and a clean downtrend) and assert that:
   * indicators stay in their valid ranges (RSI 0-100, MACD sign tracks trend),
-  * the composite score is well-formed (0-100, graded, component caps respected),
+  * the composite score is well-formed (0-90, graded, component caps respected),
   * the engine ranks an uptrend higher than a downtrend.
 
 They exist to catch gross regressions when the dashboard refactor merges and when
@@ -89,14 +89,14 @@ def _score(direction: str):
 
 def test_score_is_well_formed():
     cs = _score("up")
-    assert 0 <= cs.score <= 100
+    assert 0 <= cs.score <= 90          # max achievable is 90 (40+25+15+10)
     assert isinstance(cs.grade, str) and cs.grade
     assert isinstance(cs.action, str) and cs.action
     # component scores respect their documented caps
     assert 0 <= cs.technical_score <= 40
     assert 0 <= cs.momentum_score <= 25
     assert 0 <= cs.volume_score <= 15
-    assert 0 <= cs.pattern_score <= 10
+    assert isinstance(cs.patterns_detected, list)   # patterns are informational only
     assert 0 <= cs.sentiment_score <= 10
 
 
