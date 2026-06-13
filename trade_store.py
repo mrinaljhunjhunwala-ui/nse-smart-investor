@@ -39,9 +39,11 @@ import pandas as pd
 _log = logging.getLogger("trade_store")
 _SQLITE_PATH = "trades.db"
 
-# ── Schema-ready flags — ensure DDL runs only once per process ────────────────
-_schema_ready = False
-_kv_ready     = False
+# ── Schema-ready flags — track which DB path the schema was created for ───────
+# Storing the path (not just a bool) means tests that swap _SQLITE_PATH to a
+# temp file correctly trigger a re-run of the DDL for that new path.
+_schema_ready_for: Optional[str] = None
+_kv_ready_for:     Optional[str] = None
 
 # ── Postgres connection pool (created once, reused across calls) ──────────────
 _pg_pool = None
@@ -51,8 +53,12 @@ _pg_pool = None
 # Backend selection
 # ─────────────────────────────────────────────────────────────────────────────
 
-@lru_cache(maxsize=1)
 def _database_url() -> Optional[str]:
+    """
+    Return Postgres URL from Streamlit secrets or env, else None.
+    Not cached with lru_cache — tests monkeypatch DATABASE_URL between runs
+    and need live re-reads. Fast enough: called only at connection time.
+    """
     """
     Return a Postgres URL from Streamlit secrets or env, else None.
     Cached with lru_cache — previously re-read st.secrets on every single
@@ -172,9 +178,10 @@ def validate_persistence() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def ensure_schema() -> None:
-    """Create the trades table if it doesn't exist. Runs DDL only once per process."""
-    global _schema_ready
-    if _schema_ready:
+    """Create the trades table if needed. Skips if already run for this DB path."""
+    global _schema_ready_for
+    db_key = _database_url() or _SQLITE_PATH
+    if _schema_ready_for == db_key:
         return
 
     with _get_conn() as conn:
@@ -235,7 +242,7 @@ def ensure_schema() -> None:
                 )
         conn.commit()
 
-    _schema_ready = True
+    _schema_ready_for = db_key
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -391,9 +398,10 @@ def fetch_open(account: str = None) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _kv_ensure() -> None:
-    """Create user_kv table if it doesn't exist. Runs only once per process."""
-    global _kv_ready
-    if _kv_ready:
+    """Create user_kv table if needed. Skips if already run for this DB path."""
+    global _kv_ready_for
+    db_key = _database_url() or _SQLITE_PATH
+    if _kv_ready_for == db_key:
         return
     with _get_conn() as conn:
         cur = conn.cursor()
@@ -433,7 +441,7 @@ def _kv_ensure() -> None:
                 )
                 cur.execute("DROP TABLE user_kv_old")
         conn.commit()
-    _kv_ready = True
+    _kv_ready_for = db_key
 
 
 def kv_get(key: str, default: Any = None, user_id: str = "default") -> Any:
