@@ -16,7 +16,7 @@ _NAV_GROUPS: dict = {
     "Markets":   ["Market Live", "Market Overview", "Market Internals"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
-    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist"],
+    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score"], # <-- Registered under Analysis
     "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
 }
 
@@ -38,6 +38,7 @@ _PAGE_EMOJI: dict = {
     "Position Sizer":  "📐",
     "Angel One":       "🔗",
     "Investor Guide":  "📖",
+    "Trend Quality Score": "📊", # <-- Added Page Emoji
 }
 
 _PAGE_FULL_NAME: dict = {
@@ -58,6 +59,7 @@ _PAGE_FULL_NAME: dict = {
     "Position Sizer":  "📐 Position Sizer",
     "Angel One":       "🔗 Angel One",
     "Investor Guide":  "📖 Investor Guide",
+    "Trend Quality Score": "📊 Trend Quality Score", # <-- Added Full Display Name
 }
 
 _group_icons: dict = {
@@ -85,6 +87,7 @@ _PAGE_FILE = {
     "Investor Guide":  "pages/15_investor_guide.py",
     "Angel One":       "pages/16_angel_one.py",
     "Tomorrow's Watchlist": "pages/17_tomorrow_watchlist.py",
+    "Trend Quality Score": "pages/18_tqs_scanner.py", # <-- Added File Route Mapping
 }
 
 
@@ -621,5 +624,3 @@ def render_sidebar(current: str = None) -> None:
         "Not SEBI registered advice.  \n"
         "Past performance ≠ future results."
     )
-
-
