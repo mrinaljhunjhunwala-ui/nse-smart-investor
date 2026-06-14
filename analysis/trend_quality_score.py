@@ -3,10 +3,8 @@ trend_quality_score.py
 ======================
 Trend Quality Score (TQS) — max 90 points across 4 equally-weighted pillars.
 
-Merges:
-  - Vectorized np.where scoring (fast, production-grade)
-  - pandas_ta for indicator calculation (reliable, battle-tested)
-  - TQSResult dataclass + scan_universe() + print_report()
+Refactored to calculate all indicators natively using standard pandas/numpy
+to resolve dependency installation failures (e.g., pandas-ta packaging issues).
 """
 
 from __future__ import annotations
@@ -23,28 +21,24 @@ if _ROOT not in sys.path:
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Union
 
 pd.options.mode.chained_assignment = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Data fetching — uses existing tiered fetcher (Angel One → Stooq → Yahoo)
+# Data fetching
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_data(ticker: str, period: str = "5y") -> pd.DataFrame:
     """
-    Use the repo's tiered data fetcher so TQS benefits from Angel One
-    live data automatically when credentials are configured.
-    Falls back to Stooq → Yahoo if Angel One is unavailable.
+    Use the repo's tiered data fetcher. Falls back to yfinance if unavailable.
     """
     try:
         from data.fetcher import fetch_single
         df = fetch_single(ticker, period=period)
     except Exception:
-        # Hard fallback to yfinance if fetcher itself is unavailable
         import yfinance as yf
         df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
@@ -53,22 +47,20 @@ def fetch_data(ticker: str, period: str = "5y") -> pd.DataFrame:
     if df is None or df.empty:
         raise ValueError(f"{ticker}: no data returned")
     
-    # Ensure standard structural columns exist
     required_cols = ["Open", "High", "Low", "Close", "Volume"]
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
-        # If columns are lower-case, rename them to upper CamelCase
         df = df.rename(columns={c.lower(): c for c in required_cols})
         
     return df[required_cols].dropna()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Indicator engine  (pandas_ta for reliability + fast vectorized extras)
+# Native Indicator Calculations (Replaces pandas-ta)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fast_slope(series: pd.Series, window: int) -> pd.Series:
-    """Vectorized rolling OLS slope — performance-optimized replacement for polyfit."""
+    """Vectorized rolling OLS slope."""
     x = np.arange(window, dtype=float)
     x -= x.mean()
     denom = (x ** 2).sum()
@@ -79,19 +71,69 @@ def _fast_slope(series: pd.Series, window: int) -> pd.Series:
     )
 
 
+def _compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Welles Wilder's RSI calculation using native pandas EWM."""
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    
+    # Use standard Wilder's smoothing alpha = 1 / period
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50)
+
+
+def _compute_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Standard MACD lines."""
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    macd_hist = macd_line - signal_line
+    return macd_line, signal_line, macd_hist
+
+
+def _compute_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder's Average Directional Index (ADX)."""
+    h_l = high - low
+    h_pc = (high - close.shift(1)).abs()
+    l_pc = (low - close.shift(1)).abs()
+    tr = pd.concat([h_l, h_pc, l_pc], axis=1).max(axis=1)
+    
+    up_move = high.diff()
+    down_move = low.shift(1) - low
+    
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    
+    # Wilder's smoothing representation
+    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    smoothed_plus_dm = pd.Series(plus_dm, index=high.index).ewm(alpha=1/period, adjust=False).mean()
+    smoothed_minus_dm = pd.Series(minus_dm, index=high.index).ewm(alpha=1/period, adjust=False).mean()
+    
+    plus_di = 100 * (smoothed_plus_dm / atr.replace(0, np.nan))
+    minus_di = 100 * (smoothed_minus_dm / atr.replace(0, np.nan))
+    
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
+    adx = dx.ewm(alpha=1/period, adjust=False).mean()
+    return adx
+
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # ── P1: Trend Strength ────────────────────────────────────────────────────
-    df["SMA20"]  = ta.sma(df["Close"], length=20)
-    df["SMA50"]  = ta.sma(df["Close"], length=50)
-    df["SMA200"] = ta.sma(df["Close"], length=200)
+    df["SMA20"]  = df["Close"].rolling(20).mean()
+    df["SMA50"]  = df["Close"].rolling(50).mean()
+    df["SMA200"] = df["Close"].rolling(200).mean()
     df["SMA200_Slope"] = (df["SMA200"].pct_change(5) / 5) * 100
 
-    adx_df = ta.adx(df["High"], df["Low"], df["Close"], length=14)
-    df["ADX"] = adx_df["ADX_14"] if adx_df is not None else np.nan
+    df["ADX"] = _compute_adx(df["High"], df["Low"], df["Close"], period=14)
 
-    # ── P2: Trend Persistence (rolling Sharpe, annualised, clipped) ───────────
+    # ── P2: Trend Persistence (rolling Sharpe) ────────────────────────────────
     ret = df["Close"].pct_change()
 
     def rolling_sharpe(returns: pd.Series, window: int) -> pd.Series:
@@ -104,27 +146,25 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["Sharpe_60"] = rolling_sharpe(ret, 60)
 
     # ── P3: Momentum Quality ──────────────────────────────────────────────────
-    df["RSI"] = ta.rsi(df["Close"], length=14)
+    df["RSI"] = _compute_rsi(df["Close"], period=14)
 
-    macd_df = ta.macd(df["Close"], fast=12, slow=26, signal=9)
-    if macd_df is not None:
-        df["MACD"]           = macd_df["MACD_12_26_9"]
-        df["MACD_Sig"]       = macd_df["MACDs_12_26_9"]
-        df["MACD_Hist"]      = macd_df["MACDh_12_26_9"]
-    else:
-        df[["MACD", "MACD_Sig", "MACD_Hist"]] = np.nan
-
+    macd_line, signal_line, macd_hist = _compute_macd(df["Close"])
+    df["MACD"] = macd_line
+    df["MACD_Sig"] = signal_line
+    df["MACD_Hist"] = macd_hist
     df["MACD_Hist_Delta"] = df["MACD_Hist"].diff()
 
     # ── P4: Technical Confirmation ────────────────────────────────────────────
-    df["OBV"] = ta.obv(df["Close"], df["Volume"])
+    # Native OBV calculation: cumulative sum of (volume * sign of change)
+    close_diff = df["Close"].diff()
+    direction = np.sign(close_diff).fillna(0)
+    df["OBV"] = (direction * df["Volume"]).cumsum()
 
     obv_mu    = df["OBV"].rolling(20, min_periods=5).mean()
     obv_sigma = df["OBV"].rolling(20, min_periods=5).std(ddof=1).replace(0, np.nan)
     df["OBV_Z"] = ((df["OBV"] - obv_mu) / obv_sigma).clip(-3.0, 3.0)
 
     df["OBV_Slope_20"]      = _fast_slope(df["OBV"], 20)
-    # Use min_periods to prevent completely null outputs if the historical series is short
     df["OBV_Slope_PctRank"] = df["OBV_Slope_20"].rolling(252, min_periods=60).rank(pct=True)
 
     up_vol   = ret.gt(0) * df["Volume"]
@@ -133,17 +173,16 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         up_vol.rolling(20, min_periods=5).sum() / down_vol.rolling(20, min_periods=5).sum().replace(0, np.nan)
     ).fillna(1.0).clip(upper=3.0)
 
-    # Drop only rows where the critical calculated indicators (like SMA200) are unavailable
+    # Clean missing variables before parsing TQS
     df.dropna(subset=["SMA200", "ADX", "RSI", "Sharpe_20"], inplace=True)
     return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Vectorized pillar scoring  (np.where chains)
+# Vectorized pillar scoring
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _score_all_pillars(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute all 4 pillar scores for every row in one vectorized pass."""
     c = df
 
     # ── P1: Trend Strength (max 22.5) ─────────────────────────────────────────
@@ -209,7 +248,6 @@ def _score_all_pillars(df: pd.DataFrame) -> pd.DataFrame:
            np.where(c["OBV_Z"] >= 0.0, 6.75,
            np.where(c["OBV_Z"] >= -1.0, 3.375, 0.0))))
 
-    # Fill NaNs with median/neutral rank if history is too brief
     rank_col = c["OBV_Slope_PctRank"].fillna(0.5)
     p4_slope = np.where(rank_col >= 0.75, 5.625,
                np.where(rank_col >= 0.50, 3.75,
@@ -285,25 +323,17 @@ def score_ticker(
     period: str = "2y",
     last_n: int = 1,
 ) -> Union[TQSResult, List[TQSResult]]:
-    """
-    Score one ticker. Automatically warm-up historical indicators by adding 
-    an internal lookback padding. Returns TQSResult or list of last_n results.
-    """
-    # Map requested timeframe to padded timeframe for warm indicator states
-    warm_periods = {"1y": "2y", "2y": "5y", "5y": "max"}
+    """Score one ticker using native logic. Warmup windows are padded automatically."""
+    warm_periods = {"1y": "2y", "2y": "3y", "5y": "6y"}
     padded_period = warm_periods.get(period, period)
 
     df_raw = fetch_data(ticker, period=padded_period)
-    
-    # Calculate indicators over padded data range
     df_ind = add_indicators(df_raw)
     df_tqs = _score_all_pillars(df_ind)
 
-    # Extract target length (e.g. standard daily sessions in user requested timeframe)
     target_sessions = {"1y": 252, "2y": 504, "5y": 1260}
     session_limit = target_sessions.get(period, len(df_tqs))
     
-    # Slice historical results to desired active calculation range
     active_df = df_tqs.tail(max(last_n, session_limit))
 
     results = []
@@ -318,7 +348,7 @@ def score_ticker(
         ))
         
     if not results:
-        raise ValueError(f"Insufficient active history returned for {ticker} after lookback checks.")
+        raise ValueError(f"Insufficient active history returned for {ticker}.")
         
     return results[0] if last_n == 1 else results
 
@@ -370,7 +400,6 @@ if __name__ == "__main__":
         result = score_ticker(TICKER, period="2y")
         print_report(result)
 
-        # Last 5 days (useful for backtesting)
         history = score_ticker(TICKER, period="2y", last_n=5)
         print("Last 5 sessions:")
         if isinstance(history, list):
@@ -380,7 +409,6 @@ if __name__ == "__main__":
         else:
             print(f"  {history.date}  TQS={history.tqs:5.1f}  {history.signal()}")
 
-        # Universe scan
         NIFTY_SAMPLE = [
             "RELIANCE.NS", "TCS.NS",       "HDFCBANK.NS",  "INFY.NS",
             "ICICIBANK.NS","HINDUNILVR.NS", "ITC.NS",       "SBIN.NS",
