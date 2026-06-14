@@ -17,7 +17,6 @@ if _ROOT not in sys.path:
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 import streamlit as st
 
 from dashboard.shared.nav import render_sidebar
@@ -37,7 +36,13 @@ st.caption(
 # ── Lazy import engine ────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def _load_engine():
-    from analysis.trend_quality_score import score_ticker, scan_universe, add_indicators, fetch_data, _score_all_pillars
+    from analysis.trend_quality_score import (
+        score_ticker, 
+        scan_universe, 
+        add_indicators, 
+        fetch_data, 
+        _score_all_pillars
+    )
     return score_ticker, scan_universe, add_indicators, fetch_data, _score_all_pillars
 
 try:
@@ -49,7 +54,7 @@ except Exception as e:
     st.stop()
 
 
-# ── Default universe ──────────────────────────────────────────────────────────
+# ── Default configurations ───────────────────────────────────────────────────
 DEFAULT_TICKERS = [
     "RELIANCE.NS", "TCS.NS",        "HDFCBANK.NS",   "INFY.NS",
     "ICICIBANK.NS","HINDUNILVR.NS",  "ITC.NS",        "SBIN.NS",
@@ -72,9 +77,7 @@ GRADE_COLOUR = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Tabs
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 tab_scan, tab_deep = st.tabs(["🔍 Scanner", "🔬 Deep Dive"])
 
 
@@ -92,7 +95,7 @@ with tab_scan:
             height=100,
         )
     with col2:
-        period = st.selectbox("Period", ["1y", "2y", "5y"], index=0)
+        period = st.selectbox("Period", ["1y", "2y", "5y"], index=0, key="scan_period")
         min_tqs = st.slider("Min TQS filter", 0, 90, 0, step=5)
         run_scan = st.button("▶ Run Scan", use_container_width=True, type="primary")
 
@@ -126,93 +129,112 @@ with tab_scan:
     # ── Display results ───────────────────────────────────────────────────────
     if "tqs_scan" in st.session_state:
         df_scan = st.session_state["tqs_scan"]
-        total = len(df_scan)
-        strong = (df_scan["signal"] == "STRONG TREND").sum()
-        trending = (df_scan["signal"] == "TRENDING").sum()
-        avoid = (df_scan["signal"] == "AVOID").sum()
+        
+        if df_scan.empty:
+            st.info("No tickers match the active minimum TQS filter.")
+        else:
+            total = len(df_scan)
+            strong = (df_scan["signal"] == "STRONG TREND").sum()
+            trending = (df_scan["signal"] == "TRENDING").sum()
+            avoid = (df_scan["signal"] == "AVOID").sum()
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Stocks Scored", total)
-        m2.metric("Strong Trend", strong)
-        m3.metric("Trending", trending)
-        m4.metric("Avoid", avoid)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Stocks Scored", total)
+            m2.metric("Strong Trend", strong)
+            m3.metric("Trending", trending)
+            m4.metric("Avoid", avoid)
 
-        st.divider()
+            st.divider()
 
-        # Colour-coded table
-        def _colour_signal(val):
-            c = SIGNAL_COLOUR.get(val, "#6b7280")
-            return f"color: {c}; font-weight: 600"
+            # Color styling helper functions
+            def _colour_signal(val):
+                c = SIGNAL_COLOUR.get(str(val).upper(), "#6b7280")
+                return f"color: {c}; font-weight: 600"
 
-        def _colour_grade(val):
-            c = GRADE_COLOUR.get(val, "#6b7280")
-            return f"color: {c}; font-weight: 700"
+            def _colour_grade(val):
+                c = GRADE_COLOUR.get(str(val).upper(), "#6b7280")
+                return f"color: {c}; font-weight: 700"
 
-        def _bar_tqs(val):
-            pct = val / 90 * 100
-            return f"background: linear-gradient(90deg, #3b82f6 {pct:.0f}%, transparent {pct:.0f}%)"
+            def _bar_tqs(val):
+                try:
+                    val_float = float(val)
+                    pct = max(0.0, min(100.0, (val_float / 90.0) * 100))
+                except (ValueError, TypeError):
+                    pct = 0
+                return f"background: linear-gradient(90deg, rgba(59, 130, 246, 0.4) {pct:.0f}%, transparent {pct:.0f}%)"
 
-        display_cols = [
-            "ticker", "close", "tqs", "grade", "signal",
-            "p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation",
-            "rsi", "sharpe_20", "obv_z",
-        ]
-        styled = (
-            df_scan[display_cols]
-            .rename(columns={
-                "ticker": "Ticker", "close": "Close", "tqs": "TQS",
-                "grade": "Grade", "signal": "Signal",
-                "p1_strength": "P1 Strength", "p2_persistence": "P2 Persist",
-                "p3_momentum": "P3 Momentum", "p4_confirmation": "P4 Volume",
-                "rsi": "RSI", "sharpe_20": "Sharpe20", "obv_z": "OBV-Z",
-            })
-            .style
-            .applymap(_colour_signal, subset=["Signal"])
-            .applymap(_colour_grade,  subset=["Grade"])
-            .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"])
-            .format({
-                "Close": "₹{:,.2f}", "TQS": "{:.1f}",
-                "P1 Strength": "{:.1f}", "P2 Persist": "{:.1f}",
-                "P3 Momentum": "{:.1f}", "P4 Volume": "{:.1f}",
-                "RSI": "{:.1f}", "Sharpe20": "{:.2f}", "OBV-Z": "{:.2f}",
-            })
-        )
-        st.dataframe(styled, use_container_width=True, height=500)
+            display_cols = [
+                "ticker", "close", "tqs", "grade", "signal",
+                "p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation",
+                "rsi", "sharpe_20", "obv_z",
+            ]
+            
+            # Sub-select columns present in DataFrame to avoid KeyError issues
+            actual_cols = [col for col in display_cols if col in df_scan.columns]
+            
+            # Format and apply styling safely
+            styled = (
+                df_scan[actual_cols]
+                .rename(columns={
+                    "ticker": "Ticker", "close": "Close", "tqs": "TQS",
+                    "grade": "Grade", "signal": "Signal",
+                    "p1_strength": "P1 Strength", "p2_persistence": "P2 Persist",
+                    "p3_momentum": "P3 Momentum", "p4_confirmation": "P4 Volume",
+                    "rsi": "RSI", "sharpe_20": "Sharpe20", "obv_z": "OBV-Z",
+                })
+                .style
+                .map(_colour_signal, subset=["Signal"] if "Signal" in df_scan.columns or "signal" in actual_cols else [])
+                .map(_colour_grade,  subset=["Grade"] if "Grade" in df_scan.columns or "grade" in actual_cols else [])
+                .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"] if "TQS" in df_scan.columns or "tqs" in actual_cols else [])
+                .format({
+                    "Close": "₹{:,.2f}", "TQS": "{:.1f}",
+                    "P1 Strength": "{:.1f}", "P2 Persist": "{:.1f}",
+                    "P3 Momentum": "{:.1f}", "P4 Volume": "{:.1f}",
+                    "RSI": "{:.1f}", "Sharpe20": "{:.2f}", "OBV-Z": "{:.2f}",
+                }, na_rep="-")
+            )
+            st.dataframe(styled, use_container_width=True, height=500)
 
-        # ── Pillar radar / bar chart ──────────────────────────────────────────
-        st.subheader("Pillar breakdown — top 10")
-        top10 = df_scan.head(10)
-        fig = go.Figure()
-        pillars = ["p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation"]
-        labels  = ["P1 Strength", "P2 Persistence", "P3 Momentum", "P4 Volume"]
-        colours = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
+            # ── Pillar radar / bar chart ──────────────────────────────────────
+            st.subheader("Pillar breakdown — top 10")
+            top10 = df_scan.head(10)
+            fig = go.Figure()
+            pillars = ["p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation"]
+            labels  = ["P1 Strength", "P2 Persistence", "P3 Momentum", "P4 Volume"]
+            colours = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
 
-        for pillar, label, colour in zip(pillars, labels, colours):
-            fig.add_trace(go.Bar(
-                name=label,
-                x=top10["ticker"],
-                y=top10[pillar],
-                marker_color=colour,
-            ))
+            for pillar, label, colour in zip(pillars, labels, colours):
+                if pillar in top10.columns:
+                    fig.add_trace(go.Bar(
+                        name=label,
+                        x=top10["ticker"],
+                        y=top10[pillar],
+                        marker_color=colour,
+                    ))
 
-        fig.update_layout(
-            barmode="stack",
-            xaxis_title="Ticker",
-            yaxis_title="Score",
-            yaxis_range=[0, 90],
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            margin=dict(t=40, b=40),
-            height=380,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(
+                barmode="stack",
+                xaxis_title="Ticker",
+                yaxis_title="Score",
+                yaxis_range=[0, 90],
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(t=40, b=40, l=10, r=10),
+                height=380,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-        # ── Download ──────────────────────────────────────────────────────────
-        st.download_button(
-            "⬇ Download CSV",
-            data=df_scan.to_csv(index=False),
-            file_name="tqs_scan.csv",
-            mime="text/csv",
-        )
+            # ── Download ──────────────────────────────────────────────────────
+            st.download_button(
+                "⬇ Download CSV",
+                data=df_scan.to_csv(index=False),
+                file_name="tqs_scan.csv",
+                mime="text/csv",
+                use_container_width=False
+            )
+    else:
+        st.info("Input your universe parameters and select 'Run Scan' above to process trend scores.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -246,9 +268,6 @@ with tab_deep:
         df_tqs, r = st.session_state["tqs_deep"]
 
         # ── Scorecard header ──────────────────────────────────────────────────
-        grade_col = GRADE_COLOUR.get(r.grade(), "#6b7280")
-        sig_col   = SIGNAL_COLOUR.get(r.signal(), "#6b7280")
-
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("TQS", f"{r.tqs:.1f} / 90")
         c2.metric("Grade", r.grade())
@@ -268,7 +287,6 @@ with tab_deep:
             ("P4 Tech Confirmation", r.p4, "#8b5cf6"),
         ]
         for col, (label, score, colour) in zip(cols, pillar_data):
-            pct = score / 22.5
             fig_g = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=score,
@@ -277,14 +295,19 @@ with tab_deep:
                     "axis": {"range": [0, 22.5], "tickfont": {"size": 10}},
                     "bar":  {"color": colour},
                     "steps": [
-                        {"range": [0, 7.5],   "color": "#f1f5f9"},
-                        {"range": [7.5, 15],  "color": "#e2e8f0"},
-                        {"range": [15, 22.5], "color": "#cbd5e1"},
+                        {"range": [0, 7.5],   "color": "rgba(241, 245, 249, 0.5)"},
+                        {"range": [7.5, 15],  "color": "rgba(226, 232, 240, 0.5)"},
+                        {"range": [15, 22.5], "color": "rgba(203, 213, 225, 0.5)"},
                     ],
                 },
                 number={"suffix": "/22.5", "font": {"size": 16}},
             ))
-            fig_g.update_layout(height=200, margin=dict(t=40, b=10, l=20, r=20))
+            fig_g.update_layout(
+                height=180, 
+                margin=dict(t=30, b=10, l=15, r=15),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
+            )
             col.plotly_chart(fig_g, use_container_width=True)
 
         # ── TQS time-series chart ─────────────────────────────────────────────
@@ -312,10 +335,12 @@ with tab_deep:
 
         fig_ts.update_layout(
             xaxis_title="Date", yaxis_title="TQS",
-            yaxis_range=[0, 90],
+            yaxis_range=[0, 95],
             legend=dict(orientation="h"),
-            margin=dict(t=20, b=40),
+            margin=dict(t=20, b=40, l=10, r=10),
             height=360,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
         )
         st.plotly_chart(fig_ts, use_container_width=True)
 
@@ -328,36 +353,45 @@ with tab_deep:
             ("P3_Momentum",     "P3 Momentum",    "#f59e0b"),
             ("P4_Confirmation", "P4 Volume",      "#8b5cf6"),
         ]:
-            fig_p.add_trace(go.Scatter(
-                x=df_tqs.index, y=df_tqs[col_name],
-                name=label, line=dict(color=colour, width=1.5),
-            ))
+            if col_name in df_tqs.columns:
+                fig_p.add_trace(go.Scatter(
+                    x=df_tqs.index, y=df_tqs[col_name],
+                    name=label, line=dict(color=colour, width=1.5),
+                ))
         fig_p.update_layout(
             xaxis_title="Date", yaxis_title="Pillar Score",
-            yaxis_range=[0, 22.5],
+            yaxis_range=[0, 24],
             legend=dict(orientation="h"),
-            margin=dict(t=20, b=40),
+            margin=dict(t=20, b=40, l=10, r=10),
             height=300,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
         )
         st.plotly_chart(fig_p, use_container_width=True)
 
         # ── Key indicator table ───────────────────────────────────────────────
         st.markdown("**Latest indicator values**")
-        last = df_tqs.iloc[-1]
+        
+        # Safe checks for metric validation
+        rsi_val = getattr(r, 'rsi', 50.0)
+        adx_val = getattr(r, 'adx', 20.0)
+        sharpe_val = getattr(r, 'sharpe_20', 0.0)
+        obv_val = getattr(r, 'obv_z', 0.0)
+
         ind_data = {
             "Indicator":  ["RSI-14", "ADX-14", "Sharpe 20d", "OBV Z-score"],
-            "Value":      [f"{r.rsi:.1f}", f"{r.adx:.1f}",
-                           f"{r.sharpe_20:.2f}", f"{r.obv_z:.2f}"],
+            "Value":      [f"{rsi_val:.1f}", f"{adx_val:.1f}",
+                           f"{sharpe_val:.2f}", f"{obv_val:.2f}"],
             "Interpretation": [
-                "55–70 = steady grind (best zone)" if 55 <= r.rsi <= 70
-                else "Overbought — caution" if r.rsi > 80
-                else "Oversold" if r.rsi < 30 else "Neutral",
-                "Strong trend (>30)" if r.adx > 30
-                else "Trend present (>25)" if r.adx > 25 else "No clear trend",
-                "Strong risk-adj momentum (>1.5)" if r.sharpe_20 > 1.5
-                else "Positive" if r.sharpe_20 > 0 else "Negative momentum",
-                "Accumulation (>1)" if r.obv_z > 1
-                else "Distribution (<-1)" if r.obv_z < -1 else "Neutral",
+                "55–70 = steady grind (best zone)" if 55 <= rsi_val <= 70
+                else "Overbought — caution" if rsi_val > 80
+                else "Oversold" if rsi_val < 30 else "Neutral",
+                "Strong trend (>30)" if adx_val > 30
+                else "Trend present (>25)" if adx_val > 25 else "No clear trend",
+                "Strong risk-adj momentum (>1.5)" if sharpe_val > 1.5
+                else "Positive" if sharpe_val > 0 else "Negative momentum",
+                "Accumulation (>1)" if obv_val > 1
+                else "Distribution (<-1)" if obv_val < -1 else "Neutral",
             ],
         }
         st.dataframe(pd.DataFrame(ind_data), use_container_width=True, hide_index=True)
@@ -369,3 +403,5 @@ with tab_deep:
             file_name=f"tqs_{dd_ticker}.csv",
             mime="text/csv",
         )
+    else:
+        st.info("Input a valid symbol (e.g., RELIANCE.NS) and select 'Analyse' to load the historical deep dive.")
