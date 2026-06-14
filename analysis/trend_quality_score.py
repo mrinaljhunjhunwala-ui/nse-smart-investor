@@ -1,366 +1,407 @@
 """
-trend_quality_score.py
-======================
-Trend Quality Score (TQS) — max 90 points across 4 equally-weighted pillars.
+dashboard/pages/18_tqs_scanner.py
+Trend Quality Score (TQS) — Scanner + Deep Dive page.
 
-Merges:
-  - Gemini's vectorized np.where scoring (fast, production-grade)
-  - pandas_ta for indicator calculation (reliable, battle-tested)
-  - This codebase's TQSResult dataclass + scan_universe() + print_report()
-
-Install:
-    pip install yfinance pandas-ta numpy pandas
-
-Usage:
-    python trend_quality_score.py
-    from trend_quality_score import score_ticker, scan_universe
+Two modes:
+  1. Scanner  — score a universe of tickers, rank by TQS, show heatmap
+  2. Deep Dive — single stock: pillar breakdown, time-series chart, key indicators
 """
-
-from __future__ import annotations
-import warnings
-warnings.filterwarnings("ignore")
 
 import os
 import sys
 
-# ── Ensure project root is on sys.path so data.fetcher resolves correctly ────
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+import plotly.graph_objects as go
+import streamlit as st
 
-pd.options.mode.chained_assignment = None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Data fetching — uses existing tiered fetcher (Angel One → Stooq → Yahoo)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def fetch_data(ticker: str, period: str = "5y") -> pd.DataFrame:
-    """
-    Use the repo's tiered data fetcher so TQS benefits from Angel One
-    live data automatically when credentials are configured.
-    Falls back to Stooq → Yahoo if Angel One is unavailable.
-    """
-    try:
-        from data.fetcher import fetch_single
-        df = fetch_single(ticker, period=period)
-    except Exception:
-        # Hard fallback to yfinance if fetcher itself is unavailable
-        import yfinance as yf
-        df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0] for c in df.columns]
-
-    if df is None or df.empty:
-        raise ValueError(f"{ticker}: no data returned")
-    if len(df) < 252:
-        raise ValueError(f"{ticker}: need ≥252 rows, got {len(df)}")
-
-    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+from dashboard.shared.nav import render_sidebar
+from dashboard.shared.design import apply_design
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Indicator engine  (pandas_ta for reliability + fast vectorized extras)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
+apply_design()
+render_sidebar()
 
-def _fast_slope(series: pd.Series, window: int) -> pd.Series:
-    """Vectorized rolling OLS slope — ~10x faster than polyfit inside apply."""
-    x = np.arange(window, dtype=float)
-    x -= x.mean()
-    x_ss = (x ** 2).sum()
-    return series.rolling(window).apply(
-        lambda y: float(np.dot(x, y - y.mean()) / x_ss), raw=True
+st.title("📊 Trend Quality Score")
+st.caption(
+    "Measures trend **health and persistence** across 4 pillars (max 90 pts). "
+    "Validated baseline: +0.41 rank correlation with staying in an uptrend next month."
+)
+
+# ── Lazy import engine ────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner=False)
+def _load_engine():
+    from analysis.trend_quality_score import (
+        score_ticker, 
+        scan_universe, 
+        add_indicators, 
+        fetch_data, 
+        _score_all_pillars
     )
+    return score_ticker, scan_universe, add_indicators, fetch_data, _score_all_pillars
+
+try:
+    score_ticker, scan_universe, add_indicators, fetch_data, _score_all_pillars = _load_engine()
+    ENGINE_OK = True
+except Exception as e:
+    st.error(f"TQS engine failed to load: {e}")
+    ENGINE_OK = False
+    st.stop()
 
 
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
+# ── Default configurations ───────────────────────────────────────────────────
+DEFAULT_TICKERS = [
+    "RELIANCE.NS", "TCS.NS",        "HDFCBANK.NS",   "INFY.NS",
+    "ICICIBANK.NS","HINDUNILVR.NS",  "ITC.NS",        "SBIN.NS",
+    "BHARTIARTL.NS","KOTAKBANK.NS",  "AXISBANK.NS",   "WIPRO.NS",
+    "MARUTI.NS",   "TITAN.NS",       "ASIANPAINT.NS", "NESTLEIND.NS",
+    "SUNPHARMA.NS","HCLTECH.NS",     "LT.NS",         "ULTRACEMCO.NS",
+]
 
-    # ── P1: Trend Strength ────────────────────────────────────────────────────
-    df["SMA20"]  = ta.sma(df["Close"], length=20)
-    df["SMA50"]  = ta.sma(df["Close"], length=50)
-    df["SMA200"] = ta.sma(df["Close"], length=200)
-    df["SMA200_Slope"] = (df["SMA200"].pct_change(5) / 5) * 100
+SIGNAL_COLOUR = {
+    "STRONG TREND": "#16a34a",
+    "TRENDING":     "#65a30d",
+    "NEUTRAL":      "#ca8a04",
+    "WEAK":         "#ea580c",
+    "AVOID":        "#dc2626",
+}
 
-    adx_df = ta.adx(df["High"], df["Low"], df["Close"], length=14)
-    df["ADX"] = adx_df["ADX_14"] if adx_df is not None else np.nan
+GRADE_COLOUR = {
+    "A+": "#16a34a", "A": "#65a30d", "B": "#ca8a04",
+    "C":  "#ea580c", "D": "#dc2626", "F": "#991b1b",
+}
 
-    # ── P2: Trend Persistence (rolling Sharpe, annualised, clipped) ───────────
-    ret = df["Close"].pct_change()
 
-    def rolling_sharpe(returns: pd.Series, window: int) -> pd.Series:
-        mu    = returns.rolling(window).mean()
-        sigma = returns.rolling(window).std(ddof=1).replace(0, np.nan)
-        return (mu / sigma * np.sqrt(252)).clip(-3.0, 3.0)
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab_scan, tab_deep = st.tabs(["🔍 Scanner", "🔬 Deep Dive"])
 
-    df["Sharpe_5"]  = rolling_sharpe(ret, 5)
-    df["Sharpe_20"] = rolling_sharpe(ret, 20)
-    df["Sharpe_60"] = rolling_sharpe(ret, 60)
 
-    # ── P3: Momentum Quality ──────────────────────────────────────────────────
-    df["RSI"] = ta.rsi(df["Close"], length=14)
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 1 — SCANNER
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_scan:
+    st.subheader("Universe Scanner")
 
-    macd_df = ta.macd(df["Close"], fast=12, slow=26, signal=9)
-    if macd_df is not None:
-        df["MACD"]           = macd_df["MACD_12_26_9"]
-        df["MACD_Sig"]       = macd_df["MACDs_12_26_9"]
-        df["MACD_Hist"]      = macd_df["MACDh_12_26_9"]
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        raw_input = st.text_area(
+            "Tickers (comma or newline separated)",
+            value=", ".join(DEFAULT_TICKERS),
+            height=100,
+        )
+    with col2:
+        period = st.selectbox("Period", ["1y", "2y", "5y"], index=0, key="scan_period")
+        min_tqs = st.slider("Min TQS filter", 0, 90, 0, step=5)
+        run_scan = st.button("▶ Run Scan", use_container_width=True, type="primary")
+
+    if run_scan:
+        tickers = [t.strip().upper() for t in raw_input.replace("\n", ",").split(",") if t.strip()]
+        if not tickers:
+            st.warning("Enter at least one ticker.")
+        else:
+            rows = []
+            prog = st.progress(0, text="Scanning…")
+            for i, t in enumerate(tickers):
+                try:
+                    r = score_ticker(t, period=period)
+                    rows.append(r.as_dict())
+                except Exception:
+                    pass
+                prog.progress((i + 1) / len(tickers), text=f"Scored {t}")
+            prog.empty()
+
+            if not rows:
+                st.error("No data returned for any ticker.")
+            else:
+                df_scan = (
+                    pd.DataFrame(rows)
+                    .sort_values("tqs", ascending=False)
+                    .reset_index(drop=True)
+                )
+                df_scan = df_scan[df_scan["tqs"] >= min_tqs]
+                st.session_state["tqs_scan"] = df_scan
+
+    # ── Display results ───────────────────────────────────────────────────────
+    if "tqs_scan" in st.session_state:
+        df_scan = st.session_state["tqs_scan"]
+        
+        if df_scan.empty:
+            st.info("No tickers match the active minimum TQS filter.")
+        else:
+            total = len(df_scan)
+            strong = (df_scan["signal"] == "STRONG TREND").sum()
+            trending = (df_scan["signal"] == "TRENDING").sum()
+            avoid = (df_scan["signal"] == "AVOID").sum()
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Stocks Scored", total)
+            m2.metric("Strong Trend", strong)
+            m3.metric("Trending", trending)
+            m4.metric("Avoid", avoid)
+
+            st.divider()
+
+            # Color styling helper functions
+            def _colour_signal(val):
+                c = SIGNAL_COLOUR.get(str(val).upper(), "#6b7280")
+                return f"color: {c}; font-weight: 600"
+
+            def _colour_grade(val):
+                c = GRADE_COLOUR.get(str(val).upper(), "#6b7280")
+                return f"color: {c}; font-weight: 700"
+
+            def _bar_tqs(val):
+                try:
+                    val_float = float(val)
+                    pct = max(0.0, min(100.0, (val_float / 90.0) * 100))
+                except (ValueError, TypeError):
+                    pct = 0
+                return f"background: linear-gradient(90deg, rgba(59, 130, 246, 0.4) {pct:.0f}%, transparent {pct:.0f}%)"
+
+            display_cols = [
+                "ticker", "close", "tqs", "grade", "signal",
+                "p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation",
+                "rsi", "sharpe_20", "obv_z",
+            ]
+            
+            # Sub-select columns present in DataFrame to avoid KeyError issues
+            actual_cols = [col for col in display_cols if col in df_scan.columns]
+            
+            # Format and apply styling safely
+            styled = (
+                df_scan[actual_cols]
+                .rename(columns={
+                    "ticker": "Ticker", "close": "Close", "tqs": "TQS",
+                    "grade": "Grade", "signal": "Signal",
+                    "p1_strength": "P1 Strength", "p2_persistence": "P2 Persist",
+                    "p3_momentum": "P3 Momentum", "p4_confirmation": "P4 Volume",
+                    "rsi": "RSI", "sharpe_20": "Sharpe20", "obv_z": "OBV-Z",
+                })
+                .style
+                .map(_colour_signal, subset=["Signal"] if "Signal" in df_scan.columns or "signal" in actual_cols else [])
+                .map(_colour_grade,  subset=["Grade"] if "Grade" in df_scan.columns or "grade" in actual_cols else [])
+                .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"] if "TQS" in df_scan.columns or "tqs" in actual_cols else [])
+                .format({
+                    "Close": "₹{:,.2f}", "TQS": "{:.1f}",
+                    "P1 Strength": "{:.1f}", "P2 Persist": "{:.1f}",
+                    "P3 Momentum": "{:.1f}", "P4 Volume": "{:.1f}",
+                    "RSI": "{:.1f}", "Sharpe20": "{:.2f}", "OBV-Z": "{:.2f}",
+                }, na_rep="-")
+            )
+            st.dataframe(styled, use_container_width=True, height=500)
+
+            # ── Pillar radar / bar chart ──────────────────────────────────────
+            st.subheader("Pillar breakdown — top 10")
+            top10 = df_scan.head(10)
+            fig = go.Figure()
+            pillars = ["p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation"]
+            labels  = ["P1 Strength", "P2 Persistence", "P3 Momentum", "P4 Volume"]
+            colours = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
+
+            for pillar, label, colour in zip(pillars, labels, colours):
+                if pillar in top10.columns:
+                    fig.add_trace(go.Bar(
+                        name=label,
+                        x=top10["ticker"],
+                        y=top10[pillar],
+                        marker_color=colour,
+                    ))
+
+            fig.update_layout(
+                barmode="stack",
+                xaxis_title="Ticker",
+                yaxis_title="Score",
+                yaxis_range=[0, 90],
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(t=40, b=40, l=10, r=10),
+                height=380,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # ── Download ──────────────────────────────────────────────────────
+            st.download_button(
+                "⬇ Download CSV",
+                data=df_scan.to_csv(index=False),
+                file_name="tqs_scan.csv",
+                mime="text/csv",
+                use_container_width=False
+            )
     else:
-        df[["MACD", "MACD_Sig", "MACD_Hist"]] = np.nan
-
-    df["MACD_Hist_Delta"] = df["MACD_Hist"].diff()   # histogram day-over-day change
-
-    # ── P4: Technical Confirmation ────────────────────────────────────────────
-    df["OBV"] = ta.obv(df["Close"], df["Volume"])
-
-    obv_mu    = df["OBV"].rolling(20).mean()
-    obv_sigma = df["OBV"].rolling(20).std(ddof=1).replace(0, np.nan)
-    df["OBV_Z"] = ((df["OBV"] - obv_mu) / obv_sigma).clip(-3.0, 3.0)
-
-    # Vectorized slope — avoids slow polyfit-inside-apply loop
-    df["OBV_Slope_20"]      = _fast_slope(df["OBV"], 20)
-    df["OBV_Slope_PctRank"] = df["OBV_Slope_20"].rolling(252).rank(pct=True)
-
-    up_vol   = ret.gt(0) * df["Volume"]
-    down_vol = ret.lt(0) * df["Volume"]
-    df["Vol_Ratio"] = (
-        up_vol.rolling(20).sum() / down_vol.rolling(20).sum().replace(0, np.nan)
-    ).fillna(1.0).clip(upper=3.0)
-
-    df.dropna(inplace=True)
-    return df
+        st.info("Input your universe parameters and select 'Run Scan' above to process trend scores.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Vectorized pillar scoring  (Gemini-style np.where chains — fast)
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 2 — DEEP DIVE
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_deep:
+    st.subheader("Single Stock Deep Dive")
 
-def _score_all_pillars(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute all 4 pillar scores for every row in one vectorized pass."""
-    c = df  # alias for brevity
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        dd_ticker = st.text_input("Ticker", value="RELIANCE.NS").upper().strip()
+    with col2:
+        dd_period = st.selectbox("History", ["1y", "2y", "5y"], index=1, key="dd_period")
+    with col3:
+        st.write("")
+        st.write("")
+        run_deep = st.button("▶ Analyse", use_container_width=True, type="primary")
 
-    # ── P1: Trend Strength (max 22.5) ─────────────────────────────────────────
-    p1_align = np.where(
-        (c["Close"] > c["SMA20"]) & (c["SMA20"] > c["SMA50"]) & (c["SMA50"] > c["SMA200"]), 12.0,
-        np.where((c["Close"] > c["SMA50"]) & (c["SMA50"] > c["SMA200"]), 8.0,
-        np.where(c["Close"] > c["SMA200"], 4.0, 0.0)))
+    if run_deep and dd_ticker:
+        with st.spinner(f"Scoring {dd_ticker}…"):
+            try:
+                df_raw  = fetch_data(dd_ticker, period=dd_period)
+                df_ind  = add_indicators(df_raw)
+                df_tqs  = _score_all_pillars(df_ind).dropna(subset=["TQS"])
+                latest  = score_ticker(dd_ticker, period=dd_period)
+                st.session_state["tqs_deep"] = (df_tqs, latest)
+            except Exception as e:
+                st.error(f"Could not score {dd_ticker}: {e}")
 
-    p1_adx = np.where(c["ADX"] > 40, 6.0,
-             np.where(c["ADX"] > 30, 4.5,
-             np.where(c["ADX"] > 25, 3.0,
-             np.where(c["ADX"] >= 20, 1.5, 0.0))))
+    if "tqs_deep" in st.session_state:
+        df_tqs, r = st.session_state["tqs_deep"]
 
-    p1_slope = np.where(c["SMA200_Slope"] > 0.05, 4.5,
-               np.where(c["SMA200_Slope"] > 0.01, 2.5,
-               np.where(c["SMA200_Slope"] >= 0.0, 1.0, 0.0)))
+        # ── Scorecard header ──────────────────────────────────────────────────
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("TQS", f"{r.tqs:.1f} / 90")
+        c2.metric("Grade", r.grade())
+        c3.metric("Signal", r.signal())
+        c4.metric("RSI", f"{r.rsi:.1f}")
+        c5.metric("ADX", f"{r.adx:.1f}")
 
-    p1 = p1_align + p1_adx + p1_slope
+        st.divider()
 
-    # ── P2: Trend Persistence (max 22.5) ──────────────────────────────────────
-    p2_s5 = np.where(c["Sharpe_5"] > 2.0, 5.0,
-            np.where(c["Sharpe_5"] >= 1.0, 3.75,
-            np.where(c["Sharpe_5"] >= 0.0, 2.5,
-            np.where(c["Sharpe_5"] >= -1.0, 1.25, 0.0))))
+        # ── Pillar gauges ─────────────────────────────────────────────────────
+        st.markdown("**Pillar breakdown**")
+        cols = st.columns(4)
+        pillar_data = [
+            ("P1 Trend Strength",    r.p1, "#3b82f6"),
+            ("P2 Trend Persistence", r.p2, "#10b981"),
+            ("P3 Momentum Quality",  r.p3, "#f59e0b"),
+            ("P4 Tech Confirmation", r.p4, "#8b5cf6"),
+        ]
+        for col, (label, score, colour) in zip(cols, pillar_data):
+            fig_g = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=score,
+                title={"text": label, "font": {"size": 12}},
+                gauge={
+                    "axis": {"range": [0, 22.5], "tickfont": {"size": 10}},
+                    "bar":  {"color": colour},
+                    "steps": [
+                        {"range": [0, 7.5],   "color": "rgba(241, 245, 249, 0.5)"},
+                        {"range": [7.5, 15],  "color": "rgba(226, 232, 240, 0.5)"},
+                        {"range": [15, 22.5], "color": "rgba(203, 213, 225, 0.5)"},
+                    ],
+                },
+                number={"suffix": "/22.5", "font": {"size": 16}},
+            ))
+            fig_g.update_layout(
+                height=180, 
+                margin=dict(t=30, b=10, l=15, r=15),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
+            )
+            col.plotly_chart(fig_g, use_container_width=True)
 
-    p2_s20 = np.where(c["Sharpe_20"] > 2.0, 10.0,
-             np.where(c["Sharpe_20"] >= 1.5, 8.0,
-             np.where(c["Sharpe_20"] >= 1.0, 6.0,
-             np.where(c["Sharpe_20"] >= 0.0, 3.0,
-             np.where(c["Sharpe_20"] >= -1.0, 1.0, 0.0)))))
+        # ── TQS time-series chart ─────────────────────────────────────────────
+        st.markdown("**TQS over time**")
+        fig_ts = go.Figure()
 
-    p2_s60 = np.where(c["Sharpe_60"] > 2.0, 7.5,
-             np.where(c["Sharpe_60"] >= 1.5, 6.0,
-             np.where(c["Sharpe_60"] >= 1.0, 4.5,
-             np.where(c["Sharpe_60"] >= 0.0, 2.25,
-             np.where(c["Sharpe_60"] >= -1.0, 0.75, 0.0)))))
-
-    p2 = p2_s5 + p2_s20 + p2_s60
-
-    # ── P3: Momentum Quality (max 22.5) ───────────────────────────────────────
-    p3_rsi = np.where((c["RSI"] >= 55) & (c["RSI"] <= 70), 13.5,
-             np.where((c["RSI"] >= 45) & (c["RSI"] < 55), 9.0,
-             np.where((c["RSI"] > 70) & (c["RSI"] <= 80), 6.75,
-             np.where((c["RSI"] >= 30) & (c["RSI"] < 45), 4.5,
-             np.where(c["RSI"] > 80, 2.25, 0.0)))))
-
-    is_bull     = c["MACD"] > c["MACD_Sig"]
-    hist_pos    = c["MACD_Hist"] > 0
-    hist_rising = c["MACD_Hist_Delta"] > 0
-    # "approaching cross": histogram near zero relative to its own recent noise
-    hist_std5   = c["MACD_Hist"].rolling(5).std().fillna(0)
-    near_cross  = (c["MACD_Hist"].abs() < hist_std5) & (hist_std5 > 0)
-
-    p3_macd = np.where(is_bull & hist_pos & hist_rising, 9.0,
-              np.where(is_bull & hist_pos, 6.75,
-              np.where(is_bull, 4.5,
-              np.where(near_cross, 2.25, 0.0))))
-
-    p3 = p3_rsi + p3_macd
-
-    # ── P4: Technical Confirmation (max 22.5) ─────────────────────────────────
-    p4_z = np.where(c["OBV_Z"] >= 2.0, 13.5,
-           np.where(c["OBV_Z"] >= 1.0, 10.125,
-           np.where(c["OBV_Z"] >= 0.0, 6.75,
-           np.where(c["OBV_Z"] >= -1.0, 3.375, 0.0))))
-
-    p4_slope = np.where(c["OBV_Slope_PctRank"] >= 0.75, 5.625,
-               np.where(c["OBV_Slope_PctRank"] >= 0.50, 3.75,
-               np.where(c["OBV_Slope_PctRank"] >= 0.25, 1.875, 0.0)))
-
-    p4_ratio = np.where(c["Vol_Ratio"] > 1.5, 3.375,
-               np.where(c["Vol_Ratio"] > 1.2, 2.25,
-               np.where(c["Vol_Ratio"] >= 1.0, 1.125, 0.0)))
-
-    p4 = p4_z + p4_slope + p4_ratio
-
-    out = df[["Close"]].copy()
-    out["P1_Strength"]     = p1.round(3)
-    out["P2_Persistence"]  = p2.round(3)
-    out["P3_Momentum"]     = p3.round(3)
-    out["P4_Confirmation"] = p4.round(3)
-    out["TQS"]             = (p1 + p2 + p3 + p4).round(2)
-    out["RSI"]             = df["RSI"].round(2)
-    out["ADX"]             = df["ADX"].round(2)
-    out["Sharpe_20"]       = df["Sharpe_20"].round(3)
-    out["OBV_Z"]           = df["OBV_Z"].round(3)
-    return out
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Result dataclass
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class TQSResult:
-    ticker:     str
-    date:       str
-    close:      float
-    tqs:        float
-    p1:         float
-    p2:         float
-    p3:         float
-    p4:         float
-    rsi:        float
-    adx:        float
-    sharpe_20:  float
-    obv_z:      float
-
-    def grade(self) -> str:
-        for thresh, g in [(80,"A+"), (70,"A"), (55,"B"), (40,"C"), (25,"D")]:
-            if self.tqs >= thresh: return g
-        return "F"
-
-    def signal(self) -> str:
-        if self.tqs >= 75: return "STRONG TREND"
-        if self.tqs >= 60: return "TRENDING"
-        if self.tqs >= 45: return "NEUTRAL"
-        if self.tqs >= 30: return "WEAK"
-        return "AVOID"
-
-    def as_dict(self) -> Dict:
-        return {
-            "ticker": self.ticker, "date": self.date, "close": self.close,
-            "tqs": self.tqs, "grade": self.grade(), "signal": self.signal(),
-            "p1_strength": self.p1, "p2_persistence": self.p2,
-            "p3_momentum": self.p3, "p4_confirmation": self.p4,
-            "rsi": self.rsi, "adx": self.adx,
-            "sharpe_20": self.sharpe_20, "obv_z": self.obv_z,
-        }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Public API
-# ─────────────────────────────────────────────────────────────────────────────
-
-def score_ticker(
-    ticker: str,
-    period: str = "2y",
-    last_n: int = 1,
-) -> "TQSResult | List[TQSResult]":
-    """Score one ticker. Returns TQSResult or list of last_n results."""
-    df_raw = fetch_data(ticker, period=period)
-    df_ind = add_indicators(df_raw)
-    df_tqs = _score_all_pillars(df_ind)
-
-    results = []
-    for idx, row in df_tqs.tail(last_n).iterrows():
-        results.append(TQSResult(
-            ticker=ticker, date=str(idx.date()),
-            close=float(row["Close"]), tqs=float(row["TQS"]),
-            p1=float(row["P1_Strength"]), p2=float(row["P2_Persistence"]),
-            p3=float(row["P3_Momentum"]), p4=float(row["P4_Confirmation"]),
-            rsi=float(row["RSI"]), adx=float(row["ADX"]),
-            sharpe_20=float(row["Sharpe_20"]), obv_z=float(row["OBV_Z"]),
+        fig_ts.add_trace(go.Scatter(
+            x=df_tqs.index, y=df_tqs["TQS"],
+            name="TQS", line=dict(color="#3b82f6", width=2),
+            fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
         ))
-    return results[0] if last_n == 1 else results
 
+        # Reference bands
+        for y_val, label, colour in [
+            (75, "Strong Trend", "#16a34a"),
+            (60, "Trending",     "#65a30d"),
+            (45, "Neutral",      "#ca8a04"),
+            (30, "Weak",         "#ea580c"),
+        ]:
+            fig_ts.add_hline(
+                y=y_val, line_dash="dot", line_color=colour, line_width=1,
+                annotation_text=label, annotation_position="right",
+                annotation_font_color=colour,
+            )
 
-def scan_universe(tickers: List[str], period: str = "1y") -> pd.DataFrame:
-    """Score all tickers, return DataFrame sorted by TQS descending."""
-    rows = []
-    for t in tickers:
-        try:
-            r = score_ticker(t, period=period)
-            rows.append(r.as_dict())
-            print(f"  ✓ {t:20s}  TQS={r.tqs:5.1f}  [{r.grade()}]  {r.signal()}")
-        except Exception as e:
-            print(f"  ✗ {t:20s}  skipped: {e}")
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows).sort_values("tqs", ascending=False).reset_index(drop=True)
+        fig_ts.update_layout(
+            xaxis_title="Date", yaxis_title="TQS",
+            yaxis_range=[0, 95],
+            legend=dict(orientation="h"),
+            margin=dict(t=20, b=40, l=10, r=10),
+            height=360,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
+        st.plotly_chart(fig_ts, use_container_width=True)
 
+        # ── Pillar time-series ────────────────────────────────────────────────
+        st.markdown("**Pillar scores over time**")
+        fig_p = go.Figure()
+        for col_name, label, colour in [
+            ("P1_Strength",     "P1 Strength",    "#3b82f6"),
+            ("P2_Persistence",  "P2 Persistence", "#10b981"),
+            ("P3_Momentum",     "P3 Momentum",    "#f59e0b"),
+            ("P4_Confirmation", "P4 Volume",      "#8b5cf6"),
+        ]:
+            if col_name in df_tqs.columns:
+                fig_p.add_trace(go.Scatter(
+                    x=df_tqs.index, y=df_tqs[col_name],
+                    name=label, line=dict(color=colour, width=1.5),
+                ))
+        fig_p.update_layout(
+            xaxis_title="Date", yaxis_title="Pillar Score",
+            yaxis_range=[0, 24],
+            legend=dict(orientation="h"),
+            margin=dict(t=20, b=40, l=10, r=10),
+            height=300,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
+        st.plotly_chart(fig_p, use_container_width=True)
 
-def print_report(r: TQSResult) -> None:
-    bar = lambda v, mx: "█" * int(v / mx * 20) + "░" * (20 - int(v / mx * 20))
-    print(f"\n{'━'*56}")
-    print(f"  TQS Report — {r.ticker}  [{r.date}]")
-    print(f"{'━'*56}")
-    print(f"  Close:    ₹{r.close:>10,.2f}")
-    print(f"  Grade:    {r.grade():<4}  Signal: {r.signal()}")
-    print(f"\n  TQS Total   {r.tqs:5.1f}/90   {bar(r.tqs, 90)}")
-    print(f"  P1 Strength {r.p1:5.1f}/22.5 {bar(r.p1, 22.5)}")
-    print(f"  P2 Persist  {r.p2:5.1f}/22.5 {bar(r.p2, 22.5)}")
-    print(f"  P3 Momentum {r.p3:5.1f}/22.5 {bar(r.p3, 22.5)}")
-    print(f"  P4 Volume   {r.p4:5.1f}/22.5 {bar(r.p4, 22.5)}")
-    print(f"\n  RSI:      {r.rsi:5.1f}    ADX:      {r.adx:5.1f}")
-    print(f"  Sharpe20: {r.sharpe_20:5.2f}    OBV Z:    {r.obv_z:5.2f}")
-    print(f"{'━'*56}\n")
+        # ── Key indicator table ───────────────────────────────────────────────
+        st.markdown("**Latest indicator values**")
+        
+        # Safe checks for metric validation
+        rsi_val = getattr(r, 'rsi', 50.0)
+        adx_val = getattr(r, 'adx', 20.0)
+        sharpe_val = getattr(r, 'sharpe_20', 0.0)
+        obv_val = getattr(r, 'obv_z', 0.0)
 
+        ind_data = {
+            "Indicator":  ["RSI-14", "ADX-14", "Sharpe 20d", "OBV Z-score"],
+            "Value":      [f"{rsi_val:.1f}", f"{adx_val:.1f}",
+                           f"{sharpe_val:.2f}", f"{obv_val:.2f}"],
+            "Interpretation": [
+                "55–70 = steady grind (best zone)" if 55 <= rsi_val <= 70
+                else "Overbought — caution" if rsi_val > 80
+                else "Oversold" if rsi_val < 30 else "Neutral",
+                "Strong trend (>30)" if adx_val > 30
+                else "Trend present (>25)" if adx_val > 25 else "No clear trend",
+                "Strong risk-adj momentum (>1.5)" if sharpe_val > 1.5
+                else "Positive" if sharpe_val > 0 else "Negative momentum",
+                "Accumulation (>1)" if obv_val > 1
+                else "Distribution (<-1)" if obv_val < -1 else "Neutral",
+            ],
+        }
+        st.dataframe(pd.DataFrame(ind_data), use_container_width=True, hide_index=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    TICKER = "RELIANCE.NS"
-    print(f"Scoring {TICKER}...")
-    result = score_ticker(TICKER, period="2y")
-    print_report(result)
-
-    # Last 5 days (useful for backtesting)
-    history = score_ticker(TICKER, period="2y", last_n=5)
-    print("Last 5 sessions:")
-    for h in history:
-        print(f"  {h.date}  TQS={h.tqs:5.1f}  P1={h.p1:.1f} "
-              f"P2={h.p2:.1f} P3={h.p3:.1f} P4={h.p4:.1f}  {h.signal()}")
-
-    # Universe scan
-    NIFTY_SAMPLE = [
-        "RELIANCE.NS", "TCS.NS",       "HDFCBANK.NS",  "INFY.NS",
-        "ICICIBANK.NS","HINDUNILVR.NS", "ITC.NS",       "SBIN.NS",
-        "BHARTIARTL.NS","KOTAKBANK.NS", "AXISBANK.NS",  "WIPRO.NS",
-    ]
-    print(f"\nScanning {len(NIFTY_SAMPLE)} stocks...\n")
-    scan_df = scan_universe(NIFTY_SAMPLE, period="1y")
-    print("\n" + "─" * 90)
-    print(scan_df[[
-        "ticker","close","tqs","grade","signal",
-        "p1_strength","p2_persistence","p3_momentum","p4_confirmation",
-        "rsi","sharpe_20","obv_z"
-    ]].to_string(index=False))
+        # ── Download ──────────────────────────────────────────────────────────
+        st.download_button(
+            "⬇ Download TQS history CSV",
+            data=df_tqs.reset_index().to_csv(index=False),
+            file_name=f"tqs_{dd_ticker}.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Input a valid symbol (e.g., RELIANCE.NS) and select 'Analyse' to load the historical deep dive.")
