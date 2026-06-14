@@ -290,7 +290,7 @@ def score_ticker(
     an internal lookback padding. Returns TQSResult or list of last_n results.
     """
     # Map requested timeframe to padded timeframe for warm indicator states
-    warm_periods = {"1y": "2y", "2y": "3y", "5y": "6y"}
+    warm_periods = {"1y": "2y", "2y": "5y", "5y": "max"}
     padded_period = warm_periods.get(period, period)
 
     df_raw = fetch_data(ticker, period=padded_period)
