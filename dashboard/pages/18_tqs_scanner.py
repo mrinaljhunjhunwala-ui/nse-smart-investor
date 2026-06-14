@@ -196,7 +196,7 @@ with tab_scan:
             )
             st.dataframe(styled, use_container_width=True, height=500)
 
-            # ── Pillar radar / bar chart ──────────────────────────────────────
+            # ── Pillar breakdown — top 10 ─────────────────────────────────────
             st.subheader("Pillar breakdown — top 10")
             top10 = df_scan.head(10)
             fig = go.Figure()
@@ -246,7 +246,25 @@ with tab_deep:
 
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        dd_ticker = st.text_input("Ticker", value="RELIANCE.NS").upper().strip()
+        # Retrieve the user's active watchlist from session state
+        watchlist_tickers = st.session_state.get("watchlist", [])
+        
+        # Combine the watchlist and DEFAULT_TICKERS, removing duplicates
+        available_tickers = list(dict.fromkeys(watchlist_tickers + DEFAULT_TICKERS))
+        
+        # 1. Dropdown Selector
+        dd_ticker_selected = st.selectbox("Select Ticker", options=available_tickers, index=0)
+        
+        # 2. Autocomplete override
+        custom_ticker = st.text_input(
+            "Or enter a custom ticker (e.g. WIPRO.NS)", 
+            value="", 
+            placeholder="Type here to override dropdown selection"
+        ).upper().strip()
+        
+        # Resolve the active ticker: use custom input if populated, else the dropdown
+        dd_ticker = custom_ticker if custom_ticker else dd_ticker_selected
+
     with col2:
         dd_period = st.selectbox("History", ["1y", "2y", "5y"], index=1, key="dd_period")
     with col3:
@@ -405,4 +423,4 @@ with tab_deep:
             mime="text/csv",
         )
     else:
-        st.info("Input a valid symbol (e.g., RELIANCE.NS) and select 'Analyse' to load the historical deep dive.")
+        st.info("Select a stock from the dropdown above or enter a custom symbol, then click 'Analyse'.")
