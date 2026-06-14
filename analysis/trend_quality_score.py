@@ -20,10 +20,17 @@ from __future__ import annotations
 import warnings
 warnings.filterwarnings("ignore")
 
+import os
+import sys
+
+# ── Ensure project root is on sys.path so data.fetcher resolves correctly ────
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
-import yfinance as yf
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -31,18 +38,31 @@ pd.options.mode.chained_assignment = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Data fetching
+# Data fetching — uses existing tiered fetcher (Angel One → Stooq → Yahoo)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_data(ticker: str, period: str = "5y") -> pd.DataFrame:
-    """Fetch OHLCV via yfinance download() — more reliable than .history()."""
-    df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0] for c in df.columns]
-    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    """
+    Use the repo's tiered data fetcher so TQS benefits from Angel One
+    live data automatically when credentials are configured.
+    Falls back to Stooq → Yahoo if Angel One is unavailable.
+    """
+    try:
+        from data.fetcher import fetch_single
+        df = fetch_single(ticker, period=period)
+    except Exception:
+        # Hard fallback to yfinance if fetcher itself is unavailable
+        import yfinance as yf
+        df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0] for c in df.columns]
+
+    if df is None or df.empty:
+        raise ValueError(f"{ticker}: no data returned")
     if len(df) < 252:
         raise ValueError(f"{ticker}: need ≥252 rows, got {len(df)}")
-    return df
+
+    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
