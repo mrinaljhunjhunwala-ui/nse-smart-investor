@@ -172,20 +172,21 @@ with tab_scan:
             # Sub-select columns present in DataFrame to avoid KeyError issues
             actual_cols = [col for col in display_cols if col in df_scan.columns]
             
+            # Create a clean, renamed dataframe first to simplify styled subset references
+            df_display = df_scan[actual_cols].rename(columns={
+                "ticker": "Ticker", "close": "Close", "tqs": "TQS",
+                "grade": "Grade", "signal": "Signal",
+                "p1_strength": "P1 Strength", "p2_persistence": "P2 Persist",
+                "p3_momentum": "P3 Momentum", "p4_confirmation": "P4 Volume",
+                "rsi": "RSI", "sharpe_20": "Sharpe20", "obv_z": "OBV-Z",
+            })
+
             # Format and apply styling safely
             styled = (
-                df_scan[actual_cols]
-                .rename(columns={
-                    "ticker": "Ticker", "close": "Close", "tqs": "TQS",
-                    "grade": "Grade", "signal": "Signal",
-                    "p1_strength": "P1 Strength", "p2_persistence": "P2 Persist",
-                    "p3_momentum": "P3 Momentum", "p4_confirmation": "P4 Volume",
-                    "rsi": "RSI", "sharpe_20": "Sharpe20", "obv_z": "OBV-Z",
-                })
-                .style
-                .map(_colour_signal, subset=["Signal"] if "Signal" in df_scan.columns or "signal" in actual_cols else [])
-                .map(_colour_grade,  subset=["Grade"] if "Grade" in df_scan.columns or "grade" in actual_cols else [])
-                .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"] if "TQS" in df_scan.columns or "tqs" in actual_cols else [])
+                df_display.style
+                .map(_colour_signal, subset=["Signal"] if "Signal" in df_display.columns else [])
+                .map(_colour_grade,  subset=["Grade"] if "Grade" in df_display.columns else [])
+                .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"] if "TQS" in df_display.columns else [])
                 .format({
                     "Close": "₹{:,.2f}", "TQS": "{:.1f}",
                     "P1 Strength": "{:.1f}", "P2 Persist": "{:.1f}",
