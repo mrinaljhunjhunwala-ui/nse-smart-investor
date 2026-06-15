@@ -343,7 +343,10 @@ def get_vix_info():
         return {"vix": 18.0, "regime": "normal", "allow_buy": True, "vix_pct_chg": 0.0}
 
 
-@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache — powers Command Centre
+# PATCH 3a: TTL reduced from 1800 → 300 (5 min) so single-stock scores
+# used by the watchlist stay near-live during market hours instead of
+# showing 30-min-old data.
+@st.cache_data(ttl=300, show_spinner=False)
 def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
     """Score one stock for Command Centre. Pass vix_regime so we don't re-fetch VIX 5×."""
     try:
@@ -370,11 +373,13 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
         }
 
 
-@st.cache_data(ttl=300, show_spinner=False)   # 30-min cache, whole watchlist
+# PATCH 3b: TTL reduced from 1800 → 300 (5 min) — watchlist scores now
+# refresh every 5 min during market hours, matching Top Picks cadence.
+@st.cache_data(ttl=300, show_spinner=False)
 def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: tuple = ()) -> dict:
     """
     Score a whole watchlist IN PARALLEL (one thread per stock) and cache the
-    result for 30 min. Calls score_stock directly (not the cached single-stock
+    result for 5 min. Calls score_stock directly (not the cached single-stock
     wrapper) so it is safe to run inside worker threads. Sector strength is
     folded in via sector_ranks. Returns {ticker: score_dict}.
     """
@@ -440,6 +445,9 @@ def _sector_df_from_tuple(sector_ranks: tuple):
         return None
 
 
+# PATCH 3c: TTL reduced from 1800 → 300 (5 min) so Top Picks auto-refresh
+# every 5 min during market hours without needing a manual "Scan Now" click.
+# First scan still takes ~2 min; every reload within 5 min is instant from cache.
 # FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
 # the cached result to be wrapped in an extra layer and never properly invalidated).
 @st.cache_data(ttl=300, show_spinner=False)
@@ -452,8 +460,9 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
     sentiment AND sector strength (via sector_ranks) — "self-analysis +
     volatility" in one number. Returns {"buys": [...], "sells": [...]}.
 
-    Cached 30 min: the first scan takes ~2 min (parallelised), every rerun after
-    that is instant until the cache expires or is cleared.
+    Cached 5 min: the first scan takes ~2 min (parallelised), every rerun
+    within 5 min is instant. Cache auto-expires so picks stay live during
+    market hours without needing a manual "Scan Now" click.
     """
     import concurrent.futures as _cf
     import sys, os as _os
