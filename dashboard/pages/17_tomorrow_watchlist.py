@@ -57,6 +57,13 @@ def _render_cards(items, kind, key_prefix):
     for _it in items:
         _lbl = _it["ticker"].replace(".NS", "")
         _tt_lbl, _tt_emo, _tt_col = _trade_type(_it.get("headline", ""))
+
+        # Build entry/SL/TP line safely — guard against None values
+        _entry = _it.get("entry") or 0
+        _sl    = _it.get("sl")    or 0
+        _tp    = _it.get("tp")    or 0
+        _show_levels = _entry > 0 and _sl > 0 and _tp > 0
+
         st.markdown(
             f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
             f'border-radius:10px;padding:11px 14px;margin-bottom:6px">'
@@ -69,37 +76,42 @@ def _render_cards(items, kind, key_prefix):
             f'{_it["signal_type"]} · key level {_it["key_level"]}</div>'
             f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_it["headline"]}</div>'
             + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-               f'Entry ₹{_it["entry"]:,.2f} · SL ₹{_it["sl"]:,.2f} · TP ₹{_it["tp"]:,.2f}</div>'
-               if _it.get("entry") else "")
+               f'Entry ₹{_entry:,.2f} · SL ₹{_sl:,.2f} · TP ₹{_tp:,.2f}</div>'
+               if _show_levels else "")
             + '</div>',
             unsafe_allow_html=True,
         )
-        if _it.get("entry"):
+        if _show_levels:
             _paper_trade_popover(
-                _it["ticker"], _it["entry"], _it["sl"], _it["tp"],
+                _it["ticker"], _entry, _sl, _tp,
                 reason=f"Tomorrow Watch ({_it['signal_type']}): {_it['headline'][:45]}",
                 key=f"{key_prefix}_{_it['ticker']}",
                 label=f"📌 Paper Trade {_lbl}",
             )
 
 
+# ── Show counts from the watchlist dict (populated by the fixed thresholds) ──
+_n_brk = len(_wl.get("breakout_candidates", []))
+_n_bdn = len(_wl.get("breakdown_watch",     []))
+_n_rev = len(_wl.get("reversal_watch",      []))
+
 _t1, _t2, _t3 = st.tabs([
-    f"🚀 Breakout Watch ({len(_wl['breakout_candidates'])})",
-    f"🔻 Breakdown Watch ({len(_wl['breakdown_watch'])})",
-    f"🔄 Reversal Watch ({len(_wl['reversal_watch'])})",
+    f"🚀 Breakout Watch ({_n_brk})",
+    f"🔻 Breakdown Watch ({_n_bdn})",
+    f"🔄 Reversal Watch ({_n_rev})",
 ])
 with _t1:
     st.caption("Constructive setups approaching resistance with momentum & volume building — "
                "watch for a breakout at next open.")
-    _render_cards(_wl["breakout_candidates"], "breakout", "tw_brk")
+    _render_cards(_wl.get("breakout_candidates", []), "breakout", "tw_brk")
 with _t2:
     st.caption("Weak names below key moving averages with distribution volume — watch for a "
                "breakdown / avoid fresh longs.")
-    _render_cards(_wl["breakdown_watch"], "breakdown", "tw_bdn")
+    _render_cards(_wl.get("breakdown_watch", []), "breakdown", "tw_bdn")
 with _t3:
     st.caption("Divergences — price and momentum disagreeing (a potential turn). Confirm before "
                "acting; these are watch-only, not signals.")
-    _render_cards(_wl["reversal_watch"], "reversal", "tw_rev")
+    _render_cards(_wl.get("reversal_watch", []), "reversal", "tw_rev")
 
 st.markdown("---")
 st.caption("⚠️ Educational watchlist on end-of-day signals — not investment advice. "
