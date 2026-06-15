@@ -241,6 +241,11 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
     """
     Open-a-paper-trade popover that enters at the live market price by default.
     Preserves analysis SL/TP distances so R:R stays identical under re-anchoring.
+
+    FIX: Account selector is now rendered INSIDE the popover so the user can
+    choose which paper account to book the trade into. Previously the popover
+    always silently fell back to session_state["pt_account"] (usually "My Account")
+    with no way to change it mid-flow.
     """
     _tlbl = ticker.replace(".NS", "")
     _cap  = float(st.session_state.get("trade_capital", 500_000.0))
@@ -252,6 +257,28 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
 
     with st.popover(label, use_container_width=True):
         st.markdown(f"**{_tlbl}** — open paper trade")
+
+        # ── PATCH 1: Account selector ─────────────────────────────────────
+        # Render a selectbox so the user picks the destination account.
+        # Previously this was read silently from session_state and never shown,
+        # meaning the trade always landed in "My Account" regardless of intent.
+        _acct_list = paper_list_accounts()
+        _default_acct = st.session_state.get("pt_account", "My Account")
+        _default_idx  = (_acct_list.index(_default_acct)
+                         if _default_acct in _acct_list else 0)
+        _selected_acct = st.selectbox(
+            "Account",
+            options=_acct_list,
+            index=_default_idx,
+            key=f"{key}_acct",
+            help="Choose which paper trading account to book this trade into.",
+        )
+        _acct_type = paper_account_type(_selected_acct)
+        _acct_type_label = ("⏱ Intraday (MIS) — auto squared off at 15:15"
+                            if _acct_type == "MIS"
+                            else "📦 Delivery (CNC) — held until you close manually")
+        st.caption(f"Account type: **{_acct_type_label}** · Change in Paper Trades → Accounts.")
+        # ── END PATCH 1 ──────────────────────────────────────────────────
 
         _live = _live_quote_price(ticker)
         _default_entry = _live if (_live and _live > 0) else _analysis_entry
@@ -268,7 +295,7 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
         else:
             st.caption("⚠️ Live price unavailable — using the analysis entry. "
                        "Verify before trusting the fill.")
-            
+
         entry_use = st.number_input(
             "Entry price (₹) — defaults to LIVE, editable for a limit",
             min_value=0.01, value=round(float(_default_entry or 0.01), 2),
@@ -302,8 +329,11 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
                      type="primary", use_container_width=True):
             _id = paper_open_trade(
                 ticker, float(entry_use), int(qty), sl=sl_use, tp=tp_use, reason=reason,
-                account=st.session_state.get("pt_account", "My Account"),            )
-            st.toast(f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f}", icon="✅")
+                # PATCH 1: use _selected_acct from the selectbox above, not session_state
+                account=_selected_acct,
+            )
+            st.toast(f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f} "
+                     f"in '{_selected_acct}'", icon="✅")
             st.cache_data.clear()
             st.rerun()
 
