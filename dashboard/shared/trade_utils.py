@@ -268,6 +268,33 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
         else:
             st.caption("⚠️ Live price unavailable — using the analysis entry. "
                        "Verify before trusting the fill.")
+            # ── Account selector ───────────────────────────────────────────────
+_acct_list = paper_list_accounts()
+
+if not _acct_list:
+    _acct_list = ["My Account"]
+
+_default_acct = st.session_state.get("pt_account", "My Account")
+
+try:
+    _default_idx = _acct_list.index(_default_acct)
+except ValueError:
+    _default_idx = 0
+
+_selected_acct = st.selectbox(
+    "Paper trading account",
+    options=_acct_list,
+    index=_default_idx,
+    key=f"{key}_acct",
+)
+
+_acct_type_label = paper_account_type(_selected_acct)
+
+st.caption(
+    f"Account type: **{_acct_type_label}** "
+    f"({'Intraday — auto squared off at 15:15' if _acct_type_label == 'MIS' else 'Delivery — held until you close'}) "
+    f"· Change in Paper Trades → Accounts."
+)
 
         entry_use = st.number_input(
             "Entry price (₹) — defaults to LIVE, editable for a limit",
@@ -302,8 +329,7 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
                      type="primary", use_container_width=True):
             _id = paper_open_trade(
                 ticker, float(entry_use), int(qty), sl=sl_use, tp=tp_use, reason=reason,
-                account=st.session_state.get("pt_account", "My Account"),
-            )
+                account=_selected_acct,            )
             st.toast(f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f}", icon="✅")
             st.cache_data.clear()
             st.rerun()
