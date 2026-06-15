@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import plotly.io as pio
 from plotly.subplots import make_subplots
+from typing import Optional
 import streamlit as st
 _log = logging.getLogger("dashboard.trade_utils")
 warnings.filterwarnings('ignore')
@@ -26,11 +27,6 @@ def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
         except Exception as _e:
             _log.warning("trade_utils.%s degraded: %s", "load_trades_db", _e)
             return pd.DataFrame()
-
-
-# ── Paper-trade storage — delegates to trade_store (SQLite default, Postgres
-#    if DATABASE_URL/secrets configured). `path` kept for signature compat. ────
-import trade_store as _store
 
 
 def load_trades_by_account(account: str, path: str = "trades.db") -> pd.DataFrame:
@@ -84,7 +80,6 @@ def paper_rename_account(old_name: str, new_name: str, path: str = "trades.db"):
         reg.discard(old_name)
         reg.add(new_name)
         _store.kv_set("paper_accounts", sorted(reg))
-        # carry the account type (MIS/CNC) over to the new name
         _store.kv_set(f"acct_type:{new_name}", paper_account_type(old_name))
     except Exception as _e:
         _log.debug("trade_utils.paper_rename_account registry degraded: %s", _e)
@@ -135,7 +130,6 @@ def set_paper_account_type(name: str, atype: str) -> None:
     try:
         _store.kv_set(f"acct_type:{name}", "MIS" if str(atype).upper().startswith("MIS")
                       or "INTRA" in str(atype).upper() else "CNC")
-        # Register so a newly created (still empty) account is listed/selectable
         _register_paper_account(name)
     except Exception as _e:
         _log.debug("trade_utils.%s degraded: %s", "set_paper_account_type", _e)
@@ -184,7 +178,7 @@ def _grade_color(grade: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Position sizing — risk-based qty suggestion (used by auto-open paper trades)
+# Position sizing — risk-based qty suggestion
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _suggest_position(entry: float, sl: float,
@@ -193,14 +187,8 @@ def _suggest_position(entry: float, sl: float,
                       max_alloc_pct: float = 20.0) -> dict:
     """
     Suggest share quantity for a trade using fixed-fractional risk sizing.
-
     Sizes so that (entry - sl) × qty ≈ risk_pct% of capital, then caps the
     position at max_alloc_pct% of capital so a single name can't dominate.
-
-    capital / risk_pct default to the user's settings in session_state
-    (set in the sidebar), falling back to ₹5,00,000 and 1%.
-
-    Returns: {qty, price, risk_per_share, capital_at_risk, position_value, basis}
     """
     if capital is None:
         capital = float(st.session_state.get("trade_capital", 500_000.0))
@@ -218,10 +206,9 @@ def _suggest_position(entry: float, sl: float,
         qty_risk = int(risk_amount / rps)
         basis = f"{risk_pct:.0f}% risk (₹{risk_amount:,.0f}) ÷ ₹{rps:.2f}/share"
     else:
-        qty_risk = int(risk_amount / entry)   # no valid stop → notional sizing
+        qty_risk = int(risk_amount / entry)
         basis = "notional (no valid stop)"
 
-    # Cap at max allocation
     qty_cap = int((capital * max_alloc_pct / 100.0) / entry)
     qty = max(1, min(qty_risk, qty_cap))
     if qty == qty_cap < qty_risk:
@@ -252,29 +239,20 @@ def _live_quote_price(ticker: str) -> Optional[float]:
 def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
                          reason: str, key: str, label: str = "📌 Paper Trade") -> None:
     """
-    Open-a-paper-trade popover that enters at the **live market price** by default.
-
-    Why: the analysis entry/SL/TP come from the last *daily close*. If you open a
-    trade at that stale price while the market has moved, the position shows a
-    phantom gain/loss from the first tick. So we fetch the live LTP, default the
-    entry to it, and re-anchor SL & TP by preserving the analysis *distances*
-    (entry−SL and TP−entry) — the risk/reward stays identical, but the trade is
-    grounded in the real price you'd actually get. Entry remains editable for
-    limit-style planning. Confirmation uses st.toast so it survives the rerun.
+    Open-a-paper-trade popover that enters at the live market price by default.
+    Preserves analysis SL/TP distances so R:R stays identical under re-anchoring.
     """
     _tlbl = ticker.replace(".NS", "")
     _cap  = float(st.session_state.get("trade_capital", 500_000.0))
     _rkp  = float(st.session_state.get("risk_pct", 1.0))
 
     _analysis_entry = float(entry or 0)
-    # Preserve SL/TP distances from the analysis so R:R is invariant under re-anchoring
     _sl_dist = (_analysis_entry - float(sl)) if (sl and _analysis_entry) else None
     _tp_dist = (float(tp) - _analysis_entry) if (tp and _analysis_entry) else None
 
     with st.popover(label, use_container_width=True):
         st.markdown(f"**{_tlbl}** — open paper trade")
 
-        # Live LTP fetched when the popover opens
         _live = _live_quote_price(ticker)
         _default_entry = _live if (_live and _live > 0) else _analysis_entry
 
@@ -296,7 +274,6 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
             min_value=0.01, value=round(float(_default_entry or 0.01), 2),
             step=0.05, format="%.2f", key=f"{key}_entry",
         )
-        # Re-anchor SL/TP to the chosen entry, preserving the analysis distances
         sl_use = round(entry_use - _sl_dist, 2) if _sl_dist is not None else (float(sl) if sl else 0.0)
         tp_use = round(entry_use + _tp_dist, 2) if _tp_dist is not None else (float(tp) if tp else 0.0)
 
@@ -313,9 +290,9 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
         _val  = qty * entry_use
         _risk = abs(entry_use - (sl_use or entry_use)) * qty
         _c1, _c2, _c3 = st.columns(3)
-        _c1.metric("Entry", f"₹{entry_use:,.2f}")
+        _c1.metric("Entry",    f"₹{entry_use:,.2f}")
         _c2.metric("Position", f"₹{_val:,.0f}")
-        _c3.metric("At Risk", f"₹{_risk:,.0f}")
+        _c3.metric("At Risk",  f"₹{_risk:,.0f}")
         if sl_use or tp_use:
             _rr = ((tp_use - entry_use) / (entry_use - sl_use)
                    if (entry_use - sl_use) > 0.01 and tp_use else 0)
@@ -332,24 +309,62 @@ def _paper_trade_popover(ticker: str, entry: float, sl: float, tp: float,
             st.rerun()
 
 
-def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
-    """
-    Auto-close any OPEN paper trade whose live price has crossed its TP or SL.
-    Paper trades only — never touches real broker positions.
+# ─────────────────────────────────────────────────────────────────────────────
+# Market hours helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-    Only runs during NSE market hours: outside hours the live-price feed falls
-    back to EOD close, which could falsely trip a stop/target. Returns a list of
-    dicts describing what was closed. Caller reruns if the list is non-empty.
-    """
-    closed = []
-    # Guard: only auto-close on live intraday prices, never on stale EOD data
+def _is_market_open() -> bool:
+    """True if NSE is currently in a live session (9:15–15:30 IST, Mon–Fri)."""
     try:
         from utils.market_hours import market_status as _msx
-        if not _msx().get("is_open", False):
-            return closed
-    except Exception as _e:
-        _log.debug("trade_utils.%s degraded: %s", "_auto_close_breached", _e)
+        return bool(_msx().get("is_open", False))
+    except Exception:
         pass
+    # Fallback: manual IST check so a missing/broken module never blocks auto-close
+    import datetime as _dt
+    ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+    if ist.weekday() >= 5:          # Saturday / Sunday
+        return False
+    mins = ist.hour * 60 + ist.minute
+    return 555 <= mins <= 930       # 9:15 AM – 15:30 PM
+
+
+def _is_squareoff_time() -> bool:
+    """True from 15:15 IST onward on weekdays — MIS intraday square-off window."""
+    import datetime as _dt
+    ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+    if ist.weekday() >= 5:
+        return False
+    mins = ist.hour * 60 + ist.minute
+    return mins >= 915              # 15:15 PM
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-close logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
+    """
+    Auto-close OPEN paper trades whose live price has crossed SL or TP.
+
+    Rules:
+    • CNC (delivery) accounts — SL/TP breach only, during live market hours.
+      Prices outside hours are stale EOD; closing on them would be wrong.
+    • MIS (intraday) accounts — SL/TP breach during market hours, AND
+      force-close ALL remaining open MIS positions at 15:15 (square-off),
+      mirroring what brokers do with intraday positions.
+
+    Returns list of dicts describing what was closed.
+    Caller should rerun if the list is non-empty.
+    """
+    closed  = []
+    _open   = _is_market_open()
+    _sqoff  = _is_squareoff_time()
+
+    # Nothing to do outside market hours for any account type
+    if not _open and not _sqoff:
+        return closed
+
     try:
         rows = _store.fetch_open(account)
         if rows.empty:
@@ -359,30 +374,55 @@ def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
         lp   = _portfolio_live_prices(syms)
 
         for _, r in rows.iterrows():
-            tk  = str(r["ticker"])
-            ep  = float(r.get("price", 0) or 0)
-            qty = int(r.get("quantity", 0) or 0)
-            sl  = float(r.get("sl", 0) or 0) or None
-            tp  = float(r.get("tp", 0) or 0) or None
-            cur = lp.get(tk, {}).get("price")
-            if cur is None or ep <= 0:
+            tk        = str(r["ticker"])
+            ep        = float(r.get("price",    0) or 0)
+            qty       = int(  r.get("quantity", 0) or 0)
+            sl        = float(r.get("sl",       0) or 0) or None
+            tp        = float(r.get("tp",       0) or 0) or None
+            trade_id  = int(r["id"])
+            acct      = str(r.get("account", account or "My Account"))
+            acct_type = paper_account_type(acct)   # "MIS" or "CNC"
+            cur       = lp.get(tk, {}).get("price")
+
+            # ── MIS square-off: force-close at live price (or entry fallback) ──
+            if acct_type == "MIS" and _sqoff:
+                exit_px = cur if (cur and cur > 0) else ep
+                paper_close_trade(trade_id, exit_px,
+                                  "Auto square-off: MIS position closed at 15:15")
+                closed.append({
+                    "ticker":  tk.replace(".NS", ""),
+                    "type":    "squareoff",
+                    "exit":    exit_px,
+                    "pnl":     (exit_px - ep) * qty,
+                    "account": acct,
+                })
+                continue   # skip the SL/TP check — already closed
+
+            # ── SL / TP breach — only during live hours with a valid price ──
+            if not _open or cur is None or ep <= 0:
                 continue
 
-            hit = None
+            hit      = None
+            exit_px  = None
+            why      = ""
             if tp and cur >= tp:
-                hit, exit_px, why = "target", tp, "Auto-closed: target reached"
+                hit, exit_px, why = "target", tp,  "Auto-closed: target reached"
             elif sl and cur <= sl:
-                hit, exit_px, why = "stop", sl, "Auto-closed: stop-loss hit"
+                hit, exit_px, why = "stop",   sl,  "Auto-closed: stop-loss hit"
+
             if hit:
-                paper_close_trade(int(r["id"]), exit_px, why, path=path)
+                paper_close_trade(trade_id, exit_px, why)
                 closed.append({
-                    "ticker": tk.replace(".NS", ""), "type": hit,
-                    "exit": exit_px, "pnl": (exit_px - ep) * qty,
-                    "account": str(r.get("account", "My Account")),
+                    "ticker":  tk.replace(".NS", ""),
+                    "type":    hit,
+                    "exit":    exit_px,
+                    "pnl":     (exit_px - ep) * qty,
+                    "account": acct,
                 })
+
     except Exception as _e:
-        _log.debug("trade_utils.%s degraded: %s", "_auto_close_breached", _e)
-        pass
+        _log.warning("trade_utils._auto_close_breached error: %s", _e)
+
     return closed
 
 
@@ -390,26 +430,37 @@ def _render_autoclose_banner(closed: list) -> None:
     """Show a prominent banner listing trades that were just auto-closed."""
     if not closed:
         return
+
+    _TYPE_LABEL = {
+        "target":    "target reached",
+        "stop":      "stop-loss hit",
+        "squareoff": "MIS square-off @ 15:15",
+    }
+    _TYPE_ICON = {
+        "target":    "🎯",
+        "stop":      "🛑",
+        "squareoff": "⏰",
+    }
+
     _rows = ""
     for c in closed:
-        _ic  = "🎯" if c["type"] == "target" else "🛑"
+        _ic  = _TYPE_ICON.get(c["type"], "🔔")
+        _lbl = _TYPE_LABEL.get(c["type"], c["type"])
         _col = "#26a69a" if c["pnl"] >= 0 else "#ef5350"
         _rows += (
             f'<div style="display:flex;justify-content:space-between;'
             f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px">'
             f'<span style="color:#eee">{_ic} <b>{c["ticker"]}</b> '
             f'<span style="color:#888">({c["account"]})</span> — '
-            f'{"target reached" if c["type"]=="target" else "stop-loss hit"} '
-            f'@ ₹{c["exit"]:,.2f}</span>'
+            f'{_lbl} @ ₹{c["exit"]:,.2f}</span>'
             f'<span style="color:{_col};font-weight:700">₹{c["pnl"]:+,.0f}</span></div>'
         )
+
     st.markdown(
         f'<div style="background:linear-gradient(135deg,#1a1200,#2d1f00);'
         f'border:1px solid #FFC107;border-radius:12px;padding:14px 18px;margin-bottom:14px">'
         f'<div style="font-size:14px;font-weight:700;color:#FFC107;margin-bottom:6px">'
-        f'🔔 {len(closed)} position{"s" if len(closed)!=1 else ""} auto-closed on SL/TP</div>'
+        f'🔔 {len(closed)} position{"s" if len(closed)!=1 else ""} auto-closed</div>'
         f'{_rows}</div>',
         unsafe_allow_html=True,
     )
-
-
