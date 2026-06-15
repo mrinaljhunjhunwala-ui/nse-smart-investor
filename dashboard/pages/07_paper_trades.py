@@ -36,6 +36,10 @@ NEW  MIS auto-square-off: a dedicated @st.fragment(run_every="60s") calls
      _is_squareoff_time() logic in trade_utils this means MIS positions are
      force-closed at or within 60 seconds of 15:15 IST regardless of whether
      the user is interacting with the page.
+
+FIX APPTEST  st.selectbox index=None replaced with explicit index lookup so
+     Streamlit's headless AppTest runner does not raise
+     'NewType object has no attribute replic'.
 """
 
 import os, sys
@@ -411,16 +415,33 @@ with st.expander("➕ Open a New Paper Trade", expanded=True):
     _search_opts = sorted(
         [f"{n}  ({s.replace('.NS','')})" for n, s in STOCK_SEARCH_MAP.items()]
     )
+    _all_opts = ["— choose stock —"] + _search_opts
 
     _fc1, _fc2 = st.columns([3, 2])
     with _fc1:
-        # FIX NEW: reset to placeholder after trade opens via index=0 when _reset_form
+        # ── FIX APPTEST ───────────────────────────────────────────────────────
+        # index=None is not supported by Streamlit's AppTest headless runner and
+        # raises "NewType object has no attribute replic" in CI.
+        # Instead we compute an explicit integer index every run:
+        #   • After a trade opens (_reset_form=True)  → index 0 (placeholder)
+        #   • Otherwise                               → restore the previous
+        #     selection from session_state, falling back to 0 if not found.
+        # This is behaviourally identical to the old index=None approach in a
+        # real browser session but is fully compatible with AppTest.
+        if _reset_form or "pt_stock_sel" not in st.session_state:
+            _sel_index = 0
+        else:
+            _prev_sel  = st.session_state.get("pt_stock_sel", _all_opts[0])
+            _sel_index = _all_opts.index(_prev_sel) if _prev_sel in _all_opts else 0
+
         _form_sel = st.selectbox(
             "Search by company name",
-            ["— choose stock —"] + _search_opts,
+            _all_opts,
             key="pt_stock_sel",
-            index=0 if _reset_form else None,  # None = keep existing selection
+            index=_sel_index,
         )
+        # ─────────────────────────────────────────────────────────────────────
+
     with _fc2:
         # FIX NEW: clear manual ticker field after trade opens
         _form_manual = st.text_input(
