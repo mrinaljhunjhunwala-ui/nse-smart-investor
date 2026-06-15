@@ -1,40 +1,34 @@
 """Swing Checklist - NSE Smart Investor (multipage page; body verbatim from app.py)."""
-import os, sys
+import os
+import sys
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-import streamlit as st
-from dashboard.shared.design import apply_design
-from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
-# P3: explicit imports (was a dynamic shared-namespace injection)
-import os
+
 import pandas as pd
 import streamlit as st
-import sys
-from dashboard.shared.design import (
-    apply_design,
-)
-from dashboard.shared.cache import (
-    STOCK_SEARCH_MAP,
-)
-from dashboard.shared.chart_helpers import (
-    _ROOT,
-    render_top_bar,
-)
+
+from dashboard.shared.cache import STOCK_SEARCH_MAP
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar  # noqa: F811
+from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
+
+# ── FIX 1: Removed duplicate imports — single clean import block above ──
 
 apply_design()
 render_sidebar(current="Swing Checklist")
 render_top_bar()
 
-# ───────────────────────── page body (de-indented from app.py) ─────────────────────────
+# ───────────────────────── page body ─────────────────────────
 st.title("✅ Swing Trade Confluence Checklist")
 st.markdown(
-    "Run all 7 go/no-go factors for a delivery swing trade in one click.  \n"
-    "Green = factor confirms the trade. Red = caution. Need ≥ 5/7 green to enter."
+    "Run all 8 go/no-go factors for a delivery swing trade in one click.  \n"
+    "Green = factor confirms the trade. Red = caution. Need ≥ 5/8 green to enter."
+    # ── FIX 7: Updated copy to reflect actual factor count (was 7, now 8 with Volume) ──
 )
 
-# ── Stock picker: searchable name/symbol list + manual entry (same as Analyze Stock) ──
+# ── Stock picker ──
 _sc_search_options = sorted(
     f"{name}  ({sym.replace('.NS', '')})"
     for name, sym in STOCK_SEARCH_MAP.items()
@@ -71,61 +65,68 @@ _sc_ticker = _sc_sym.replace(".NS", "")
 if _sc_btn and _sc_sym:
     with st.spinner(f"Running confluence checklist for {_sc_ticker}…"):
         try:
+            from analysis.mtf import check_daily_weekly_alignment
             from data.fetcher import fetch_single
+            from strategies.sector_rotation import SECTORS, compute_sector_scores
+            from trading.signals import get_india_vix_regime
             from utils.indicators import add_all_indicators
-            from trading.signals import (get_india_vix_regime, check_oversold_bounce,
-                                          check_momentum_leader, check_fibonacci_pullback,
-                                          check_pullback_to_sma)
-            from strategies.sector_rotation import compute_sector_scores, SECTORS
 
-            _sc_df = fetch_single(_sc_sym, period="1y")
-            _sc_df = add_all_indicators(_sc_df)
-            _sc_df.dropna(subset=["RSI","ATR"], inplace=True)
+            # ── FIX 4: Fetch both daily AND weekly data for true MTF alignment ──
+            _sc_df_daily  = fetch_single(_sc_sym, period="1y", interval="1d")
+            _sc_df_weekly = fetch_single(_sc_sym, period="2y", interval="1wk")
 
-            _sc_cur = _sc_df.iloc[-1]
+            _sc_df_daily  = add_all_indicators(_sc_df_daily)
+            _sc_df_weekly = add_all_indicators(_sc_df_weekly)
+
+            _sc_df_daily.dropna(subset=["RSI", "ATR"], inplace=True)
+            _sc_df_weekly.dropna(subset=["RSI"], inplace=True)
+
+            _sc_cur = _sc_df_daily.iloc[-1]
             _price  = float(_sc_cur["Close"])
             _rsi    = float(_sc_cur.get("RSI", 50))
-            _adx    = float(_sc_cur.get("ADX", 0)) if not pd.isna(_sc_cur.get("ADX",0)) else 0
+            _adx    = float(_sc_cur.get("ADX", 0)) if not pd.isna(_sc_cur.get("ADX", 0)) else 0
             _sma20  = float(_sc_cur.get("SMA_20", 0))
             _sma50  = float(_sc_cur.get("SMA_50", 0))
             _sma200 = float(_sc_cur.get("SMA_200", 0))
             _atr    = float(_sc_cur.get("ATR", 0))
             _vol_r  = float(_sc_cur.get("Volume_Ratio", 1))
-            _st_dir = int(_sc_cur.get("ST_Direction", 0))
             _fib_zone = str(_sc_cur.get("Fib_Zone", "unknown"))
             _cpr_zone = str(_sc_cur.get("Price_vs_CPR", "unknown"))
 
-            # VIX check
-            _vix_r = get_india_vix_regime()
+            # ── VIX check ──
+            _vix_r  = get_india_vix_regime()
             _vix_ok = _vix_r["allow_buy"]
             _vix_val = _vix_r.get("vix") or 0
 
-            # Sector rank check
+            # ── Sector rank check ──
+            # ── FIX 5: Sector exception now marks as FAILED (False), not silently passed ──
             try:
-                _sec_scores = compute_sector_scores(period="1y")
-                _top3 = set(_sec_scores.head(3).index.tolist()) if not _sec_scores.empty else set()
+                _sec_scores   = compute_sector_scores(period="1y")
+                _top3         = set(_sec_scores.head(3).index.tolist()) if not _sec_scores.empty else set()
                 _ticker_sector = {t: s for s, ts in SECTORS.items() for t in ts}
-                _stock_sector = _ticker_sector.get(_sc_sym, "Unknown")
-                _sector_ok = _stock_sector in _top3
-                _sector_str = f"{_stock_sector} ({('Top 3' if _sector_ok else 'Not top 3')})"
-            except Exception:
-                _sector_ok, _sector_str = True, "Unknown (not filtered)"
+                _stock_sector  = _ticker_sector.get(_sc_sym, "Unknown")
+                _sector_ok     = _stock_sector in _top3
+                _sector_str    = f"{_stock_sector} ({'Top 3' if _sector_ok else 'Not top 3'})"
+            except Exception as _sec_err:
+                _sector_ok  = False  # conservative: don't reward a broken check
+                _sector_str = f"Sector check failed: {_sec_err}"
 
-            # MTF check (weekly trend)
+            # ── MTF check (now uses actual weekly dataframe) ──
+            # ── FIX 6: MTF exception now marks as FAILED (False), not silently passed ──
             try:
-                from analysis.mtf import check_daily_weekly_alignment
-                _mtf = check_daily_weekly_alignment(_sc_df)
-                _mtf_ok = _mtf["alignment"] == "bullish"
+                _mtf     = check_daily_weekly_alignment(_sc_df_daily, _sc_df_weekly)
+                _mtf_ok  = _mtf["alignment"] == "bullish"
                 _mtf_str = _mtf["confirmation"]
-            except Exception:
-                _mtf_ok, _mtf_str = True, "MTF check skipped"
+            except Exception as _mtf_err:
+                _mtf_ok  = False  # conservative: don't reward a broken check
+                _mtf_str = f"MTF check failed: {_mtf_err}"
 
-            # Build checklist items
+            # ── Build checklist items ──
             _checks = [
                 {
                     "name":   "1️⃣ VIX Regime",
                     "pass":   _vix_ok,
-                    "detail": f"India VIX = {_vix_val:.1f} | Regime: {_vix_r.get('regime','?').upper()}",
+                    "detail": f"India VIX = {_vix_val:.1f} | Regime: {_vix_r.get('regime', '?').upper()}",
                     "tip":    "VIX must be ≤ 28. High VIX = panic = avoid new longs.",
                 },
                 {
@@ -137,19 +138,20 @@ if _sc_btn and _sc_sym:
                 {
                     "name":   "3️⃣ MA Stack (SMA20 > SMA50)",
                     "pass":   _sma20 > _sma50 > 0,
-                    "detail": f"SMA20 ₹{_sma20:.1f} {'>' if _sma20>_sma50 else '<'} SMA50 ₹{_sma50:.1f}",
+                    "detail": f"SMA20 ₹{_sma20:.1f} {'>' if _sma20 > _sma50 else '<'} SMA50 ₹{_sma50:.1f}",
                     "tip":    "Moving average alignment confirms short-term uptrend.",
                 },
                 {
-                    "name":   "4️⃣ RSI Zone (30–70)",
-                    "pass":   30 < _rsi < 72,
+                    # ── FIX 2: Lower bound corrected from 30 to 25 to match the tip text ──
+                    "name":   "4️⃣ RSI Zone (25–72)",
+                    "pass":   25 < _rsi < 72,
                     "detail": f"RSI = {_rsi:.1f} | Ideal entry: 40–60",
                     "tip":    "RSI in healthy range — not overbought (>72) or in freefall (<25).",
                 },
                 {
                     "name":   "5️⃣ ADX Trend Strength",
                     "pass":   _adx >= 20,
-                    "detail": f"ADX = {_adx:.1f} | {'Trending ✅' if _adx>=25 else ('Weak trend' if _adx>=20 else 'Ranging ❌')}",
+                    "detail": f"ADX = {_adx:.1f} | {'Trending ✅' if _adx >= 25 else ('Weak trend' if _adx >= 20 else 'Ranging ❌')}",
                     "tip":    "ADX ≥ 20 confirms trending environment. Below 20 = ranging/choppy.",
                 },
                 {
@@ -164,22 +166,31 @@ if _sc_btn and _sc_sym:
                     "detail": _sector_str,
                     "tip":    "Stocks in top-3 sectors by momentum score have higher win rates.",
                 },
+                {
+                    # ── FIX 9: Volume Ratio was fetched but never used — now a real check ──
+                    "name":   "8️⃣ Volume Confirmation (≥ 1.2×)",
+                    "pass":   _vol_r >= 1.2,
+                    "detail": f"Volume Ratio = {_vol_r:.2f}× avg | {'Above avg ✅' if _vol_r >= 1.2 else 'Below avg ❌'}",
+                    "tip":    "Volume ≥ 1.2× 20-day avg confirms participation behind the move.",
+                },
             ]
 
-            # Score
+            # ── Score ──
             _score = sum(1 for c in _checks if c["pass"])
             _score_color = "card-green" if _score >= 5 else ("card-yellow" if _score >= 3 else "card-red")
+
+            # ── FIX 7: Verdict thresholds now consistent with "need ≥ 5 to enter" rule ──
             _verdict = (
                 "✅ STRONG SETUP — All key factors aligned. Consider entry."
-                if _score >= 6 else
+                if _score >= 7 else
                 "🟡 MODERATE SETUP — Most factors align. Entry with smaller size."
-                if _score >= 4 else
+                if _score >= 5 else
                 "🔴 WEAK SETUP — Too many factors against. Wait for improvement."
             )
 
             st.markdown(f"""
             <div class="{_score_color}">
-            <span class="score-big">{_score}/7</span> &nbsp;&nbsp;
+            <span class="score-big">{_score}/8</span> &nbsp;&nbsp;
             <span class="signal-big">{_verdict}</span><br>
             <b>{_sc_ticker}</b> at ₹{_price:.2f} | RSI {_rsi:.1f} | ADX {_adx:.1f}
             </div>
@@ -199,13 +210,18 @@ if _sc_btn and _sc_sym:
                     unsafe_allow_html=True,
                 )
 
-            # Trade plan if score ≥ 4
-            if _score >= 4 and _atr > 0:
+            # ── Trade plan if score ≥ 5 ──
+            # ── FIX 7: Threshold raised from 4 to 5 to match entry rule ──
+            if _score >= 5 and _atr > 0:
                 st.markdown("---")
                 st.markdown("### 📋 Suggested Trade Plan")
+
                 _sl_val = _price - 2 * _atr
                 _tp_val = _price + 3 * _atr
-                _rr_val = 3 * _atr / (2 * _atr)
+
+                # ── FIX 3: R:R now computed from actual price levels, not a hardcoded constant ──
+                _rr_val = (_tp_val - _price) / (_price - _sl_val)
+
                 st.markdown(f"""
                 <div class="card-blue">
                 <b>Entry:</b> ₹{_price:.2f} &nbsp;|&nbsp;
@@ -218,24 +234,21 @@ if _sc_btn and _sc_sym:
 
         except Exception as _sce:
             st.error(f"Checklist error: {_sce}")
-            import traceback; st.code(traceback.format_exc())
+            import traceback
+            st.code(traceback.format_exc())
 else:
     st.info("Enter a ticker and click **✅ Run Checklist** to see confluence analysis.")
 
-# Reference table
+# ── Reference table ──
 st.markdown("---")
 st.markdown("### 📖 Checklist Reference — What Each Factor Means")
 st.dataframe(pd.DataFrame([
-    {"Factor":    "VIX Regime",          "Pass When":  "India VIX ≤ 28",        "Why It Matters": "High VIX = market panic = stop-outs are more likely"},
-    {"Factor":    "SMA200 Trend",         "Pass When":  "Price > SMA200",         "Why It Matters": "Stocks below SMA200 are in a downtrend — buying is fighting the tape"},
-    {"Factor":    "MA Stack",             "Pass When":  "SMA20 > SMA50",          "Why It Matters": "Short-term uptrend confirmed when faster MA is above slower"},
-    {"Factor":    "RSI Zone",             "Pass When":  "RSI 30–72",              "Why It Matters": "Outside this range = exhaustion (too hot or too cold)"},
-    {"Factor":    "ADX Strength",         "Pass When":  "ADX ≥ 20",              "Why It Matters": "Trending stocks have higher momentum carry than ranging stocks"},
-    {"Factor":    "MTF Alignment",        "Pass When":  "Daily+Weekly both bullish","Why It Matters": "Same direction on multiple timeframes = higher conviction"},
-    {"Factor":    "Sector Rank",          "Pass When":  "Sector in Top 3",        "Why It Matters": "Rising sectors carry stocks — fight sector momentum rarely works"},
+    {"Factor": "VIX Regime",        "Pass When": "India VIX ≤ 28",             "Why It Matters": "High VIX = market panic = stop-outs are more likely"},
+    {"Factor": "SMA200 Trend",      "Pass When": "Price > SMA200",              "Why It Matters": "Stocks below SMA200 are in a downtrend — buying is fighting the tape"},
+    {"Factor": "MA Stack",          "Pass When": "SMA20 > SMA50",               "Why It Matters": "Short-term uptrend confirmed when faster MA is above slower"},
+    {"Factor": "RSI Zone",          "Pass When": "RSI 25–72",                   "Why It Matters": "Outside this range = exhaustion (too hot) or freefall (too cold)"},
+    {"Factor": "ADX Strength",      "Pass When": "ADX ≥ 20",                   "Why It Matters": "Trending stocks have higher momentum carry than ranging stocks"},
+    {"Factor": "MTF Alignment",     "Pass When": "Daily + Weekly both bullish", "Why It Matters": "Same direction on multiple timeframes = higher conviction"},
+    {"Factor": "Sector Rank",       "Pass When": "Sector in Top 3",             "Why It Matters": "Rising sectors carry stocks — fighting sector momentum rarely works"},
+    {"Factor": "Volume Confirm",    "Pass When": "Volume Ratio ≥ 1.2×",        "Why It Matters": "Above-average volume validates the move; low volume = weak conviction"},
 ]), hide_index=True, use_container_width=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 14 — MY WATCHLIST  [NEW]
-# ═══════════════════════════════════════════════════════════════════════════════
