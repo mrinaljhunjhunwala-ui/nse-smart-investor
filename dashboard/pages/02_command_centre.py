@@ -32,6 +32,7 @@ from dashboard.shared.cache import (
 )
 from dashboard.shared.trade_utils import (
     _auto_close_breached,
+    _is_squareoff_time,          # PATCH 2: imported for unconditional MIS square-off
     _paper_trade_popover,
     _portfolio_live_prices,
     _render_autoclose_banner,
@@ -261,7 +262,7 @@ if _scan_t:
         f'align-items:center">'
         f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last updated: '
         f'<b>{_scan_t}</b></span>'
-        f'<span style="font-size:11px;color:#555">Refreshes every 30 min · '
+        f'<span style="font-size:11px;color:#555">Refreshes every 5 min · '
         f'tap Scan Now to force refresh</span>'
         f'</div>',
         unsafe_allow_html=True,
@@ -274,7 +275,8 @@ with _tp_h1:
     st.caption("Strongest and weakest **trend-quality** setups across the **full liquid "
                "NSE universe** (trend + momentum + RSI + volume + sector + VIX). "
                "Scores rank trend health — they are **not a forecast of returns**. "
-               "First scan ~2 min, then cached 30 min.")
+               "Auto-refreshes every 5 min during market hours. "
+               "First scan ~2 min, then cached.")
 with _tp_h2:
     st.write("")
     _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
@@ -285,8 +287,8 @@ with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=Fa
         f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
         "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
         "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
-        "surfaced (10 each — buys and sells). First scan ~2 min; results cached 30 min, so reopening the "
-        "page is instant.")
+        "surfaced (10 each — buys and sells). First scan ~2 min; results cached 5 min, "
+        "so the page auto-refreshes picks every 5 min without any click.")
 
 # Phase 1 (UI honesty): regime reliability + score methodology next to live picks
 from dashboard.shared.disclosures import (
@@ -308,103 +310,115 @@ try:
 except Exception:
     pass
 
-if _run_picks or st.session_state.get("cc_picks_loaded"):
-    st.session_state["cc_picks_loaded"] = True
-    with st.spinner("Scanning the full NSE universe — first run ~2 min, then cached…"):
-        _sec_tuple = _sector_ranks_tuple()
-        st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
-        _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
+# ── PATCH 3: Top Picks always load on page open; Scan Now forces a fresh scan ──
+# Previously picks only loaded if the session flag "cc_picks_loaded" was already
+# set (i.e. you had clicked Scan Now at some point in this session). On a fresh
+# page load or browser refresh, the section was replaced with a static info box
+# showing stale or no data.
+#
+# Now:
+#   • Picks always render on every page load (no click required).
+#   • "Scan Now" busts the cache immediately so you get a fresh scan right away.
+#   • The 5-min TTL on _home_top_picks means data auto-refreshes every 5 min
+#     without any user interaction.
+if _run_picks:
+    st.cache_data.clear()   # force a fresh scan bypassing the 5-min cache
 
-    # ── Auto-update notification (Part 2): toast when a new scan completes ──
-    import datetime as _dt
-    _prev_scan = st.session_state.get("_picks_last_scan")
-    _now_str = _dt.datetime.now().strftime("%H:%M")
-    if _prev_scan != _now_str:
-        st.session_state["_picks_last_scan"] = _now_str
-        if _prev_scan is not None:        # don't toast on first load
-            st.toast("🔄 Top Picks updated — new scan complete", icon="📊")
-    st.session_state["_picks_scan_time"] = _now_str
+# Always run picks — no session flag gate
+with st.spinner("Scanning the full NSE universe — first run ~2 min, then cached 5 min…"):
+    _sec_tuple = _sector_ranks_tuple()
+    st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
+    _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
 
-    # Live prices for the picks — the scan scores on last daily close, but the
-    # cards (and any paper trade) should reflect the real-time market price.
-    _pk_all_syms = tuple({*(b["ticker"] for b in _picks["buys"]),
-                          *(s["ticker"] for s in _picks["sells"])})
-    _pk_lp = _portfolio_live_prices(_pk_all_syms) if _pk_all_syms else {}
+# ── Auto-update notification: toast when a new scan completes ──
+import datetime as _dt
+_prev_scan = st.session_state.get("_picks_last_scan")
+_now_str = _dt.datetime.now().strftime("%H:%M")
+if _prev_scan != _now_str:
+    st.session_state["_picks_last_scan"] = _now_str
+    if _prev_scan is not None:        # don't toast on first load
+        st.toast("🔄 Top Picks updated — new scan complete", icon="📊")
+st.session_state["_picks_scan_time"] = _now_str
+# ── END PATCH 3 ────────────────────────────────────────────────────────────
 
-    _pk_buy, _pk_sell = st.columns(2)
-    with _pk_buy:
-        st.markdown("#### 🟢 Buy Candidates")
-        if not _picks["buys"]:
-            st.caption("No strong buy setups today — market not offering clean entries.")
-        for _b in _picks["buys"]:
-            _bl = _b["ticker"].replace(".NS", "")
-            _blq = _pk_lp.get(_b["ticker"], {})
-            _blive = _blq.get("price")
-            _bchg  = _blq.get("chg")
-            _blive_html = ""
-            if _blive:
-                _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
-                _barr = "▲" if (_bchg or 0) >= 0 else "▼"
-                _blive_html = (
-                    f'<div style="font-size:12px;color:#fff;margin-top:3px">'
-                    f'🔴 Live <b>₹{_blive:,.2f}</b> '
-                    f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span></div>'
-                )
-            _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
-            _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
-                        f'{_bs["qty"]} sh</span>') if _bs else ""
-            _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
-            _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
-                          else "B" if _b["score"] >= 62 else "")
-            _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
-                           f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
-                           f'GRADE {_grade_tag}</span>') if _grade_tag else ""
-            st.markdown(
-                f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
-                f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
-                f'</div>'
-                f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
-                f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
-                + _blive_html
-                + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
-                   if _b["entry"] else "")
-                + '</div>',
-                unsafe_allow_html=True,
+# Live prices for the picks — the scan scores on last daily close, but the
+# cards (and any paper trade) should reflect the real-time market price.
+_pk_all_syms = tuple({*(b["ticker"] for b in _picks["buys"]),
+                      *(s["ticker"] for s in _picks["sells"])})
+_pk_lp = _portfolio_live_prices(_pk_all_syms) if _pk_all_syms else {}
+
+_pk_buy, _pk_sell = st.columns(2)
+with _pk_buy:
+    st.markdown("#### 🟢 Buy Candidates")
+    if not _picks["buys"]:
+        st.caption("No strong buy setups today — market not offering clean entries.")
+    for _b in _picks["buys"]:
+        _bl = _b["ticker"].replace(".NS", "")
+        _blq = _pk_lp.get(_b["ticker"], {})
+        _blive = _blq.get("price")
+        _bchg  = _blq.get("chg")
+        _blive_html = ""
+        if _blive:
+            _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
+            _barr = "▲" if (_bchg or 0) >= 0 else "▼"
+            _blive_html = (
+                f'<div style="font-size:12px;color:#fff;margin-top:3px">'
+                f'🔴 Live <b>₹{_blive:,.2f}</b> '
+                f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span></div>'
             )
-            if _b["entry"]:
-                _paper_trade_popover(
-                    _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
-                    reason=f"Top Pick: {_b['headline'][:55]}",
-                    key=f"cc_pick_{_b['ticker']}",
-                    label=f"📌 Paper Trade {_bl}",
-                )
-            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
-            render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
-    with _pk_sell:
-        st.markdown("#### 🔴 Sell / Avoid")
-        if not _picks["sells"]:
-            st.caption("No clear sell signals — nothing flashing red in the scan.")
-        for _sv in _picks["sells"]:
-            _svl = _sv["ticker"].replace(".NS", "")
-            st.markdown(
-                f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
-                f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
-                f'</div>'
-                f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
+        _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
+        _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
+                    f'{_bs["qty"]} sh</span>') if _bs else ""
+        _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
+        _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
+                      else "B" if _b["score"] >= 62 else "")
+        _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
+                       f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
+                       f'GRADE {_grade_tag}</span>') if _grade_tag else ""
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
+            f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center">'
+            f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}</span>'
+            f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+            f'</div>'
+            f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
+            f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
+            + _blive_html
+            + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
+               f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
+               if _b["entry"] else "")
+            + '</div>',
+            unsafe_allow_html=True,
+        )
+        if _b["entry"]:
+            _paper_trade_popover(
+                _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
+                reason=f"Top Pick: {_b['headline'][:55]}",
+                key=f"cc_pick_{_b['ticker']}",
+                label=f"📌 Paper Trade {_bl}",
             )
-            # reason pointers + Deep Dive (narrative, score bars, Ask AI)
-            render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
-else:
-    st.info("Click **🔎 Scan Now** to find today's strongest buy & sell setups across NSE.")
+        # reason pointers + Deep Dive (narrative, score bars, Ask AI)
+        render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
+with _pk_sell:
+    st.markdown("#### 🔴 Sell / Avoid")
+    if not _picks["sells"]:
+        st.caption("No clear sell signals — nothing flashing red in the scan.")
+    for _sv in _picks["sells"]:
+        _svl = _sv["ticker"].replace(".NS", "")
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
+            f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center">'
+            f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
+            f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+            f'</div>'
+            f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        # reason pointers + Deep Dive (narrative, score bars, Ask AI)
+        render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
 
 st.markdown("---")
 
@@ -413,20 +427,43 @@ _cc_h1, _cc_h2 = st.columns([5, 2])
 _cc_h1.markdown("### 📌 Open Positions")
 with _cc_h2:
     _cc_autoclose = st.toggle(
-        "🤖 Auto-close on SL/TP", value=st.session_state.get("auto_close_on", False),
+        "🤖 Auto-close CNC on SL/TP",
+        value=st.session_state.get("auto_close_on", False),
         key="cc_autoclose_toggle",
-        help="When ON, paper trades that hit their target or stop-loss are "
-             "closed automatically on page load (during market hours only, "
-             "on live prices). Real broker holdings are never auto-traded — only alerted.",
+        help="When ON, CNC (delivery) paper trades that hit their target or stop-loss are "
+             "closed automatically on page load (during market hours only, on live prices). "
+             "MIS (intraday) positions are ALWAYS squared off at 15:15 regardless of this toggle. "
+             "Real broker holdings are never auto-traded — only alerted.",
     )
     st.session_state["auto_close_on"] = _cc_autoclose
 
-# Run auto-close across ALL accounts, then show what was closed
-if _cc_autoclose:
-    _cc_closed = _auto_close_breached()
-    if _cc_closed:
-        _render_autoclose_banner(_cc_closed)
+# ── PATCH 2: MIS intraday square-off runs UNCONDITIONALLY at 15:15 ──────────
+# Previously the entire auto-close block was gated behind the user's toggle,
+# meaning intraday (MIS) positions were never squared off unless the user had
+# turned on "Auto-close on SL/TP". This mirrors real broker behaviour where
+# intraday positions are force-closed at 15:15 regardless of any setting.
+#
+# The _auto_close_breached() function already handles MIS square-off internally
+# (acct_type == "MIS" and _is_squareoff_time() path). We just need to call it
+# unconditionally so it runs even when the toggle is OFF.
+_cc_sq_banner_shown = False
+if _is_squareoff_time():
+    _sq_all_closed = _auto_close_breached()
+    _sq_mis_closed = [c for c in _sq_all_closed if c["type"] == "squareoff"]
+    if _sq_mis_closed:
+        _render_autoclose_banner(_sq_mis_closed)
         st.cache_data.clear()
+        _cc_sq_banner_shown = True
+
+# CNC SL/TP auto-close: only when the user has the toggle enabled
+if _cc_autoclose:
+    _cc_all_closed = _auto_close_breached()
+    # Filter to SL/TP hits only (squareoff was already handled above)
+    _cc_sltp_closed = [c for c in _cc_all_closed if c["type"] in ("target", "stop")]
+    if _cc_sltp_closed:
+        _render_autoclose_banner(_cc_sltp_closed)
+        st.cache_data.clear()
+# ── END PATCH 2 ────────────────────────────────────────────────────────────
 
 _cc_open_df = pd.DataFrame()
 try:
@@ -510,7 +547,7 @@ _cc_wl = st.session_state.get("watchlist", ["RELIANCE.NS", "TCS.NS", "HDFCBANK.N
 _wh1, _wh2 = st.columns([5, 2])
 with _wh1:
     st.markdown("### ⭐ Watchlist — What to Do Today")
-    st.caption("Scores update every 30 min. First load takes ~20-40 s while data is fetched.")
+    st.caption("Scores update every 5 min. First load takes ~20-40 s while data is fetched.")
 with _wh2:
     st.write("")
     if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
@@ -520,7 +557,7 @@ with _wh2:
 # computed this session (stored when Top Picks ran) — so the heavy ~10 s
 # sector multi-fetch never blocks the Command Centre's first load.
 _wl_sector = st.session_state.get("_sec_ranks_cache", ())
-with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 30 min)…"):
+with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 5 min)…"):
     _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r, sector_ranks=_wl_sector)
 
 # Sort: BUY signals first, EXIT last
