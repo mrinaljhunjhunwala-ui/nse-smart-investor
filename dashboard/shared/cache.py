@@ -440,8 +440,9 @@ def _sector_df_from_tuple(sector_ranks: tuple):
         return None
 
 
-@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache
-@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache — the full scan is heavy
+# FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
+# the cached result to be wrapped in an extra layer and never properly invalidated).
+@st.cache_data(ttl=1800, show_spinner=False)
 def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
     """
     Scan the FULL NSE universe (~200+ liquid large/mid/small-caps) and return the
@@ -476,15 +477,15 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
                     # richer "why" payload (zero extra cost — already on the score object)
                     "narrative": s.narrative, "sector": s.sector,
                     "technical": s.technical_score, "momentum": s.momentum_score,
-                    "volume": s.volume_score, "pattern": s.pattern_score,
+                    "volume": s.volume_score,
                     "sentiment": s.sentiment_score}
         except Exception as _e:
-            _log.debug("cache.%s degraded: %s", "_one", _e)
+            _log.debug("cache._home_top_picks._one degraded for %s: %s", tk, _e)
             return {"ticker": tk, "price": 0, "score": 0, "grade": "?",
                     "action": "UNAVAILABLE", "headline": "", "entry": 0,
                     "sl": 0, "tp": 0, "rr": 0, "narrative": "", "sector": "",
                     "technical": 0, "momentum": 0, "volume": 0,
-                    "pattern": 0, "sentiment": 0}
+                    "sentiment": 0}
 
     results = []
     try:
@@ -496,17 +497,21 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
 
     for s in results:
         act = s.get("action", "")
-        if s.get("score", 0) <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
+        sc  = s.get("score", 0)
+        # FIX 2: Skip zero-score AND unavailable results — score_stock returns
+        # score=0 with action=DATA_UNAVAILABLE when data fetch fails. Previously
+        # score <= 0 guard was missing the DATA_UNAVAILABLE string check fully.
+        if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
             continue
-        # long side includes WATCHLIST so we reliably surface 10+ candidates; cards
-        # show each stock's true action (STRONG BUY / BUY / WATCHLIST)
+        # Long side: STRONG BUY / BUY / WATCHLIST all surface so we always
+        # have enough candidates. Cards show each stock's true action label.
         if act in ("STRONG BUY", "BUY", "WATCHLIST"):
             buys.append(s)
         elif act in ("EXIT", "CAUTION"):
             sells.append(s)
 
     buys.sort(key=lambda x: -x.get("score", 0))
-    sells.sort(key=lambda x: x.get("score", 0))   # lowest score = weakest
+    sells.sort(key=lambda x: x.get("score", 0))   # lowest score = weakest first
     return {"buys": buys[:n], "sells": sells[:n]}
 
 
@@ -515,17 +520,19 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     """
     Scan the Nifty 500 universe for NEXT-SESSION setups (based on today's close),
     distinct from intraday Top Picks. Reuses the composite-score infrastructure
-    (score_stock folds in trend, momentum, RSI, volume, VIX + sector strength), so
-    the component scores are the encoded form of the breakout/volume/RSI criteria —
-    no extra fetches beyond the standard scan.
+    (score_stock folds in trend, momentum, RSI, volume, VIX + sector strength).
+
+    Score component ranges (from analysis/score.py):
+        technical_score  /40  — RSI, MACD, SMA stack, ADX
+        momentum_score   /25  — 5d / 20d / 60d returns
+        volume_score     /15  — Volume ratio + OBV trend
 
     Returns: {
-        "breakout_candidates": [...],   # setting up for a breakout at next open
-        "breakdown_watch":     [...],   # below support, momentum weakening
-        "reversal_watch":      [...],   # divergence / oversold-overbought extremes
+        "breakout_candidates": [...],
+        "breakdown_watch":     [...],
+        "reversal_watch":      [...],
         "scan_time": "DD Mon HH:MM"
     }
-    Each item: {ticker, score, headline, signal_type, key_level, action, entry, sl, tp}.
     """
     import concurrent.futures as _cf
     import datetime as _dtm
@@ -546,11 +553,13 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
         try:
             from analysis.score import score_stock
             s = score_stock(tk)
+            # FIX 3: pattern_score no longer exists on CompositeScore (removed in
+            # PATTERN_REMOVAL_MIGRATION). Access only valid fields.
             return {"ticker": tk, "price": s.price, "score": s.score, "grade": s.grade,
                     "action": s.action, "headline": s.headline, "entry": s.entry,
                     "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
                     "technical": s.technical_score, "momentum": s.momentum_score,
-                    "volume": s.volume_score, "pattern": s.pattern_score}
+                    "volume": s.volume_score}
         except Exception as _e:
             _log.debug("cache._tomorrow_watchlist score failed for %s: %s", tk, _e)
             return None
@@ -572,28 +581,43 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
         act, sc = s.get("action", ""), s.get("score", 0)
         if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
             continue
-        tech, mom, vol = s.get("technical", 0), s.get("momentum", 0), s.get("volume", 0)
+
+        # Component scores — calibrated to actual ranges:
+        #   technical /40 · momentum /25 · volume /15
+        tech = s.get("technical", 0)   # out of 40
+        mom  = s.get("momentum",  0)   # out of 25
+        vol  = s.get("volume",    0)   # out of 15
+
         ent = s.get("entry", 0)
-        kl = f"₹{ent:,.0f}" if ent else "—"
-        # Breakout: constructive action, momentum building, volume buildup, room left
-        if act in ("STRONG BUY", "BUY", "WATCHLIST") and sc >= 55 and mom >= 15 and vol >= 9:
+        kl  = f"₹{ent:,.0f}" if ent else "—"
+
+        # FIX 4: Old thresholds (mom>=15, vol>=9) required top-40% on BOTH
+        # components simultaneously — almost impossible to satisfy together.
+        # New thresholds are ~33rd percentile of each component range.
+
+        # Breakout: positive action + decent composite + any meaningful momentum + some volume
+        if act in ("STRONG BUY", "BUY", "WATCHLIST") and sc >= 52 and mom >= 8 and vol >= 5:
             out["breakout_candidates"].append(_item(s, "🚀 Breakout setup", kl))
-        # Breakdown: weak score / below MAs, distribution volume
-        elif (act in ("EXIT", "CAUTION") or sc < 40) and tech < 18 and vol >= 7:
+
+        # Breakdown: weak action or low composite + weak technicals + any volume present
+        elif (act in ("EXIT", "CAUTION") or sc < 40) and tech < 22 and vol >= 4:
             out["breakdown_watch"].append(_item(s, "🔻 Breakdown risk",
                                                 f"₹{s.get('sl', 0):,.0f}" if s.get("sl") else kl))
-        # Reversal: divergence (price weak but momentum building, or vice-versa)
-        elif (35 <= sc <= 58 and mom >= 15 and tech < 22):
+
+        # Bullish divergence: mid-range score but momentum building despite weak price trend
+        elif 35 <= sc <= 58 and mom >= 8 and tech < 25:
             out["reversal_watch"].append(_item(s, "🔄 Bullish divergence", kl))
-        elif (45 <= sc <= 68 and mom < 8 and tech >= 24):
+
+        # Bearish divergence: mid-range score, price trend intact but momentum fading
+        elif 45 <= sc <= 68 and mom < 5 and tech >= 22:
             out["reversal_watch"].append(_item(s, "🔄 Bearish divergence", kl))
 
     out["breakout_candidates"].sort(key=lambda x: -x["score"])
     out["breakdown_watch"].sort(key=lambda x: x["score"])
     out["reversal_watch"].sort(key=lambda x: -x["score"])
     out["breakout_candidates"] = out["breakout_candidates"][:n]
-    out["breakdown_watch"] = out["breakdown_watch"][:n]
-    out["reversal_watch"] = out["reversal_watch"][:n]
+    out["breakdown_watch"]     = out["breakdown_watch"][:n]
+    out["reversal_watch"]      = out["reversal_watch"][:n]
     return out
 
 
@@ -692,15 +716,15 @@ def _deep_confirmation(ticker: str) -> dict:
         # Signal agreement (9 checks)
         rsi = float(cur.get("RSI", 50))
         sigs = [
-            ("RSI not overbought (<70)",  rsi < 70),
-            ("MACD above signal",         float(cur.get("MACD", 0)) > float(cur.get("MACD_Signal", 0))),
-            ("Above 20-day avg",          price > float(cur.get("SMA_20", price * 1.1))),
-            ("Above 50-day avg",          price > float(cur.get("SMA_50", price * 1.1))),
-            ("Above 200-day avg",         price > float(cur.get("SMA_200", price * 1.1))),
+            ("RSI not overbought (<70)",    rsi < 70),
+            ("MACD above signal",           float(cur.get("MACD", 0)) > float(cur.get("MACD_Signal", 0))),
+            ("Above 20-day avg",            price > float(cur.get("SMA_20",  price * 1.1))),
+            ("Above 50-day avg",            price > float(cur.get("SMA_50",  price * 1.1))),
+            ("Above 200-day avg",           price > float(cur.get("SMA_200", price * 1.1))),
             ("Trend has strength (ADX>20)", float(cur.get("ADX", 0)) > 20),
-            ("Volume supportive",         float(cur.get("Volume_Ratio", 1)) >= 1.0),
-            ("No bearish divergence",     not bool(cur.get("RSI_Bear_Div", 0))),
-            ("Weekly trend not down",     out["weekly"] != "downtrend"),
+            ("Volume supportive",           float(cur.get("Volume_Ratio", 1)) >= 1.0),
+            ("No bearish divergence",       not bool(cur.get("RSI_Bear_Div", 0))),
+            ("Weekly trend not down",       out["weekly"] != "downtrend"),
         ]
         out["signals"] = sigs
         out["bull"]    = sum(1 for _, ok in sigs if ok)
@@ -737,5 +761,3 @@ def _sparkline_svg(prices: list, w: int = 120, h: int = 28) -> str:
     return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="display:block">'
             f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="1.6" '
             f'stroke-linejoin="round" stroke-linecap="round"/></svg>')
-
-
