@@ -370,7 +370,7 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
         }
 
 
-@st.cache_data(ttl=1800, show_spinner=False)   # 30-min cache, whole watchlist
+@st.cache_data(ttl=300, show_spinner=False)   # 30-min cache, whole watchlist
 def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: tuple = ()) -> dict:
     """
     Score a whole watchlist IN PARALLEL (one thread per stock) and cache the
@@ -442,7 +442,7 @@ def _sector_df_from_tuple(sector_ranks: tuple):
 
 # FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
 # the cached result to be wrapped in an extra layer and never properly invalidated).
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
     """
     Scan the FULL NSE universe (~200+ liquid large/mid/small-caps) and return the
