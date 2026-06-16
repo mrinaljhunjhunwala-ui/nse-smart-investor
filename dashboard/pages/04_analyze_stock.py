@@ -1,22 +1,54 @@
-"""Analyze Stock - NSE Smart Investor (multipage page; body verbatim from app.py)."""
+"""Analyze Stock - NSE Smart Investor (multipage page; body verbatim from app.py).
+
+FIXES applied in this revision
+───────────────────────────────
+A1  "Paper Trade This Signal" bottom button replaced with _paper_trade_popover()
+    so it gets the account selector, live-price re-anchor, qty override and
+    proper R:R display — identical to every other paper trade button in the app.
+    The old direct paper_open_trade() call with hardcoded qty=int(10000/entry)
+    is gone.
+
+A2  Live drift caption now gated on _ms_an.get("is_open") — the warning
+    "Live ₹X vs analysis ₹X" no longer fires when the market is closed (Yahoo
+    returns last EOD close as "live" outside hours, making the drift spurious).
+
+A3  Conviction score now guards against _dc["total"] being None or 0. If
+    deep confirmation is unavailable the conviction section shows
+    "confirmation unavailable" and skips the adjustment rather than silently
+    arithmetic-ing on a phantom 9.
+
+A4  Earnings date label now handles negative _ed_days (results already
+    announced) with an explicit branch: "Results Xd ago" in teal/gray,
+    rather than falling through to the confusing "Unknown / gray" bucket.
+
+A5  Portfolio fit CSV loading is now wrapped in @st.cache_data(ttl=300)
+    keyed on file path + mtime so re-reading the CSV on every widget
+    interaction is avoided.
+
+A6  Sector rank metric guard: f"#{cs.sector_rank}" is now
+    f"#{cs.sector_rank}" if cs.sector_rank else "—" to prevent "#None".
+
+A7  df.iloc[-2] is now guarded with len(df) >= 2 to avoid IndexError on
+    single-row dataframes (new listings, data gaps).
+"""
+
 import os, sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+
 import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
-# Fundamentals (Phase 0): UI depends ONLY on the service facade + the schema/analytics.
+
 from analysis.fundamentals.service import default_service as _fund_service
 from analysis.fundamentals import analytics as _fund_analytics
-# P3: explicit imports (was a dynamic shared-namespace injection)
+
 import os
 import streamlit as st
 import sys
-from dashboard.shared.design import (
-    apply_design,
-)
+from dashboard.shared.design import apply_design
 from dashboard.shared.cache import (
     STOCK_SEARCH_MAP,
     _deep_confirmation,
@@ -31,7 +63,7 @@ from dashboard.shared.trade_utils import (
     _action_color,
     _action_emoji,
     _grade_color,
-    paper_open_trade,
+    _paper_trade_popover,      # FIX A1: use popover instead of direct call
 )
 from dashboard.shared.chart_helpers import (
     _ROOT,
@@ -43,11 +75,13 @@ apply_design()
 render_sidebar(current="Analyze Stock")
 render_top_bar()
 
-# ───────────────────────── page body (de-indented from app.py) ─────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 st.title("🔍 Analyze Any NSE Stock")
-st.markdown("Search by company name or ticker — get a full **trend-quality score**, chart, stop-loss, and plain-English read of the setup.")
+st.markdown(
+    "Search by company name or ticker — get a full **trend-quality score**, "
+    "chart, stop-loss, and plain-English read of the setup."
+)
 
-# Phase 1 (UI honesty): what the score measures + current-regime reliability
 from dashboard.shared.disclosures import (
     render_score_methodology as _render_score_methodology,
     render_regime_reliability_note as _render_regime_note,
@@ -55,12 +89,17 @@ from dashboard.shared.disclosures import (
 _render_regime_note()
 _render_score_methodology()
 
-# ── Stock search: name autocomplete + manual ticker ────────────────────────
-search_options = [f"{name}  ({sym.replace('.NS','')})"
-                  for name, sym in STOCK_SEARCH_MAP.items()]
+# ── Stock search ───────────────────────────────────────────────────────────
+search_options = [
+    f"{name}  ({sym.replace('.NS','')})"
+    for name, sym in STOCK_SEARCH_MAP.items()
+]
 search_options_sorted = sorted(search_options)
 
-_AS_PERIOD_MAP = {"1D":"1d","5D":"5d","1M":"1m","6M":"6m","YTD":"ytd","Max":"max"}
+_AS_PERIOD_MAP = {
+    "1D": "1d", "5D": "5d", "1M": "1m",
+    "6M": "6m", "YTD": "ytd", "Max": "max",
+}
 
 col_search, col_manual, col_btn = st.columns([3, 2, 1])
 with col_search:
@@ -82,43 +121,41 @@ with col_btn:
     st.write("")
     analyze_btn = st.button("🔍 Analyze", type="primary", key="analyze_btn")
 
-# ── Period selector — horizontal pill-style radio ──────────────────────
 _ui_period = st.radio(
     "Chart period",
     list(_AS_PERIOD_MAP.keys()),
-    index=3,                      # default = 6M
+    index=3,
     horizontal=True,
     key="analyze_period",
 )
 period = _AS_PERIOD_MAP[_ui_period]
 
-# Validate the manually-typed symbol before any API call
 _mt_clean, _mt_err = _validate_ticker(manual_ticker)
 if _mt_err:
     st.error(f"⚠️ {_mt_err}")
     st.stop()
 
-# Resolve final ticker
 ticker = ""
 if _mt_clean:
     ticker = _mt_clean + ".NS"
 elif selected_option != "— type to search —":
-    # Extract ticker from "Company Name  (TICKER)" format
     raw_sym = selected_option.rsplit("(", 1)[-1].rstrip(")")
-    ticker = raw_sym + ".NS" if not raw_sym.endswith(".NS") else raw_sym
+    ticker  = raw_sym + ".NS" if not raw_sym.endswith(".NS") else raw_sym
 
 if not ticker:
     ticker = "RELIANCE.NS"
 
-if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last_analyzed == ticker):
+if analyze_btn or (
+    "last_analyzed" in st.session_state
+    and st.session_state.last_analyzed == ticker
+):
     st.session_state.last_analyzed = ticker
 
     with st.spinner(f"Scoring {ticker}…"):
         try:
-            # Deep-dive score over 2Y data — changing chart period won't re-fetch
             cs = get_composite_score(ticker)
-            # Live price reconciliation: the score's price is the last DAILY close
-            # (used for all indicators); the live quote may be more recent.
+
+            # Live price
             _an_live = None
             try:
                 from utils.live_price import get_live_quote as _an_lq
@@ -126,35 +163,46 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 if isinstance(_anq, dict) and _anq.get("price"):
                     _an_live = float(_anq["price"])
             except Exception:
-                _an_live = None
-            _an_drift = (abs(_an_live - cs.price) / cs.price * 100) if (_an_live and cs.price) else 0.0
-            # Full 2Y dataframe (all indicators valid at most-recent row)
+                pass
+            _an_drift = (
+                abs(_an_live - cs.price) / cs.price * 100
+                if (_an_live and cs.price)
+                else 0.0
+            )
+
             df = load_ticker_df(ticker)
-            # Chart-display slice — only controls what the user SEES on the chart
+
+            # FIX A7: guard against single-row dataframe (new listings / data gaps)
+            if len(df) < 2:
+                st.error(
+                    f"⚠️ Insufficient price history for **{ticker.replace('.NS','')}** "
+                    f"({len(df)} row(s) returned). The stock may be newly listed or "
+                    "data is temporarily unavailable. Try again later."
+                )
+                st.stop()
+
             df_chart = _trim_to_period(df, period)
 
-            # ── Revenue growth for the hero chip (R2 — evidence-backed signal) ──
-            # Service + engine caches make this cheap; the Fundamentals section
-            # below reuses the same cached object. None → "—", never a fake 0.
+            # Revenue growth chip
             _rg_val, _rg_conf = None, ""
             try:
-                _rg_cf = _fund_service().get_fundamentals(ticker)
+                _rg_cf  = _fund_service().get_fundamentals(ticker)
                 if _rg_cf is not None:
                     _rg_res = _fund_analytics.revenue_cagr(_rg_cf, years=5)
                     if getattr(_rg_res, "available", False) and _rg_res.value is not None:
-                        _rg_val = float(_rg_res.value)
+                        _rg_val  = float(_rg_res.value)
                         _rg_conf = str(_rg_res.confidence)
             except Exception:
                 pass
 
-            # ── Score hero section ─────────────────────────────────────
+            # ── Score hero section ─────────────────────────────────────────
             st.markdown("---")
             hero_col, detail_col = st.columns([1, 2])
 
             with hero_col:
                 grade_c = _grade_color(cs.grade)
-                card_c = _action_color(cs.action)
-                emoji = _action_emoji(cs.action)
+                card_c  = _action_color(cs.action)
+                emoji   = _action_emoji(cs.action)
                 st.markdown(
                     f'<div class="{card_c}" style="text-align:center;padding:24px">'
                     f'<div class="ticker-label">{ticker.replace(".NS","")}</div>'
@@ -165,21 +213,19 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     f'Grade: {cs.grade}</div>'
                     f'<div class="signal-big">{emoji} {cs.action}</div>'
                     f'</div>',
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
                 st.markdown("")
-                # Score breakdown mini-table (pattern is no longer scored —
-                # see PATTERN_REMOVAL_MIGRATION.md — so its row is gone)
                 score_breakdown = {
-                    "Technical (40)":  cs.technical_score,
-                    "Momentum (25)":   cs.momentum_score,
-                    "Volume (15)":     cs.volume_score,
-                    "Sentiment (10)":  cs.sentiment_score,
+                    "Technical (40)": cs.technical_score,
+                    "Momentum (25)":  cs.momentum_score,
+                    "Volume (15)":    cs.volume_score,
+                    "Sentiment (10)": cs.sentiment_score,
                 }
                 for label, val in score_breakdown.items():
-                    pct = val / {"Technical (40)": 40, "Momentum (25)": 25,
-                                 "Volume (15)": 15,
-                                 "Sentiment (10)": 10}[label] * 100
+                    _max = {"Technical (40)": 40, "Momentum (25)": 25,
+                            "Volume (15)": 15,    "Sentiment (10)": 10}[label]
+                    pct       = val / _max * 100
                     bar_color = "#26a69a" if pct >= 60 else "#f9a825" if pct >= 35 else "#ef5350"
                     st.markdown(
                         f'<div style="display:flex;align-items:center;margin:3px 0;">'
@@ -189,32 +235,37 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                         f'border-radius:4px;height:10px"></div></div>'
                         f'<span style="width:42px;text-align:right;font-size:12px;color:#ccc">'
                         f'{val:.0f}</span></div>',
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
 
             with detail_col:
-                # Trade levels
-                latest = df.iloc[-1]
-                prev   = df.iloc[-2]
+                latest  = df.iloc[-1]
+                prev    = df.iloc[-2]   # safe — len(df) >= 2 guarded above
                 day_chg = (latest["Close"] / prev["Close"] - 1) * 100
 
-                # Show the LIVE price as the headline current price when available
                 _disp_price = _an_live if _an_live else cs.price
                 mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-                mc1.metric("Price (live)" if _an_live else "Close",
-                           f"₹{_disp_price:,.2f}", f"{day_chg:+.2f}%")
-                mc2.metric("Sector",     cs.sector)
-                mc3.metric("VIX Regime", cs.vix_regime)
-                mc4.metric("Sector Rank",f"#{cs.sector_rank}")
-                # R2: first-class revenue-growth chip (evidence-backed signal)
+                mc1.metric(
+                    "Price (live)" if _an_live else "Close",
+                    f"₹{_disp_price:,.2f}", f"{day_chg:+.2f}%",
+                )
+                mc2.metric("Sector",      cs.sector)
+                mc3.metric("VIX Regime",  cs.vix_regime)
+                # FIX A6: guard against cs.sector_rank being None
+                mc4.metric(
+                    "Sector Rank",
+                    f"#{cs.sector_rank}" if cs.sector_rank else "—",
+                )
                 mc5.metric(
                     "Rev Growth /yr",
                     f"{_rg_val:+.1f}%" if _rg_val is not None else "—",
-                    help=("Annualised revenue growth from audited statements"
-                          + (f" · confidence: {_rg_conf}" if _rg_conf else "")
-                          + ". The strongest return-linked metric in platform "
-                            "research (2022–2025) — a measured observation, "
-                            "not a buy signal."),
+                    help=(
+                        "Annualised revenue growth from audited statements"
+                        + (f" · confidence: {_rg_conf}" if _rg_conf else "")
+                        + ". The strongest return-linked metric in platform "
+                          "research (2022–2025) — a measured observation, "
+                          "not a buy signal."
+                    ),
                 )
                 if _rg_val is not None:
                     from dashboard.shared.disclosures import (
@@ -222,7 +273,7 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     )
                     _rg_evidence()
 
-                # Close-price status + live-vs-daily reconciliation
+                # FIX A2: live drift caption only fires when market is actually open
                 try:
                     from utils.market_hours import market_status as _an_ms
                     _ms_an = _an_ms()
@@ -230,39 +281,48 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                         _dlabel = df.index[-1].strftime("%d-%b")
                     except Exception:
                         _dlabel = ""
-                    if _an_live and _an_drift >= 0.5:
+                    if _ms_an.get("is_open") and _an_live and _an_drift >= 0.5:
+                        # FIX A2: only warn about drift during live market hours
                         st.caption(
-                            f"ℹ️ Live price **₹{_an_live:,.2f}** · indicators & levels computed on the "
-                            f"last daily close **₹{cs.price:,.2f}**{f' ({_dlabel})' if _dlabel else ''} "
-                            f"— {_an_drift:.1f}% apart, so treat the entry/target as a guide near the live price."
+                            f"ℹ️ Live price **₹{_an_live:,.2f}** · indicators & levels "
+                            f"computed on the last daily close **₹{cs.price:,.2f}**"
+                            f"{f' ({_dlabel})' if _dlabel else ''} "
+                            f"— {_an_drift:.1f}% apart, treat entry/target as a guide."
                         )
                     elif _ms_an.get("is_open"):
-                        st.caption("🔴 LIVE · market open — the official close settles after 3:30 PM.")
+                        st.caption(
+                            "🔴 LIVE · market open — official close settles after 3:30 PM."
+                        )
                     else:
-                        st.caption(f"🟢 Settled EOD close{f' · {_dlabel}' if _dlabel else ''} "
-                                   f"(market closed — official end-of-day price).")
+                        st.caption(
+                            f"🟢 Settled EOD close{f' · {_dlabel}' if _dlabel else ''} "
+                            "(market closed — official end-of-day price)."
+                        )
                 except Exception:
                     pass
 
                 tc1, tc2, tc3, tc4 = st.columns(4)
-                tc1.metric("Entry (now)",  f"₹{cs.entry:,.2f}")
-                tc2.metric("Stop-Loss",    f"₹{cs.stop_loss:,.2f}",
-                           f"-{(cs.price - cs.stop_loss)/cs.price*100:.1f}%",
-                           delta_color="inverse")
-                tc3.metric("Target",       f"₹{cs.target:,.2f}",
-                           f"+{(cs.target - cs.price)/cs.price*100:.1f}%")
-                tc4.metric("Risk : Reward",f"{cs.risk_reward:.1f} : 1")
+                tc1.metric("Entry (now)", f"₹{cs.entry:,.2f}")
+                tc2.metric(
+                    "Stop-Loss", f"₹{cs.stop_loss:,.2f}",
+                    f"-{(cs.price - cs.stop_loss)/cs.price*100:.1f}%",
+                    delta_color="inverse",
+                )
+                tc3.metric(
+                    "Target", f"₹{cs.target:,.2f}",
+                    f"+{(cs.target - cs.price)/cs.price*100:.1f}%",
+                )
+                tc4.metric("Risk : Reward", f"{cs.risk_reward:.1f} : 1")
 
-                # Headline + Narrative
                 st.markdown(
                     f'<div class="{_action_color(cs.action)}">'
                     f'<b style="font-size:16px">{cs.headline}</b><br><br>'
                     f'<span class="narrative">{cs.narrative}</span>'
                     f'</div>',
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
 
-            # ── Action strip — prominent recommendation banner ─────────
+            # ── Action strip ───────────────────────────────────────────────
             _as_colors = {
                 "BUY":          ("#0a2a1a", "#26a69a"),
                 "CAUTIOUS BUY": ("#0d2210", "#4caf50"),
@@ -271,15 +331,15 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 "EXIT":         ("#2a0a0a", "#ef5350"),
             }
             _as_bg, _as_border = _as_colors.get(cs.action, ("#1a1a2e", "#2196F3"))
-            _as_rr_ok = cs.risk_reward >= 1.5
+            _as_rr_ok    = cs.risk_reward >= 1.5
             _as_rr_color = "#26a69a" if _as_rr_ok else "#f9a825"
 
             st.markdown(
                 f'<div style="background:{_as_bg};border-left:6px solid {_as_border};'
                 f'border-radius:8px;padding:16px 22px;margin:14px 0 6px 0">'
                 f'<span style="font-size:22px;font-weight:700">'
-                f'{_action_emoji(cs.action)} Recommendation: <span style="color:{_as_border}">'
-                f'{cs.action}</span></span>'
+                f'{_action_emoji(cs.action)} Recommendation: '
+                f'<span style="color:{_as_border}">{cs.action}</span></span>'
                 f'<span style="font-size:13px;color:#bbb;margin-left:16px">'
                 f'Score {cs.score:.0f}/100</span><br>'
                 f'<span style="font-size:13px;color:#ccc">'
@@ -293,74 +353,109 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 unsafe_allow_html=True,
             )
 
-            # ── Plain-English explanation (easy to understand) ─────────
             st.markdown(
                 f'<div class="glass-panel" style="margin:8px 0 14px 0;padding:14px 18px">'
-                f'<div style="font-size:11px;color:#ff9500;font-weight:700;text-transform:uppercase;'
-                f'letter-spacing:1px;margin-bottom:6px">💬 In plain English</div>'
+                f'<div style="font-size:11px;color:#ff9500;font-weight:700;'
+                f'text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">💬 In plain English</div>'
                 f'<div style="font-size:14px;line-height:1.7;color:#e0e0e0">'
                 f'{_plain_english(cs.action, cs.entry, cs.stop_loss, cs.target, cs.risk_reward)}'
                 f'</div></div>',
                 unsafe_allow_html=True,
             )
 
-            # ── Multi-signal confirmation (timeframe + RS + earnings + agreement) ──
+            # ── Multi-signal confirmation ──────────────────────────────────
             with st.spinner("Running deep confirmation…"):
                 _dc = _deep_confirmation(ticker)
-            _wk_map = {"uptrend": ("🟢 Uptrend", "#00d4aa"), "downtrend": ("🔴 Downtrend", "#ff4757"),
-                       "sideways": ("🟡 Sideways", "#ff9500"), None: ("—", "#8899bb")}
+
+            _wk_map = {
+                "uptrend":  ("🟢 Uptrend",  "#00d4aa"),
+                "downtrend":("🔴 Downtrend","#ff4757"),
+                "sideways": ("🟡 Sideways", "#ff9500"),
+                None:       ("—",           "#8899bb"),
+            }
             _wk_txt, _wk_c = _wk_map.get(_dc["weekly"], ("—", "#8899bb"))
             _rs_c   = "#00d4aa" if (_dc["rs_pct"] or 0) > 0 else "#ff4757"
-            _rs_txt = (f'{_dc["rel_strength"].title()} ({_dc["rs_pct"]:+.1f}% vs Nifty)'
-                       if _dc["rel_strength"] else "—")
-            _ed_days = _dc["earnings_days"]
-            if _ed_days is not None and 0 <= _ed_days <= 7:
-                _ed_txt, _ed_c = f"⚠️ Results in {_ed_days}d — avoid fresh buys", "#ff4757"
-            elif _ed_days is not None and 0 <= _ed_days <= 21:
-                _ed_txt, _ed_c = f"Results in {_ed_days}d", "#ff9500"
-            elif _ed_days is not None:
-                _ed_txt, _ed_c = f"Results in {_ed_days}d (clear)", "#00d4aa"
-            else:
-                _ed_txt, _ed_c = "Unknown", "#8899bb"
-            _bull, _tot = _dc["bull"], _dc["total"] or 9
-            _agr_pct = _bull / _tot * 100
-            _agr_c = "#00d4aa" if _agr_pct >= 67 else "#ff9500" if _agr_pct >= 40 else "#ff4757"
+            _rs_txt = (
+                f'{_dc["rel_strength"].title()} ({_dc["rs_pct"]:+.1f}% vs Nifty)'
+                if _dc["rel_strength"]
+                else "—"
+            )
 
-            # ── Fold confirmation into a CONVICTION score (#7) ─────────────
+            # FIX A4: handle negative _ed_days (results already announced)
+            _ed_days = _dc["earnings_days"]
+            if _ed_days is not None and _ed_days < 0:
+                _ed_txt = f"Results {abs(_ed_days)}d ago"
+                _ed_c   = "#8899bb"                            # neutral — event passed
+            elif _ed_days is not None and 0 <= _ed_days <= 7:
+                _ed_txt = f"⚠️ Results in {_ed_days}d — avoid fresh buys"
+                _ed_c   = "#ff4757"
+            elif _ed_days is not None and 0 <= _ed_days <= 21:
+                _ed_txt = f"Results in {_ed_days}d"
+                _ed_c   = "#ff9500"
+            elif _ed_days is not None:
+                _ed_txt = f"Results in {_ed_days}d (clear)"
+                _ed_c   = "#00d4aa"
+            else:
+                _ed_txt = "Unknown"
+                _ed_c   = "#8899bb"
+
+            # FIX A3: guard against _dc["total"] being None or 0
+            _bull = _dc.get("bull", 0)
+            _tot  = _dc.get("total") or 0
+            _confirmation_available = _tot > 0
+
+            # Conviction score
             _conf_delta, _conf_reasons = 0, []
-            if _dc["weekly"] == "uptrend":
-                _conf_delta += 4; _conf_reasons.append("+4 weekly uptrend")
-            elif _dc["weekly"] == "downtrend":
-                _conf_delta -= 6; _conf_reasons.append("−6 weekly downtrend")
-            if _dc["rs_pct"] is not None:
-                if _dc["rs_pct"] > 3:
-                    _conf_delta += 4; _conf_reasons.append(f"+4 leads Nifty ({_dc['rs_pct']:+.1f}%)")
-                elif _dc["rs_pct"] < -3:
-                    _conf_delta -= 4; _conf_reasons.append(f"−4 lags Nifty ({_dc['rs_pct']:+.1f}%)")
-            if _ed_days is not None and 0 <= _ed_days <= 7:
-                _conf_delta -= 6; _conf_reasons.append(f"−6 earnings in {_ed_days}d")
-            if _agr_pct >= 80:
-                _conf_delta += 5; _conf_reasons.append(f"+5 strong agreement ({_bull}/{_tot})")
-            elif _agr_pct <= 40:
-                _conf_delta -= 5; _conf_reasons.append(f"−5 weak agreement ({_bull}/{_tot})")
-            _conf_delta  = max(-15, min(15, _conf_delta))
-            _conviction  = max(0, min(100, cs.score + _conf_delta))
+            if _confirmation_available:
+                _agr_pct = _bull / _tot * 100
+                _agr_c   = "#00d4aa" if _agr_pct >= 67 else "#ff9500" if _agr_pct >= 40 else "#ff4757"
+
+                if _dc["weekly"] == "uptrend":
+                    _conf_delta += 4;  _conf_reasons.append("+4 weekly uptrend")
+                elif _dc["weekly"] == "downtrend":
+                    _conf_delta -= 6;  _conf_reasons.append("−6 weekly downtrend")
+                if _dc["rs_pct"] is not None:
+                    if _dc["rs_pct"] > 3:
+                        _conf_delta += 4; _conf_reasons.append(f"+4 leads Nifty ({_dc['rs_pct']:+.1f}%)")
+                    elif _dc["rs_pct"] < -3:
+                        _conf_delta -= 4; _conf_reasons.append(f"−4 lags Nifty ({_dc['rs_pct']:+.1f}%)")
+                if _ed_days is not None and 0 <= _ed_days <= 7:
+                    _conf_delta -= 6; _conf_reasons.append(f"−6 earnings in {_ed_days}d")
+                if _agr_pct >= 80:
+                    _conf_delta += 5; _conf_reasons.append(f"+5 strong agreement ({_bull}/{_tot})")
+                elif _agr_pct <= 40:
+                    _conf_delta -= 5; _conf_reasons.append(f"−5 weak agreement ({_bull}/{_tot})")
+                _conf_delta = max(-15, min(15, _conf_delta))
+                _conviction = max(0, min(100, cs.score + _conf_delta))
+            else:
+                # FIX A3: confirmation unavailable — use raw score, no adjustment
+                _agr_pct    = 0
+                _agr_c      = "#8899bb"
+                _conviction = cs.score
+                _conf_delta = 0
+
             _cv_c    = "#00d4aa" if _conviction >= 65 else "#ff9500" if _conviction >= 45 else "#ff4757"
             _delta_c = "#00d4aa" if _conf_delta >= 0 else "#ff4757"
             _delta_s = f"{_conf_delta:+d}" if _conf_delta else "±0"
 
             st.markdown(
-                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.06);border-radius:12px;'
-                f'padding:14px 18px;margin-bottom:12px">'
-                f'<div style="font-size:11px;color:#5b8def;font-weight:700;text-transform:uppercase;'
-                f'letter-spacing:1px;margin-bottom:10px">🔬 Multi-Signal Confirmation</div>'
+                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.06);'
+                f'border-radius:12px;padding:14px 18px;margin-bottom:12px">'
+                f'<div style="font-size:11px;color:#5b8def;font-weight:700;'
+                f'text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">'
+                f'🔬 Multi-Signal Confirmation</div>'
                 f'<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">'
-                # Conviction score — base folded with confirmation
+                # Conviction score
                 f'<div style="border-right:1px solid rgba(255,255,255,.08);padding-right:18px">'
                 f'<div style="font-size:10px;color:#4a5568">CONVICTION</div>'
                 f'<div style="font-size:24px;font-weight:800;color:{_cv_c}">{_conviction:.0f}'
                 f'<span style="font-size:12px;color:#8899bb"> /100</span></div>'
-                f'<div style="font-size:10px;color:{_delta_c}">base {cs.score:.0f} · {_delta_s} confirmation</div></div>'
+                + (
+                    f'<div style="font-size:10px;color:{_delta_c}">base {cs.score:.0f} · {_delta_s} confirmation</div>'
+                    if _confirmation_available
+                    else '<div style="font-size:10px;color:#8899bb">confirmation unavailable</div>'
+                ) +
+                f'</div>'
                 f'<div><div style="font-size:10px;color:#4a5568">WEEKLY TREND</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_wk_c}">{_wk_txt}</div></div>'
                 f'<div><div style="font-size:10px;color:#4a5568">RELATIVE STRENGTH</div>'
@@ -368,23 +463,36 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 f'<div><div style="font-size:10px;color:#4a5568">EARNINGS</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_ed_c}">{_ed_txt}</div></div>'
                 f'<div><div style="font-size:10px;color:#4a5568">SIGNAL AGREEMENT</div>'
-                f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">{_bull} of {_tot} bullish</div></div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">'
+                + (f'{_bull} of {_tot} bullish' if _confirmation_available else '—') +
+                f'</div></div>'
                 f'</div>'
-                + (f'<div style="font-size:11px;color:#8899bb;margin-top:8px">Conviction adjustments: '
-                   f'{" · ".join(_conf_reasons)}</div>' if _conf_reasons else
-                   '<div style="font-size:11px;color:#8899bb;margin-top:8px">No adjustment — '
-                   'confirmation signals are neutral.</div>')
-                + '</div>',
+                + (
+                    f'<div style="font-size:11px;color:#8899bb;margin-top:8px">'
+                    f'Conviction adjustments: {" · ".join(_conf_reasons)}</div>'
+                    if _conf_reasons
+                    else (
+                        '<div style="font-size:11px;color:#8899bb;margin-top:8px">'
+                        'No adjustment — confirmation signals are neutral.</div>'
+                        if _confirmation_available
+                        else
+                        '<div style="font-size:11px;color:#8899bb;margin-top:8px">'
+                        'Deep confirmation unavailable — conviction equals base score.</div>'
+                    )
+                )
+                + "</div>",
                 unsafe_allow_html=True,
             )
-            # Signal checklist (expandable)
-            with st.expander(f"🔎 See all {_tot} signals", expanded=False):
-                for _sname, _sok in _dc["signals"]:
-                    st.markdown(
-                        f'<div style="font-size:13px;color:#ccc;padding:2px 0">'
-                        f'{"🟢" if _sok else "⚪"} {_sname}</div>',
-                        unsafe_allow_html=True,
-                    )
+
+            # Signal checklist
+            if _confirmation_available:
+                with st.expander(f"🔎 See all {_tot} signals", expanded=False):
+                    for _sname, _sok in _dc.get("signals", []):
+                        st.markdown(
+                            f'<div style="font-size:13px;color:#ccc;padding:2px 0">'
+                            f'{"🟢" if _sok else "⚪"} {_sname}</div>',
+                            unsafe_allow_html=True,
+                        )
 
             _as_c1, _as_c2, _as_c3, _as_c4 = st.columns([1, 1, 1, 3])
             if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", use_container_width=True):
@@ -393,56 +501,54 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     _wl.append(ticker)
                 st.toast(f"{ticker.replace('.NS','')} added to watchlist ✓")
             if _as_c2.button("📝 Paper Trade", key=f"as_pt_{ticker}", use_container_width=True):
-                st.session_state["_goto_page"] ="📂 Paper Trades"
+                st.session_state["_goto_page"]        = "📂 Paper Trades"
                 st.session_state["pt_prefill_ticker"] = ticker
                 st.rerun()
             if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
 
-            # ── Technical indicators ───────────────────────────────────
+            # ── Technical indicators ───────────────────────────────────────
             st.markdown("---")
             ti_cols = st.columns(6)
             indicators_display = [
-                ("RSI (14)",    f"{latest.get('RSI', 0):.1f}",
-                 "Oversold (<30)" if latest.get("RSI", 50) < 30
+                ("RSI (14)",  f"{latest.get('RSI', 0):.1f}",
+                 "Oversold (<30)"   if latest.get("RSI", 50) < 30
                  else "Overbought (>70)" if latest.get("RSI", 50) > 70
                  else "Normal"),
-                ("ADX",         f"{latest.get('ADX', 0):.1f}",
+                ("ADX",       f"{latest.get('ADX', 0):.1f}",
                  "Trending (>25)" if latest.get("ADX", 0) > 25 else "Ranging"),
-                ("ATR",         f"₹{latest.get('ATR', 0):.1f}", "Daily move range"),
-                ("Vol Ratio",   f"{latest.get('Volume_Ratio', 0):.2f}x",
+                ("ATR",       f"₹{latest.get('ATR', 0):.1f}", "Daily move range"),
+                ("Vol Ratio", f"{latest.get('Volume_Ratio', 0):.2f}x",
                  "High volume" if latest.get("Volume_Ratio", 1) > 1.5 else "Normal"),
-                ("Stoch K",     f"{latest.get('Stoch_K', 50):.1f}",
+                ("Stoch K",   f"{latest.get('Stoch_K', 50):.1f}",
                  "Oversold" if latest.get("Stoch_K", 50) < 20
                  else "Overbought" if latest.get("Stoch_K", 50) > 80 else ""),
-                ("VWAP %",      f"{latest.get('VWAP_Pct', 0):+.1f}%",
+                ("VWAP %",   f"{latest.get('VWAP_Pct', 0):+.1f}%",
                  "Above VWAP" if latest.get("VWAP_Pct", 0) > 0 else "Below VWAP"),
             ]
-            for (label, value, note), col in zip(indicators_display, ti_cols):
-                col.metric(label, value, note)
+            for (lbl, val, note), col in zip(indicators_display, ti_cols):
+                col.metric(lbl, val, note)
 
-            # ── Candlestick patterns ───────────────────────────────────
-            pat_cols = [c for c in df.columns if c.startswith("Pat_")]
-            active_pats = [c.replace("Pat_", "").replace("_", " ")
-                           for c in pat_cols if latest.get(c, 0) == 1]
+            pat_cols   = [c for c in df.columns if c.startswith("Pat_")]
+            active_pats = [
+                c.replace("Pat_", "").replace("_", " ")
+                for c in pat_cols if latest.get(c, 0) == 1
+            ]
             if active_pats:
                 st.info(f"📍 **Candlestick signals today:** {', '.join(active_pats)}")
 
-            # RSI divergence
             if latest.get("RSI_Bull_Div", 0):
                 st.success("📈 **Bullish RSI Divergence detected** — momentum improving despite lower price")
             if latest.get("RSI_Bear_Div", 0):
                 st.warning("📉 **Bearish RSI Divergence detected** — momentum fading despite higher price")
 
-            # ── Chart ─────────────────────────────────────────────────
+            # ── Chart ──────────────────────────────────────────────────────
             st.markdown("---")
             st.subheader("📊 Price Chart")
-            # df_chart is the period-trimmed slice (indicators stay accurate
-            # because they were computed on the full 2-year dataset)
             st.plotly_chart(build_price_chart(df_chart, ticker), width="stretch")
 
-            # ── News feed ─────────────────────────────────────────────
+            # ── News feed ──────────────────────────────────────────────────
             st.markdown("---")
             st.subheader(f"📰 Latest News — {get_display_name(ticker)}")
             with st.spinner("Loading news…"):
@@ -450,11 +556,13 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 articles = _gsn(ticker, max_articles=6)
             if articles:
                 for art in articles:
-                    s = art["sentiment"]
-                    icon = "🟢" if s == "positive" else ("🔴" if s == "negative" else "⚪")
-                    impact = ("Positive catalyst" if s == "positive"
-                              else "Negative signal" if s == "negative"
-                              else "Neutral update")
+                    s      = art["sentiment"]
+                    icon   = "🟢" if s == "positive" else ("🔴" if s == "negative" else "⚪")
+                    impact = (
+                        "Positive catalyst" if s == "positive"
+                        else "Negative signal" if s == "negative"
+                        else "Neutral update"
+                    )
                     st.markdown(
                         f'{icon} **[{art["title"]}]({art["link"]})**  \n'
                         f'<span style="font-size:11px;color:#aaa">'
@@ -464,10 +572,10 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             else:
                 st.info("No recent news found for this stock.")
 
-            # ── Trading summary box ────────────────────────────────────
+            # ── Trading summary box ────────────────────────────────────────
             st.markdown("---")
             action_c = _action_color(cs.action)
-            atr = float(df["ATR"].iloc[-1]) if "ATR" in df.columns else cs.price * 0.02
+            atr      = float(df["ATR"].iloc[-1]) if "ATR" in df.columns else cs.price * 0.02
             st.markdown(
                 f'<div class="{action_c}" style="padding:16px">'
                 f'<b style="font-size:16px">Trading Plan — {ticker.replace(".NS","")}</b><br><br>'
@@ -479,47 +587,41 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 f'(~{abs(cs.entry - cs.stop_loss)/cs.entry*100:.1f}% below entry, '
                 f'~1× ATR = ₹{atr:.1f})</span><br>'
                 f'<b>Target:</b> ₹{cs.target:,.2f} '
-                f'<span style="color:#aaa;font-size:12px">'
-                f'(R:R = {cs.risk_reward:.1f}:1)</span><br><br>'
+                f'<span style="color:#aaa;font-size:12px">(R:R = {cs.risk_reward:.1f}:1)</span><br><br>'
                 f'<i>{cs.headline}</i>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
-            # ── Paper Trade This Signal ────────────────────────────────
+            # ── FIX A1: Paper trade via popover (was direct paper_open_trade call) ──
             st.markdown("---")
             _pbt_col, _pbt_info = st.columns([1, 3])
             with _pbt_col:
-                if st.button(f"📌 Paper Trade This Signal", type="primary", key="analyze_pt_btn"):
-                    _pt_qty = max(1, int(10000 / cs.entry)) if cs.entry > 0 else 1
-                    _new_trade_id = paper_open_trade(
-                        ticker, cs.entry, _pt_qty,
-                        sl=cs.stop_loss, tp=cs.target,
-                        reason=f"{cs.action} score={cs.score:.0f}: {cs.headline}",
-                        account=st.session_state.get("pt_account", "My Account"),
-                    )
-                    st.success(
-                        f"✅ Paper trade #{_new_trade_id} opened:  "
-                        f"**{_pt_qty} × {ticker.replace('.NS','')}** @ ₹{cs.entry:,.2f}  "
-                        f"| SL ₹{cs.stop_loss:,.2f} | Target ₹{cs.target:,.2f}  "
-                        f"| Potential gain ₹{(cs.target - cs.entry)*_pt_qty:,.0f}"
-                    )
+                _paper_trade_popover(
+                    ticker,
+                    entry   = cs.entry,
+                    sl      = cs.stop_loss,
+                    tp      = cs.target,
+                    reason  = f"{cs.action} score={cs.score:.0f}: {cs.headline}",
+                    key     = f"as_ptpop_{ticker}",
+                    label   = "📌 Paper Trade This Signal",
+                )
             with _pbt_info:
                 st.info(
                     "📌 **Paper Trading** lets you test this signal without real money. "
                     "Track it in the **📂 Paper Trades** page to see if the model's calls are accurate."
                 )
 
-            # ── 📊 Fundamentals (Phase 0 — Yahoo-backed, provider-agnostic) ──────
+            # ── Fundamentals ───────────────────────────────────────────────
             st.markdown("---")
             st.subheader("📊 Fundamentals")
             try:
                 import datetime as _f_dt
-                _f_cf = _fund_service().get_fundamentals(ticker)          # facade only
+                _f_cf  = _fund_service().get_fundamentals(ticker)
                 _f_res = _fund_analytics.compute_all(_f_cf, cagr_years=5)
                 _f_fresh = "—"
                 if _f_cf.last_updated:
-                    _f_hrs = (_f_dt.datetime.now() - _f_cf.last_updated).total_seconds() / 3600
+                    _f_hrs   = (_f_dt.datetime.now() - _f_cf.last_updated).total_seconds() / 3600
                     _f_fresh = "just now" if _f_hrs < 1 else f"{_f_hrs:.0f}h ago"
                 st.caption(
                     f"Provider: **{_f_cf.provider_name or '—'}**  ·  "
@@ -528,7 +630,7 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 )
                 if _f_cf.is_partial:
                     st.warning(
-                        "⚠️ **Partial data** — some fundamentals are unavailable for this stock "
+                        f"⚠️ **Partial data** — some fundamentals are unavailable for this stock "
                         f"from {_f_cf.provider_name or 'the provider'}. "
                         f"Missing: {', '.join(_f_cf.missing_fields) or 'n/a'}."
                     )
@@ -537,10 +639,12 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     if _r.available and _r.value is not None:
                         _txt = f"{_r.value:,.1f}%" if _r.unit == "%" else f"{_r.value:,.2f}x"
                         _col.metric(_r.metric, _txt)
-                        _col.caption(f"confidence: {_r.confidence}"
-                                     + (f" · {_r.reason}" if _r.reason else ""))
+                        _col.caption(
+                            f"confidence: {_r.confidence}"
+                            + (f" · {_r.reason}" if _r.reason else "")
+                        )
                     else:
-                        _col.metric(_r.metric, "N/A")          # never a fabricated 0
+                        _col.metric(_r.metric, "N/A")
                         _col.caption(f"⚠️ {_r.reason}")
 
                 _fc1, _fc2, _fc3, _fc4 = st.columns(4)
@@ -548,29 +652,29 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 _f_show(_fc2, _f_res["eps_cagr"])
                 _f_show(_fc3, _f_res["roe"])
                 _f_show(_fc4, _f_res["debt_to_equity"])
-                # R4: evidence context for the revenue-growth metric
+
                 from dashboard.shared.disclosures import (
                     render_revenue_growth_evidence as _f_rg_evidence,
                 )
                 _f_rg_evidence()
 
-                # Option A — honest CAGR confidence disclosure (only when not all "high")
-                _cagr_results = [r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
-                                 if r is not None and getattr(r, "available", False)]
+                _cagr_results = [
+                    r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
+                    if r is not None and getattr(r, "available", False)
+                ]
                 if _cagr_results and any(r.confidence in ("medium", "low") for r in _cagr_results):
                     st.caption(
                         "📊 **Data depth note:** CAGR confidence reflects Yahoo Finance's "
                         "available history (~4–5 years for most NSE names). "
                         "\"Medium\" confidence means the trend is directionally reliable "
-                        "but not enough history exists for statistical certainty. "
-                        "Interpretation: treat Medium-confidence CAGR as a directional signal, "
-                        "not a precise forecast."
+                        "but not enough history exists for statistical certainty."
                     )
 
-                # ── Sector-aware ROCE / FCF (Phase D1) — only where meaningful ──
                 from analysis.sector_classification import classify_sector as _classify
-                _sp = _classify(getattr(cs, "sector", None),
-                                name=getattr(cs, "company_name", None))
+                _sp = _classify(
+                    getattr(cs, "sector", None),
+                    name=getattr(cs, "company_name", None),
+                )
                 if _sp.is_financial:
                     st.info(f"🏦 **{_sp.group}** — {_sp.note}")
                 else:
@@ -579,8 +683,10 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     _rr = _f_res["fcf"]
                     if _rr.available and _rr.value is not None:
                         _rc2.metric("Free Cash Flow", f"₹{_rr.value:,.0f} cr")
-                        _cap = (" · capex-heavy: negative FCF can be a normal investment cycle"
-                                if _sp.fcf_capex_caveat else "")
+                        _cap = (
+                            " · capex-heavy: negative FCF can be a normal investment cycle"
+                            if _sp.fcf_capex_caveat else ""
+                        )
                         _rc2.caption(f"confidence: {_rr.confidence}{_cap}")
                     else:
                         _rc2.metric("Free Cash Flow", "N/A")
@@ -592,7 +698,7 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             except Exception as _f_e:
                 st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
 
-            # ── 💰 Valuation Context (Phase C1 — surface existing multiples, NO judgment) ──
+            # ── Valuation Context ──────────────────────────────────────────
             st.markdown("---")
             st.subheader("💰 Valuation Context")
             st.caption(
@@ -602,16 +708,20 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             try:
                 from analysis.fundamentals.valuation import build_valuation_context
                 from analysis.sector_classification import classify_sector as _classify_v
-                _spv = _classify_v(getattr(cs, "sector", None),
-                                   name=getattr(cs, "company_name", None))
-                _val_cf = _fund_service().get_fundamentals(ticker)
-                _val = build_valuation_context(_val_cf, sector_profile=_spv)
+                _spv     = _classify_v(
+                    getattr(cs, "sector", None),
+                    name=getattr(cs, "company_name", None),
+                )
+                _val_cf  = _fund_service().get_fundamentals(ticker)
+                _val     = build_valuation_context(_val_cf, sector_profile=_spv)
                 _vc1, _vc2, _vc3 = st.columns(3)
-                _vc1.metric("P/E", f"{_val.pe:,.1f}x" if _val.pe is not None else "N/A")
-                _vc2.metric("P/B", f"{_val.pb:,.1f}x" if _val.pb is not None else "N/A")
+                _vc1.metric("P/E",  f"{_val.pe:,.1f}x"  if _val.pe  is not None else "N/A")
+                _vc2.metric("P/B",  f"{_val.pb:,.1f}x"  if _val.pb  is not None else "N/A")
                 if _val.ev_ebitda_applicable:
-                    _vc3.metric("EV/EBITDA",
-                                f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A")
+                    _vc3.metric(
+                        "EV/EBITDA",
+                        f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A",
+                    )
                 else:
                     _vc3.metric("EV/EBITDA", "n/a")
                     _vc3.caption("not meaningful for financials")
@@ -626,18 +736,20 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     + ". Values are None when unavailable — never fabricated."
                 )
 
-                # ── Valuation Assessment (Phase E1-v2 — descriptive posture, NO judgment) ──
                 st.markdown("**🧮 Valuation Assessment** *(growth- & quality-adjusted, descriptive)*")
                 try:
                     from analysis.fundamentals.valuation_decision import assess_valuation
                     _va_res = _fund_analytics.compute_all(_val_cf)
-                    _va = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
-                    _va_color = {"high": "#00d4aa", "medium": "#ffa726",
-                                 "low": "#8899bb", "none": "#8899bb"}.get(_va.confidence, "#8899bb")
+                    _va     = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
+                    _va_color = {
+                        "high": "#00d4aa", "medium": "#ffa726",
+                        "low":  "#8899bb", "none":   "#8899bb",
+                    }.get(_va.confidence, "#8899bb")
                     st.markdown(
                         f"> {_va.phrase}  \n"
                         f"<span style='color:{_va_color}'>confidence: {_va.confidence}</span>",
-                        unsafe_allow_html=True)
+                        unsafe_allow_html=True,
+                    )
                     if _va.justification and _va.posture != "INSUFFICIENT_EVIDENCE":
                         st.caption("Basis: " + _va.justification)
                     if _va.triggered_guard:
@@ -649,56 +761,70 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                     if _va.confidence_factors:
                         st.caption("Confidence factors: " + " · ".join(_va.confidence_factors))
                     st.caption(
-                        "Descriptive only — relates the multiple to growth & quality. No buy/sell, "
-                        "no fair/intrinsic value, no cheap/expensive label."
+                        "Descriptive only — no buy/sell, no fair/intrinsic value, "
+                        "no cheap/expensive label."
                     )
                 except Exception as _va_e:
                     st.caption(f"⚠️ Valuation assessment unavailable: {_va_e}")
             except Exception as _val_e:
                 st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
 
-            # ── 💧 Liquidity Context (Phase C1 — from existing OHLCV) ──
+            # ── Liquidity Context ──────────────────────────────────────────
             st.markdown("---")
             st.subheader("💧 Liquidity Context")
             _liq_ctx = None
             try:
                 from analysis.liquidity import compute_liquidity, format_turnover
                 _liq_ctx = compute_liquidity(df)
-                _lt_color = {"High": "#00d4aa", "Medium": "#2ecc71",
-                             "Low": "#ffa726", "Illiquid": "#ff4757"}.get(
-                                 _liq_ctx.liquidity_tier, "#8899bb")
+                _lt_color = {
+                    "High": "#00d4aa", "Medium": "#2ecc71",
+                    "Low":  "#ffa726", "Illiquid": "#ff4757",
+                }.get(_liq_ctx.liquidity_tier, "#8899bb")
                 st.markdown(
                     f"Liquidity tier: <b style='color:{_lt_color}'>{_liq_ctx.liquidity_tier}</b>",
-                    unsafe_allow_html=True)
+                    unsafe_allow_html=True,
+                )
                 _lc1, _lc2, _lc3 = st.columns(3)
-                _lc1.metric("Avg daily turnover (30d)",
-                            format_turnover(_liq_ctx.avg_daily_turnover_30d))
-                _lc2.metric("Avg daily volume (30d)",
-                            f"{_liq_ctx.avg_daily_volume_30d:,.0f}"
-                            if _liq_ctx.avg_daily_volume_30d is not None else "N/A")
-                _lc3.metric("Volume trend (30d vs 90d)",
-                            (_liq_ctx.volume_trend or "—").title(),
-                            f"{_liq_ctx.volume_trend_ratio:.2f}x"
-                            if _liq_ctx.volume_trend_ratio is not None else None)
-                st.caption(_liq_ctx.reason + " · computed from existing OHLCV (no new data source).")
+                _lc1.metric(
+                    "Avg daily turnover (30d)",
+                    format_turnover(_liq_ctx.avg_daily_turnover_30d),
+                )
+                _lc2.metric(
+                    "Avg daily volume (30d)",
+                    f"{_liq_ctx.avg_daily_volume_30d:,.0f}"
+                    if _liq_ctx.avg_daily_volume_30d is not None else "N/A",
+                )
+                _lc3.metric(
+                    "Volume trend (30d vs 90d)",
+                    (_liq_ctx.volume_trend or "—").title(),
+                    f"{_liq_ctx.volume_trend_ratio:.2f}x"
+                    if _liq_ctx.volume_trend_ratio is not None else None,
+                )
+                st.caption(
+                    _liq_ctx.reason
+                    + " · computed from existing OHLCV (no new data source)."
+                )
             except Exception as _liq_e:
                 st.caption(f"⚠️ Liquidity context unavailable: {_liq_e}")
 
-            # ── 🧭 Investment Thesis (Phase A1 — structured, rules-based, NO AI) ──
+            # ── Investment Thesis ──────────────────────────────────────────
             st.markdown("---")
             st.subheader("🧭 Investment Thesis (structured)")
             st.caption(
                 "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
                 "single verdict. Every point is traceable to its source. Not investment advice."
             )
+            _th = None
             try:
                 from analysis.thesis import generate_thesis, build_inputs
-                _th = generate_thesis(build_inputs(ticker, composite=cs, deep=_dc,
-                                                   liquidity=_liq_ctx))
-
-                _v_color = {"Strong Positive": "#00d4aa", "Positive": "#2ecc71",
-                            "Neutral": "#8899bb", "Negative": "#ff7043",
-                            "Strong Negative": "#ff4757"}.get(_th.verdict, "#8899bb")
+                _th = generate_thesis(
+                    build_inputs(ticker, composite=cs, deep=_dc, liquidity=_liq_ctx)
+                )
+                _v_color = {
+                    "Strong Positive": "#00d4aa", "Positive": "#2ecc71",
+                    "Neutral":         "#8899bb",  "Negative": "#ff7043",
+                    "Strong Negative": "#ff4757",
+                }.get(_th.verdict, "#8899bb")
                 st.markdown(
                     f"<div style='font-size:1.15rem'>Verdict: "
                     f"<b style='color:{_v_color}'>{_th.verdict}</b> "
@@ -709,8 +835,7 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
 
                 def _factor_list(_factors, _empty):
                     if not _factors:
-                        st.caption(_empty)
-                        return
+                        st.caption(_empty); return
                     for _f in _factors:
                         st.markdown(
                             f"- {_f.text}  \n"
@@ -726,23 +851,19 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 with _tc2:
                     st.markdown("**🔴 Bear case**")
                     _factor_list(_th.bear_factors, "No bear factors triggered.")
-
                 st.markdown("**⚠️ Key risks**")
                 _factor_list(_th.key_risks, "No specific risks flagged by the rules.")
-
                 for _tn in getattr(_th, "notes", []) or []:
                     st.info("ℹ️ " + _tn)
-
                 st.caption(
                     "Contributing subsystems: "
                     + (", ".join(_th.inputs_present) or "none available")
                     + ". Phase A1/D1 — explainable, sector-aware rules; no AI/LLM narration."
                 )
             except Exception as _th_e:
-                _th = None
                 st.caption(f"⚠️ Thesis unavailable: {_th_e}")
 
-            # ── 🧩 Portfolio Fit Assessment (Phase B — rules-based, NO AI) ──────
+            # ── Portfolio Fit — FIX A5: cache CSV read ────────────────────
             st.markdown("---")
             st.subheader("🧩 Portfolio Fit Assessment")
             st.caption(
@@ -750,32 +871,53 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                 "diversification, sector mix, beta and concentration. Not investment advice."
             )
             try:
-                import pandas as _pf_pd, pathlib as _pf_pl
-                _pf_csv = st.session_state.get("_ao_portfolio_path") \
-                    or (_pf_pl.Path(_ROOT) / "portfolio.csv")
-                _pf_holds = []
-                if _pf_csv and _pf_pl.Path(_pf_csv).exists():
-                    _pf_df = _pf_pd.read_csv(_pf_csv)
-                    for _, _r in _pf_df.iterrows():
-                        _t = str(_r.get("ticker", "")).strip()
-                        if _t and not _t.upper().endswith(".NS"):
-                            _t = _t + ".NS"
-                        _q = float(_r.get("quantity", 0) or 0)
-                        if _t and _q > 0:
-                            _pf_holds.append({"ticker": _t, "quantity": _q})
+                import pandas as _pf_pd
+                import pathlib as _pf_pl
+
+                _pf_csv_path = st.session_state.get("_ao_portfolio_path") or str(
+                    _pf_pl.Path(_ROOT) / "portfolio.csv"
+                )
+
+                # FIX A5: cache the CSV read keyed on path + file mtime
+                @st.cache_data(ttl=300, show_spinner=False)
+                def _load_portfolio_csv(_path: str, _mtime: float) -> list:
+                    _holds = []
+                    try:
+                        _df = _pf_pd.read_csv(_path)
+                        for _, _r in _df.iterrows():
+                            _t = str(_r.get("ticker", "")).strip()
+                            if _t and not _t.upper().endswith(".NS"):
+                                _t += ".NS"
+                            _q = float(_r.get("quantity", 0) or 0)
+                            if _t and _q > 0:
+                                _holds.append({"ticker": _t, "quantity": _q})
+                    except Exception:
+                        pass
+                    return _holds
+
+                _pf_mtime = 0.0
+                if _pf_pl.Path(_pf_csv_path).exists():
+                    _pf_mtime = _pf_pl.Path(_pf_csv_path).stat().st_mtime
+
+                _pf_holds = _load_portfolio_csv(_pf_csv_path, _pf_mtime) if _pf_mtime else []
 
                 if not _pf_holds:
-                    st.info("No portfolio found — add holdings on the **📂 My Portfolio** page "
-                            "to see how this stock would fit your book.")
+                    st.info(
+                        "No portfolio found — add holdings on the **📂 My Portfolio** page "
+                        "to see how this stock would fit your book."
+                    )
                 else:
                     from analysis.thesis import build_fit_inputs, assess_fit
                     with st.spinner("Assessing fit against your portfolio…"):
-                        _fit = assess_fit(build_fit_inputs(
-                            ticker, _pf_holds, candidate_thesis=_th))
+                        _fit = assess_fit(
+                            build_fit_inputs(ticker, _pf_holds, candidate_thesis=_th)
+                        )
 
-                    _fr_color = {"Strong Fit": "#00d4aa", "Fit": "#2ecc71",
-                                 "Neutral": "#8899bb", "Poor Fit": "#ff7043",
-                                 "Strong Conflict": "#ff4757"}.get(_fit.fit_rating, "#8899bb")
+                    _fr_color = {
+                        "Strong Fit":     "#00d4aa", "Fit":      "#2ecc71",
+                        "Neutral":        "#8899bb", "Poor Fit": "#ff7043",
+                        "Strong Conflict":"#ff4757",
+                    }.get(_fit.fit_rating, "#8899bb")
                     st.markdown(
                         f"<div style='font-size:1.15rem'>Fit rating: "
                         f"<b style='color:{_fr_color}'>{_fit.fit_rating}</b> "
@@ -790,8 +932,7 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
 
                     def _fit_list(_factors, _empty):
                         if not _factors:
-                            st.caption(_empty)
-                            return
+                            st.caption(_empty); return
                         for _f in _factors:
                             st.markdown(
                                 f"- {_f.text}  \n"
@@ -808,8 +949,9 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
                         st.markdown("**❌ Negative effects**")
                         _fit_list(_fit.negative_effects, "No negative effects flagged.")
 
-                    _ps_color = {"Large": "#00d4aa", "Moderate": "#ffa726",
-                                 "Small": "#ff7043"}.get(_fit.position_size_guidance, "#8899bb")
+                    _ps_color = {
+                        "Large": "#00d4aa", "Moderate": "#ffa726", "Small": "#ff7043",
+                    }.get(_fit.position_size_guidance, "#8899bb")
                     st.markdown(
                         f"**Position size guidance:** "
                         f"<b style='color:{_ps_color}'>{_fit.position_size_guidance}</b>",
@@ -828,8 +970,3 @@ if analyze_btn or ("last_analyzed" in st.session_state and st.session_state.last
             st.error(f"Analysis failed: {e}")
             import traceback
             st.code(traceback.format_exc())
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 — MARKET OVERVIEW
-# ═══════════════════════════════════════════════════════════════════════════════
