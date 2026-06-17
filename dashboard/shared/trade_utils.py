@@ -44,12 +44,14 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import pathlib
 import sys
 import sqlite3
 import warnings
 import io
 import json
 import math
+import tempfile
 import time
 from typing import Optional
 
@@ -363,6 +365,81 @@ def _portfolio_live_prices(tickers: tuple) -> dict:
         except Exception as _e:
             _log.debug("trade_utils._portfolio_live_prices(%s) failed: %s", t, _e)
     return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX4 — Secure temp file helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _safe_tmpfile(suffix: str = ".csv") -> pathlib.Path:
+    """Return a Path to a freshly-created secure temporary file.
+
+    FIX4: replaces the insecure tempfile.mktemp() pattern (which creates a
+    race condition between name generation and file creation) with
+    NamedTemporaryFile(delete=False), which atomically creates the file.
+    The caller owns the file and is responsible for deletion when done.
+
+    Usage:
+        tmp = _safe_tmpfile(suffix=".csv")
+        tmp.write_text(content, encoding="utf-8")
+    """
+    with tempfile.NamedTemporaryFile(
+        suffix=suffix, delete=False, mode="w", encoding="utf-8"
+    ) as _f:
+        _path = _f.name   # file is created and immediately closed (empty)
+    return pathlib.Path(_path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX9 — Portfolio CSV upload validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REQUIRED_CSV_COLS = {"ticker", "quantity", "avg_buy_price", "date_bought"}
+
+
+def upload_validate_portfolio_csv(
+    uploaded_file,
+) -> "tuple[pathlib.Path | None, str | None]":
+    """Validate an st.file_uploader result as a portfolio CSV.
+
+    FIX9: validates required columns at upload time so the rest of the page
+    never receives a malformed DataFrame.
+
+    Returns
+    -------
+    (path, None)   — file is valid; path is a secure tmp Path ready to read.
+    (None, errmsg) — file is invalid; errmsg is a human-readable explanation.
+    """
+    import io as _io
+
+    if uploaded_file is None:
+        return None, "No file provided."
+
+    try:
+        _raw = uploaded_file.read()
+        uploaded_file.seek(0)          # reset so callers can re-read if needed
+        _df  = pd.read_csv(_io.BytesIO(_raw))
+    except Exception as _e:
+        return None, f"Could not parse CSV: {_e}"
+
+    _cols_lower = {c.strip().lower() for c in _df.columns}
+    _missing    = _REQUIRED_CSV_COLS - _cols_lower
+    if _missing:
+        return None, (
+            f"Missing required column(s): {', '.join(sorted(_missing))}. "
+            f"Expected: {', '.join(sorted(_REQUIRED_CSV_COLS))}."
+        )
+
+    if _df.empty:
+        return None, "The uploaded CSV has no data rows."
+
+    # Write to a secure temp file so the rest of the page can use a Path
+    try:
+        _tmp = _safe_tmpfile(suffix=".csv")
+        _tmp.write_bytes(_raw)
+        return _tmp, None
+    except Exception as _e:
+        return None, f"Could not write temp file: {_e}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
