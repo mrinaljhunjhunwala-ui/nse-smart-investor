@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import email.utils
 import logging
+import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -342,9 +343,16 @@ _NEGATIVE = {
     "tumbles", "slides", "sinks", "plunges", "falls", "drops",
 }
 
+# BUGFIX: title.lower().split() left trailing/leading punctuation glued onto
+# words (e.g. "profit!", "growth,", "record-high"), so those tokens never
+# matched _POSITIVE/_NEGATIVE even though the root word was present. This
+# regex pulls out plain alphabetic tokens instead, splitting on any non-letter
+# (so "record-high" also yields "record" and "high" separately).
+_WORD_RE = re.compile(r"[a-z]+")
+
 
 def _quick_sentiment(title: str) -> str:
-    words = set(title.lower().split())
+    words = set(_WORD_RE.findall(title.lower()))
     pos = len(words & _POSITIVE)
     neg = len(words & _NEGATIVE)
     if pos > neg:
