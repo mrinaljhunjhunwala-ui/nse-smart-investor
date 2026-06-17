@@ -39,9 +39,25 @@ with _tab_macro:
     with st.spinner("Fetching 7 macro instruments…"):
         try:
             macro_df = load_macro_data()
+
+            # FIX MI2 — surface exactly which instruments came back so a
+            # partial fetch (e.g. Yahoo failing for some/all of Gold/Brent/
+            # USD-INR/DXY) is visible instead of silently degrading into a
+            # broken-looking chart below.
+            _expected = ["Nifty 50", "BankNifty", "India VIX",
+                         "Gold ($/oz)", "Brent Crude", "USD/INR", "DXY"]
+            _missing  = [c for c in _expected if c not in macro_df.columns]
+
             if macro_df.empty:
                 st.warning("Could not fetch macro data. Check internet connection.")
             else:
+                if _missing:
+                    st.info(
+                        f"ℹ️ {len(_missing)} of {len(_expected)} instruments unavailable "
+                        f"right now: **{', '.join(_missing)}**. Showing the "
+                        f"{len(macro_df.columns)} that loaded successfully."
+                    )
+
                 # Metric cards
                 st.subheader("Current Levels & Daily Change")
                 card_cols = st.columns(min(len(macro_df.columns), 7))
@@ -56,44 +72,74 @@ with _tab_macro:
 
                 st.markdown("---")
 
-                # Normalised 3-month performance
-                st.subheader("3-Month Performance (Normalised to 100)")
-                first_valid = macro_df.apply(
-                    lambda s: s.dropna().iloc[0] if not s.dropna().empty else 1
-                )
-                norm_df = macro_df.div(first_valid) * 100
-                _colors = ["#4CAF50","#2196F3","#FF6B6B","#FFD700","#FF8C00","#9C27B0","#00BCD4"]
-                fig_norm = go.Figure()
-                for i, col in enumerate(norm_df.columns):
-                    fig_norm.add_trace(go.Scatter(
-                        x=norm_df.index, y=norm_df[col], name=col,
-                        line=dict(color=_colors[i % len(_colors)], width=2),
-                    ))
-                fig_norm.add_hline(y=100, line_dash="dot", line_color="white", opacity=0.3)
-                fig_norm.update_layout(
-                    template="nse_pro", height=380,
-                    yaxis_title="Indexed (start = 100)",
-                    legend=dict(orientation="h", y=1.02),
-                    margin=dict(l=0, r=0, t=40, b=0),
-                )
-                st.plotly_chart(fig_norm, width="stretch")
+                # FIX MI2 — only attempt the normalized performance chart and
+                # the correlation matrix if there are at least 2 usable
+                # columns with enough overlapping history. Previously these
+                # ran unconditionally on whatever subset of macro_df existed,
+                # so a column with too little/misaligned history could push
+                # pct_change()/corr() output to all-NaN, which renders as a
+                # blank or visibly broken chart with no explanation.
+                _usable_cols = [c for c in macro_df.columns if macro_df[c].dropna().shape[0] >= 30]
 
-                st.markdown("---")
+                if len(_usable_cols) < 2:
+                    st.warning(
+                        "⚠️ Not enough overlapping history across instruments right now "
+                        "to plot 3-month performance or the correlation matrix "
+                        f"(only {len(_usable_cols)} instrument(s) have sufficient data). "
+                        "Try **Refresh Macro Data** in a moment."
+                    )
+                else:
+                    _macro_use = macro_df[_usable_cols]
 
-                # 30-day return correlation heatmap
-                st.subheader("30-Day Return Correlation Matrix")
-                rets_30  = macro_df.pct_change().tail(30)
-                corr_m   = rets_30.corr().round(2)
-                fig_corr = px.imshow(
-                    corr_m, text_auto=True, aspect="auto",
-                    color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
-                    title="30-Day Daily Return Correlation",
-                )
-                fig_corr.update_layout(
-                    template="nse_pro", height=420,
-                    margin=dict(l=0, r=0, t=40, b=0),
-                )
-                st.plotly_chart(fig_corr, width="stretch")
+                    # Normalised 3-month performance
+                    st.subheader("3-Month Performance (Normalised to 100)")
+                    first_valid = _macro_use.apply(
+                        lambda s: s.dropna().iloc[0] if not s.dropna().empty else 1
+                    )
+                    norm_df = _macro_use.div(first_valid) * 100
+                    _colors = ["#4CAF50","#2196F3","#FF6B6B","#FFD700","#FF8C00","#9C27B0","#00BCD4"]
+                    fig_norm = go.Figure()
+                    for i, col in enumerate(norm_df.columns):
+                        fig_norm.add_trace(go.Scatter(
+                            x=norm_df.index, y=norm_df[col], name=col,
+                            line=dict(color=_colors[i % len(_colors)], width=2),
+                        ))
+                    fig_norm.add_hline(y=100, line_dash="dot", line_color="white", opacity=0.3)
+                    fig_norm.update_layout(
+                        template="nse_pro", height=380,
+                        yaxis_title="Indexed (start = 100)",
+                        legend=dict(orientation="h", y=1.02),
+                        margin=dict(l=0, r=0, t=40, b=0),
+                    )
+                    st.plotly_chart(fig_norm, width="stretch")
+
+                    st.markdown("---")
+
+                    # 30-day return correlation heatmap
+                    st.subheader("30-Day Return Correlation Matrix")
+                    rets_30 = _macro_use.pct_change().tail(30)
+                    # FIX MI2: drop any column that is still all-NaN after the
+                    # 30-day slice (e.g. an instrument with a recent data gap)
+                    # so .corr() never returns an all-NaN row/column that
+                    # would render as a blank heatmap.
+                    rets_30 = rets_30.dropna(axis=1, how="all")
+                    if rets_30.shape[1] < 2:
+                        st.warning(
+                            "⚠️ Not enough recent daily returns to compute a "
+                            "correlation matrix right now — try refreshing in a moment."
+                        )
+                    else:
+                        corr_m = rets_30.corr().round(2)
+                        fig_corr = px.imshow(
+                            corr_m, text_auto=True, aspect="auto",
+                            color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
+                            title="30-Day Daily Return Correlation",
+                        )
+                        fig_corr.update_layout(
+                            template="nse_pro", height=420,
+                            margin=dict(l=0, r=0, t=40, b=0),
+                        )
+                        st.plotly_chart(fig_corr, width="stretch")
 
                 st.markdown("---")
 
@@ -142,7 +188,6 @@ with _tab_breadth:
                   help="> 1.5 = strong; < 0.7 = weak")
         c4.metric("Near 52W High / Low", f"{breadth['near_52w_high']} / {breadth['near_52w_low']}")
 
-        # % above key MAs bar chart
         st.markdown("---")
         st.subheader("% of Nifty 50 Stocks Above Key Moving Averages")
         bvals = {
@@ -170,7 +215,6 @@ with _tab_breadth:
         )
         st.plotly_chart(bar_fig, width="stretch")
 
-        # Signal interpretation
         pct200 = breadth["pct_above_200"]
         if pct200 >= 70:
             sig_txt, sig_clr = "🟢 **Strong Bull Market breadth** — Majority above SMA200. Buy dips with confidence.", "#4CAF50"
@@ -186,7 +230,6 @@ with _tab_breadth:
             f'{sig_txt}</div>', unsafe_allow_html=True
         )
 
-        # A/D pie + reference table side by side
         st.markdown("---")
         col_pie, col_tbl = st.columns([1, 1])
         with col_pie:
@@ -210,7 +253,6 @@ with _tab_breadth:
                 {"% Above SMA200": "< 30%",  "Signal": "Bear market",    "Action": "Reduce exposure, hedge"},
             ]), hide_index=True)
 
-        # 52W high / low bars
         st.markdown("---")
         st.subheader("52-Week High / Low Distribution")
         hl_fig = go.Figure(go.Bar(
