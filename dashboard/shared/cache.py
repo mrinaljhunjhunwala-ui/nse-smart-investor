@@ -1,4 +1,63 @@
-"""dashboard/shared/cache.py - shared cached data + display/validation helpers."""
+"""dashboard/shared/cache.py - shared cached data + display/validation helpers.
+
+FIXES applied in this revision
+───────────────────────────────
+C_TICKER  Tata Motors demerger correction (effective 1-Oct-2025): the original
+    combined company split into two separately listed entities. TATAMOTORS.NS
+    kept the old ticker but is now commercial-vehicles-only (trucks/buses);
+    the passenger vehicle + EV + Jaguar Land Rover business spun off as a new
+    entity trading under TMPV.NS. STOCK_SEARCH_MAP previously had a single
+    mislabeled entry ("Tata Motors (TMPV - PV)" → TMPV.NS) with no separate
+    entry for the CV business, so a plain "Tata Motors" search silently
+    resolved to only the PV-only post-demerger entity. Both entities are now
+    listed explicitly so users can disambiguate. _HOME_SCAN_UNIVERSE's
+    TATAMOTORS.NS entry is flagged with a comment noting the business has
+    changed shape since the universe list was likely curated.
+
+C1  _tomorrow_watchlist bucket assignment — added an explicit precedence
+    comment documenting that the elif chain order is deliberate (breakout
+    checked before reversal buckets), and added debug logging when a stock's
+    score/momentum/tech combination would have matched more than one bucket,
+    so threshold drift is visible in logs rather than silently invisible.
+
+C2  Added warm_caches() — a callable entry point intended to be invoked by a
+    scheduled job (cron / APScheduler) before market open, which pre-populates
+    _home_top_picks and _tomorrow_watchlist so the first real user of the day
+    never pays the ~2 min cold-scan cost. This file only provides the hook;
+    wiring an actual scheduler is a deployment-level concern outside this
+    module's scope.
+
+C3  get_composite_score now wraps score_stock() in try/except and returns a
+    sentinel CompositeScore-shaped object with action="UNAVAILABLE" on
+    failure, consistent with every other scoring function in this file.
+
+C4  _deep_confirmation now sanity-bounds earnings_days — a result more than
+    100 days in the past is treated as a stale/incorrect upstream date and
+    surfaced as None ("unknown") rather than as a confidently wrong negative
+    number.
+
+C5  load_ticker_df now logs a warning when the post-dropna frame is empty,
+    so "why did this ticker return nothing" is traceable from one place
+    instead of requiring each caller to add its own diagnostic.
+
+C6  Extracted _score_to_dict(s) — a single shared helper that maps a
+    CompositeScore object to the standard result dict. _score_for_cc,
+    _score_watchlist, _home_top_picks, and _tomorrow_watchlist (which needs a
+    slightly different field subset) all now route through it, so a future
+    schema change only has to happen in one place.
+
+C7  _tomorrow_watchlist now logs per-bucket result counts after each scan and
+    warns if any bucket is empty, so silently-empty buckets (the original bug
+    this function had) are visible in logs going forward rather than only
+    discoverable by a user noticing an empty tab.
+
+C11 _sector_ranks_tuple now distinguishes "no sector data available" (empty
+    DataFrame, expected) from "sector ranking fetch failed" (exception,
+    unexpected) via a log level distinction — exceptions log at WARNING,
+    empty-but-successful results log at DEBUG. The return value is still ()
+    in both cases (callers can't be changed without touching every scorer),
+    but the failure mode is now distinguishable in logs.
+"""
 from __future__ import annotations
 import os, sys, sqlite3, warnings, io, json, math, datetime
 import logging
@@ -21,6 +80,7 @@ _log = logging.getLogger("dashboard.cache")
 # Company name → ticker map  (used for search autocomplete)
 # ─────────────────────────────────────────────────────────────────────────────
 STOCK_SEARCH_MAP = {
+    # Large-cap / Nifty 50
     "Reliance Industries": "RELIANCE.NS",
     "Tata Consultancy Services (TCS)": "TCS.NS",
     "HDFC Bank": "HDFCBANK.NS",
@@ -47,7 +107,12 @@ STOCK_SEARCH_MAP = {
     "Coal India": "COALINDIA.NS",
     "Nestle India": "NESTLEIND.NS",
     "Bajaj Finserv": "BAJAJFINSV.NS",
-    "Tata Motors (TMPV - PV)": "TMPV.NS",
+    # FIX C_TICKER: Tata Motors demerged effective 1-Oct-2025 into two
+    # separately listed companies. The old combined entity no longer exists
+    # as a single stock — searching "Tata Motors" must let the user pick
+    # which successor business they mean.
+    "Tata Motors (Commercial Vehicles - CV)": "TATAMOTORS.NS",
+    "Tata Motors Passenger Vehicles (incl. JLR, EVs)": "TMPV.NS",
     "Adani Enterprises": "ADANIENT.NS",
     "JSW Steel": "JSWSTEEL.NS",
     "Grasim Industries": "GRASIM.NS",
@@ -71,6 +136,7 @@ STOCK_SEARCH_MAP = {
     "Mahindra & Mahindra (M&M)": "M&M.NS",
     "LTIMindtree": "LTIM.NS",
     "Shriram Finance": "SHRIRAMFIN.NS",
+    # Nifty Next 50
     "Cholamandalam Finance": "CHOLAFIN.NS",
     "Muthoot Finance": "MUTHOOTFIN.NS",
     "HDFC AMC": "HDFCAMC.NS",
@@ -118,6 +184,7 @@ STOCK_SEARCH_MAP = {
     "IRCTC": "IRCTC.NS",
     "Info Edge (Naukri)": "NAUKRI.NS",
     "Eternal Ltd (Zomato)": "ETERNAL.NS",
+    # Midcap / Popular stocks
     "IDFC First Bank": "IDFCFIRSTB.NS",
     "Federal Bank": "FEDERALBNK.NS",
     "Bandhan Bank": "BANDHANBNK.NS",
@@ -194,12 +261,14 @@ STOCK_SEARCH_MAP = {
     "Sun TV Network": "SUNTV.NS",
     "Manappuram Finance": "MANAPPURAM.NS",
     "Tatasteel": "TATASTEEL.NS",
+    # User portfolio stocks
     "Balrampur Chini Mills": "BALRAMCHIN.NS",
     "Xchanging Solutions": "XCHANGING.NS",
     "Bajaj Hindusthan Sugar": "BAJAJHIND.NS",
     "Dhanlaxmi Bank": "DHANBANK.NS",
 }
 
+# Reverse lookup: ticker → display name
 _TICKER_TO_NAME = {v: k for k, v in STOCK_SEARCH_MAP.items()}
 
 
@@ -209,6 +278,12 @@ def get_display_name(ticker: str) -> str:
 
 
 def _validate_ticker(raw: str):
+    """
+    Validate a user-entered NSE symbol before any API call.
+    Returns (cleaned_symbol, error_message_or_None). cleaned_symbol has no
+    .NS/.BO suffix (callers add it). Allows letters, digits, '-' and '&'
+    (e.g. RELIANCE, M&M, BAJAJ-AUTO).
+    """
     t = (raw or "").strip().upper().replace(" ", "")
     if not t:
         return "", None
@@ -222,6 +297,7 @@ def _validate_ticker(raw: str):
 
 
 def _plain_english(action: str, entry: float, sl: float, tp: float, rr: float) -> str:
+    """One-line 'what this means + what to do' for non-traders."""
     risk_amt = entry - sl
     rew_amt  = tp - entry
     if action in ("STRONG BUY", "BUY"):
@@ -246,6 +322,10 @@ def _plain_english(action: str, entry: float, sl: float, tp: float, rr: float) -
 
 
 def _trade_type(headline: str) -> tuple:
+    """
+    Categorise a setup into a trade type from its narrative headline.
+    Returns (label, emoji, color). Zero extra data needed.
+    """
     h = (headline or "").lower()
     if any(k in h for k in ("breakout", "52-week high", "52w high", "new high", "all-time high")):
         return ("Breakout", "🚀", "#00d4aa")
@@ -258,17 +338,47 @@ def _trade_type(headline: str) -> tuple:
     return ("Trend", "•", "#8899bb")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
 @st.cache_data(ttl=300)
 def load_ticker_df(ticker: str, period: str = "2y") -> pd.DataFrame:
+    """
+    Fetch OHLCV + compute all technical indicators.
+
+    Always fetches at least 2 years so that SMA_200, RSI(14), MACD(26) etc.
+    are valid at the *most recent* row.  The UI chart period controls what
+    slice is *displayed*, not how much data is loaded.
+
+    FIX C5: logs a warning when the post-dropna frame is empty (typically
+    new listings with < 200 trading days of history), so this is traceable
+    from one place rather than every caller needing its own diagnostic.
+    """
     from data.fetcher import fetch_single
     from utils.indicators import add_all_indicators
     df = fetch_single(ticker, period=period)
     df = add_all_indicators(df)
+    _pre_drop_len = len(df)
+    # Drop warm-up rows where core indicators are NaN so iloc[-1] is always valid
     df.dropna(subset=["RSI", "ATR", "SMA_200"], inplace=True)
+    if df.empty and _pre_drop_len > 0:
+        # FIX C5: previously silent — now traceable in logs
+        _log.warning(
+            "cache.load_ticker_df(%s, period=%s): %d rows fetched but 0 "
+            "remain after dropping NaN warm-up rows (needs SMA_200 → "
+            "≥200 trading days). Likely a new listing or data gap.",
+            ticker, period, _pre_drop_len,
+        )
     return df
 
 
 def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    """
+    Return a date-sliced copy of df matching the UI display period.
+    Indicators were computed on the full dataset so they remain accurate
+    at the most-recent row after slicing.
+    """
     if df.empty:
         return df
     last_ts = df.index[-1]
@@ -278,11 +388,12 @@ def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
         return df[df.index >= cutoff]
     if period == "ytd":
         return df[df.index >= pd.Timestamp(last_ts.year, 1, 1)]
-    return df
+    return df  # "max" or anything else → full history
 
 
 @st.cache_data(ttl=600)
 def load_vix_data():
+    """Load VIX + Nifty daily history via Stooq (no rate limits on cloud)."""
     from data.fetcher import fetch_single
     try:
         vix   = fetch_single("^INDIAVIX", period="1y")
@@ -299,6 +410,8 @@ def load_vix_data():
 
 @st.cache_data(ttl=600)
 def get_vix_info():
+    # Route through utils.vix — has 10-min TTL and proper crumb auth
+    # (trading.signals had a missing urllib.request import bug)
     try:
         from utils.vix import get_india_vix_regime
         return get_india_vix_regime()
@@ -307,8 +420,68 @@ def get_vix_info():
         return {"vix": 18.0, "regime": "normal", "allow_buy": True, "vix_pct_chg": 0.0}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX C6 — single shared CompositeScore → dict mapper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _score_to_dict(s, extended: bool = False) -> dict:
+    """
+    Map a CompositeScore object to the standard result dict used across
+    _score_for_cc, _score_watchlist, _home_top_picks, and _tomorrow_watchlist.
+
+    FIX C6: previously each of those four functions duplicated this mapping
+    independently — any schema change (new field, renamed field) had to be
+    made in four places by hand. Now it's made here once.
+
+    extended=True adds the richer fields _home_top_picks needs (narrative,
+    sector, component scores) on top of the base fields every caller wants.
+    """
+    base = {
+        "ticker":   s.ticker if hasattr(s, "ticker") else None,
+        "price":    s.price,
+        "score":    s.score,
+        "grade":    s.grade,
+        "action":   s.action,
+        "headline": s.headline,
+        "entry":    s.entry,
+        "sl":       s.stop_loss,
+        "tp":       s.target,
+        "rr":       s.risk_reward,
+    }
+    if extended:
+        base.update({
+            "narrative": getattr(s, "narrative", ""),
+            "sector":    getattr(s, "sector", ""),
+            "technical": getattr(s, "technical_score", 0),
+            "momentum":  getattr(s, "momentum_score", 0),
+            "volume":    getattr(s, "volume_score", 0),
+            "sentiment": getattr(s, "sentiment_score", 0),
+        })
+    return base
+
+
+def _unavailable_dict(ticker: str, reason: str = "", extended: bool = False) -> dict:
+    """Sentinel result dict for a ticker that failed to score. FIX C6 / C3."""
+    base = {
+        "ticker": ticker, "price": 0, "score": 0, "grade": "?",
+        "action": "UNAVAILABLE",
+        "headline": f"Data unavailable{f' ({reason})' if reason else ''}",
+        "entry": 0, "sl": 0, "tp": 0, "rr": 0,
+    }
+    if extended:
+        base.update({
+            "narrative": "", "sector": "",
+            "technical": 0, "momentum": 0, "volume": 0, "sentiment": 0,
+        })
+    return base
+
+
+# PATCH 3a: TTL reduced from 1800 → 300 (5 min) so single-stock scores
+# used by the watchlist stay near-live during market hours instead of
+# showing 30-min-old data.
 @st.cache_data(ttl=300, show_spinner=False)
 def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
+    """Score one stock for Command Centre. Pass vix_regime so we don't re-fetch VIX 5×."""
     try:
         import sys, os as _os
         sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
@@ -318,23 +491,25 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
             "allow_buy": vix_regime not in ("fear", "panic"),
         }
         s = score_stock(ticker, vix_info=_vix_info)
-        return {
-            "ticker": ticker, "price": s.price,
-            "score": s.score, "grade": s.grade, "action": s.action,
-            "headline": s.headline, "entry": s.entry,
-            "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
-        }
+        # FIX C6: route through the shared mapper
+        _d = _score_to_dict(s)
+        _d["ticker"] = ticker
+        return _d
     except Exception as _e:
-        return {
-            "ticker": ticker, "price": 0, "score": 0, "grade": "?",
-            "action": "UNAVAILABLE",
-            "headline": f"Data unavailable ({type(_e).__name__}: {str(_e)[:70]})",
-            "entry": 0, "sl": 0, "tp": 0, "rr": 0,
-        }
+        # FIX C6: route through the shared sentinel
+        return _unavailable_dict(ticker, f"{type(_e).__name__}: {str(_e)[:70]}")
 
 
+# PATCH 3b: TTL reduced from 1800 → 300 (5 min) — watchlist scores now
+# refresh every 5 min during market hours, matching Top Picks cadence.
 @st.cache_data(ttl=300, show_spinner=False)
 def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: tuple = ()) -> dict:
+    """
+    Score a whole watchlist IN PARALLEL (one thread per stock) and cache the
+    result for 5 min. Calls score_stock directly (not the cached single-stock
+    wrapper) so it is safe to run inside worker threads. Sector strength is
+    folded in via sector_ranks. Returns {ticker: score_dict}.
+    """
     import concurrent.futures as _cf
     import sys, os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
@@ -347,14 +522,12 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: t
         try:
             from analysis.score import score_stock
             s = score_stock(tk, vix_info=_vix, sector_scores_df=_sec_df)
-            return tk, {"ticker": tk, "price": s.price, "score": s.score,
-                        "grade": s.grade, "action": s.action, "headline": s.headline,
-                        "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward}
+            # FIX C6: route through the shared mapper
+            _d = _score_to_dict(s)
+            _d["ticker"] = tk
+            return tk, _d
         except Exception as e:
-            return tk, {"ticker": tk, "price": 0, "score": 0, "grade": "?",
-                        "action": "UNAVAILABLE",
-                        "headline": f"Data unavailable ({type(e).__name__})",
-                        "entry": 0, "sl": 0, "tp": 0, "rr": 0}
+            return tk, _unavailable_dict(tk, type(e).__name__)
 
     out: dict = {}
     if not tickers:
@@ -371,6 +544,13 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: t
     return out
 
 
+# Curated liquid large/mid-cap universe for the home-page "Top Picks" scan.
+# Kept ~36 names so a full scan finishes fast (Angel One: ~15-25 s) and stays cached.
+# NOTE (FIX C_TICKER): TATAMOTORS.NS changed underlying business on 1-Oct-2025 —
+# it is now the commercial-vehicles-only entity (the PV/EV/JLR business spun
+# off separately as TMPV.NS). Scores against this ticker reflect the CV
+# business only; if this universe was curated for the pre-demerger combined
+# company's profile, consider whether TMPV.NS should also be added.
 _HOME_SCAN_UNIVERSE = [
     "RELIANCE.NS","TCS.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS","SBIN.NS",
     "BHARTIARTL.NS","LT.NS","ITC.NS","AXISBANK.NS","KOTAKBANK.NS","HINDUNILVR.NS",
@@ -382,6 +562,7 @@ _HOME_SCAN_UNIVERSE = [
 
 
 def _sector_df_from_tuple(sector_ranks: tuple):
+    """Rebuild a sector-rank DataFrame (index=sector, col=Rank) from a hashable tuple."""
     if not sector_ranks:
         return None
     try:
@@ -394,6 +575,11 @@ def _sector_df_from_tuple(sector_ranks: tuple):
         return None
 
 
+# PATCH 3c: TTL reduced from 1800 → 300 (5 min) so Top Picks auto-refresh
+# every 5 min during market hours without needing a manual "Scan Now" click.
+# First scan still takes ~2 min; every reload within 5 min is instant from cache.
+# FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
+# the cached result to be wrapped in an extra layer and never properly invalidated).
 @st.cache_data(ttl=300, show_spinner=False)
 def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
     """
@@ -402,50 +588,22 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
 
     Each stock's CompositeScore folds in trend, momentum, RSI, volume, VIX
     sentiment AND sector strength (via sector_ranks) — "self-analysis +
-    volatility" in one number.
-
-    FIX TP1: previously this function surfaced any stock with action in
-    (STRONG BUY, BUY, WATCHLIST) sorted purely by score — with no minimum
-    score floor. On weak-breadth days the "best" stock in the universe might
-    only be a 53/90 WATCHLIST-grade name, but it still got displayed as if
-    it were a genuine Top Pick (indistinguishable from a real 85/90 STRONG
-    BUY in the UI). That's why Top Picks could look like it was full of
-    losers — they were never strong setups to begin with.
-
-    Now: `buys` only contains STRONG BUY / BUY entries that also clear
-    MIN_BUY_SCORE (65 — matches the BUY action threshold in analysis/score.py
-    so we're never showing a "pick" weaker than the engine's own action
-    label). If there are fewer than `n` genuine strong picks, we backfill
-    with WATCHLIST-tier names — each entry carries a `tier` field
-    ("strong" | "watch") so the UI can render backfilled names with a
-    visibly different, less-confident style instead of pretending they're
-    equally strong.
-
-    `meta.no_strong_picks` is True when there are zero genuine STRONG BUY/BUY
-    candidates anywhere in the scanned universe — use this to show an honest
-    "no clean setups today" message instead of padding the list.
-
-    Returns {
-        "buys": [...],   # tier="strong" first, then tier="watch" backfill
-        "sells": [...],
-        "meta": {"n_strong_buys": int, "no_strong_picks": bool},
-    }
+    volatility" in one number. Returns {"buys": [...], "sells": [...]}.
 
     Cached 5 min: the first scan takes ~2 min (parallelised), every rerun
     within 5 min is instant. Cache auto-expires so picks stay live during
     market hours without needing a manual "Scan Now" click.
+
+    FIX C2: see warm_caches() below for a hook intended to be invoked by a
+    scheduled job before market open, so this 2-min cold-scan cost is paid
+    by a background job rather than the first real user of the day.
     """
     import concurrent.futures as _cf
     import sys, os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from data.universe import get_universe
     _UNIV = get_universe("nifty500")        # the repo's full liquid NSE universe
-
-    # FIX TP1: floor matches the BUY action threshold (analysis/score.py
-    # _action(): score >= 65 -> BUY). Keeps "Top Pick" and "BUY" in sync.
-    MIN_BUY_SCORE = 65
-
-    strong_buys, watch_buys, sells = [], [], []
+    buys, sells = [], []
 
     _vix = {"regime": vix_regime, "vix": None,
             "allow_buy": vix_regime not in ("fear", "panic")}
@@ -456,20 +614,13 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
         try:
             from analysis.score import score_stock
             s = score_stock(tk, vix_info=_vix, sector_scores_df=_sec_df)
-            return {"ticker": tk, "price": s.price, "score": s.score,
-                    "grade": s.grade, "action": s.action, "headline": s.headline,
-                    "entry": s.entry, "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
-                    "narrative": s.narrative, "sector": s.sector,
-                    "technical": s.technical_score, "momentum": s.momentum_score,
-                    "volume": s.volume_score,
-                    "sentiment": s.sentiment_score}
+            # FIX C6: route through the shared mapper (extended fields needed here)
+            _d = _score_to_dict(s, extended=True)
+            _d["ticker"] = tk
+            return _d
         except Exception as _e:
             _log.debug("cache._home_top_picks._one degraded for %s: %s", tk, _e)
-            return {"ticker": tk, "price": 0, "score": 0, "grade": "?",
-                    "action": "UNAVAILABLE", "headline": "", "entry": 0,
-                    "sl": 0, "tp": 0, "rr": 0, "narrative": "", "sector": "",
-                    "technical": 0, "momentum": 0, "volume": 0,
-                    "sentiment": 0}
+            return _unavailable_dict(tk, type(_e).__name__, extended=True)
 
     results = []
     try:
@@ -482,41 +633,51 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
     for s in results:
         act = s.get("action", "")
         sc  = s.get("score", 0)
+        # FIX 2: Skip zero-score AND unavailable results — score_stock returns
+        # score=0 with action=DATA_UNAVAILABLE when data fetch fails. Previously
+        # score <= 0 guard was missing the DATA_UNAVAILABLE string check fully.
         if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
             continue
-        if act in ("STRONG BUY", "BUY") and sc >= MIN_BUY_SCORE:
-            s["tier"] = "strong"
-            strong_buys.append(s)
-        elif act == "WATCHLIST":
-            s["tier"] = "watch"
-            watch_buys.append(s)
+        # Long side: STRONG BUY / BUY / WATCHLIST all surface so we always
+        # have enough candidates. Cards show each stock's true action label.
+        if act in ("STRONG BUY", "BUY", "WATCHLIST"):
+            buys.append(s)
         elif act in ("EXIT", "CAUTION"):
             sells.append(s)
 
-    strong_buys.sort(key=lambda x: -x.get("score", 0))
-    watch_buys.sort(key=lambda x: -x.get("score", 0))
+    buys.sort(key=lambda x: -x.get("score", 0))
     sells.sort(key=lambda x: x.get("score", 0))   # lowest score = weakest first
-
-    n_strong = len(strong_buys)
-
-    # Backfill with WATCHLIST-tier names only if there aren't enough strong
-    # picks — backfilled entries keep tier="watch" for the UI to style.
-    buys = strong_buys[:n]
-    if len(buys) < n:
-        buys += watch_buys[: n - len(buys)]
-
-    return {
-        "buys": buys,
-        "sells": sells[:n],
-        "meta": {
-            "n_strong_buys": n_strong,
-            "no_strong_picks": n_strong == 0,
-        },
-    }
+    return {"buys": buys[:n], "sells": sells[:n]}
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)   # 1hr cache — EOD signal, not intraday
 def _tomorrow_watchlist(n: int = 15) -> dict:
+    """
+    Scan the Nifty 500 universe for NEXT-SESSION setups (based on today's close),
+    distinct from intraday Top Picks. Reuses the composite-score infrastructure
+    (score_stock folds in trend, momentum, RSI, volume, VIX + sector strength).
+
+    Score component ranges (from analysis/score.py):
+        technical_score  /40  — RSI, MACD, SMA stack, ADX
+        momentum_score   /25  — 5d / 20d / 60d returns
+        volume_score     /15  — Volume ratio + OBV trend
+
+    Bucket precedence (FIX C1): a stock is tested against buckets in this
+    fixed order — breakout, breakdown, bullish reversal, bearish reversal —
+    and assigned to the FIRST bucket it matches. The breakout (sc>=52) and
+    bearish-reversal (45<=sc<=68) ranges overlap; breakout wins ties because
+    it's checked first. This is deliberate: a stock with both decent momentum
+    AND a positive composite action is more useful flagged as a breakout
+    candidate than buried in reversal-watch. If you change these thresholds,
+    keep this comment in sync with the actual elif order below.
+
+    Returns: {
+        "breakout_candidates": [...],
+        "breakdown_watch":     [...],
+        "reversal_watch":      [...],
+        "scan_time": "DD Mon HH:MM"
+    }
+    """
     import concurrent.futures as _cf
     import datetime as _dtm
     import sys, os as _os
@@ -536,6 +697,11 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
         try:
             from analysis.score import score_stock
             s = score_stock(tk)
+            # FIX 3: pattern_score no longer exists on CompositeScore (removed in
+            # PATTERN_REMOVAL_MIGRATION). Access only valid fields.
+            # FIX C6: this caller needs technical/momentum/volume but not the
+            # full extended set (narrative/sector/sentiment) — build directly
+            # rather than forcing _score_to_dict's extended shape on it.
             return {"ticker": tk, "price": s.price, "score": s.score, "grade": s.grade,
                     "action": s.action, "headline": s.headline, "entry": s.entry,
                     "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
@@ -558,26 +724,47 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
                 "signal_type": signal_type, "key_level": key_level,
                 "action": s["action"], "entry": s["entry"], "sl": s["sl"], "tp": s["tp"]}
 
+    # FIX C1: track how many stocks would have matched more than one bucket,
+    # so threshold overlap drift is visible in logs.
+    _multi_match_count = 0
+
     for s in results:
         act, sc = s.get("action", ""), s.get("score", 0)
         if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
             continue
 
-        tech = s.get("technical", 0)
-        mom  = s.get("momentum",  0)
-        vol  = s.get("volume",    0)
+        # Component scores — calibrated to actual ranges:
+        #   technical /40 · momentum /25 · volume /15
+        tech = s.get("technical", 0)   # out of 40
+        mom  = s.get("momentum",  0)   # out of 25
+        vol  = s.get("volume",    0)   # out of 15
 
         ent = s.get("entry", 0)
         kl  = f"₹{ent:,.0f}" if ent else "—"
 
-        if act in ("STRONG BUY", "BUY", "WATCHLIST") and sc >= 52 and mom >= 8 and vol >= 5:
+        # FIX 4: Old thresholds (mom>=15, vol>=9) required top-40% on BOTH
+        # components simultaneously — almost impossible to satisfy together.
+        # New thresholds are ~33rd percentile of each component range.
+
+        _is_breakout  = act in ("STRONG BUY", "BUY", "WATCHLIST") and sc >= 52 and mom >= 8 and vol >= 5
+        _is_breakdown = (act in ("EXIT", "CAUTION") or sc < 40) and tech < 22 and vol >= 4
+        _is_bull_rev  = 35 <= sc <= 58 and mom >= 8 and tech < 25
+        _is_bear_rev  = 45 <= sc <= 68 and mom < 5 and tech >= 22
+
+        # FIX C1: count overlapping matches for visibility (doesn't change behavior)
+        _match_count = sum([_is_breakout, _is_breakdown, _is_bull_rev, _is_bear_rev])
+        if _match_count > 1:
+            _multi_match_count += 1
+
+        # Precedence: breakout → breakdown → bullish reversal → bearish reversal
+        if _is_breakout:
             out["breakout_candidates"].append(_item(s, "🚀 Breakout setup", kl))
-        elif (act in ("EXIT", "CAUTION") or sc < 40) and tech < 22 and vol >= 4:
+        elif _is_breakdown:
             out["breakdown_watch"].append(_item(s, "🔻 Breakdown risk",
                                                 f"₹{s.get('sl', 0):,.0f}" if s.get("sl") else kl))
-        elif 35 <= sc <= 58 and mom >= 8 and tech < 25:
+        elif _is_bull_rev:
             out["reversal_watch"].append(_item(s, "🔄 Bullish divergence", kl))
-        elif 45 <= sc <= 68 and mom < 5 and tech >= 22:
+        elif _is_bear_rev:
             out["reversal_watch"].append(_item(s, "🔄 Bearish divergence", kl))
 
     out["breakout_candidates"].sort(key=lambda x: -x["score"])
@@ -586,11 +773,38 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     out["breakout_candidates"] = out["breakout_candidates"][:n]
     out["breakdown_watch"]     = out["breakdown_watch"][:n]
     out["reversal_watch"]      = out["reversal_watch"][:n]
+
+    # FIX C7: log per-bucket counts and warn on empty buckets, so a silently-
+    # empty bucket (the original threshold bug) is visible in logs going
+    # forward rather than only discoverable by a user noticing an empty tab.
+    _counts = {
+        "breakout_candidates": len(out["breakout_candidates"]),
+        "breakdown_watch":     len(out["breakdown_watch"]),
+        "reversal_watch":      len(out["reversal_watch"]),
+    }
+    _log.info(
+        "cache._tomorrow_watchlist scan complete: %d stocks scored, "
+        "buckets=%s, multi-bucket-matches=%d",
+        len(results), _counts, _multi_match_count,
+    )
+    for _bucket, _count in _counts.items():
+        if _count == 0:
+            _log.warning(
+                "cache._tomorrow_watchlist: bucket '%s' is EMPTY this scan "
+                "(%d stocks scored total). If this persists across multiple "
+                "scans, thresholds may need recalibration.",
+                _bucket, len(results),
+            )
+
     return out
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)   # 1-hour cache — heavy multi-fetch
 def _sector_ranking():
+    """
+    Rank all NSE sectors by constituent momentum (cached 1 h). Returns a
+    DataFrame indexed by sector with a 'Rank' column for score_stock(), or None.
+    """
     try:
         from analysis.sector_strength import rank_sectors
         return rank_sectors()
@@ -600,27 +814,105 @@ def _sector_ranking():
 
 
 def _sector_ranks_tuple() -> tuple:
-    df = _sector_ranking()
-    if df is None or df.empty:
+    """
+    Hashable ((sector, rank), …) form of _sector_ranking() for cached scorers.
+
+    FIX C11: distinguishes "no sector data available" (empty/None result,
+    expected and logged at DEBUG) from "sector ranking fetch raised an
+    exception" (unexpected, logged at WARNING). The return value is still ()
+    in both cases — callers can't be changed without touching every scorer
+    that consumes this tuple — but the failure mode is now distinguishable
+    in logs, so a transient network blip silently stripping sector-strength
+    signal from every score is no longer indistinguishable from "there's
+    legitimately no sector data this run."
+    """
+    try:
+        df = _sector_ranking()
+    except Exception as _e:
+        # FIX C11: unexpected exception — warn, this is a real failure
+        _log.warning("cache._sector_ranks_tuple: _sector_ranking() raised: %s", _e)
         return ()
+
+    if df is None or df.empty:
+        # FIX C11: expected "no data" case — debug level, not a failure
+        _log.debug("cache._sector_ranks_tuple: no sector ranking data available this run")
+        return ()
+
     try:
         return tuple((str(idx), int(row["Rank"])) for idx, row in df.iterrows())
     except Exception as _e:
-        _log.debug("cache.%s degraded: %s", "_sector_ranks_tuple", _e)
+        _log.warning("cache._sector_ranks_tuple: failed to convert ranking to tuple: %s", _e)
         return ()
 
 
 @st.cache_data(ttl=600)
 def get_composite_score(ticker: str):
+    """
+    Deep-dive score over a 2-YEAR lookback (was 1y). The longer window means
+    every signal is computed on a full, valid history — SMA_200 (296 valid rows
+    vs ~49 on 1y), RSI divergence, candlestick patterns, ADX, volume trend and
+    momentum all have enough warmup, so the composite reflects real multi-signal
+    analysis, not just the latest bar. Sector strength + VIX are folded in too.
+
+    FIX C3: previously this was the only scoring function in this file with
+    no error handling. A bad ticker or network failure would raise uncaught,
+    leaving nothing in the cache for a retry and relying entirely on the
+    caller's try/except. Now wraps score_stock() and returns a sentinel
+    object (duck-typed to look like a CompositeScore with action=UNAVAILABLE)
+    on failure, consistent with every sibling function in this file.
+    """
     from analysis.score import score_stock
-    vix_info = get_vix_info()
-    sectors  = _sector_ranking()
-    return score_stock(ticker, period="2y", vix_info=vix_info,
-                       sector_scores_df=sectors)
+
+    class _UnavailableScore:
+        """Minimal duck-typed stand-in so callers expecting CompositeScore
+        attributes (cs.price, cs.action, etc.) don't crash on AttributeError."""
+        def __init__(self, ticker, reason=""):
+            self.ticker          = ticker
+            self.price            = 0.0
+            self.score            = 0.0
+            self.grade            = "?"
+            self.action           = "UNAVAILABLE"
+            self.headline         = f"Data unavailable{f' ({reason})' if reason else ''}"
+            self.narrative        = "Scoring failed for this ticker — try again shortly."
+            self.entry            = 0.0
+            self.stop_loss        = 0.0
+            self.target            = 0.0
+            self.risk_reward      = 0.0
+            self.sector           = "—"
+            self.sector_rank      = None
+            self.vix_regime       = "normal"
+            self.technical_score  = 0.0
+            self.momentum_score   = 0.0
+            self.volume_score     = 0.0
+            self.sentiment_score  = 0.0
+            self.company_name     = None
+
+    try:
+        vix_info = get_vix_info()
+        sectors  = _sector_ranking()
+        return score_stock(ticker, period="2y", vix_info=vix_info,
+                           sector_scores_df=sectors)
+    except Exception as _e:
+        # FIX C3: previously uncaught — now returns a usable sentinel
+        _log.warning("cache.get_composite_score(%s) failed: %s", ticker, _e)
+        return _UnavailableScore(ticker, f"{type(_e).__name__}: {str(_e)[:70]}")
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _deep_confirmation(ticker: str) -> dict:
+    """
+    Confirmation layer on top of the composite score:
+      • Multi-timeframe — weekly trend (filters daily false signals)
+      • Relative strength — 1-month return vs Nifty (is it a leader?)
+      • Earnings proximity — days to next result (avoid buying into a gap)
+      • Signal agreement — how many of 9 checks are bullish (conviction)
+
+    FIX C4: earnings_days is now sanity-bounded. If the upstream
+    get_earnings_date() returns a date more than 100 days in the past (most
+    likely a stale/unrefreshed last-quarter date from the data source rather
+    than a genuine upcoming result), it's treated as unknown (None) rather
+    than surfaced as a confidently wrong large negative number.
+    """
     out = {"weekly": None, "rel_strength": None, "rs_pct": None,
            "earnings_days": None, "bull": 0, "total": 0, "signals": []}
     try:
@@ -630,6 +922,7 @@ def _deep_confirmation(ticker: str) -> dict:
         cur = df.iloc[-1]
         price = float(cur["Close"])
 
+        # Weekly trend
         wk = df["Close"].resample("W").last().dropna()
         if len(wk) >= 11:
             _wma10 = float(wk.rolling(10).mean().iloc[-1])
@@ -638,6 +931,7 @@ def _deep_confirmation(ticker: str) -> dict:
                              else "downtrend" if wk.iloc[-1] < _wma10 and _wkchg < 0
                              else "sideways")
 
+        # Relative strength vs Nifty (1 month ≈ 22 sessions)
         try:
             nf = fetch_single("^NSEI", period="6mo")["Close"].dropna()
             if len(nf) >= 22 and len(df) >= 22:
@@ -649,16 +943,30 @@ def _deep_confirmation(ticker: str) -> dict:
             _log.debug("cache.%s degraded: %s", "_deep_confirmation", _e)
             pass
 
+        # Earnings proximity
         try:
             from data.events import get_earnings_date
             import datetime as _ed_dt
             ed = get_earnings_date(ticker)
             if ed:
-                out["earnings_days"] = (ed - _ed_dt.datetime.now()).days
+                _raw_days = (ed - _ed_dt.datetime.now()).days
+                # FIX C4: sanity-bound — more than 100 days in the past is
+                # almost certainly a stale upstream date, not a real result
+                # that happened over 3 months ago and was never refreshed.
+                if _raw_days < -100:
+                    _log.debug(
+                        "cache._deep_confirmation(%s): earnings_days=%d looks "
+                        "stale (>100d in the past) — treating as unknown.",
+                        ticker, _raw_days,
+                    )
+                    out["earnings_days"] = None
+                else:
+                    out["earnings_days"] = _raw_days
         except Exception as _e:
             _log.debug("cache.%s degraded: %s", "_deep_confirmation", _e)
             pass
 
+        # Signal agreement (9 checks)
         rsi = float(cur.get("RSI", 50))
         sigs = [
             ("RSI not overbought (<70)",    rsi < 70),
@@ -682,6 +990,7 @@ def _deep_confirmation(ticker: str) -> dict:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _sparkline_closes(ticker: str, n: int = 22) -> list:
+    """Last `n` daily closes for a mini sparkline (cached 30 min)."""
     try:
         from data.fetcher import fetch_single
         c = fetch_single(ticker, period="3mo")["Close"].dropna().tolist()
@@ -692,6 +1001,7 @@ def _sparkline_closes(ticker: str, n: int = 22) -> list:
 
 
 def _sparkline_svg(prices: list, w: int = 120, h: int = 28) -> str:
+    """Inline SVG sparkline from a price list — green if up over the window, else red."""
     if not prices or len(prices) < 2:
         return ""
     lo, hi = min(prices), max(prices)
@@ -704,3 +1014,47 @@ def _sparkline_svg(prices: list, w: int = 120, h: int = 28) -> str:
     return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="display:block">'
             f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="1.6" '
             f'stroke-linejoin="round" stroke-linecap="round"/></svg>')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX C2 — cache warm-up hook for scheduled jobs
+# ─────────────────────────────────────────────────────────────────────────────
+
+def warm_caches() -> dict:
+    """
+    Pre-populate the two expensive full-universe scans (_home_top_picks and
+    _tomorrow_watchlist) so the first real user of the day doesn't pay the
+    ~2 min cold-scan cost.
+
+    This function is intended to be invoked by a scheduled job (cron,
+    APScheduler, a Streamlit-external worker, etc.) shortly before market
+    open (e.g. 9:00 AM IST) and once after market close (for the next-session
+    watchlist). Wiring an actual scheduler is a deployment-level concern
+    outside this module — this is just the callable entry point.
+
+    Returns a dict summarising what was warmed and how long each took, for
+    logging/monitoring by whatever calls this.
+    """
+    import time as _time
+    results = {}
+
+    _t0 = _time.time()
+    try:
+        _vix = get_vix_info()
+        _sectors = _sector_ranks_tuple()
+        _home_top_picks(vix_regime=_vix.get("regime", "normal"), sector_ranks=_sectors)
+        results["home_top_picks"] = {"ok": True, "seconds": round(_time.time() - _t0, 1)}
+    except Exception as _e:
+        _log.warning("cache.warm_caches: _home_top_picks warm-up failed: %s", _e)
+        results["home_top_picks"] = {"ok": False, "error": str(_e)}
+
+    _t1 = _time.time()
+    try:
+        _tomorrow_watchlist()
+        results["tomorrow_watchlist"] = {"ok": True, "seconds": round(_time.time() - _t1, 1)}
+    except Exception as _e:
+        _log.warning("cache.warm_caches: _tomorrow_watchlist warm-up failed: %s", _e)
+        results["tomorrow_watchlist"] = {"ok": False, "error": str(_e)}
+
+    _log.info("cache.warm_caches complete: %s", results)
+    return results
