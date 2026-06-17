@@ -30,6 +30,13 @@ TU5  Signal monitor state (_pf_prev_actions) persisted to the kv store via
 TU6  _live_quote_price() — tenacity retry with exponential back-off (3
      attempts, 1 s / 2 s delays) so a transient Yahoo 429 does not silently
      return None and cascade into the entry-price square-off fallback (TU2).
+
+FIX3 clear_price_caches() — added as a named public export so
+     03_my_portfolio.py can bust only the live-price TTL caches (60 s) on
+     the user's "Refresh Prices" click without clearing risk or fundamental
+     caches.  Calls _portfolio_live_prices.clear() and
+     _fetch_single_live_price.clear() — both are @st.cache_data functions
+     so .clear() is always available.
 """
 
 from __future__ import annotations
@@ -76,12 +83,12 @@ _NSE_HOLIDAYS_FALLBACK = {
     datetime.date(2025, 3, 14),   # Holi
     datetime.date(2025, 4, 14),   # Dr. Ambedkar Jayanti / Good Friday
     datetime.date(2025, 4, 18),   # Good Friday
-    datetime.date(2025, 5, 1),    # Maharashtra Day
+    datetime.date(2025, 5,  1),   # Maharashtra Day
     datetime.date(2025, 8, 15),   # Independence Day
-    datetime.date(2025, 10, 2),   # Gandhi Jayanti
+    datetime.date(2025, 10,  2),  # Gandhi Jayanti
     datetime.date(2025, 10, 22),  # Dussehra
     datetime.date(2025, 10, 24),  # Diwali Laxmi Puja (Muhurat trading only)
-    datetime.date(2025, 11, 5),   # Diwali Balipratipada
+    datetime.date(2025, 11,  5),  # Diwali Balipratipada
     datetime.date(2025, 11, 15),  # Gurunanak Jayanti
     datetime.date(2025, 12, 25),  # Christmas
     # 2026
@@ -125,9 +132,7 @@ def _nse_holidays() -> set:
     try:
         import urllib.request, json as _json
         _year = today.year
-        _url  = (
-            f"https://www.nseindia.com/api/holiday-master?type=trading"
-        )
+        _url  = "https://www.nseindia.com/api/holiday-master?type=trading"
         _req  = urllib.request.Request(
             _url,
             headers={
@@ -358,6 +363,30 @@ def _portfolio_live_prices(tickers: tuple) -> dict:
         except Exception as _e:
             _log.debug("trade_utils._portfolio_live_prices(%s) failed: %s", t, _e)
     return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX3 — Granular live-price cache buster (public export)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def clear_price_caches() -> None:
+    """Invalidate only the live-price TTL caches (60 s).
+
+    Called from 03_my_portfolio.py when the user clicks 'Refresh Prices'.
+    Deliberately leaves risk and fundamental caches untouched so an on-demand
+    price refresh does not trigger expensive re-fetches of unrelated data.
+
+    Both _portfolio_live_prices and _fetch_single_live_price are decorated
+    with @st.cache_data, so .clear() is always available.
+    """
+    try:
+        _portfolio_live_prices.clear()
+    except Exception as _e:
+        _log.debug("clear_price_caches: _portfolio_live_prices.clear() failed: %s", _e)
+    try:
+        _fetch_single_live_price.clear()
+    except Exception as _e:
+        _log.debug("clear_price_caches: _fetch_single_live_price.clear() failed: %s", _e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -738,16 +767,16 @@ def _render_autoclose_banner(closed: list) -> None:
         return
 
     _TYPE_LABEL = {
-        "target":          "target reached",
-        "stop":            "stop-loss hit",
-        "squareoff":       "MIS square-off @ 15:15",
-        "squareoff_failed":"⚠️ MIS square-off FAILED — close manually",
+        "target":           "target reached",
+        "stop":             "stop-loss hit",
+        "squareoff":        "MIS square-off @ 15:15",
+        "squareoff_failed": "⚠️ MIS square-off FAILED — close manually",
     }
     _TYPE_ICON = {
-        "target":          "🎯",
-        "stop":            "🛑",
-        "squareoff":       "⏰",
-        "squareoff_failed":"⚠️",
+        "target":           "🎯",
+        "stop":             "🛑",
+        "squareoff":        "⏰",
+        "squareoff_failed": "⚠️",
     }
 
     _rows = ""
