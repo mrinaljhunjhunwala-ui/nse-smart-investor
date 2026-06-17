@@ -8,14 +8,11 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.picks_ui import render_pick_analysis
-# P3: explicit imports (was a dynamic shared-namespace injection)
 import os
 import pandas as pd
 import streamlit as st
 import sys
 import trade_store as _store
-# Restored (these module-level imports sat inside the old globals() block and were
-# dropped by the P3 transform; the page-smoke test caught the resulting NameError).
 from data.universe import get_universe
 from data.angel_fetcher import is_configured as _ao_is_configured
 from dashboard.shared.design import (
@@ -32,7 +29,7 @@ from dashboard.shared.cache import (
 )
 from dashboard.shared.trade_utils import (
     _auto_close_breached,
-    _is_squareoff_time,          # PATCH 2: imported for unconditional MIS square-off
+    _is_squareoff_time,
     _paper_trade_popover,
     _portfolio_live_prices,
     _render_autoclose_banner,
@@ -100,7 +97,6 @@ try:
 
     _pto_n = 0 if (_pto_open is None or _pto_open.empty) else len(_pto_open)
 
-    # Unrealised P&L on open positions — uses LIVE prices
     _pto_unreal = 0.0
     if _pto_n:
         _pto_syms = tuple(_pto_open["ticker"].tolist())
@@ -111,7 +107,6 @@ try:
             _pcur = _pto_lp.get(str(_por["ticker"]), {}).get("price", _pep)
             _pto_unreal += (_pcur - _pep) * _pqt
 
-    # Realised P&L + win rate from closed history
     _pto_real, _pto_wins, _pto_tot = 0.0, 0, 0
     if not _pto_all.empty and "status" in _pto_all.columns:
         _pto_closed = _pto_all[_pto_all["status"].isin(["CLOSED", "STOPPED"])]
@@ -156,7 +151,6 @@ _cc_vix_info = get_vix_info()
 _cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
 _cc_vix_v = _cc_vix_info.get("vix")
 
-# Nifty trend from cached daily bars
 _cc_nifty_trend = "unknown"
 _cc_nifty_val   = None
 _cc_nifty_5d    = 0.0
@@ -189,7 +183,6 @@ _NT_LBL = {
 _vc, _vi, _vl = _VIX_LBL.get(_cc_vix_r, _VIX_LBL["unknown"])
 _nc, _ni, _nl = _NT_LBL.get(_cc_nifty_trend, _NT_LBL["unknown"])
 
-# Overall market verdict
 if _cc_vix_r == "normal" and _cc_nifty_trend == "uptrend":
     _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "#0a2a1a", "#26a69a"
 elif _cc_vix_r in ("fear", "panic") or _cc_nifty_trend == "downtrend":
@@ -220,7 +213,6 @@ st.markdown(
     f'</div>',
     unsafe_allow_html=True,
 )
-# ── Market Mood meter (Fear ↔ Greed composite) ─────────────────────────────
 _mood_vix = {"complacency": 85, "normal": 65, "elevated": 45,
              "fear": 22, "panic": 6, "unknown": 50}.get(_cc_vix_r, 50)
 _mood_nty = {"uptrend": 80, "sideways": 50, "downtrend": 20,
@@ -253,7 +245,6 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=
 
 st.markdown("---")
 
-# ── Top Picks last-updated strip (Part 2) ─────────────────────────────
 _scan_t = st.session_state.get("_picks_scan_time")
 if _scan_t:
     st.markdown(
@@ -290,7 +281,6 @@ with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=Fa
         "surfaced (10 each — buys and sells). First scan ~2 min; results cached 5 min, "
         "so the page auto-refreshes picks every 5 min without any click.")
 
-# Phase 1 (UI honesty): regime reliability + score methodology next to live picks
 from dashboard.shared.disclosures import (
     render_regime_reliability_note as _cc_regime_note,
     render_score_methodology as _cc_score_methodology,
@@ -298,7 +288,6 @@ from dashboard.shared.disclosures import (
 _cc_regime_note()
 _cc_score_methodology()
 
-# Data-source badge — shows whether the scan is using the fast broker feed or fallback
 try:
     if _ao_is_configured():
         st.caption("⚡ **Angel One configured** — the scan uses it first (Tier-0 broker "
@@ -310,36 +299,48 @@ try:
 except Exception:
     pass
 
-# ── PATCH 3: Top Picks always load on page open; Scan Now forces a fresh scan ──
-# Previously picks only loaded if the session flag "cc_picks_loaded" was already
-# set (i.e. you had clicked Scan Now at some point in this session). On a fresh
-# page load or browser refresh, the section was replaced with a static info box
-# showing stale or no data.
-#
-# Now:
-#   • Picks always render on every page load (no click required).
-#   • "Scan Now" busts the cache immediately so you get a fresh scan right away.
-#   • The 5-min TTL on _home_top_picks means data auto-refreshes every 5 min
-#     without any user interaction.
 if _run_picks:
     st.cache_data.clear()   # force a fresh scan bypassing the 5-min cache
 
-# Always run picks — no session flag gate
 with st.spinner("Scanning the full NSE universe — first run ~2 min, then cached 5 min…"):
     _sec_tuple = _sector_ranks_tuple()
     st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
     _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
 
-# ── Auto-update notification: toast when a new scan completes ──
 import datetime as _dt
 _prev_scan = st.session_state.get("_picks_last_scan")
 _now_str = _dt.datetime.now().strftime("%H:%M")
 if _prev_scan != _now_str:
     st.session_state["_picks_last_scan"] = _now_str
-    if _prev_scan is not None:        # don't toast on first load
+    if _prev_scan is not None:
         st.toast("🔄 Top Picks updated — new scan complete", icon="📊")
 st.session_state["_picks_scan_time"] = _now_str
-# ── END PATCH 3 ────────────────────────────────────────────────────────────
+
+# ── FIX TP1 (page side) — honest "no strong picks" banner + tier-aware cards ──
+# _home_top_picks() now returns a "meta" dict with no_strong_picks / n_strong_buys,
+# and each buy candidate carries a "tier" field ("strong" | "watch"). Previously
+# the page treated every entry in _picks["buys"] identically — a backfilled
+# WATCHLIST-grade name rendered with the exact same green "Buy Candidate" styling
+# as a genuine STRONG BUY, which is what made the section look misleading on
+# weak-breadth days. Now we show a clear banner when there are zero genuine
+# strong setups, and tier="watch" cards get a visibly different (amber, not
+# green) treatment so they read as "worth watching" rather than "buy this".
+_picks_meta = _picks.get("meta", {})
+if _picks_meta.get("no_strong_picks"):
+    st.markdown(
+        '<div style="background:#1a1200;border:1px solid #4a3a00;border-radius:8px;'
+        'padding:10px 14px;margin-bottom:10px">'
+        '<span style="font-size:13px;color:#ffb300">⚠️ <b>No strong BUY-grade setups '
+        'in today\'s scan.</b> The names below are the closest watchlist-grade '
+        'candidates — none currently meet the bar for a confident new entry. '
+        'Consider waiting for a cleaner setup.</span></div>',
+        unsafe_allow_html=True,
+    )
+elif _picks_meta.get("n_strong_buys", 0) < len(_picks["buys"]):
+    st.caption(
+        f"📊 {_picks_meta.get('n_strong_buys', 0)} genuine strong BUY-grade setup(s) today — "
+        "remaining cards below are watchlist-grade backfill, marked accordingly."
+    )
 
 # Live prices for the picks — the scan scores on last daily close, but the
 # cards (and any paper trade) should reflect the real-time market price.
@@ -375,12 +376,26 @@ with _pk_buy:
         _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
                        f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
                        f'GRADE {_grade_tag}</span>') if _grade_tag else ""
+
+        # FIX TP1: tier-aware styling — watchlist-grade backfill renders in
+        # amber, not the same green used for genuine strong picks.
+        _is_watch_tier = _b.get("tier") == "watch"
+        _card_border = "#FF9800" if _is_watch_tier else "#26a69a"
+        _card_grad   = ("linear-gradient(135deg,#2a2000,#332b0a)" if _is_watch_tier
+                        else "linear-gradient(135deg,#0a2a1a,#0f3320)")
+        _score_color = "#FF9800" if _is_watch_tier else "#26a69a"
+        _tier_badge  = (
+            '<span style="background:#FF980022;color:#FF9800;border:1px solid #FF9800;'
+            'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
+            'WATCHLIST-GRADE</span>'
+        ) if _is_watch_tier else ""
+
         st.markdown(
-            f'<div style="background:linear-gradient(135deg,#0a2a1a,#0f3320);'
-            f'border-left:4px solid #26a69a;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+            f'<div style="background:{_card_grad};'
+            f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
             f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}</span>'
-            f'<span style="font-size:13px;font-weight:700;color:#26a69a">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+            f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}{_tier_badge}</span>'
+            f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
             f'</div>'
             f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
             f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
@@ -398,7 +413,6 @@ with _pk_buy:
                 key=f"cc_pick_{_b['ticker']}",
                 label=f"📌 Paper Trade {_bl}",
             )
-        # reason pointers + Deep Dive (narrative, score bars, Ask AI)
         render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
 with _pk_sell:
     st.markdown("#### 🔴 Sell / Avoid")
@@ -417,7 +431,6 @@ with _pk_sell:
             f'</div>',
             unsafe_allow_html=True,
         )
-        # reason pointers + Deep Dive (narrative, score bars, Ask AI)
         render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
 
 st.markdown("---")
@@ -437,15 +450,6 @@ with _cc_h2:
     )
     st.session_state["auto_close_on"] = _cc_autoclose
 
-# ── PATCH 2: MIS intraday square-off runs UNCONDITIONALLY at 15:15 ──────────
-# Previously the entire auto-close block was gated behind the user's toggle,
-# meaning intraday (MIS) positions were never squared off unless the user had
-# turned on "Auto-close on SL/TP". This mirrors real broker behaviour where
-# intraday positions are force-closed at 15:15 regardless of any setting.
-#
-# The _auto_close_breached() function already handles MIS square-off internally
-# (acct_type == "MIS" and _is_squareoff_time() path). We just need to call it
-# unconditionally so it runs even when the toggle is OFF.
 _cc_sq_banner_shown = False
 if _is_squareoff_time():
     _sq_all_closed = _auto_close_breached()
@@ -455,15 +459,12 @@ if _is_squareoff_time():
         st.cache_data.clear()
         _cc_sq_banner_shown = True
 
-# CNC SL/TP auto-close: only when the user has the toggle enabled
 if _cc_autoclose:
     _cc_all_closed = _auto_close_breached()
-    # Filter to SL/TP hits only (squareoff was already handled above)
     _cc_sltp_closed = [c for c in _cc_all_closed if c["type"] in ("target", "stop")]
     if _cc_sltp_closed:
         _render_autoclose_banner(_cc_sltp_closed)
         st.cache_data.clear()
-# ── END PATCH 2 ────────────────────────────────────────────────────────────
 
 _cc_open_df = pd.DataFrame()
 try:
@@ -553,14 +554,10 @@ with _wh2:
     if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
         st.cache_data.clear(); st.rerun()
 
-# Speed: the watchlist uses the sector ranking only if it's already been
-# computed this session (stored when Top Picks ran) — so the heavy ~10 s
-# sector multi-fetch never blocks the Command Centre's first load.
 _wl_sector = st.session_state.get("_sec_ranks_cache", ())
 with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 5 min)…"):
     _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r, sector_ranks=_wl_sector)
 
-# Sort: BUY signals first, EXIT last
 _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
             "HOLD": 3, "CAUTION": 4, "EXIT": 5, "UNAVAILABLE": 9}
 _cc_sorted = sorted(_cc_wl, key=lambda t: _A_ORDER.get(
@@ -591,7 +588,6 @@ for _cct in _cc_sorted:
     _lbl   = _cct.replace(".NS", "")
     _bar_w = min(int(_score), 100)
 
-    # Price levels block (only shown for actionable signals)
     _price_block = ""
     if _act in ("STRONG BUY", "BUY", "EXIT", "WATCHLIST", "CAUTION") and _entry > 0:
         _sl_str = f'<span style="color:#ef5350">SL ₹{_sl:,.2f}</span>' if _sl else ""
