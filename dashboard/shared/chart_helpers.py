@@ -21,14 +21,56 @@ if _ROOT not in sys.path:
 import logging as _logging
 _log = _logging.getLogger("dashboard.chart_helpers")
 
+# FIX MI1 — Yahoo macro fetch now uses the same crumb-authenticated session as
+# _index_strip_data() instead of a bare urllib.request.urlopen() call.
+# PROBLEM: the old version of load_macro_data() hit Yahoo's v8 chart API with
+# no crumb/cookie and only a User-Agent header. Yahoo frequently 401s/429s
+# naked requests like that — when all 4 of Gold/Brent/USD-INR/DXY failed
+# silently (each wrapped in its own try/except), macro_df was left with only
+# the 3 Stooq-backed index columns. That's not enough columns/rows for a
+# meaningful 30-day correlation matrix, and any column with too few
+# overlapping non-NaN rows could throw pct_change()/corr() output full of NaN,
+# rendering as a blank or broken heatmap with no visible error message.
+def _yahoo_chart_close(sym: str, range_: str = "3mo") -> pd.Series:
+    """Fetch a Yahoo Finance daily close series using crumb-authenticated session.
+
+    FIX MI1: reuses the same _get_yf_crumb() helper that _index_strip_data()
+    already relies on, instead of an unauthenticated bare request. Falls back
+    to an unauthenticated attempt only if crumb retrieval itself fails.
+    """
+    import urllib.parse
+    import urllib.request
+
+    try:
+        from data.fetcher import _get_yf_crumb
+        _opener, _crumb = _get_yf_crumb()
+    except Exception as _e:
+        _log.debug("chart_helpers._yahoo_chart_close crumb unavailable: %s", _e)
+        _opener, _crumb = None, ""
+
+    _qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
+    _open = _opener.open if _opener else urllib.request.urlopen
+
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote(sym)}?interval=1d&range={range_}{_qs}")
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+    with _open(req, timeout=10) as r:
+        raw = json.loads(r.read())
+    res = raw["chart"]["result"][0]
+    ts  = res["timestamp"]
+    cl  = res["indicators"]["quote"][0]["close"]
+    df  = pd.DataFrame({"Close": cl}, index=pd.to_datetime(ts, unit="s")).dropna()
+    return df["Close"]
+
+
 @st.cache_data(ttl=600)
 def load_macro_data():
     """
     Fetch 3-month daily history for macro instruments.
     NSE indices via fetch_single() (Stooq first).
-    Commodities/FX via Yahoo Finance JSON history (cloud-safe direct HTTP).
+    Commodities/FX via Yahoo Finance JSON history (crumb-authenticated — FIX MI1).
     """
-    import json, io, datetime, urllib.request
     from data.fetcher import fetch_single
 
     data = {}
@@ -48,7 +90,7 @@ def load_macro_data():
             _log.debug("chart_helpers.%s degraded: %s", "load_macro_data", _e)
             pass
 
-    # Commodities / FX — use Yahoo Finance JSON history (v8 chart API)
+    # Commodities / FX — Yahoo Finance JSON history (FIX MI1: now crumb-authenticated)
     commodity_map = {
         "Gold ($/oz)": "GC=F",
         "Brent Crude": "BZ=F",
@@ -57,21 +99,11 @@ def load_macro_data():
     }
     for name, sym in commodity_map.items():
         try:
-            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
-                   "?interval=1d&range=3mo")
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                raw = json.loads(r.read())
-            res = raw["chart"]["result"][0]
-            ts  = res["timestamp"]
-            cl  = res["indicators"]["quote"][0]["close"]
-            df  = pd.DataFrame({"Close": cl},
-                               index=pd.to_datetime(ts, unit="s")).dropna()
-            if not df.empty:
-                data[name] = df["Close"]
+            series = _yahoo_chart_close(sym, range_="3mo")
+            if not series.empty:
+                data[name] = series
         except Exception as _e:
-            _log.debug("chart_helpers.%s degraded: %s", "load_macro_data", _e)
+            _log.debug("chart_helpers.load_macro_data degraded for %s: %s", name, _e)
             pass
 
     return pd.DataFrame(data).dropna(how="all")
@@ -181,7 +213,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
         subplot_titles=[f"{ticker} — Price", "Volume", "RSI (14)", "MACD"],
     )
 
-    # ── Row 1: Candlestick ──────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
         x=df.index, open=df["Open"], high=df["High"],
         low=df["Low"], close=df["Close"],
@@ -210,7 +241,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
                 line=dict(color=color, width=1.2),
             ), row=1, col=1)
 
-    # ── Row 2: Volume bars (green = up day, red = down day) ─────────────────
     if "Volume" in df.columns:
         vol_colors = [
             "#26a69a" if c >= o else "#ef5350"
@@ -222,7 +252,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
             name="Volume", showlegend=False,
             opacity=0.7,
         ), row=2, col=1)
-        # 20-day avg volume line
         vol_ma = df["Volume"].rolling(20).mean()
         fig.add_trace(go.Scatter(
             x=df.index, y=vol_ma,
@@ -230,7 +259,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
             name="Vol MA20", showlegend=False,
         ), row=2, col=1)
 
-    # ── Row 3: RSI ──────────────────────────────────────────────────────────
     if "RSI" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["RSI"], name="RSI",
@@ -238,13 +266,11 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
         ), row=3, col=1)
         for level, color in [(30, "#26a69a"), (70, "#ef5350"), (50, "rgba(150,150,150,0.5)")]:
             fig.add_hline(y=level, line_dash="dot", line_color=color, row=3, col=1)
-        # RSI overbought / oversold shading
         fig.add_hrect(y0=70, y1=100, fillcolor="rgba(239,83,80,0.06)",
                       line_width=0, row=3, col=1)
         fig.add_hrect(y0=0, y1=30, fillcolor="rgba(38,166,154,0.06)",
                       line_width=0, row=3, col=1)
 
-    # ── Row 4: MACD ─────────────────────────────────────────────────────────
     if "MACD" in df.columns and "MACD_Signal" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["MACD"], name="MACD",
@@ -261,7 +287,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
                 marker_color=hist_colors, opacity=0.6,
             ), row=4, col=1)
 
-    # ── NSE Pro Plotly layout ────────────────────────────────────────────────
     _NSE_GRID = dict(gridcolor="rgba(255,255,255,.04)", linecolor="rgba(255,255,255,.06)")
     _NSE_TICK = dict(color="#4a5568", size=10)
     fig.update_layout(
@@ -283,7 +308,6 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
         ),
         hovermode="x unified",
     )
-    # Apply grid style to all rows
     for row in range(1, 5):
         fig.update_xaxes(
             **_NSE_GRID, zeroline=False, tickfont=_NSE_TICK,
@@ -297,14 +321,11 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
     fig.update_yaxes(title_text="Volume",   title_font=dict(size=10,color="#4a5568"), tickformat=".2s", row=2, col=1)
     fig.update_yaxes(title_text="RSI",      title_font=dict(size=10,color="#4a5568"), range=[0,100], row=3, col=1)
     fig.update_yaxes(title_text="MACD",     title_font=dict(size=10,color="#4a5568"), row=4, col=1)
-    # Spike lines for crosshair
     fig.update_xaxes(showspikes=True, spikethickness=1, spikecolor="#5a6a8a", spikedash="dot")
     fig.update_yaxes(showspikes=True, spikethickness=1, spikecolor="#5a6a8a")
     return fig
 
 
-# ── Live top bar: Nifty indices strip + scrolling ticker (auto-refresh 5 s) ───
-# All Nifty indices the strip tries to show (failures are skipped gracefully).
 _INDEX_STRIP = [
     ("NIFTY 50",   "^NSEI"),      ("BANK NIFTY", "^NSEBANK"),
     ("NIFTY IT",   "^CNXIT"),     ("NIFTY AUTO",  "^CNXAUTO"),
@@ -365,10 +386,8 @@ def _ticker_tape_data():
 
 @st.fragment(run_every="5s")     # auto-updates ONLY this bar every 5 s, no page reload
 def _live_top_bar():
-    # ── VIX + market-status chips, then Nifty indices strip ──────────────────
     try:
         _chips = ""
-        # India VIX chip
         try:
             from utils.vix import get_india_vix_regime as _ltb_vix
             _vinfo = _ltb_vix()
@@ -385,7 +404,6 @@ def _live_top_bar():
         except Exception as _e:
             _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
             pass
-        # Market-status chip
         try:
             from utils.market_hours import market_status as _ltb_ms
             _msd = _ltb_ms()
@@ -420,7 +438,6 @@ def _live_top_bar():
         _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
         pass
 
-    # ── Scrolling stock ticker ───────────────────────────────────────────────
     try:
         _tt = _ticker_tape_data()
         if _tt:
@@ -443,8 +460,6 @@ def _live_top_bar():
         pass
 
 
-# ── Index explorer: open any index to see its stocks + day changes ────────────
-# Maps each index label to its constituent ticker list (from the app universe).
 _INDEX_CONSTITUENTS = {
     "NIFTY 50":     ("universe", "nifty50"),
     "BANK NIFTY":   ("sector",   "Banking"),
@@ -495,7 +510,6 @@ def render_top_bar():
         if _ix_rows:
             _ix_up = sum(1 for _, _, c in _ix_rows if c >= 0)
             st.caption(f"**{_ix_pick}** — {len(_ix_rows)} stocks · {_ix_up} up / {len(_ix_rows)-_ix_up} down")
-            # color-coded HTML grid
             _ix_html = '<div style="display:flex;flex-wrap:wrap;gap:6px">'
             for _nm, _px, _ch in _ix_rows:
                 _cc = "#00d4aa" if _ch >= 0 else "#ff4757"
