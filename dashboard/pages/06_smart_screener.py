@@ -1,31 +1,18 @@
 """Smart Screener - NSE Smart Investor (multipage page; body verbatim from app.py)."""
-import os, sys
+import os
+import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-import streamlit as st
-from dashboard.shared.design import apply_design
-from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
-# P3: explicit imports (was a dynamic shared-namespace injection)
-import os
+
 import pandas as pd
 import streamlit as st
-import sys
-from dashboard.shared.design import (
-    apply_design,
-)
-from dashboard.shared.cache import (
-    get_vix_info,
-)
-from dashboard.shared.trade_utils import (
-    _action_color,
-    _action_emoji,
-)
-from dashboard.shared.chart_helpers import (
-    _ROOT,
-    render_top_bar,
-)
+
+from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
+from dashboard.shared.cache import get_vix_info
+from dashboard.shared.trade_utils import _action_color, _action_emoji
+from dashboard.shared.chart_helpers import render_top_bar
 
 apply_design()
 render_sidebar(current="Smart Screener")
@@ -170,7 +157,13 @@ if scan_btn:
                     except Exception:
                         _rg_futs[_f]["rev_growth"] = None
             finally:
-                _rg_pool.shutdown(wait=False)
+                # BUGFIX: previously shutdown(wait=False) left any still-running
+                # fetch threads executing in the background indefinitely after
+                # this function returned. cancel_futures=True (Py3.9+) drops
+                # everything that hasn't started yet instead of leaking threads;
+                # already-running fetches still finish naturally but are no
+                # longer joined or waited on.
+                _rg_pool.shutdown(wait=False, cancel_futures=True)
             for s in signals:
                 s.setdefault("rev_growth", None)
 
@@ -206,10 +199,15 @@ if scan_btn:
             _s_price = sig.get("price", 0)
             _s_sl    = sig.get("sl", sig.get("stop_loss", 0)) or 0
             _s_tp    = sig.get("tp", sig.get("target", None))
-            _s_rr    = (
-                sig.get("rr_ratio") or
-                (round((_s_tp - _s_price) / max(_s_price - _s_sl, 0.01), 1) if _s_tp else None)
-            )
+            # BUGFIX: previously max(_s_price - _s_sl, 0.01) clamped a negative
+            # or zero risk denominator (stop-loss at/above price) up to 0.01,
+            # which inflated R:R into misleadingly huge numbers instead of
+            # signalling "this setup's risk is invalid". Now falls back to
+            # None ("—" downstream) whenever the risk leg isn't a sane long.
+            _s_rr = sig.get("rr_ratio")
+            if _s_rr is None and _s_tp:
+                _risk = _s_price - _s_sl
+                _s_rr = round((_s_tp - _s_price) / _risk, 1) if _risk > 0.01 else None
             _s_sector    = sig.get("sector", "")
             _s_stop_type = sig.get("stop_type", "atr")
             _s_score_str = (f"Score {sig.get('composite_score','?')}/100 "
