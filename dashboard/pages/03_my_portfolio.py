@@ -1,30 +1,31 @@
 """My Portfolio - NSE Smart Investor (multipage page; body verbatim from app.py)."""
-import os, sys
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-import streamlit as st
-from dashboard.shared.design import apply_design
-from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
-# P3: explicit imports (was a dynamic shared-namespace injection)
 import os
+import sys
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import sys
-from dashboard.shared.design import (
-    apply_design,
-)
+import pathlib as _pl
+import tempfile
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
+from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.trade_utils import (
     _action_emoji,
     _paper_trade_popover,
     _portfolio_live_prices,
+    clear_price_caches,            # FIX3
+    _safe_tmpfile,                 # FIX4
+    upload_validate_portfolio_csv, # FIX9
+    load_signal_monitor_state,     # FIX TU5
+    save_signal_monitor_state,     # FIX TU5
 )
-from dashboard.shared.chart_helpers import (
-    _ROOT,
-    render_top_bar,
-)
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar
+from dashboard.shared.squareoff_monitor import render_squareoff_monitor  # FIX3
 # Copilot Phase 4 modules — concentration (HHI) + fundamental quality
 from analysis.portfolio_concentration import analyze_concentration, concentration_grade
 from analysis.portfolio_fundamentals import batch_fetch_fundamentals, compute_quality_score
@@ -39,6 +40,10 @@ st.markdown(
     "Your holdings health check — live prices, plain English buy/hold/sell recommendations, and news for each stock."
 )
 
+# ── Market status badge + MIS auto square-off monitor ─────────────────
+# Polls every 60 s while page is open; tightens to 20 s during 15:20–15:30.
+render_squareoff_monitor(poll_every=60, show_badge=True)
+
 # ── Angel One real holdings shortcut ──────────────────────────────────────
 try:
     from data.angel_fetcher import is_configured as _pf_ao_ok, get_holdings as _pf_ao_holdings
@@ -51,14 +56,12 @@ try:
             if st.button("Import Angel One Holdings", key="pf_ao_import"):
                 _ao_h = _pf_ao_holdings()
                 if _ao_h:
-                    import tempfile as _tmf
-                    import pathlib as _tmpl
                     _rows = [
                         f"{h['symbol']}.NS,{h['qty']},{h['avg_price']},2024-01-01"
                         for h in _ao_h
                     ]
                     _ao_csv_content = "ticker,quantity,avg_buy_price,date_bought\n" + "\n".join(_rows)
-                    _ao_tmp = _tmpl.Path(_tmf.mktemp(suffix=".csv"))
+                    _ao_tmp = _safe_tmpfile(suffix=".csv")   # FIX4: secure NamedTemporaryFile
                     _ao_tmp.write_text(_ao_csv_content, encoding="utf-8")
                     st.session_state["_ao_portfolio_path"] = str(_ao_tmp)
                     st.success(f"Imported {len(_ao_h)} holdings from Angel One")
@@ -96,13 +99,15 @@ with col_sample:
     )
     st.caption("Tickers without .NS suffix are auto-resolved (e.g. RELIANCE → RELIANCE.NS)")
 
-# Resolve which file to analyse
-import tempfile
+# Resolve which file to analyse — FIX9: validate columns at upload time
 if uploaded is not None:
-    tmp = _pl.Path(tempfile.mktemp(suffix=".csv"))
-    tmp.write_bytes(uploaded.read())
-    _csv_source = tmp
-    st.success("Using uploaded portfolio file.")
+    _csv_source, _csv_err = upload_validate_portfolio_csv(uploaded)
+    if _csv_err:
+        st.error(f"❌ Invalid portfolio CSV: {_csv_err}")
+        _csv_source = None
+        st.stop()
+    else:
+        st.success("Using uploaded portfolio file.")
 elif st.session_state.get("_ao_portfolio_path"):
     _csv_source = _pl.Path(st.session_state["_ao_portfolio_path"])
     st.success("Using Angel One holdings (imported from broker)")
@@ -125,7 +130,7 @@ if _csv_source is not None:
         with _refresh_col:
             st.write("")
             if st.button("🔄 Refresh Prices", key="port_refresh_live"):
-                st.cache_data.clear()
+                clear_price_caches()   # FIX3: granular — preserves risk/fundamental caches
         with _live_col:
             st.markdown("#### 📡 Live Prices (updates every 60 s)")
         _live_prices = _portfolio_live_prices(_port_tickers)
@@ -323,14 +328,14 @@ if _csv_source is not None:
             _PF_BUY  = {"STRONG BUY", "BUY"}
             _PF_SELL = {"CAUTION", "EXIT", "SELL", "REDUCE"}
             _pf_cur  = {h.ticker: h.action for h in summary.holdings}
-            _pf_prev = st.session_state.get("_pf_prev_actions", {})
+            _pf_prev = load_signal_monitor_state()   # FIX TU5: kv-backed, survives refresh
             _pf_flips = []
             for _tk, _ac in _pf_cur.items():
                 _pv = _pf_prev.get(_tk)
                 if _pv and _pv != _ac and (_ac in _PF_BUY or _ac in _PF_SELL):
                     _pf_flips.append((_tk.replace(".NS", ""), _pv, _ac,
                                       "buy" if _ac in _PF_BUY else "sell"))
-            st.session_state["_pf_prev_actions"] = _pf_cur
+            save_signal_monitor_state(_pf_cur)       # FIX TU5: persist immediately
 
             _sg1, _sg2 = st.columns([5, 2])
             _sg1.markdown("### 🔔 Auto-Signal Monitor")
@@ -429,10 +434,6 @@ if _csv_source is not None:
                 from data.fetcher import fetch_single as _fs
 
                 def _tz_safe_loader(_tkr, period="1y"):
-                    # The tiered fetcher (Angel/Stooq/Yahoo) can return tz-AWARE indexes for
-                    # some tickers and tz-NAIVE for others; pandas then refuses to align them
-                    # ("Cannot join tz-naive with tz-aware DatetimeIndex") when the NAV panel
-                    # is built. Normalise every frame to tz-naive so they always align.
                     _df = _fs(_tkr, period=period)
                     try:
                         if _df is not None and not getattr(_df, "empty", True):
@@ -464,14 +465,12 @@ if _csv_source is not None:
                 if _rr.error:
                     st.warning(f"⚠️ Risk analytics unavailable: {_rr.error}")
                 else:
-                    # specific, weight-aware disclosure (severe → warning, else info)
                     if (_rr.affected_weight_pct or 0) >= 25 or not _rr.purchase_dates_known:
                         st.warning(f"⚠️ {_rr.disclosure}")
                     else:
                         st.info(f"ℹ️ {_rr.disclosure}")
                     st.caption(f"Confidence: **{_rr.confidence}** — {_rr.confidence_reason}")
 
-                    # ── Group 1: HYPOTHETICAL performance (biased by the assumption) ──
                     st.markdown("##### 📈 Hypothetical Performance — *if you'd held today's exact book*")
                     _perf = _rr.performance_metrics()
                     _p1 = st.columns(3)
@@ -489,12 +488,11 @@ if _csv_source is not None:
                                                margin=dict(l=0, r=0, t=40, b=0))
                         st.plotly_chart(_fig_nav, width="stretch")
 
-                    # ── Group 2: ROBUST risk profile (unaffected by the assumption) ──
                     st.markdown("##### 🛡️ Risk Profile (current book) — *robust to the holdings assumption*")
                     _rk = _rr.risk_metrics()
                     _rcols = st.columns(4)
-                    _rm(_rcols[0], _rk[0][0], _rk[0][1], _rk[0][2])    # Portfolio Beta
-                    _rm(_rcols[1], _rk[1][0], _rk[1][1], _rk[1][2])    # Annualised Volatility
+                    _rm(_rcols[0], _rk[0][0], _rk[0][1], _rk[0][2])
+                    _rm(_rcols[1], _rk[1][0], _rk[1][1], _rk[1][2])
                     _rcols[2].metric("Holdings analysed", len(_rr.holdings_used))
                     _rcols[3].metric("Lookback (days)", _rr.n_days)
                     _rcL, _rcR = st.columns([1, 1])
@@ -644,7 +642,10 @@ if _csv_source is not None:
                 elif _h_sort == "Total P&L (low→high)":
                     _hold_sorted.sort(key=lambda h: h.pnl)
                 elif _h_sort == "Today's change":
-                    _hold_sorted.sort(key=lambda h: -getattr(h, "pnl_pct", 0))
+                    # FIX14: sort by today_chg_pct if available; fall back to pnl_pct
+                    _hold_sorted.sort(
+                        key=lambda h: -getattr(h, "today_chg_pct", getattr(h, "pnl_pct", 0))
+                    )
                 elif _h_sort == "Score (best first)":
                     _hold_sorted.sort(key=lambda h: -getattr(h, "score", 0))
                 elif _h_sort == "Value (high→low)":
@@ -673,15 +674,14 @@ if _csv_source is not None:
                 _h_sl  = h.stop_loss or (h.avg_buy_price * 0.95)
                 _h_tp  = h.target    or (h.avg_buy_price * 1.10)
                 _h_rng = max(_h_tp - _h_sl, 0.01)
-                _h_ep_pct  = min(100, max(0, (_h_sl + (_h_rng * 0.3) - _h_sl) / _h_rng * 100))
                 _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
+                # _h_ep_pct removed — was computed but never rendered (FIX7)
                 _h_bar_c   = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
                 _h_score_w = min(int(h.score), 100)
 
                 _h_html = (
                     f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
-                    # Header row: name + action + score
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
                     f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
@@ -692,20 +692,16 @@ if _csv_source is not None:
                     f'<div style="width:60px;height:5px;background:#333;border-radius:3px;margin-top:3px">'
                     f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div></div>'
                     f'</div></div>'
-                    # Price row
                     f'<div style="font-size:15px;color:#fff;margin-bottom:4px">'
                     f'<b>₹{h.current_price:,.2f}</b>'
                     f'<span style="font-size:12px;color:#aaa;margin-left:8px">{h.quantity:.0f} shares · held {h.days_held}d</span>'
                     f'</div>'
-                    # Invested vs Now
                     f'<div style="font-size:12px;color:#aaa;margin-bottom:6px">'
                     f'Invested ₹{_h_inv:,.0f} → Now ₹{_h_val:,.0f}'
                     f'</div>'
-                    # P&L
                     f'<div style="font-size:18px;font-weight:700;color:{_h_pnl_c};margin-bottom:8px">'
                     f'{_h_pnl_a} ₹{abs(h.pnl):,.0f} ({h.pnl_pct:+.1f}%)'
                     f'</div>'
-                    # Progress bar: SL → current → target
                     f'<div style="margin-bottom:6px">'
                     f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:2px">'
                     f'<span>SL ₹{_h_sl:,.0f}</span><span>Target ₹{_h_tp:,.0f}</span></div>'
@@ -716,7 +712,6 @@ if _csv_source is not None:
                     f'top:-4px;width:14px;height:14px;background:{_h_bar_c};border-radius:50%;'
                     f'border:2px solid #fff"></div>'
                     f'</div></div>'
-                    # Headline reason
                     f'<div style="font-size:12px;color:#ccc;margin-top:6px">{h.headline}</div>'
                     f'</div>'
                 )
@@ -765,7 +760,7 @@ if _csv_source is not None:
 
             # ── Export ─────────────────────────────────────────────────
             st.markdown("---")
-            export_path = pm.export_summary_csv(summary)
+            # export_path removed — pm.export_summary_csv() side-effect not needed here (FIX8)
             export_df = pd.DataFrame([{
                 "Ticker": h.ticker.replace(".NS",""),
                 "Qty": h.quantity,
@@ -791,7 +786,7 @@ if _csv_source is not None:
         except Exception as e:
             import logging as _pf_logging, traceback as _pf_tb
             _pf_logging.getLogger("dashboard.my_portfolio").error(
-                "Portfolio analysis failed: %s", e, exc_info=True)   # diagnosable in logs too
+                "Portfolio analysis failed: %s", e, exc_info=True)
             st.error(f"Portfolio analysis failed: {type(e).__name__}: {e}")
             with st.expander("Show technical details (for debugging)"):
                 st.code(_pf_tb.format_exc())
