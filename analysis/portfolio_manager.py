@@ -15,11 +15,28 @@ Usage:
     summary = pm.mark_to_market()
     pm.print_summary(summary)
     pm.export_summary_csv(summary)
+
+CHANGES in this revision
+─────────────────────────
+PM1  today_chg_pct added to HoldingResult — the intraday % change for this
+     holding (current price vs previous close).  Populated from
+     get_live_quote() which already returns chg_pct.  Enables the
+     "Today's change" sort in my_portfolio.py to work correctly instead of
+     falling back to the overall pnl_pct.
+
+PM2  _score_holding now calls get_live_quote() instead of get_live_price()
+     so it gets price AND chg_pct in a single network call (was making two
+     calls in some code paths). get_live_price is a thin wrapper over
+     get_live_quote anyway so there is no extra latency cost.
+
+PM3  today_chg_pct included in export_summary_csv fieldnames so the
+     downloaded CSV carries the intraday column too.
 """
 
 from __future__ import annotations
 
 import csv
+import logging
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +47,7 @@ import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore")
+_log = logging.getLogger("portfolio_manager")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -43,22 +61,23 @@ class HoldingResult:
     avg_buy_price:  float
     date_bought:    str
     current_price:  float
-    invested:       float          # quantity × avg_buy_price
-    current_value:  float          # quantity × current_price
-    pnl:            float          # current_value - invested
-    pnl_pct:        float          # pnl / invested × 100
+    invested:       float           # quantity × avg_buy_price
+    current_value:  float           # quantity × current_price
+    pnl:            float           # current_value - invested
+    pnl_pct:        float           # pnl / invested × 100
+    today_chg_pct:  float           # PM1: intraday % change vs prev close (0.0 if unavailable)
     days_held:      int
-    score:          float          # 0–100 composite score
-    grade:          str            # A+…F
-    action:         str            # STRONG BUY…EXIT
-    signal:         str            # 🟢 BUY MORE / 🟡 HOLD / 🔴 CONSIDER SELLING
-    headline:       str            # one-liner for UI card
-    narrative:      str            # full paragraph
+    score:          float           # 0–100 composite score
+    grade:          str             # A+…F
+    action:         str             # STRONG BUY…EXIT
+    signal:         str             # 🟢 BUY MORE / 🟡 HOLD / 🔴 CONSIDER SELLING
+    headline:       str             # one-liner for UI card
+    narrative:      str             # full paragraph
     sector:         str
     stop_loss:      float
     target:         float
     risk_reward:    float
-    error:          str = ""       # non-empty if scoring failed
+    error:          str = ""        # non-empty if scoring failed
 
 
 @dataclass
@@ -73,19 +92,19 @@ class PortfolioDiversification:
 
 @dataclass
 class PortfolioSummary:
-    generated_at:       str
-    holdings:           List[HoldingResult]
-    total_invested:     float
+    generated_at:        str
+    holdings:            List[HoldingResult]
+    total_invested:      float
     total_current_value: float
-    total_pnl:          float
-    total_pnl_pct:      float
-    portfolio_score:    float    # weighted average composite score
-    portfolio_grade:    str
-    best_holding:       Optional[HoldingResult]
-    worst_holding:      Optional[HoldingResult]
-    diversification:    PortfolioDiversification
-    vix_regime:         str
-    summary_narrative:  str      # 2–3 sentence overall take for non-traders
+    total_pnl:           float
+    total_pnl_pct:       float
+    portfolio_score:     float    # weighted average composite score
+    portfolio_grade:     str
+    best_holding:        Optional[HoldingResult]
+    worst_holding:       Optional[HoldingResult]
+    diversification:     PortfolioDiversification
+    vix_regime:          str
+    summary_narrative:   str      # 2–3 sentence overall take for non-traders
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -137,7 +156,8 @@ def _analyse_diversification(
         risk = "VERY HIGH"
         advice = (
             f"Over 60% of your portfolio is in {top_sector}. "
-            "A single sector event can hurt significantly. Consider spreading across 5–8 sectors."
+            "A single sector event can hurt significantly. "
+            "Consider spreading across 5–8 sectors."
         )
     elif top_pct > 45:
         risk = "HIGH"
@@ -177,10 +197,10 @@ def _portfolio_narrative(
     holdings: List[HoldingResult],
 ) -> str:
     pnl_word = "gained" if summary.total_pnl >= 0 else "lost"
-    pnl_abs = abs(summary.total_pnl)
-    pnl_pct = abs(summary.total_pnl_pct)
+    pnl_abs  = abs(summary.total_pnl)
+    pnl_pct  = abs(summary.total_pnl_pct)
 
-    buy_count = sum(1 for h in holdings if "BUY" in h.action)
+    buy_count  = sum(1 for h in holdings if "BUY" in h.action)
     sell_count = sum(1 for h in holdings if h.action in ("CAUTION", "EXIT"))
 
     parts = [
@@ -190,15 +210,14 @@ def _portfolio_narrative(
     if buy_count:
         parts.append(
             f"{buy_count} of your holdings look strong right now "
-            f"— our model suggests they could be added to."
+            "— our model suggests they could be added to."
         )
     if sell_count:
         parts.append(
             f"{sell_count} holdings are showing weakness "
-            f"— consider reviewing those positions."
+            "— consider reviewing those positions."
         )
 
-    # VIX context — compare uppercase so "fear"/"FEAR" both match
     _vix_upper = summary.vix_regime.upper()
     if "FEAR" in _vix_upper or "PANIC" in _vix_upper:
         parts.append(
@@ -233,7 +252,7 @@ class PortfolioManager:
     """
 
     def __init__(self, csv_path: str | Path):
-        self.csv_path = Path(csv_path)
+        self.csv_path    = Path(csv_path)
         self.holdings_raw = self._load_csv()
 
     # ── loader ────────────────────────────────────────────────────────────────
@@ -246,14 +265,16 @@ class PortfolioManager:
                 ticker = row.get("ticker", "").strip().upper()
                 if not ticker:
                     continue
-                # Normalise ticker suffix
                 if not ticker.endswith(".NS") and not ticker.endswith(".BO"):
                     ticker = ticker + ".NS"
                 rows.append({
-                    "ticker": ticker,
-                    "quantity": float(row.get("quantity", 0)),
+                    "ticker":        ticker,
+                    "quantity":      float(row.get("quantity", 0)),
                     "avg_buy_price": float(row.get("avg_buy_price", 0)),
-                    "date_bought": row.get("date_bought", "").strip() or datetime.today().strftime("%Y-%m-%d"),
+                    "date_bought":   (
+                        row.get("date_bought", "").strip()
+                        or datetime.today().strftime("%Y-%m-%d")
+                    ),
                 })
         return rows
 
@@ -264,9 +285,7 @@ class PortfolioManager:
         Score every holding and return a PortfolioSummary.
         Set parallel=True for faster processing (uses ThreadPoolExecutor).
         """
-        from analysis.score import score_stock
-
-        # VIX fetch via utils.vix (cookie+crumb auth, no yfinance, cloud-safe)
+        # VIX fetch
         try:
             from utils.vix import get_india_vix_regime
             vix_info = get_india_vix_regime()
@@ -275,31 +294,28 @@ class PortfolioManager:
                         "allow_buy": True, "vix_pct_chg": 0.0}
 
         vix_regime = vix_info.get("regime", "normal")
-
         holdings: List[HoldingResult] = []
 
         if parallel:
             from concurrent.futures import ThreadPoolExecutor, wait as _wait
             pool = ThreadPoolExecutor(max_workers=4)
             try:
-                futs = {pool.submit(self._score_holding, raw, vix_info): raw["ticker"]
-                        for raw in self.holdings_raw}
+                futs = {
+                    pool.submit(self._score_holding, raw, vix_info): raw["ticker"]
+                    for raw in self.holdings_raw
+                }
                 done, _ = _wait(list(futs.keys()), timeout=120)
                 for fut in done:
                     try:
                         holdings.append(fut.result(timeout=0))
                     except Exception as e:
-                        # A holding that fails here is retried by the sequential pass
-                        # below (it won't be in scored_tickers). Log so a holding that
-                        # fails BOTH paths — and silently drops out of the portfolio
-                        # total/P&L — is at least diagnosable.
-                        import logging as _lg
-                        _lg.getLogger("portfolio").warning(
+                        _log.warning(
                             "parallel score failed for %s: %s (retrying sequentially)",
-                            futs.get(fut, "?"), e)
+                            futs.get(fut, "?"), e,
+                        )
             finally:
                 pool.shutdown(wait=False)
-            # Fall back to sequential for any that timed out
+            # Sequential retry for any that timed out or raised
             scored_tickers = {h.ticker for h in holdings}
             for raw in self.holdings_raw:
                 if raw["ticker"] not in scored_tickers:
@@ -314,14 +330,13 @@ class PortfolioManager:
             holdings.sort(key=lambda h: h.invested, reverse=True)
 
         total_current = sum(h.current_value for h in holdings)
-        total_pnl = total_current - total_invested
+        total_pnl     = total_current - total_invested
         total_pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0.0
 
-        # Portfolio-level composite score (weighted by current value)
         scored = [h for h in holdings if not h.error]
         if scored:
-            weights = np.array([h.current_value for h in scored])
-            scores = np.array([h.score for h in scored])
+            weights        = np.array([h.current_value for h in scored])
+            scores         = np.array([h.score         for h in scored])
             portfolio_score = float(np.average(scores, weights=weights))
         else:
             portfolio_score = 0.0
@@ -329,23 +344,23 @@ class PortfolioManager:
         portfolio_grade = _score_to_grade(portfolio_score)
         diversification = _analyse_diversification(holdings)
 
-        best = max(scored, key=lambda h: h.pnl_pct) if scored else None
+        best  = max(scored, key=lambda h: h.pnl_pct) if scored else None
         worst = min(scored, key=lambda h: h.pnl_pct) if scored else None
 
         summary = PortfolioSummary(
-            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            holdings=holdings,
-            total_invested=total_invested,
-            total_current_value=total_current,
-            total_pnl=total_pnl,
-            total_pnl_pct=total_pnl_pct,
-            portfolio_score=round(portfolio_score, 1),
-            portfolio_grade=portfolio_grade,
-            best_holding=best,
-            worst_holding=worst,
-            diversification=diversification,
-            vix_regime=vix_regime,
-            summary_narrative="",
+            generated_at         = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            holdings             = holdings,
+            total_invested       = total_invested,
+            total_current_value  = total_current,
+            total_pnl            = total_pnl,
+            total_pnl_pct        = total_pnl_pct,
+            portfolio_score      = round(portfolio_score, 1),
+            portfolio_grade      = portfolio_grade,
+            best_holding         = best,
+            worst_holding        = worst,
+            diversification      = diversification,
+            vix_regime           = vix_regime,
+            summary_narrative    = "",
         )
         summary.summary_narrative = _portfolio_narrative(summary, holdings)
         return summary
@@ -355,14 +370,12 @@ class PortfolioManager:
     def _score_holding(self, raw: Dict, vix_info: Dict) -> HoldingResult:
         from analysis.score import score_stock
 
-        ticker = raw["ticker"]
-        qty = raw["quantity"]
-        avg_price = raw["avg_buy_price"]
+        ticker      = raw["ticker"]
+        qty         = raw["quantity"]
+        avg_price   = raw["avg_buy_price"]
         date_bought = raw["date_bought"]
+        invested    = qty * avg_price
 
-        invested = qty * avg_price
-
-        # Days held
         try:
             bought_dt = datetime.strptime(date_bought, "%Y-%m-%d")
             days_held = (datetime.today() - bought_dt).days
@@ -371,64 +384,78 @@ class PortfolioManager:
 
         try:
             cs = score_stock(ticker, period="1y", vix_info=vix_info)
-            # Try to get a more current price (NSE live → yfinance fast_info → EOD)
+
+            # PM2: use get_live_quote so we get price AND chg_pct in one call
+            current_price  = cs.price
+            today_chg_pct  = 0.0
             try:
-                from utils.live_price import get_live_price
-                live = get_live_price(ticker)
-                current_price = live if (live and live > 0) else cs.price
-            except Exception:
-                current_price = cs.price
+                from utils.live_price import get_live_quote
+                _q = get_live_quote(ticker)
+                if _q and isinstance(_q, dict) and _q.get("price"):
+                    current_price = float(_q["price"])
+                    today_chg_pct = float(_q.get("chg_pct") or 0.0)
+            except Exception as _lq_err:
+                _log.debug("_score_holding live quote failed for %s: %s", ticker, _lq_err)
+                # keep cs.price and today_chg_pct=0.0
+
             current_value = qty * current_price
-            pnl = current_value - invested
-            pnl_pct = (pnl / invested * 100) if invested > 0 else 0.0
-            signal = _traffic_light(cs.action, pnl_pct)
+            pnl           = current_value - invested
+            pnl_pct       = (pnl / invested * 100) if invested > 0 else 0.0
+            signal        = _traffic_light(cs.action, pnl_pct)
 
             return HoldingResult(
-                ticker=ticker,
-                quantity=qty,
-                avg_buy_price=avg_price,
-                date_bought=date_bought,
-                current_price=current_price,
-                invested=invested,
-                current_value=current_value,
-                pnl=pnl,
-                pnl_pct=pnl_pct,
-                days_held=days_held,
-                score=cs.score,
-                grade=cs.grade,
-                action=cs.action,
-                signal=signal,
-                headline=cs.headline,
-                narrative=cs.narrative,
-                sector=cs.sector,
-                stop_loss=cs.stop_loss,
-                target=cs.target,
-                risk_reward=cs.risk_reward,
-                error="",
+                ticker        = ticker,
+                quantity      = qty,
+                avg_buy_price = avg_price,
+                date_bought   = date_bought,
+                current_price = current_price,
+                invested      = invested,
+                current_value = current_value,
+                pnl           = pnl,
+                pnl_pct       = pnl_pct,
+                today_chg_pct = today_chg_pct,   # PM1
+                days_held     = days_held,
+                score         = cs.score,
+                grade         = cs.grade,
+                action        = cs.action,
+                signal        = signal,
+                headline      = cs.headline,
+                narrative     = cs.narrative,
+                sector        = cs.sector,
+                stop_loss     = cs.stop_loss,
+                target        = cs.target,
+                risk_reward   = cs.risk_reward,
+                error         = "",
             )
+
         except Exception as e:
+            _log.warning("_score_holding failed for %s: %s", ticker, e)
             return HoldingResult(
-                ticker=ticker,
-                quantity=qty,
-                avg_buy_price=avg_price,
-                date_bought=date_bought,
-                current_price=0.0,
-                invested=invested,
-                current_value=invested,   # assume break-even if error
-                pnl=0.0,
-                pnl_pct=0.0,
-                days_held=days_held,
-                score=50.0,
-                grade="C",
-                action="HOLD",
-                signal="🟡 HOLD",
-                headline=f"Data unavailable for {ticker}",
-                narrative=f"Could not fetch live data for {ticker}. Please check the ticker symbol.",
-                sector="Unknown",
-                stop_loss=avg_price * 0.92,
-                target=avg_price * 1.15,
-                risk_reward=1.875,
-                error=str(e),
+                ticker        = ticker,
+                quantity      = qty,
+                avg_buy_price = avg_price,
+                date_bought   = date_bought,
+                current_price = 0.0,
+                invested      = invested,
+                current_value = invested,   # assume break-even on error
+                pnl           = 0.0,
+                pnl_pct       = 0.0,
+                today_chg_pct = 0.0,        # PM1: safe default
+                days_held     = days_held,
+                score         = 50.0,
+                grade         = "C",
+                action        = "HOLD",
+                signal        = "🟡 HOLD",
+                headline      = f"Data unavailable for {ticker}",
+                narrative     = (
+                    f"Could not fetch live data for {ticker}. "
+                    "Please check the ticker symbol."
+                ),
+                sector        = "Unknown",
+                stop_loss     = avg_price * 0.92,
+                target        = avg_price * 1.15,
+                risk_reward   = 1.875,
+                error         = str(e),
             )
 
     # ── pretty printer ────────────────────────────────────────────────────────
@@ -443,29 +470,33 @@ class PortfolioManager:
         print(f"  Current Value  : ₹{summary.total_current_value:>12,.0f}")
         print(f"  Total P&L      : {pnl_sign}₹{summary.total_pnl:>11,.0f}  "
               f"({pnl_sign}{summary.total_pnl_pct:.1f}%)")
-        print(f"  Portfolio Score: {summary.portfolio_score:.0f}/100  [{summary.portfolio_grade}]")
+        print(f"  Portfolio Score: {summary.portfolio_score:.0f}/100  "
+              f"[{summary.portfolio_grade}]")
         print()
         print(f"  {summary.summary_narrative}")
         print()
         print("─" * 60)
-        print(f"  {'TICKER':<12} {'QTY':>6} {'BUY':>8} {'NOW':>8} {'P&L%':>7} "
-              f"{'SCORE':>6} {'SIGNAL':<28}")
+        print(f"  {'TICKER':<12} {'QTY':>6} {'BUY':>8} {'NOW':>8} "
+              f"{'TODAY%':>7} {'P&L%':>7} {'SCORE':>6} {'SIGNAL':<28}")
         print("─" * 60)
         for h in summary.holdings:
-            pnl_str = f"{'+' if h.pnl_pct >= 0 else ''}{h.pnl_pct:.1f}%"
+            today_str = f"{h.today_chg_pct:+.1f}%"
+            pnl_str   = f"{'+' if h.pnl_pct >= 0 else ''}{h.pnl_pct:.1f}%"
             score_str = f"{h.score:.0f} [{h.grade}]"
-            print(f"  {h.ticker.replace('.NS',''):<12} {h.quantity:>6.0f} "
-                  f"₹{h.avg_buy_price:>7,.0f} ₹{h.current_price:>7,.0f} "
-                  f"{pnl_str:>7} {score_str:>8}  {h.signal}")
+            print(
+                f"  {h.ticker.replace('.NS',''):<12} {h.quantity:>6.0f} "
+                f"₹{h.avg_buy_price:>7,.0f} ₹{h.current_price:>7,.0f} "
+                f"{today_str:>7} {pnl_str:>7} {score_str:>8}  {h.signal}"
+            )
         print("─" * 60)
         if summary.best_holding:
             bh = summary.best_holding
-            print(f"  Best:  {bh.ticker.replace('.NS','')} {'+' if bh.pnl_pct>=0 else ''}"
-                  f"{bh.pnl_pct:.1f}%")
+            print(f"  Best:  {bh.ticker.replace('.NS','')} "
+                  f"{'+' if bh.pnl_pct>=0 else ''}{bh.pnl_pct:.1f}%")
         if summary.worst_holding:
             wh = summary.worst_holding
-            print(f"  Worst: {wh.ticker.replace('.NS','')} {'+' if wh.pnl_pct>=0 else ''}"
-                  f"{wh.pnl_pct:.1f}%")
+            print(f"  Worst: {wh.ticker.replace('.NS','')} "
+                  f"{'+' if wh.pnl_pct>=0 else ''}{wh.pnl_pct:.1f}%")
         print()
         div = summary.diversification
         print(f"  Diversification: {div.concentration_risk}")
@@ -482,9 +513,11 @@ class PortfolioManager:
         if output_path is None:
             output_path = str(Path.home() / "portfolio_summary.csv")
 
+        # PM3: today_chg_pct added to export
         fieldnames = [
             "ticker", "quantity", "avg_buy_price", "date_bought",
-            "current_price", "invested", "current_value", "pnl", "pnl_pct",
+            "current_price", "invested", "current_value",
+            "pnl", "pnl_pct", "today_chg_pct",
             "days_held", "score", "grade", "action", "signal",
             "stop_loss", "target", "risk_reward", "sector", "headline",
         ]
@@ -494,28 +527,34 @@ class PortfolioManager:
             writer.writeheader()
             for h in summary.holdings:
                 writer.writerow({
-                    "ticker": h.ticker,
-                    "quantity": h.quantity,
-                    "avg_buy_price": round(h.avg_buy_price, 2),
-                    "date_bought": h.date_bought,
-                    "current_price": round(h.current_price, 2),
-                    "invested": round(h.invested, 2),
-                    "current_value": round(h.current_value, 2),
-                    "pnl": round(h.pnl, 2),
-                    "pnl_pct": round(h.pnl_pct, 2),
-                    "days_held": h.days_held,
-                    "score": round(h.score, 1),
-                    "grade": h.grade,
-                    "action": h.action,
-                    "signal": h.signal.replace("🟢", "GREEN").replace("🟡", "YELLOW").replace("🔴", "RED"),
-                    "stop_loss": round(h.stop_loss, 2),
-                    "target": round(h.target, 2),
-                    "risk_reward": round(h.risk_reward, 2),
-                    "sector": h.sector,
-                    "headline": h.headline,
+                    "ticker":         h.ticker,
+                    "quantity":       h.quantity,
+                    "avg_buy_price":  round(h.avg_buy_price,  2),
+                    "date_bought":    h.date_bought,
+                    "current_price":  round(h.current_price,  2),
+                    "invested":       round(h.invested,        2),
+                    "current_value":  round(h.current_value,  2),
+                    "pnl":            round(h.pnl,             2),
+                    "pnl_pct":        round(h.pnl_pct,         2),
+                    "today_chg_pct":  round(h.today_chg_pct,  2),   # PM3
+                    "days_held":      h.days_held,
+                    "score":          round(h.score,           1),
+                    "grade":          h.grade,
+                    "action":         h.action,
+                    "signal":         (
+                        h.signal
+                        .replace("🟢", "GREEN")
+                        .replace("🟡", "YELLOW")
+                        .replace("🔴", "RED")
+                    ),
+                    "stop_loss":      round(h.stop_loss,       2),
+                    "target":         round(h.target,          2),
+                    "risk_reward":    round(h.risk_reward,     2),
+                    "sector":         h.sector,
+                    "headline":       h.headline,
                 })
 
-        print(f"Portfolio summary exported to: {output_path}")
+        _log.info("Portfolio summary exported to: %s", output_path)
         return output_path
 
 
@@ -524,22 +563,16 @@ class PortfolioManager:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _score_to_grade(score: float) -> str:
-    if score >= 88:
-        return "A+"
-    elif score >= 75:
-        return "A"
-    elif score >= 62:
-        return "B"
-    elif score >= 48:
-        return "C"
-    elif score >= 32:
-        return "D"
-    else:
-        return "F"
+    if score >= 88:  return "A+"
+    if score >= 75:  return "A"
+    if score >= 62:  return "B"
+    if score >= 48:  return "C"
+    if score >= 32:  return "D"
+    return "F"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quick standalone usage
+# Standalone usage
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
