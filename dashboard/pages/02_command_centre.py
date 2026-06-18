@@ -1,23 +1,21 @@
 """Command Centre - NSE Smart Investor (multipage page; body verbatim from app.py)."""
-import os, sys
+import os
+import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-import streamlit as st
-from dashboard.shared.design import apply_design
-from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared.picks_ui import render_pick_analysis
-import os
+
 import pandas as pd
 import streamlit as st
-import sys
 import trade_store as _store
+
 from data.universe import get_universe
 from data.angel_fetcher import is_configured as _ao_is_configured
-from dashboard.shared.design import (
-    apply_design,
-)
+
+from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
+from dashboard.shared.picks_ui import render_pick_analysis
+from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
     _home_top_picks,
     _score_watchlist,
@@ -35,10 +33,6 @@ from dashboard.shared.trade_utils import (
     _render_autoclose_banner,
     _suggest_position,
     paper_close_trade,
-)
-from dashboard.shared.chart_helpers import (
-    _ROOT,
-    render_top_bar,
 )
 
 apply_design()
@@ -241,7 +235,12 @@ st.markdown(
 
 _cc_ref_c = st.columns([6, 1])[1]
 if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=True):
-    st.cache_data.clear(); st.rerun()
+    # BUGFIX: this only needs to bust the VIX cache — the previous blanket
+    # st.cache_data.clear() also wiped Top Picks (2-min cold scan), watchlist
+    # scores, and sparklines, forcing expensive re-fetches the user never
+    # asked for just to refresh the VIX/Nifty pulse panel.
+    get_vix_info.clear()
+    st.rerun()
 
 st.markdown("---")
 
@@ -300,7 +299,10 @@ except Exception:
     pass
 
 if _run_picks:
-    st.cache_data.clear()   # force a fresh scan bypassing the 5-min cache
+    # BUGFIX: was a blanket st.cache_data.clear(), which also wiped watchlist
+    # scores, sparklines, and VIX info — none of which "Scan Now" was asking
+    # to refresh. Only the Top Picks cache itself needs busting here.
+    _home_top_picks.clear()
 
 with st.spinner("Scanning the full NSE universe — first run ~2 min, then cached 5 min…"):
     _sec_tuple = _sector_ranks_tuple()
@@ -456,7 +458,10 @@ if _is_squareoff_time():
     _sq_mis_closed = [c for c in _sq_all_closed if c["type"] == "squareoff"]
     if _sq_mis_closed:
         _render_autoclose_banner(_sq_mis_closed)
-        st.cache_data.clear()
+        # BUGFIX: only live prices need to be re-fetched after an auto-close —
+        # a blanket st.cache_data.clear() here also nuked Top Picks, watchlist
+        # scores, and VIX info on every squareoff event.
+        _portfolio_live_prices.clear()
         _cc_sq_banner_shown = True
 
 if _cc_autoclose:
@@ -464,7 +469,7 @@ if _cc_autoclose:
     _cc_sltp_closed = [c for c in _cc_all_closed if c["type"] in ("target", "stop")]
     if _cc_sltp_closed:
         _render_autoclose_banner(_cc_sltp_closed)
-        st.cache_data.clear()
+        _portfolio_live_prices.clear()
 
 _cc_open_df = pd.DataFrame()
 try:
@@ -539,7 +544,11 @@ else:
                              use_container_width=True, type="primary"):
                     paper_close_trade(_pos["id"], _pos["cur"],
                                       "Closed via Command Centre")
-                    st.cache_data.clear(); st.rerun()
+                    # BUGFIX: closing one position only needs fresh live
+                    # prices for the remaining open positions — it doesn't
+                    # need to invalidate Top Picks or watchlist scores too.
+                    _portfolio_live_prices.clear()
+                    st.rerun()
 
 st.markdown("---")
 
@@ -552,7 +561,11 @@ with _wh1:
 with _wh2:
     st.write("")
     if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
-        st.cache_data.clear(); st.rerun()
+        # BUGFIX: was a blanket st.cache_data.clear() — only the watchlist
+        # scoring cache needs busting for a re-score; Top Picks and VIX info
+        # don't need to be thrown away too.
+        _score_watchlist.clear()
+        st.rerun()
 
 _wl_sector = st.session_state.get("_sec_ranks_cache", ())
 with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 5 min)…"):
