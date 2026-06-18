@@ -641,13 +641,28 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
         # Long side: STRONG BUY / BUY / WATCHLIST all surface so we always
         # have enough candidates. Cards show each stock's true action label.
         if act in ("STRONG BUY", "BUY", "WATCHLIST"):
+            # FIX TP1 (backend side): the Command Centre page already expects
+            # each buy to carry a "tier" field and the response to carry a
+            # "meta" dict (see the FIX TP1 comment in
+            # dashboard/pages/02_command_centre.py) — this function never
+            # actually set either, so _picks.get("meta", {}) was always {},
+            # which made the page's elif branch fire on EVERY scan that found
+            # at least one buy ("0 genuine strong BUY-grade setup(s) today"),
+            # even when the top picks were real STRONG BUY / BUY setups. That
+            # made every scan read as if it were all weak backfill, which is
+            # what looked like "no positive-return stocks" to the user.
+            s["tier"] = "watch" if act == "WATCHLIST" else "strong"
             buys.append(s)
         elif act in ("EXIT", "CAUTION"):
             sells.append(s)
 
     buys.sort(key=lambda x: -x.get("score", 0))
     sells.sort(key=lambda x: x.get("score", 0))   # lowest score = weakest first
-    return {"buys": buys[:n], "sells": sells[:n]}
+
+    buys = buys[:n]
+    _n_strong = sum(1 for b in buys if b.get("tier") == "strong")
+    meta = {"no_strong_picks": _n_strong == 0, "n_strong_buys": _n_strong}
+    return {"buys": buys, "sells": sells[:n], "meta": meta}
 
 
 @st.cache_data(ttl=3600, show_spinner=False)   # 1hr cache — EOD signal, not intraday
@@ -1058,3 +1073,4 @@ def warm_caches() -> dict:
 
     _log.info("cache.warm_caches complete: %s", results)
     return results
+    
