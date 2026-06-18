@@ -34,7 +34,11 @@ with _tab_macro:
     )
 
     if st.button("🔄 Refresh Macro Data", type="primary"):
-        st.cache_data.clear()
+        # BUGFIX: was a blanket st.cache_data.clear() — since cache_data is
+        # global across the whole app, this also wiped Command Centre's
+        # 2-minute Top Picks scan and watchlist scores just to refresh 7
+        # macro instruments. Only load_macro_data's own cache needs busting.
+        load_macro_data.clear()
 
     with st.spinner("Fetching 7 macro instruments…"):
         try:
@@ -171,7 +175,9 @@ with _tab_breadth:
     )
 
     if st.button("🔄 Refresh Breadth Data", type="primary"):
-        st.cache_data.clear()
+        # BUGFIX: same blanket-clear issue — only this page's own breadth
+        # cache needs busting here.
+        compute_market_breadth.clear()
 
     st.info("⏱️ Scanning all 50 Nifty stocks takes ~3 minutes. Results are cached for 15 minutes.")
     run_breadth = st.button("🔍 Compute Breadth Now", type="primary", key="breadth_btn")
