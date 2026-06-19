@@ -221,6 +221,17 @@ def _watchlist_prices(tickers_tuple: tuple) -> dict:
     return out
 
 
+def _qv_holding_field(row, *names, default=0):
+    """Pull the first present/non-None attribute from `row` across a list of
+    possible column-name spellings. Manual holdings storage may use slightly
+    different field names than the old portfolio.csv did (e.g. 'qty' vs
+    'quantity'); this keeps the sidebar resilient to either."""
+    for n in names:
+        v = getattr(row, n, None)
+        if v is not None:
+            return v
+    return default
+
 
 def render_sidebar(current: str = None) -> None:
     """Render the full sidebar. `current` = this page's name (for routing)."""
@@ -286,14 +297,19 @@ def render_sidebar(current: str = None) -> None:
 
 
     # ── Portfolio quick-view (right under the nav — value + today's P&L) ───────────
+    # FIX: My Portfolio no longer uses portfolio.csv / Angel One import — holdings
+    # are added/edited/deleted manually via trade_utils.load_manual_holdings() /
+    # save_manual_holdings(), persisted through the kv store. This quick view was
+    # still reading the old portfolio.csv path directly, so it kept showing stale
+    # (or now permanently empty) data that no longer has anything to do with what's
+    # actually on the My Portfolio page. Routed through load_manual_holdings()
+    # instead, matching what My Portfolio / Analyze Stock already do.
     st.sidebar.markdown("---")
     with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
         try:
-            import pathlib as _qpl
-            _qcsv = _qpl.Path(_ROOT) / "portfolio.csv"
-            _qsrc = st.session_state.get("_ao_portfolio_path") or (_qcsv if _qcsv.exists() else None)
-            if _qsrc:
-                _qdf = pd.read_csv(_qsrc)
+            from dashboard.shared.trade_utils import load_manual_holdings
+            _qdf = load_manual_holdings()
+            if _qdf is not None and not _qdf.empty:
                 _qsyms = tuple((t if str(t).endswith(".NS") else f"{t}.NS")
                                for t in _qdf["ticker"].tolist())
                 _qlp = _qv_prices(_qsyms)
@@ -303,8 +319,8 @@ def render_sidebar(current: str = None) -> None:
                     _qsym = _qr.ticker if str(_qr.ticker).endswith(".NS") else f"{_qr.ticker}.NS"
                     _ql = _qlp.get(_qsym, {})
                     _qcur = _ql.get("price")
-                    _qty  = getattr(_qr, "quantity", 0)
-                    _qbuy = getattr(_qr, "avg_buy_price", 0)
+                    _qty  = _qv_holding_field(_qr, "quantity", "qty")
+                    _qbuy = _qv_holding_field(_qr, "avg_buy_price", "avg_price", "buy_price")
                     if _qcur:
                         _q_val   += _qcur * _qty
                         _q_inv   += _qbuy * _qty
@@ -334,9 +350,43 @@ def render_sidebar(current: str = None) -> None:
                     st.session_state["_goto_page"] = "🏠 My Portfolio"
                     st.rerun()
             else:
-                st.caption("No portfolio.csv found. Upload one on the My Portfolio page.")
+                st.caption("No holdings yet. Add them on the My Portfolio page.")
         except Exception as _qe:
             st.caption(f"Quick view unavailable: {str(_qe)[:50]}")
+
+    # ── Paper Trades quick-view ──────────────────────────────────────────────
+    # NEW: mirrors the on-page "Paper Trades Overview" panel (open count +
+    # unrealised P&L on live prices), with a one-click jump to the full page.
+    with st.sidebar.expander("📂 Paper Trades Quick View", expanded=True):
+        try:
+            _pt_open = _store.fetch_open()
+            _pt_n = 0 if (_pt_open is None or _pt_open.empty) else len(_pt_open)
+            _pt_unreal = 0.0
+            if _pt_n:
+                _pt_syms = tuple(_pt_open["ticker"].tolist())
+                _pt_lp = _qv_prices(_pt_syms)
+                for _, _ptr in _pt_open.iterrows():
+                    _pt_ep  = float(_ptr.get("price", 0) or 0)
+                    _pt_qty = int(_ptr.get("quantity", 0) or 0)
+                    _pt_cur = _pt_lp.get(str(_ptr["ticker"]), {}).get("price", _pt_ep)
+                    _pt_unreal += (_pt_cur - _pt_ep) * _pt_qty
+            _puc = "#00d4aa" if _pt_unreal >= 0 else "#ff4757"
+            st.markdown(
+                f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1px">Open Positions</div>'
+                f'<div style="font-size:22px;font-weight:800;color:#f0f4ff">{_pt_n}</div>'
+                f'<div style="margin-top:6px">'
+                f'<div style="font-size:10px;color:#4a5568">UNREALISED P&amp;L</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_puc}">'
+                f'{"▲" if _pt_unreal>=0 else "▼"} ₹{abs(_pt_unreal):,.0f}</div></div>',
+                unsafe_allow_html=True,
+            )
+            if not _pt_n:
+                st.caption("No open paper positions.")
+            if st.button("📂 Open Paper Trades", key="sb_open_papertrades", use_container_width=True):
+                st.session_state["_goto_page"] = "📂 Paper Trades"
+                st.rerun()
+        except Exception as _pte:
+            st.caption(f"Quick view unavailable: {str(_pte)[:50]}")
 
     st.sidebar.markdown("---")
 
