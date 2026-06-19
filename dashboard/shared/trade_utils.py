@@ -37,6 +37,11 @@ FIX3 clear_price_caches() — added as a named public export so
      caches.  Calls _portfolio_live_prices.clear() and
      _fetch_single_live_price.clear() — both are @st.cache_data functions
      so .clear() is always available.
+
+FIX MH1  Manual portfolio holdings persistence (load_manual_holdings /
+     save_manual_holdings) — replaces the old portfolio.csv / file-upload /
+     Angel-One-import flow. Holdings are entered by hand on the My Portfolio
+     page and persisted to the kv store, same pattern as TU5.
 """
 
 from __future__ import annotations
@@ -382,6 +387,11 @@ def _safe_tmpfile(suffix: str = ".csv") -> pathlib.Path:
     Usage:
         tmp = _safe_tmpfile(suffix=".csv")
         tmp.write_text(content, encoding="utf-8")
+
+    NOTE: kept for backwards compatibility / other potential callers. The
+    My Portfolio page no longer uses this for holdings (see FIX MH1 below) —
+    holdings are now entered manually and persisted via the kv store, not
+    through CSV uploads or Angel-One tmp-file imports.
     """
     with tempfile.NamedTemporaryFile(
         suffix=suffix, delete=False, mode="w", encoding="utf-8"
@@ -404,6 +414,11 @@ def upload_validate_portfolio_csv(
 
     FIX9: validates required columns at upload time so the rest of the page
     never receives a malformed DataFrame.
+
+    NOTE: no longer called from My Portfolio (that page now uses manual
+    holdings entry — see load_manual_holdings/save_manual_holdings below).
+    Left in place in case any other page or export/import workflow still
+    needs CSV validation.
 
     Returns
     -------
@@ -952,3 +967,43 @@ def save_signal_monitor_state(actions: dict) -> None:
         _store.kv_set("pf_prev_actions", actions)
     except Exception as _e:
         _log.debug("trade_utils.save_signal_monitor_state kv write: %s", _e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX MH1 — Manual portfolio holdings persistence (replaces CSV upload)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MANUAL_HOLDINGS_KV_KEY = "manual_portfolio_holdings"
+
+
+def load_manual_holdings() -> list:
+    """Load the user's manually-entered portfolio holdings from the kv store.
+
+    FIX MH1: replaces the old portfolio.csv / file-upload / Angel-One-import
+    flow. Holdings are entered by hand on the My Portfolio page (ticker, qty,
+    avg buy price, date bought — no price/qty auto-suggestion) and persisted
+    here so they survive refreshes and new tabs, same pattern as TU5's
+    signal-monitor state.
+
+    Returns a list of dicts: [{"ticker": "...", "quantity": float,
+    "avg_buy_price": float, "date_bought": "YYYY-MM-DD"}, ...]
+    """
+    try:
+        _kv = _store.kv_get(_MANUAL_HOLDINGS_KV_KEY, None)
+        if isinstance(_kv, list):
+            return _kv
+    except Exception as _e:
+        _log.debug("trade_utils.load_manual_holdings kv read: %s", _e)
+    return st.session_state.get("_manual_holdings", [])
+
+
+def save_manual_holdings(holdings: list) -> None:
+    """Persist the user's manually-entered portfolio holdings to the kv store.
+
+    FIX MH1: called after every add / edit / delete on the My Portfolio page.
+    """
+    st.session_state["_manual_holdings"] = holdings
+    try:
+        _store.kv_set(_MANUAL_HOLDINGS_KV_KEY, holdings)
+    except Exception as _e:
+        _log.debug("trade_utils.save_manual_holdings kv write: %s", _e)
