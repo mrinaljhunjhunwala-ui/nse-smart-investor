@@ -5,6 +5,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import threading
 import pandas as pd
 import streamlit as st
 import trade_store as _store
@@ -244,196 +245,262 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=
 
 st.markdown("---")
 
-_scan_t = st.session_state.get("_picks_scan_time")
-if _scan_t:
-    st.markdown(
-        f'<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
-        f'padding:7px 14px;margin-bottom:10px;display:flex;justify-content:space-between;'
-        f'align-items:center">'
-        f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last updated: '
-        f'<b>{_scan_t}</b></span>'
-        f'<span style="font-size:11px;color:#555">Refreshes every 5 min · '
-        f'tap Scan Now to force refresh</span>'
-        f'</div>',
-        unsafe_allow_html=True,
+# ═══════════════════════════════════════════════════════════════════════════
+# ── 2. TODAY'S TOP PICKS — full NSE-wide scan, stale-while-revalidate ──────
+# ═══════════════════════════════════════════════════════════════════════════
+# FIX (blanking on rescan): the old version called _home_top_picks() inside
+# `with st.spinner(...)`, directly on the page's normal script run. On a
+# cache-miss (cold start, or the 5-min TTL expiring), that call blocks for
+# ~2 minutes — and because the Top Picks section literally hasn't executed
+# yet on this run, there is nothing to show: the previous cards aren't "still
+# there", they just haven't been re-drawn, so the whole section reads as
+# blank/spinner until the scan finishes.
+#
+# Fix: the entire section is now an @st.fragment(run_every=...) — Streamlit
+# reruns ONLY this fragment on its own timer, not the whole page. The last
+# good scan result is kept in st.session_state and rendered immediately on
+# every fragment run, BEFORE checking whether a refresh is needed. If the
+# cached result is stale, a background thread kicks off _home_top_picks()
+# without blocking the render — so the existing cards stay exactly as they
+# are (with a small "refreshing…" note) until the new scan lands, at which
+# point the next fragment tick swaps them in. Nothing ever goes blank.
+#
+# Universe: this already scans get_universe("nifty500") inside
+# _home_top_picks — the full liquid NSE list, not a Nifty-50-only set. (Any
+# further universe widening/curation is being handled separately in
+# data/universe.py.)
+
+_PICKS_KEY = "_cc_top_picks"
+_PICKS_TTL_SECONDS = 300  # matches _home_top_picks' own cache TTL
+
+
+def _picks_background_fetch(vix_regime: str, sector_ranks: tuple) -> None:
+    """Runs in a worker thread. Only touches st.session_state — never calls
+    st.* UI functions, which are not safe off the main script thread."""
+    try:
+        result = _home_top_picks(vix_regime=vix_regime, sector_ranks=sector_ranks)
+        st.session_state[_PICKS_KEY] = result
+        st.session_state[f"{_PICKS_KEY}_ts"] = datetime.datetime.now()
+        st.session_state[f"{_PICKS_KEY}_error"] = None
+    except Exception as _e:
+        st.session_state[f"{_PICKS_KEY}_error"] = str(_e)
+    finally:
+        st.session_state[f"{_PICKS_KEY}_fetching"] = False
+
+
+import datetime
+
+
+@st.fragment(run_every=20)
+def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
+    _tp_h1, _tp_h2 = st.columns([5, 2])
+    with _tp_h1:
+        st.markdown("### 🔥 Today's Top Picks — NSE Scan")
+        st.caption("Strongest and weakest **trend-quality** setups across the **full liquid "
+                   "NSE universe** (trend + momentum + RSI + volume + sector + VIX). "
+                   "Scores rank trend health — they are **not a forecast of returns**. "
+                   "Refreshes automatically every 5 min during market hours; old picks "
+                   "stay on screen while a refresh runs in the background.")
+    with _tp_h2:
+        st.write("")
+        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+
+    _scan_univ = get_universe("nifty500")
+    with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
+        st.caption(
+            f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
+            "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
+            "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
+            "surfaced (10 each — buys and sells). The first-ever scan after a deploy/redeploy "
+            "takes ~2 min and runs in the background without blocking the page; every scan "
+            "after that is served instantly from cache and refreshed automatically every 5 min.")
+
+    from dashboard.shared.disclosures import (
+        render_regime_reliability_note as _cc_regime_note,
+        render_score_methodology as _cc_score_methodology,
     )
+    _cc_regime_note()
+    _cc_score_methodology()
 
-# ── 2. TODAY'S TOP PICKS — broad NSE scan (above open positions) ──────
-_tp_h1, _tp_h2 = st.columns([5, 2])
-with _tp_h1:
-    st.markdown("### 🔥 Today's Top Picks — NSE Scan")
-    st.caption("Strongest and weakest **trend-quality** setups across the **full liquid "
-               "NSE universe** (trend + momentum + RSI + volume + sector + VIX). "
-               "Scores rank trend health — they are **not a forecast of returns**. "
-               "Auto-refreshes every 5 min during market hours. "
-               "First scan ~2 min, then cached.")
-with _tp_h2:
-    st.write("")
-    _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+    try:
+        if _ao_is_configured():
+            st.caption("⚡ **Angel One configured** — the scan uses it first (Tier-0 broker "
+                       "feed, throttled to its rate limit). Stooq/Yahoo are only a last-resort "
+                       "fallback if an Angel call fails or its session has expired.")
+        else:
+            st.caption("ℹ️ **Using free sources** (Stooq → Yahoo). Set up **Angel One** on its "
+                       "page for faster, more reliable scans.")
+    except Exception:
+        pass
 
-_scan_univ = get_universe("nifty500")
-with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
-    st.caption(
-        f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
-        "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
-        "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
-        "surfaced (10 each — buys and sells). First scan ~2 min; results cached 5 min, "
-        "so the page auto-refreshes picks every 5 min without any click.")
+    # ── Decide whether a (re)scan is needed, then kick it off in the background ──
+    _now = datetime.datetime.now()
+    _last_ts = st.session_state.get(f"{_PICKS_KEY}_ts")
+    _is_stale = (_last_ts is None) or ((_now - _last_ts).total_seconds() > _PICKS_TTL_SECONDS)
+    _fetching = st.session_state.get(f"{_PICKS_KEY}_fetching", False)
 
-from dashboard.shared.disclosures import (
-    render_regime_reliability_note as _cc_regime_note,
-    render_score_methodology as _cc_score_methodology,
-)
-_cc_regime_note()
-_cc_score_methodology()
+    if _run_picks:
+        # "Scan Now" always forces a fresh background fetch — but the cards
+        # already on screen are left untouched until it completes.
+        _is_stale = True
 
-try:
-    if _ao_is_configured():
-        st.caption("⚡ **Angel One configured** — the scan uses it first (Tier-0 broker "
-                   "feed, throttled to its rate limit). Stooq/Yahoo are only a last-resort "
-                   "fallback if an Angel call fails or its session has expired.")
-    else:
-        st.caption("ℹ️ **Using free sources** (Stooq → Yahoo). Set up **Angel One** on its "
-                   "page for faster, more reliable scans.")
-except Exception:
-    pass
+    if _is_stale and not _fetching:
+        st.session_state[f"{_PICKS_KEY}_fetching"] = True
+        threading.Thread(
+            target=_picks_background_fetch,
+            args=(vix_regime, sector_tuple),
+            daemon=True,
+        ).start()
+        _fetching = True
 
-if _run_picks:
-    # BUGFIX: was a blanket st.cache_data.clear(), which also wiped watchlist
-    # scores, sparklines, and VIX info — none of which "Scan Now" was asking
-    # to refresh. Only the Top Picks cache itself needs busting here.
-    _home_top_picks.clear()
+    _picks = st.session_state.get(_PICKS_KEY)
+    _err = st.session_state.get(f"{_PICKS_KEY}_error")
 
-with st.spinner("Scanning the full NSE universe — first run ~2 min, then cached 5 min…"):
-    _sec_tuple = _sector_ranks_tuple()
-    st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
-    _picks = _home_top_picks(vix_regime=_cc_vix_r, sector_ranks=_sec_tuple)
+    # Status strip — always non-blocking; never replaces the cards below.
+    if _picks is None and _fetching:
+        st.info("⏳ Running the first scan of the full NSE universe — this can take ~2 minutes. "
+                "This page will update on its own the moment it's ready; feel free to keep "
+                "using the rest of Command Centre meanwhile.")
+        return
+    if _picks is None and _err:
+        st.error(f"⚠️ Last scan attempt failed: {_err}")
+        return
+    if _picks is None:
+        st.caption("Waiting for the first scan to start…")
+        return
 
-import datetime as _dt
-_prev_scan = st.session_state.get("_picks_last_scan")
-_now_str = _dt.datetime.now().strftime("%H:%M")
-if _prev_scan != _now_str:
-    st.session_state["_picks_last_scan"] = _now_str
-    if _prev_scan is not None:
-        st.toast("🔄 Top Picks updated — new scan complete", icon="📊")
-st.session_state["_picks_scan_time"] = _now_str
-
-# ── FIX TP1 (page side) — honest "no strong picks" banner + tier-aware cards ──
-# _home_top_picks() now returns a "meta" dict with no_strong_picks / n_strong_buys,
-# and each buy candidate carries a "tier" field ("strong" | "watch"). Previously
-# the page treated every entry in _picks["buys"] identically — a backfilled
-# WATCHLIST-grade name rendered with the exact same green "Buy Candidate" styling
-# as a genuine STRONG BUY, which is what made the section look misleading on
-# weak-breadth days. Now we show a clear banner when there are zero genuine
-# strong setups, and tier="watch" cards get a visibly different (amber, not
-# green) treatment so they read as "worth watching" rather than "buy this".
-_picks_meta = _picks.get("meta", {})
-if _picks_meta.get("no_strong_picks"):
-    st.markdown(
-        '<div style="background:#1a1200;border:1px solid #4a3a00;border-radius:8px;'
-        'padding:10px 14px;margin-bottom:10px">'
-        '<span style="font-size:13px;color:#ffb300">⚠️ <b>No strong BUY-grade setups '
-        'in today\'s scan.</b> The names below are the closest watchlist-grade '
-        'candidates — none currently meet the bar for a confident new entry. '
-        'Consider waiting for a cleaner setup.</span></div>',
-        unsafe_allow_html=True,
-    )
-elif _picks_meta.get("n_strong_buys", 0) < len(_picks["buys"]):
-    st.caption(
-        f"📊 {_picks_meta.get('n_strong_buys', 0)} genuine strong BUY-grade setup(s) today — "
-        "remaining cards below are watchlist-grade backfill, marked accordingly."
-    )
-
-# Live prices for the picks — the scan scores on last daily close, but the
-# cards (and any paper trade) should reflect the real-time market price.
-_pk_all_syms = tuple({*(b["ticker"] for b in _picks["buys"]),
-                      *(s["ticker"] for s in _picks["sells"])})
-_pk_lp = _portfolio_live_prices(_pk_all_syms) if _pk_all_syms else {}
-
-_pk_buy, _pk_sell = st.columns(2)
-with _pk_buy:
-    st.markdown("#### 🟢 Buy Candidates")
-    if not _picks["buys"]:
-        st.caption("No strong buy setups today — market not offering clean entries.")
-    for _b in _picks["buys"]:
-        _bl = _b["ticker"].replace(".NS", "")
-        _blq = _pk_lp.get(_b["ticker"], {})
-        _blive = _blq.get("price")
-        _bchg  = _blq.get("chg")
-        _blive_html = ""
-        if _blive:
-            _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
-            _barr = "▲" if (_bchg or 0) >= 0 else "▼"
-            _blive_html = (
-                f'<div style="font-size:12px;color:#fff;margin-top:3px">'
-                f'🔴 Live <b>₹{_blive:,.2f}</b> '
-                f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span></div>'
-            )
-        _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
-        _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
-                    f'{_bs["qty"]} sh</span>') if _bs else ""
-        _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
-        _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
-                      else "B" if _b["score"] >= 62 else "")
-        _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
-                       f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
-                       f'GRADE {_grade_tag}</span>') if _grade_tag else ""
-
-        # FIX TP1: tier-aware styling — watchlist-grade backfill renders in
-        # amber, not the same green used for genuine strong picks.
-        _is_watch_tier = _b.get("tier") == "watch"
-        _card_border = "#FF9800" if _is_watch_tier else "#26a69a"
-        _card_grad   = ("linear-gradient(135deg,#2a2000,#332b0a)" if _is_watch_tier
-                        else "linear-gradient(135deg,#0a2a1a,#0f3320)")
-        _score_color = "#FF9800" if _is_watch_tier else "#26a69a"
-        _tier_badge  = (
-            '<span style="background:#FF980022;color:#FF9800;border:1px solid #FF9800;'
-            'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
-            'WATCHLIST-GRADE</span>'
-        ) if _is_watch_tier else ""
-
+    if _fetching:
         st.markdown(
-            f'<div style="background:{_card_grad};'
-            f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}{_tier_badge}</span>'
-            f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
-            f'</div>'
-            f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
-            f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
-            + _blive_html
-            + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-               f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
-               if _b["entry"] else "")
-            + '</div>',
+            '<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
+            'padding:6px 14px;margin-bottom:10px">'
+            '<span style="font-size:12px;color:#4caf7d">🔄 Refreshing in the background — '
+            'current picks below stay as-is until the new scan lands.</span></div>',
             unsafe_allow_html=True,
         )
-        if _b["entry"]:
-            _paper_trade_popover(
-                _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
-                reason=f"Top Pick: {_b['headline'][:55]}",
-                key=f"cc_pick_{_b['ticker']}",
-                label=f"📌 Paper Trade {_bl}",
-            )
-        render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
-with _pk_sell:
-    st.markdown("#### 🔴 Sell / Avoid")
-    if not _picks["sells"]:
-        st.caption("No clear sell signals — nothing flashing red in the scan.")
-    for _sv in _picks["sells"]:
-        _svl = _sv["ticker"].replace(".NS", "")
+    elif _last_ts:
         st.markdown(
-            f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
-            f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
-            f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
-            f'</div>'
-            f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+            f'<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
+            f'padding:7px 14px;margin-bottom:10px;display:flex;justify-content:space-between;'
+            f'align-items:center">'
+            f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last updated: '
+            f'<b>{_last_ts.strftime("%H:%M:%S")}</b></span>'
+            f'<span style="font-size:11px;color:#555">Auto-refreshes every 5 min · '
+            f'tap Scan Now to force refresh</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
-        render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
+
+    # ── FIX TP1 (page side) — honest "no strong picks" banner + tier-aware cards ──
+    _picks_meta = _picks.get("meta", {})
+    if _picks_meta.get("no_strong_picks"):
+        st.markdown(
+            '<div style="background:#1a1200;border:1px solid #4a3a00;border-radius:8px;'
+            'padding:10px 14px;margin-bottom:10px">'
+            '<span style="font-size:13px;color:#ffb300">⚠️ <b>No strong BUY-grade setups '
+            'in today\'s scan.</b> The names below are the closest watchlist-grade '
+            'candidates — none currently meet the bar for a confident new entry. '
+            'Consider waiting for a cleaner setup.</span></div>',
+            unsafe_allow_html=True,
+        )
+    elif _picks_meta.get("n_strong_buys", 0) < len(_picks["buys"]):
+        st.caption(
+            f"📊 {_picks_meta.get('n_strong_buys', 0)} genuine strong BUY-grade setup(s) today — "
+            "remaining cards below are watchlist-grade backfill, marked accordingly."
+        )
+
+    # Live prices for the picks — the scan scores on last daily close, but the
+    # cards (and any paper trade) should reflect the real-time market price.
+    _pk_all_syms = tuple({*(b["ticker"] for b in _picks["buys"]),
+                          *(s["ticker"] for s in _picks["sells"])})
+    _pk_lp = _portfolio_live_prices(_pk_all_syms) if _pk_all_syms else {}
+
+    _pk_buy, _pk_sell = st.columns(2)
+    with _pk_buy:
+        st.markdown("#### 🟢 Buy Candidates")
+        if not _picks["buys"]:
+            st.caption("No strong buy setups today — market not offering clean entries.")
+        for _b in _picks["buys"]:
+            _bl = _b["ticker"].replace(".NS", "")
+            _blq = _pk_lp.get(_b["ticker"], {})
+            _blive = _blq.get("price")
+            _bchg  = _blq.get("chg")
+            _blive_html = ""
+            if _blive:
+                _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
+                _barr = "▲" if (_bchg or 0) >= 0 else "▼"
+                _blive_html = (
+                    f'<div style="font-size:12px;color:#fff;margin-top:3px">'
+                    f'🔴 Live <b>₹{_blive:,.2f}</b> '
+                    f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span></div>'
+                )
+            _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
+            _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
+                        f'{_bs["qty"]} sh</span>') if _bs else ""
+            _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
+            _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
+                          else "B" if _b["score"] >= 62 else "")
+            _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
+                           f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
+                           f'GRADE {_grade_tag}</span>') if _grade_tag else ""
+
+            _is_watch_tier = _b.get("tier") == "watch"
+            _card_border = "#FF9800" if _is_watch_tier else "#26a69a"
+            _card_grad   = ("linear-gradient(135deg,#2a2000,#332b0a)" if _is_watch_tier
+                            else "linear-gradient(135deg,#0a2a1a,#0f3320)")
+            _score_color = "#FF9800" if _is_watch_tier else "#26a69a"
+            _tier_badge  = (
+                '<span style="background:#FF980022;color:#FF9800;border:1px solid #FF9800;'
+                'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
+                'WATCHLIST-GRADE</span>'
+            ) if _is_watch_tier else ""
+
+            st.markdown(
+                f'<div style="background:{_card_grad};'
+                f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}{_tier_badge}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+                f'</div>'
+                f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
+                f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
+                + _blive_html
+                + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
+                   if _b["entry"] else "")
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+            if _b["entry"]:
+                _paper_trade_popover(
+                    _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
+                    reason=f"Top Pick: {_b['headline'][:55]}",
+                    key=f"cc_pick_{_b['ticker']}",
+                    label=f"📌 Paper Trade {_bl}",
+                )
+            render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
+    with _pk_sell:
+        st.markdown("#### 🔴 Sell / Avoid")
+        if not _picks["sells"]:
+            st.caption("No clear sell signals — nothing flashing red in the scan.")
+        for _sv in _picks["sells"]:
+            _svl = _sv["ticker"].replace(".NS", "")
+            st.markdown(
+                f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
+                f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+                f'</div>'
+                f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
+
+
+_sec_tuple = _sector_ranks_tuple()
+st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
+_render_top_picks_section(_cc_vix_r, _sec_tuple)
 
 st.markdown("---")
 
