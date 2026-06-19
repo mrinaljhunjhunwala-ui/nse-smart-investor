@@ -42,21 +42,19 @@ FIX APPTEST  st.selectbox index=None replaced with explicit index lookup so
      'NewType object has no attribute replic'.
 """
 
-import os, sys
+import os
+import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import streamlit as st
-from dashboard.shared.design import apply_design
-from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
 from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
 from dashboard.shared.cache import STOCK_SEARCH_MAP, _validate_ticker
 from dashboard.shared.trade_utils import (
     _auto_close_breached,
@@ -74,7 +72,7 @@ from dashboard.shared.trade_utils import (
     paper_rename_account,
     set_paper_account_type,
 )
-from dashboard.shared.chart_helpers import _ROOT, render_top_bar
+from dashboard.shared.chart_helpers import render_top_bar
 
 apply_design()
 render_sidebar(current="Paper Trades")
@@ -349,7 +347,15 @@ def _paper_trade_suggestions(ticker: str) -> dict:
     try:
         q = get_live_quote(ticker)
         if not isinstance(q, dict) or not q.get("price"):
-            result["error"] = "Price unavailable — all sources failed. Try again in 30 s."
+            # BUGFIX: this fires for a misspelled/nonexistent ticker just as
+            # often as for a real outage, but the old wording ("all sources
+            # failed... try again in 30s") only suggested the outage
+            # explanation and never mentioned checking the spelling.
+            result["error"] = (
+                f"Couldn't find '{ticker.replace('.NS','')}' on NSE — check the "
+                "spelling. If you're sure it's correct, this may be a "
+                "temporary data outage; try again in 30s."
+            )
             return result
 
         price = q["price"]
@@ -397,7 +403,19 @@ def _paper_trade_suggestions(ticker: str) -> dict:
         result["qty_suggest"] = max(1, int(10000 / price))
 
     except Exception as _exc:
-        result["error"] = str(_exc)
+        # BUGFIX: fetch_single() raises "ValueError: No data for X.NS. All
+        # sources failed: [...]" for an unknown ticker — that raw exception
+        # text was being shown verbatim via st.warning() below. The specific
+        # "ticker not found" case now gets a plain message; anything else
+        # keeps its original detail since it's a genuine, unexpected failure
+        # worth being able to see.
+        if isinstance(_exc, ValueError) and str(_exc).startswith("No data for"):
+            result["error"] = (
+                f"Couldn't find '{ticker.replace('.NS','')}' on NSE — "
+                "check the spelling and try again."
+            )
+        else:
+            result["error"] = str(_exc)
     return result
 
 
@@ -417,39 +435,67 @@ with st.expander("➕ Open a New Paper Trade", expanded=True):
     )
     _all_opts = ["— choose stock —"] + _search_opts
 
-    _fc1, _fc2 = st.columns([3, 2])
-    with _fc1:
-        # ── FIX APPTEST ───────────────────────────────────────────────────────
-        # index=None is not supported by Streamlit's AppTest headless runner and
-        # raises "NewType object has no attribute replic" in CI.
-        # Instead we compute an explicit integer index every run:
-        #   • After a trade opens (_reset_form=True)  → index 0 (placeholder)
-        #   • Otherwise                               → restore the previous
-        #     selection from session_state, falling back to 0 if not found.
-        # This is behaviourally identical to the old index=None approach in a
-        # real browser session but is fully compatible with AppTest.
-        if _reset_form or "pt_stock_sel" not in st.session_state:
-            _sel_index = 0
-        else:
-            _prev_sel  = st.session_state.get("pt_stock_sel", _all_opts[0])
-            _sel_index = _all_opts.index(_prev_sel) if _prev_sel in _all_opts else 0
+    # BUGFIX (root cause): index=/value= are silently IGNORED by Streamlit
+    # once st.session_state already holds a value for that widget's key — they
+    # only take effect on the very first render, before the key exists at all.
+    # The previous _reset_form handling (computing _sel_index, passing
+    # value="" if _reset_form else ...) therefore never actually cleared
+    # either field after a trade opened; it only looked correct because the
+    # very first render happens to have no prior session_state key yet. The
+    # only way Streamlit honors a reset is overwriting session_state directly
+    # BEFORE the widget below is created in this run — which is what this
+    # block does.
+    if _reset_form:
+        st.session_state["pt_stock_sel"] = _all_opts[0]
+        st.session_state["pt_manual_tk"] = ""
 
+    # BUGFIX (user-reported): the dropdown and the manual ticker box were also
+    # independent of each other — picking a dropdown stock left old text
+    # sitting in the manual box (which silently took priority below in the
+    # "Resolve ticker" logic), and typing a manual ticker left the dropdown
+    # showing a stale company name. Neither cleared on its own. These
+    # callbacks make using one field automatically clear the other; the
+    # "✖ Clear" button reuses the _reset_form mechanism above to clear both.
+    def _pt_on_dropdown_change():
+        if st.session_state.get("pt_stock_sel", _all_opts[0]) != _all_opts[0]:
+            st.session_state["pt_manual_tk"] = ""
+
+    def _pt_on_manual_change():
+        if st.session_state.get("pt_manual_tk", "").strip():
+            st.session_state["pt_stock_sel"] = _all_opts[0]
+
+    _fc1, _fc2, _fc3 = st.columns([3, 2, 1])
+    with _fc1:
+        # NOTE: no index= needed — on first-ever render (no session_state key
+        # yet) Streamlit defaults a selectbox to index 0 anyway, which is the
+        # placeholder we want; on every later render session_state already
+        # holds the live value and fully governs what's displayed.
         _form_sel = st.selectbox(
             "Search by company name",
             _all_opts,
             key="pt_stock_sel",
-            index=_sel_index,
+            on_change=_pt_on_dropdown_change,
         )
-        # ─────────────────────────────────────────────────────────────────────
 
     with _fc2:
-        # FIX NEW: clear manual ticker field after trade opens
         _form_manual = st.text_input(
             "Or type NSE ticker directly",
             key="pt_manual_tk",
-            value="" if _reset_form else st.session_state.get("pt_manual_tk", ""),
             placeholder="e.g. INFY",
+            on_change=_pt_on_manual_change,
         ).strip().upper()
+
+    with _fc3:
+        st.write("")
+        st.write("")
+        # Reuses _pt_reset_form (handled at the top of this block, before the
+        # widgets above were created) rather than writing pt_stock_sel /
+        # pt_manual_tk directly here, which would raise "cannot be modified
+        # after the widget ... is instantiated" since both already rendered
+        # above in this same run.
+        if st.button("✖ Clear", key="pt_clear_search", use_container_width=True):
+            st.session_state["_pt_reset_form"] = True
+            st.rerun()
 
     _pf_clean, _pf_err = _validate_ticker(_form_manual)
     if _pf_err:
