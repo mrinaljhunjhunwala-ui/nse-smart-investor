@@ -16,6 +16,13 @@ MH3  The "📊 Analyze" button on each holding card sets
      st.session_state["analyze_ticker"] before navigating — paired with the
      corresponding read on the Analyze Stock page so the ticker is honored
      automatically instead of requiring manual re-entry.
+
+Phase2  UI honesty — all action labels shown to the user go through
+     _display_label() so "STRONG BUY" → "Strong Trend ▲▲" etc. Internal
+     strings (DB, CSV export, sort keys) are unchanged.
+
+QualityFix  compute_quality_score returns 0 for no-data; UI now treats
+     0 as None so the table shows "—" instead of a misleading Quality=0.
 """
 import os
 import sys
@@ -39,12 +46,11 @@ from dashboard.shared.trade_utils import (
     clear_price_caches,            # FIX3
     load_signal_monitor_state,     # FIX TU5
     save_signal_monitor_state,     # FIX TU5
-    load_manual_holdings,          # FIX MH1 — replaces CSV upload
-    save_manual_holdings,          # FIX MH1 — replaces CSV upload
+    load_manual_holdings,          # FIX MH1
+    save_manual_holdings,          # FIX MH1
 )
 from dashboard.shared.chart_helpers import _ROOT, render_top_bar
-from dashboard.shared.squareoff_monitor import render_squareoff_monitor  # FIX3
-# Copilot Phase 4 modules — concentration (HHI) + fundamental quality
+from dashboard.shared.squareoff_monitor import render_squareoff_monitor
 from analysis.portfolio_concentration import analyze_concentration, concentration_grade
 from analysis.portfolio_fundamentals import batch_fetch_fundamentals, compute_quality_score
 
@@ -52,22 +58,17 @@ apply_design()
 render_sidebar(current="My Portfolio")
 render_top_bar()
 
-# ───────────────────────── page body (de-indented from app.py) ─────────────────────────
 st.title("🏠 My Portfolio")
 st.markdown(
     "Your holdings health check — live prices, trend-quality scores, and plain English guidance for each stock."
 )
 
-# ── Market status badge + MIS auto square-off monitor ─────────────────
-# Polls every 60 s while page is open; tightens to 20 s during 15:20–15:30.
 render_squareoff_monitor(poll_every=60, show_badge=True)
 
 # ════════════════════════════════════════════════════════════════════════
-# FIX MH1 — MANUAL HOLDINGS: add / edit / remove (replaces CSV upload
-# + Angel One import entirely — that data source is locked / unavailable
-# so holdings are now entered and maintained by hand).
+# FIX MH1 — MANUAL HOLDINGS: add / edit / remove
 # ════════════════════════════════════════════════════════════════════════
-_holdings = load_manual_holdings()   # list[dict]: ticker, quantity, avg_buy_price, date_bought
+_holdings = load_manual_holdings()
 
 with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
     st.caption(
@@ -101,12 +102,12 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
             st.error("Avg buy price must be greater than 0.")
         else:
             _norm_ticker = _mh_ticker if _mh_ticker.endswith(".NS") else _mh_ticker + ".NS"
-            _holdings = [h for h in _holdings if h["ticker"] != _norm_ticker]  # replace if exists
+            _holdings = [h for h in _holdings if h["ticker"] != _norm_ticker]
             _holdings.append({
-                "ticker": _norm_ticker,
-                "quantity": float(_mh_qty),
+                "ticker":        _norm_ticker,
+                "quantity":      float(_mh_qty),
                 "avg_buy_price": float(_mh_price),
-                "date_bought": _mh_date.isoformat(),
+                "date_bought":   _mh_date.isoformat(),
             })
             save_manual_holdings(_holdings)
             clear_price_caches()
@@ -141,23 +142,18 @@ if _holdings:
                 save_manual_holdings(_holdings)
                 clear_price_caches()
                 st.rerun()
-            # auto-save edits in place (no separate save button)
             if (_new_qty != _h["quantity"] or _new_price != _h["avg_buy_price"]
                     or _new_date.isoformat() != str(_h.get("date_bought"))[:10]):
-                _h["quantity"] = float(_new_qty)
+                _h["quantity"]      = float(_new_qty)
                 _h["avg_buy_price"] = float(_new_price)
-                _h["date_bought"] = _new_date.isoformat()
+                _h["date_bought"]   = _new_date.isoformat()
                 save_manual_holdings(_holdings)
 
-# Build the in-memory frame the rest of the page consumes — same shape the old CSV gave it
-if _holdings:
-    _csv_source = pd.DataFrame(_holdings)
-else:
-    _csv_source = None
+_csv_source = pd.DataFrame(_holdings) if _holdings else None
 
 if _csv_source is not None:
 
-    # ── LIVE PRICES STRIP (fast, 60-second cache) ─────────────────────────
+    # ── LIVE PRICES STRIP ─────────────────────────────────────────────
     try:
         _port_csv = _csv_source.copy()
         _port_tickers = tuple(
@@ -168,7 +164,7 @@ if _csv_source is not None:
         with _refresh_col:
             st.write("")
             if st.button("🔄 Refresh Prices", key="port_refresh_live"):
-                clear_price_caches()   # FIX3: granular — preserves risk/fundamental caches
+                clear_price_caches()
         with _live_col:
             st.markdown("#### 📡 Live Prices (updates every 60 s)")
         _live_prices = _portfolio_live_prices(_port_tickers)
@@ -194,28 +190,24 @@ if _csv_source is not None:
                     _total_port_value  += _cur * _qty
                     _total_invested    += _buy * _qty
                     _lp_rows.append({
-                        "ticker":      str(_row.ticker).replace(".NS", ""),
-                        "qty":         int(_qty),
-                        "avg_cost":    float(_buy),
-                        "live_price":  float(_cur),
-                        "chg_pct":     float(_chg),
-                        "today_pnl":   float(_today_pnl),
-                        "total_pct":   float(_total_pct),
-                        "total_pnl":   float(_total_pnl),
+                        "ticker":     str(_row.ticker).replace(".NS", ""),
+                        "qty":        int(_qty),
+                        "avg_cost":   float(_buy),
+                        "live_price": float(_cur),
+                        "chg_pct":    float(_chg),
+                        "today_pnl":  float(_today_pnl),
+                        "total_pct":  float(_total_pct),
+                        "total_pnl":  float(_total_pnl),
                     })
                 else:
                     _lp_rows.append({
-                        "ticker":      str(_row.ticker).replace(".NS", ""),
-                        "qty":         int(getattr(_row, "quantity", 1)),
-                        "avg_cost":    float(getattr(_row, "avg_buy_price", 0)),
-                        "live_price":  None,
-                        "chg_pct":     None,
-                        "today_pnl":   None,
-                        "total_pct":   None,
-                        "total_pnl":   None,
+                        "ticker":     str(_row.ticker).replace(".NS", ""),
+                        "qty":        int(getattr(_row, "quantity", 1)),
+                        "avg_cost":   float(getattr(_row, "avg_buy_price", 0)),
+                        "live_price": None, "chg_pct": None,
+                        "today_pnl":  None, "total_pct": None, "total_pnl": None,
                     })
 
-            # ── Today's Change Banner ─────────────────────────────────────
             _td_c = "#26a69a" if _total_today_pnl >= 0 else "#ef5350"
             _ov_c = "#26a69a" if _total_overall_pnl >= 0 else "#ef5350"
             _td_a = "▲" if _total_today_pnl >= 0 else "▼"
@@ -240,7 +232,6 @@ if _csv_source is not None:
                 unsafe_allow_html=True,
             )
 
-            # ── Colored holdings table ────────────────────────────────────
             _TH  = "background:#1a2744;padding:8px 12px;font-size:11px;color:#aaa;font-weight:600;border-bottom:2px solid #2a3a5c;text-align:right;white-space:nowrap"
             _THL = _TH.replace("text-align:right", "text-align:left")
             _TD  = "padding:8px 12px;font-size:13px;border-bottom:1px solid #1a2744;text-align:right"
@@ -248,26 +239,22 @@ if _csv_source is not None:
             _tbl = (
                 '<table style="width:100%;border-collapse:collapse;margin-bottom:6px">'
                 f'<thead><tr>'
-                f'<th style="{_THL}">Stock</th>'
-                f'<th style="{_TH}">Qty</th>'
-                f'<th style="{_TH}">Avg Cost</th>'
-                f'<th style="{_TH}">Live Price</th>'
-                f'<th style="{_TH}">Today %</th>'
-                f'<th style="{_TH}">Today P&amp;L</th>'
-                f'<th style="{_TH}">Total Return</th>'
-                f'<th style="{_TH}">Total P&amp;L</th>'
+                f'<th style="{_THL}">Stock</th><th style="{_TH}">Qty</th>'
+                f'<th style="{_TH}">Avg Cost</th><th style="{_TH}">Live Price</th>'
+                f'<th style="{_TH}">Today %</th><th style="{_TH}">Today P&amp;L</th>'
+                f'<th style="{_TH}">Total Return</th><th style="{_TH}">Total P&amp;L</th>'
                 f'</tr></thead><tbody>'
             )
             for _r in _lp_rows:
-                _lv   = f"₹{_r['live_price']:,.2f}" if _r['live_price'] else "—"
-                _cg   = f"{_r['chg_pct']:+.2f}%"   if _r['chg_pct']   is not None else "—"
-                _tp2  = f"₹{_r['today_pnl']:+,.0f}" if _r['today_pnl'] is not None else "—"
-                _tr2  = f"{_r['total_pct']:+.1f}%"  if _r['total_pct'] is not None else "—"
-                _tnl  = f"₹{_r['total_pnl']:+,.0f}" if _r['total_pnl'] is not None else "—"
-                _cgc  = "#26a69a" if (_r['chg_pct']   or 0) >= 0 else "#ef5350"
-                _tpc  = "#26a69a" if (_r['today_pnl'] or 0) >= 0 else "#ef5350"
-                _tnc  = "#26a69a" if (_r['total_pnl'] or 0) >= 0 else "#ef5350"
-                _rbg  = "rgba(38,166,154,0.04)" if (_r['today_pnl'] or 0) >= 0 else "rgba(239,83,80,0.04)"
+                _lv  = f"₹{_r['live_price']:,.2f}" if _r['live_price'] else "—"
+                _cg  = f"{_r['chg_pct']:+.2f}%"   if _r['chg_pct']  is not None else "—"
+                _tp2 = f"₹{_r['today_pnl']:+,.0f}" if _r['today_pnl'] is not None else "—"
+                _tr2 = f"{_r['total_pct']:+.1f}%"  if _r['total_pct'] is not None else "—"
+                _tnl = f"₹{_r['total_pnl']:+,.0f}" if _r['total_pnl'] is not None else "—"
+                _cgc = "#26a69a" if (_r['chg_pct']   or 0) >= 0 else "#ef5350"
+                _tpc = "#26a69a" if (_r['today_pnl'] or 0) >= 0 else "#ef5350"
+                _tnc = "#26a69a" if (_r['total_pnl'] or 0) >= 0 else "#ef5350"
+                _rbg = "rgba(38,166,154,0.04)" if (_r['today_pnl'] or 0) >= 0 else "rgba(239,83,80,0.04)"
                 _tbl += (
                     f'<tr style="background:{_rbg}">'
                     f'<td style="{_TDL}"><b>{_r["ticker"]}</b></td>'
@@ -283,22 +270,21 @@ if _csv_source is not None:
             _tbl += '</tbody></table>'
             st.markdown(_tbl, unsafe_allow_html=True)
 
-            # ── FIX MH2 — Portfolio Heatmap, now collapsible (was full-width always-on) ──
+            # FIX MH2 — collapsible heatmap
             _hm_rows = []
             for _row in _port_csv.itertuples():
-                _sym  = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
-                _lp   = _live_prices.get(_sym, {})
-                _cur  = _lp.get("price")
-                _buy  = getattr(_row, "avg_buy_price", 0)
-                _qty  = getattr(_row, "quantity", 1)
+                _sym = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
+                _lp  = _live_prices.get(_sym, {})
+                _cur = _lp.get("price")
+                _buy = getattr(_row, "avg_buy_price", 0)
+                _qty = getattr(_row, "quantity", 1)
                 if _cur and _buy and _buy > 0:
-                    _pct   = (_cur / _buy - 1) * 100
-                    _val   = _cur * _qty
+                    _pct = (_cur / _buy - 1) * 100
+                    _val = _cur * _qty
                     _hm_rows.append({
-                        "label":  _row.ticker,
-                        "value":  _val,
-                        "pct":    round(_pct, 2),
-                        "text":   f"{_row.ticker}<br>{_pct:+.1f}%<br>₹{_val/1000:.0f}K",
+                        "label": _row.ticker, "value": _val,
+                        "pct": round(_pct, 2),
+                        "text": f"{_row.ticker}<br>{_pct:+.1f}%<br>₹{_val/1000:.0f}K",
                     })
             if _hm_rows:
                 with st.expander(
@@ -307,15 +293,12 @@ if _csv_source is not None:
                     _hm_df = pd.DataFrame(_hm_rows)
                     import plotly.express as _px2
                     _fig_hm = _px2.treemap(
-                        _hm_df, path=["label"], values="value",
-                        color="pct",
+                        _hm_df, path=["label"], values="value", color="pct",
                         color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
-                        color_continuous_midpoint=0,
-                        custom_data=["pct", "text"],
+                        color_continuous_midpoint=0, custom_data=["pct", "text"],
                     )
                     _fig_hm.update_traces(
-                        texttemplate="%{customdata[1]}",
-                        textfont_size=13,
+                        texttemplate="%{customdata[1]}", textfont_size=13,
                         hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
                     )
                     _fig_hm.update_layout(
@@ -336,8 +319,7 @@ if _csv_source is not None:
             pm = PortfolioManager(_csv_source)
             summary = pm.mark_to_market(parallel=True)
 
-            # ── Top summary banner ─────────────────────────────────────
-            pnl_sign = "+" if summary.total_pnl >= 0 else ""
+            pnl_sign  = "+" if summary.total_pnl >= 0 else ""
             pnl_color = "#26a69a" if summary.total_pnl >= 0 else "#ef5350"
 
             st.markdown("---")
@@ -351,11 +333,9 @@ if _csv_source is not None:
             c3.metric("Health Score",
                       f"{summary.portfolio_score:.0f}/100",
                       f"Grade {summary.portfolio_grade}")
-            c4.metric("Diversification",
-                      summary.diversification.concentration_risk)
+            c4.metric("Diversification", summary.diversification.concentration_risk)
             c5.metric("VIX Regime", summary.vix_regime)
 
-            # ── Overall narrative ──────────────────────────────────────
             st.markdown(
                 f'<div class="card-blue"><span class="narrative">'
                 f'💡 <b>Portfolio Summary:</b> {summary.summary_narrative}'
@@ -363,19 +343,18 @@ if _csv_source is not None:
                 unsafe_allow_html=True
             )
 
-            # ── 🔔 Auto-Signal Monitor — flag holdings that flipped to BUY/SELL ──
-            # Recommendations only. The app NEVER auto-executes real trades.
+            # ── Auto-Signal Monitor ────────────────────────────────────
             _PF_BUY  = {"STRONG BUY", "BUY"}
             _PF_SELL = {"CAUTION", "EXIT", "SELL", "REDUCE"}
             _pf_cur  = {h.ticker: h.action for h in summary.holdings}
-            _pf_prev = load_signal_monitor_state()   # FIX TU5: kv-backed, survives refresh
+            _pf_prev = load_signal_monitor_state()
             _pf_flips = []
             for _tk, _ac in _pf_cur.items():
                 _pv = _pf_prev.get(_tk)
                 if _pv and _pv != _ac and (_ac in _PF_BUY or _ac in _PF_SELL):
                     _pf_flips.append((_tk.replace(".NS", ""), _pv, _ac,
                                       "buy" if _ac in _PF_BUY else "sell"))
-            save_signal_monitor_state(_pf_cur)       # FIX TU5: persist immediately
+            save_signal_monitor_state(_pf_cur)
 
             _sg1, _sg2 = st.columns([5, 2])
             _sg1.markdown("### 🔔 Auto-Signal Monitor")
@@ -385,7 +364,6 @@ if _csv_source is not None:
             _pf_sells = [h for h in summary.holdings if h.action in _PF_SELL]
 
             if _pf_flips:
-                # PATCH 5 — flip banner uses _display_label for honest labels
                 _fl_rows = "".join(
                     f'<div style="font-size:12.5px;color:#fff;margin:2px 0">'
                     f'{"🟢" if _d == "buy" else "🔴"} <b>{_t}</b> '
@@ -406,7 +384,6 @@ if _csv_source is not None:
                         icon="⚡",
                     )
 
-            # PATCH 3 — caption uses honest trend-quality language
             st.caption(
                 f"📡 **{len(_pf_buys)}** holding(s) in an **Uptrend / Strong Trend**, "
                 f"**{len(_pf_sells)}** showing **Weakening / Exit Signal** right now — see the cards below. "
@@ -416,7 +393,6 @@ if _csv_source is not None:
             if _pf_auto:
                 @st.fragment(run_every="300s")
                 def _pf_signal_tick():
-                    # a full rerun every 5 min re-scores holdings & re-checks flips
                     st.rerun()
                 _pf_signal_tick()
 
@@ -447,12 +423,11 @@ if _csv_source is not None:
                         st.markdown(
                             f'<div class="{risk_color}">'
                             f'<b>Concentration Risk: {div.concentration_risk}</b><br>'
-                            f'{div.advice}'
-                            f'</div>',
+                            f'{div.advice}</div>',
                             unsafe_allow_html=True
                         )
 
-            # ── 📉 Portfolio Risk & Performance (Phase 1) ─────────────────
+            # ── Portfolio Risk & Performance ───────────────────────────
             st.markdown("---")
             _rh1, _rh2 = st.columns([5, 2])
             _rh1.subheader("📉 Portfolio Risk & Performance")
@@ -460,7 +435,7 @@ if _csv_source is not None:
                 _risk_period = st.selectbox(
                     "Lookback", ["6mo", "1y", "2y", "3y"], index=1,
                     key="pf_risk_period", label_visibility="collapsed")
-            # purchase dates (from the raw holdings) feed the recency/interpretation layer
+
             _db_map = {}
             for _hr in getattr(pm, "holdings_raw", []) or []:
                 _rt = str(_hr.get("ticker", "")).strip().upper()
@@ -566,14 +541,11 @@ if _csv_source is not None:
 
                     with st.expander("ℹ️ Methodology & assumptions", expanded=False):
                         st.markdown("**Two metric groups, two interpretations:**")
-                        st.markdown("- **Hypothetical Performance** (Sharpe, Sortino, Calmar, CAGR, "
-                                    "Total Return, Max Drawdown) assumes today's holdings were held "
+                        st.markdown("- **Hypothetical Performance** assumes today's holdings were held "
                                     "over the whole lookback — read as *current-book hypothetical*, "
-                                    "not realised returns. Optimistically biased when names were "
-                                    "bought recently (see the notice above).")
+                                    "not realised returns.")
                         st.markdown("- **Risk Profile** (Beta, Volatility, Correlation, Risk "
-                                    "Contribution) are current-book snapshots — **unaffected** by the "
-                                    "holdings assumption and safe to trust.")
+                                    "Contribution) are current-book snapshots — safe to trust.")
                         for _n in _rr.notes:
                             st.markdown(f"- {_n}")
                         st.caption("Informational analytics — not investment advice.")
@@ -592,12 +564,10 @@ if _csv_source is not None:
                         if _sec:
                             _row["sector"] = _sec
                         _conc_holdings.append(_row)
-
-                _conc = analyze_concentration(_conc_holdings)
+                _conc  = analyze_concentration(_conc_holdings)
                 _grade = concentration_grade(_conc.hhi)
                 _risk_color = {"LOW": "#26a69a", "MEDIUM": "#ff9500",
                                "HIGH": "#ff4757"}.get(_conc.risk_level, "#8899bb")
-
                 _cc = st.columns(4)
                 _cc[0].markdown(
                     f'<div class="metric-box"><div class="metric-lbl">HHI Index</div>'
@@ -605,9 +575,8 @@ if _csv_source is not None:
                     f'<div style="font-size:11px;color:#8899bb">{_conc.hhi_category} · Grade {_grade}</div></div>',
                     unsafe_allow_html=True)
                 _cc[1].metric("Largest Position", f"{_conc.top_1_weight:.1f}%")
-                _cc[2].metric("Top 5 Weight", f"{_conc.top_5_weight:.1f}%")
-                _cc[3].metric("Holdings", _conc.total_holdings)
-
+                _cc[2].metric("Top 5 Weight",     f"{_conc.top_5_weight:.1f}%")
+                _cc[3].metric("Holdings",          _conc.total_holdings)
                 _cm = "card-green" if _conc.risk_level == "LOW" else (
                     "card-yellow" if _conc.risk_level == "MEDIUM" else "card-red")
                 st.markdown(
@@ -622,7 +591,7 @@ if _csv_source is not None:
             except Exception as _conc_err:
                 st.caption(f"Concentration analysis unavailable: {_conc_err}")
 
-            # ── Fundamental Quality (Phase 4, on-demand — network) ────
+            # ── Fundamental Quality ────────────────────────────────────
             st.markdown("##### 🔬 Fundamental Quality Scores")
             st.caption("Quality score (0–100) from ROE/ROCE, revenue & EPS CAGR, "
                        "leverage, and FCF health. Fetches live fundamentals — opt-in.")
@@ -638,13 +607,14 @@ if _csv_source is not None:
                         except Exception:
                             _q = None
                         rows.append({
-                            "Stock":     str(_f.get("ticker", "")).replace(".NS", ""),
-                            "Quality":   round(_q, 0) if _q is not None else None,
-                            "ROE %":     _f.get("roe"),
-                            "ROCE %":    _f.get("roce"),
+                            "Stock":      str(_f.get("ticker", "")).replace(".NS", ""),
+                            # QualityFix: 0 means no data — render as "—" not "0"
+                            "Quality":    round(_q, 0) if (_q is not None and _q > 0) else None,
+                            "ROE %":      _f.get("roe"),
+                            "ROCE %":     _f.get("roce"),
                             "Rev CAGR %": _f.get("revenue_cagr_5y") or _f.get("revenue_cagr_3y"),
                             "EPS CAGR %": _f.get("eps_cagr_5y") or _f.get("eps_cagr_3y"),
-                            "D/E":       _f.get("debt_to_equity"),
+                            "D/E":        _f.get("debt_to_equity"),
                         })
                     return rows
 
@@ -668,7 +638,7 @@ if _csv_source is not None:
                 else:
                     st.info("No fundamental data could be retrieved (source may be rate-limited).")
 
-            # ── Holdings cards (2-column grid) ────────────────────────
+            # ── Holdings cards (2-column grid) ─────────────────────────
             st.markdown("---")
             _hh1, _hh2 = st.columns([3, 2])
             _hh1.subheader("📋 Your Holdings — Trend Quality")
@@ -679,7 +649,6 @@ if _csv_source is not None:
                      "Score (best first)", "Value (high→low)", "Action (buy→exit)"],
                     key="pf_holdings_sort", label_visibility="collapsed",
                 )
-            # _ACT_ORDER keys stay as internal strings — sort logic unchanged
             _ACT_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2, "HOLD": 3,
                           "CAUTION": 4, "EXIT": 5}
             _hold_sorted = list(summary.holdings)
@@ -709,38 +678,38 @@ if _csv_source is not None:
             _hc_grid = st.columns(2)
             for _hi, h in enumerate(_hold_sorted):
                 _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#9E9E9E", "#1a1a1a"))
-                _h_emoji = _action_emoji(h.action)
-                _h_pnl_c = "#26a69a" if h.pnl >= 0 else "#ef5350"
-                _h_pnl_a = "▲" if h.pnl >= 0 else "▼"
-                _h_lbl   = h.ticker.replace(".NS", "")
-                _h_inv   = h.avg_buy_price * h.quantity
-                _h_val   = h.current_price * h.quantity
-
-                # Progress bar: SL → Entry → Current → Target
-                _h_sl  = h.stop_loss or (h.avg_buy_price * 0.95)
-                _h_tp  = h.target    or (h.avg_buy_price * 1.10)
-                _h_rng = max(_h_tp - _h_sl, 0.01)
+                _h_emoji  = _action_emoji(h.action)
+                _h_pnl_c  = "#26a69a" if h.pnl >= 0 else "#ef5350"
+                _h_pnl_a  = "▲" if h.pnl >= 0 else "▼"
+                _h_lbl    = h.ticker.replace(".NS", "")
+                _h_inv    = h.avg_buy_price * h.quantity
+                _h_val    = h.current_price * h.quantity
+                _h_sl     = h.stop_loss or (h.avg_buy_price * 0.95)
+                _h_tp     = h.target    or (h.avg_buy_price * 1.10)
+                _h_rng    = max(_h_tp - _h_sl, 0.01)
                 _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
-                _h_bar_c   = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
+                _h_bar_c  = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
                 _h_score_w = min(int(h.score), 100)
 
-                # PATCH 2 — display honest label, not raw action string
+                # Phase 2 — honest display label, not raw action string
                 _h_html = (
                     f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
                     f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
-                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">{_h_emoji} {_display_label(h.action)}</span>'
+                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">'
+                    f'{_h_emoji} {_display_label(h.action)}</span>'
                     f'</div>'
                     f'<div style="text-align:right">'
                     f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
                     f'<div style="width:60px;height:5px;background:#333;border-radius:3px;margin-top:3px">'
-                    f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div></div>'
-                    f'</div></div>'
+                    f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div>'
+                    f'</div></div></div>'
                     f'<div style="font-size:15px;color:#fff;margin-bottom:4px">'
                     f'<b>₹{h.current_price:,.2f}</b>'
-                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">{h.quantity:.0f} shares · held {h.days_held}d</span>'
+                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
+                    f'{h.quantity:.0f} shares · held {h.days_held}d</span>'
                     f'</div>'
                     f'<div style="font-size:12px;color:#aaa;margin-bottom:6px">'
                     f'Invested ₹{_h_inv:,.0f} → Now ₹{_h_val:,.0f}'
@@ -765,10 +734,11 @@ if _csv_source is not None:
                     st.markdown(_h_html, unsafe_allow_html=True)
                     _hb1, _hb2 = st.columns(2)
                     with _hb1:
-                        if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}", use_container_width=True):
-                            # FIX MH3 — pairs with the read on Analyze Stock page
+                        if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}",
+                                     use_container_width=True):
+                            # FIX MH3
                             st.session_state["analyze_ticker"] = h.ticker
-                            st.session_state["_goto_page"] = "🔍 Analyze Stock"
+                            st.session_state["_goto_page"]     = "🔍 Analyze Stock"
                             st.rerun()
                     with _hb2:
                         _ph_price = h.current_price or h.avg_buy_price
@@ -789,10 +759,8 @@ if _csv_source is not None:
                     st.markdown(
                         f'<div class="card-green">'
                         f'🏆 <b>Best Performer:</b> {bh.ticker.replace(".NS","")} '
-                        f'(+{bh.pnl_pct:.1f}%, ₹+{bh.pnl:,.0f})'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
+                        f'(+{bh.pnl_pct:.1f}%, ₹+{bh.pnl:,.0f})</div>',
+                        unsafe_allow_html=True)
             if summary.worst_holding:
                 wh = summary.worst_holding
                 with bw_cols[1]:
@@ -800,31 +768,27 @@ if _csv_source is not None:
                     st.markdown(
                         f'<div class="card-red">'
                         f'📉 <b>Needs Attention:</b> {wh.ticker.replace(".NS","")} '
-                        f'({sign}{wh.pnl_pct:.1f}%, ₹{sign}{wh.pnl:,.0f})'
-                        f'</div>',
-                        unsafe_allow_html=True
-                    )
+                        f'({sign}{wh.pnl_pct:.1f}%, ₹{sign}{wh.pnl:,.0f})</div>',
+                        unsafe_allow_html=True)
 
             # ── Export ─────────────────────────────────────────────────
             st.markdown("---")
             export_df = pd.DataFrame([{
-                "Ticker": h.ticker.replace(".NS",""),
-                "Qty": h.quantity,
+                "Ticker":   h.ticker.replace(".NS", ""),
+                "Qty":      h.quantity,
                 "Buy Price": h.avg_buy_price,
-                "Current": h.current_price,
-                "P&L (₹)": round(h.pnl, 2),
-                "P&L (%)": round(h.pnl_pct, 2),
-                "Score": h.score,
-                "Grade": h.grade,
-                "Action": h.action,          # internal string kept in CSV for data use
-                "Signal": h.signal.replace("🟢","G").replace("🟡","Y").replace("🔴","R"),
-                "Sector": h.sector,
+                "Current":  h.current_price,
+                "P&L (₹)":  round(h.pnl, 2),
+                "P&L (%)":  round(h.pnl_pct, 2),
+                "Score":    h.score,
+                "Grade":    h.grade,
+                "Action":   h.action,   # internal string kept in CSV
+                "Signal":   h.signal.replace("🟢","G").replace("🟡","Y").replace("🔴","R"),
+                "Sector":   h.sector,
             } for h in summary.holdings])
-
-            csv_bytes = export_df.to_csv(index=False).encode()
             st.download_button(
                 "📥 Download Full Report CSV",
-                data=csv_bytes,
+                data=export_df.to_csv(index=False).encode(),
                 file_name="portfolio_health_report.csv",
                 mime="text/csv",
             )
@@ -837,7 +801,6 @@ if _csv_source is not None:
             with st.expander("Show technical details (for debugging)"):
                 st.code(_pf_tb.format_exc())
 else:
-    # ── Empty state — manual holdings entry replaces CSV upload guidance ──
     st.markdown("---")
     st.info(
         "No holdings yet. Use **➕ Add a holding** above to get started.  \n\n"
