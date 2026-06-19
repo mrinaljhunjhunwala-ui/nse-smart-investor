@@ -1,11 +1,28 @@
-"""My Portfolio - NSE Smart Investor (multipage page; body verbatim from app.py)."""
+"""My Portfolio - NSE Smart Investor (multipage page; body verbatim from app.py).
+
+FIXES applied in this revision
+───────────────────────────────
+MH1  Removed the entire CSV-upload / sample-CSV-download / Angel-One-import
+     flow. The page is now driven by manually-entered holdings (ticker, qty,
+     avg buy price, date bought) persisted via load_manual_holdings() /
+     save_manual_holdings() in trade_utils.py. No price/qty suggestions are
+     given — the user types exactly what they hold. This also removes the
+     dependency on _safe_tmpfile that was causing the missing-import error.
+
+MH2  Portfolio Heatmap is now inside a collapsed st.expander, matching the
+     Sector Breakdown treatment, instead of always rendering full-width.
+
+MH3  The "📊 Analyze" button on each holding card sets
+     st.session_state["analyze_ticker"] before navigating — paired with the
+     corresponding read on the Analyze Stock page so the ticker is honored
+     automatically instead of requiring manual re-entry.
+"""
 import os
 import sys
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import pathlib as _pl
-import tempfile
+import datetime as _dt
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -20,10 +37,10 @@ from dashboard.shared.trade_utils import (
     _paper_trade_popover,
     _portfolio_live_prices,
     clear_price_caches,            # FIX3
-    _safe_tmpfile,                 # FIX4
-    upload_validate_portfolio_csv, # FIX9
     load_signal_monitor_state,     # FIX TU5
     save_signal_monitor_state,     # FIX TU5
+    load_manual_holdings,          # FIX MH1 — replaces CSV upload
+    save_manual_holdings,          # FIX MH1 — replaces CSV upload
 )
 from dashboard.shared.chart_helpers import _ROOT, render_top_bar
 from dashboard.shared.squareoff_monitor import render_squareoff_monitor  # FIX3
@@ -45,76 +62,96 @@ st.markdown(
 # Polls every 60 s while page is open; tightens to 20 s during 15:20–15:30.
 render_squareoff_monitor(poll_every=60, show_badge=True)
 
-# ── Angel One real holdings shortcut ──────────────────────────────────────
-try:
-    from data.angel_fetcher import is_configured as _pf_ao_ok, get_holdings as _pf_ao_holdings
-    if _pf_ao_ok():
-        with st.expander("🔗 Import from Angel One account", expanded=False):
-            st.info(
-                "Your Angel One account is connected. Click below to import your "
-                "real demat holdings directly — no CSV upload needed."
+# ════════════════════════════════════════════════════════════════════════
+# FIX MH1 — MANUAL HOLDINGS: add / edit / remove (replaces CSV upload
+# + Angel One import entirely — that data source is locked / unavailable
+# so holdings are now entered and maintained by hand).
+# ════════════════════════════════════════════════════════════════════════
+_holdings = load_manual_holdings()   # list[dict]: ticker, quantity, avg_buy_price, date_bought
+
+with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
+    st.caption(
+        "Enter your holding details manually. No price or quantity suggestions — "
+        "type exactly what you hold."
+    )
+    with st.form("mh_add_form", clear_on_submit=True):
+        _f1, _f2, _f3, _f4 = st.columns([2, 1, 1, 1.3])
+        with _f1:
+            _mh_ticker = st.text_input(
+                "Ticker", placeholder="e.g. RELIANCE or RELIANCE.NS"
+            ).strip().upper()
+        with _f2:
+            _mh_qty = st.number_input("Quantity", min_value=0.0, step=1.0, value=0.0)
+        with _f3:
+            _mh_price = st.number_input(
+                "Avg buy price (₹)", min_value=0.0, step=0.05, value=0.0, format="%.2f"
             )
-            if st.button("Import Angel One Holdings", key="pf_ao_import"):
-                _ao_h = _pf_ao_holdings()
-                if _ao_h:
-                    _rows = [
-                        f"{h['symbol']}.NS,{h['qty']},{h['avg_price']},2024-01-01"
-                        for h in _ao_h
-                    ]
-                    _ao_csv_content = "ticker,quantity,avg_buy_price,date_bought\n" + "\n".join(_rows)
-                    _ao_tmp = _safe_tmpfile(suffix=".csv")   # FIX4: secure NamedTemporaryFile
-                    _ao_tmp.write_text(_ao_csv_content, encoding="utf-8")
-                    st.session_state["_ao_portfolio_path"] = str(_ao_tmp)
-                    st.success(f"Imported {len(_ao_h)} holdings from Angel One")
-                    st.rerun()
-                else:
-                    st.error("Could not fetch holdings from Angel One")
-except Exception:
-    pass
+        with _f4:
+            _mh_date = st.date_input("Date bought", value=_dt.date.today())
+        _mh_submit = st.form_submit_button(
+            "Add holding", type="primary", use_container_width=True
+        )
 
-# ── Auto-load default portfolio.csv OR let user upload ────────────────────
-import pathlib as _pl
-_DEFAULT_CSV = _pl.Path(_ROOT) / "portfolio.csv"
+    if _mh_submit:
+        if not _mh_ticker:
+            st.error("Ticker is required.")
+        elif _mh_qty <= 0:
+            st.error("Quantity must be greater than 0.")
+        elif _mh_price <= 0:
+            st.error("Avg buy price must be greater than 0.")
+        else:
+            _norm_ticker = _mh_ticker if _mh_ticker.endswith(".NS") else _mh_ticker + ".NS"
+            _holdings = [h for h in _holdings if h["ticker"] != _norm_ticker]  # replace if exists
+            _holdings.append({
+                "ticker": _norm_ticker,
+                "quantity": float(_mh_qty),
+                "avg_buy_price": float(_mh_price),
+                "date_bought": _mh_date.isoformat(),
+            })
+            save_manual_holdings(_holdings)
+            clear_price_caches()
+            st.success(f"Added {_norm_ticker.replace('.NS','')} to your portfolio.")
+            st.rerun()
 
-col_ul, col_sample = st.columns([2, 1])
+if _holdings:
+    with st.expander(f"✏️ Manage holdings ({len(_holdings)})", expanded=False):
+        for _i, _h in enumerate(_holdings):
+            _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns([2, 1, 1, 1.3, 0.8])
+            _mc1.markdown(f"**{_h['ticker'].replace('.NS','')}**")
+            _new_qty = _mc2.number_input(
+                "Qty", min_value=0.0, step=1.0,
+                value=float(_h["quantity"]), key=f"mh_qty_{_i}",
+                label_visibility="collapsed",
+            )
+            _new_price = _mc3.number_input(
+                "Avg ₹", min_value=0.0, step=0.05,
+                value=float(_h["avg_buy_price"]), key=f"mh_price_{_i}",
+                format="%.2f", label_visibility="collapsed",
+            )
+            try:
+                _cur_date = _dt.date.fromisoformat(str(_h.get("date_bought"))[:10])
+            except Exception:
+                _cur_date = _dt.date.today()
+            _new_date = _mc4.date_input(
+                "Date", value=_cur_date, key=f"mh_date_{_i}",
+                label_visibility="collapsed",
+            )
+            if _mc5.button("🗑️", key=f"mh_del_{_i}", use_container_width=True):
+                _holdings.pop(_i)
+                save_manual_holdings(_holdings)
+                clear_price_caches()
+                st.rerun()
+            # auto-save edits in place (no separate save button)
+            if (_new_qty != _h["quantity"] or _new_price != _h["avg_buy_price"]
+                    or _new_date.isoformat() != str(_h.get("date_bought"))[:10]):
+                _h["quantity"] = float(_new_qty)
+                _h["avg_buy_price"] = float(_new_price)
+                _h["date_bought"] = _new_date.isoformat()
+                save_manual_holdings(_holdings)
 
-with col_ul:
-    uploaded = st.file_uploader(
-        "Upload a different portfolio CSV (optional — default portfolio.csv auto-loads)",
-        type=["csv"],
-        help="Columns: ticker, quantity, avg_buy_price, date_bought",
-    )
-
-with col_sample:
-    sample_csv = (
-        "ticker,quantity,avg_buy_price,date_bought\n"
-        "RELIANCE,10,1350.00,2024-01-15\n"
-        "TCS,5,3800.00,2024-03-10\n"
-        "HDFCBANK,20,1600.00,2024-02-01\n"
-    )
-    st.download_button(
-        "📥 Download sample CSV",
-        data=sample_csv,
-        file_name="sample_portfolio.csv",
-        mime="text/csv",
-    )
-    st.caption("Tickers without .NS suffix are auto-resolved (e.g. RELIANCE → RELIANCE.NS)")
-
-# Resolve which file to analyse — FIX9: validate columns at upload time
-if uploaded is not None:
-    _csv_source, _csv_err = upload_validate_portfolio_csv(uploaded)
-    if _csv_err:
-        st.error(f"❌ Invalid portfolio CSV: {_csv_err}")
-        _csv_source = None
-        st.stop()
-    else:
-        st.success("Using uploaded portfolio file.")
-elif st.session_state.get("_ao_portfolio_path"):
-    _csv_source = _pl.Path(st.session_state["_ao_portfolio_path"])
-    st.success("Using Angel One holdings (imported from broker)")
-elif _DEFAULT_CSV.exists():
-    _csv_source = _DEFAULT_CSV
-    st.info(f"Auto-loaded: **portfolio.csv** ({len(pd.read_csv(_DEFAULT_CSV))} holdings found)")
+# Build the in-memory frame the rest of the page consumes — same shape the old CSV gave it
+if _holdings:
+    _csv_source = pd.DataFrame(_holdings)
 else:
     _csv_source = None
 
@@ -122,7 +159,7 @@ if _csv_source is not None:
 
     # ── LIVE PRICES STRIP (fast, 60-second cache) ─────────────────────────
     try:
-        _port_csv = pd.read_csv(_csv_source)
+        _port_csv = _csv_source.copy()
         _port_tickers = tuple(
             (t if t.endswith(".NS") else t + ".NS")
             for t in _port_csv["ticker"].tolist()
@@ -246,7 +283,7 @@ if _csv_source is not None:
             _tbl += '</tbody></table>'
             st.markdown(_tbl, unsafe_allow_html=True)
 
-            # ── Portfolio Heatmap ──────────────────────────────────────
+            # ── FIX MH2 — Portfolio Heatmap, now collapsible (was full-width always-on) ──
             _hm_rows = []
             for _row in _port_csv.itertuples():
                 _sym  = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
@@ -264,27 +301,29 @@ if _csv_source is not None:
                         "text":   f"{_row.ticker}<br>{_pct:+.1f}%<br>₹{_val/1000:.0f}K",
                     })
             if _hm_rows:
-                _hm_df = pd.DataFrame(_hm_rows)
-                import plotly.express as _px2
-                _fig_hm = _px2.treemap(
-                    _hm_df, path=["label"], values="value",
-                    color="pct",
-                    color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
-                    color_continuous_midpoint=0,
-                    custom_data=["pct", "text"],
-                    title="📊 Portfolio Heatmap — sized by value, coloured by P&L",
-                )
-                _fig_hm.update_traces(
-                    texttemplate="%{customdata[1]}",
-                    textfont_size=13,
-                    hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
-                )
-                _fig_hm.update_layout(
-                    template="nse_pro", height=300,
-                    margin=dict(l=0, r=0, t=40, b=0),
-                    coloraxis_showscale=False,
-                )
-                st.plotly_chart(_fig_hm, use_container_width=True)
+                with st.expander(
+                    "📊 Portfolio Heatmap — sized by value, coloured by P&L", expanded=False
+                ):
+                    _hm_df = pd.DataFrame(_hm_rows)
+                    import plotly.express as _px2
+                    _fig_hm = _px2.treemap(
+                        _hm_df, path=["label"], values="value",
+                        color="pct",
+                        color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
+                        color_continuous_midpoint=0,
+                        custom_data=["pct", "text"],
+                    )
+                    _fig_hm.update_traces(
+                        texttemplate="%{customdata[1]}",
+                        textfont_size=13,
+                        hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
+                    )
+                    _fig_hm.update_layout(
+                        template="nse_pro", height=300,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        coloraxis_showscale=False,
+                    )
+                    st.plotly_chart(_fig_hm, use_container_width=True)
         else:
             st.caption("⚠️ Live prices unavailable — trying again. Showing EOD data below.")
     except Exception as _e:
@@ -727,8 +766,9 @@ if _csv_source is not None:
                     _hb1, _hb2 = st.columns(2)
                     with _hb1:
                         if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}", use_container_width=True):
+                            # FIX MH3 — pairs with the read on Analyze Stock page
                             st.session_state["analyze_ticker"] = h.ticker
-                            st.session_state["_goto_page"] ="🔍 Analyze Stock"
+                            st.session_state["_goto_page"] = "🔍 Analyze Stock"
                             st.rerun()
                     with _hb2:
                         _ph_price = h.current_price or h.avg_buy_price
@@ -797,13 +837,11 @@ if _csv_source is not None:
             with st.expander("Show technical details (for debugging)"):
                 st.code(_pf_tb.format_exc())
 else:
-    # ── PATCH 4 — Empty state legend: honest trend-quality language ────
+    # ── Empty state — manual holdings entry replaces CSV upload guidance ──
     st.markdown("---")
-    st.warning(
-        "No portfolio.csv found at the default path. "
-        "Upload a CSV above to get started.  \n\n"
-        "**Required columns:** `ticker, quantity, avg_buy_price, date_bought`  \n"
-        "**What you'll see:**  \n"
+    st.info(
+        "No holdings yet. Use **➕ Add a holding** above to get started.  \n\n"
+        "**What you'll see once added:**  \n"
         "- 🚀 Strong Trend / Uptrend = strong, persistent trend momentum  \n"
         "- 🟡 Neutral = mixed signals, no clear edge  \n"
         "- ⚠️ Weakening / Exit Signal = trend deteriorating  \n"
