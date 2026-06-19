@@ -17,6 +17,27 @@ MH3  The "📊 Analyze" button on each holding card sets
      corresponding read on the Analyze Stock page so the ticker is honored
      automatically instead of requiring manual re-entry.
 
+MH4  FIX (this revision) — PortfolioManager(csv_path) does `Path(csv_path)`
+     internally, so it has ALWAYS required an actual file path, never a
+     DataFrame. MH1 dropped the old CSV-upload flow (and the _safe_tmpfile
+     helper that used to bridge this) but nothing replaced that bridge, so
+     every portfolio analysis run failed with
+     "TypeError: ... not 'DataFrame'". A small temp-file helper
+     (_holdings_csv_tmpfile) now writes the in-memory holdings to a real
+     temp CSV and hands PortfolioManager that path, exactly as it expects.
+     The temp file is cleaned up in a finally block.
+
+MH5  FIX (this revision) — "Manage holdings" rendered raw input widgets with
+     no column labels, so an opened expander was a wall of unlabeled boxes.
+     Added a header row (Ticker / Qty / Avg ₹ / Date bought) above the list.
+
+MH6  FIX (this revision) — "Add a holding" required typing the exact NSE
+     ticker with no help. Added a searchable "Find by company name" dropdown
+     (powered by the existing STOCK_SEARCH_MAP) that auto-fills the ticker
+     field, similar to the lookup already used elsewhere in the app (e.g.
+     Paper Trades). Manual ticker entry still works for anything not in the
+     map.
+
 Phase2  UI honesty — all action labels shown to the user go through
      _display_label() so "STRONG BUY" → "Strong Trend ▲▲" etc. Internal
      strings (DB, CSV export, sort keys) are unchanged.
@@ -26,6 +47,7 @@ QualityFix  compute_quality_score returns 0 for no-data; UI now treats
 """
 import os
 import sys
+import tempfile
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -51,6 +73,7 @@ from dashboard.shared.trade_utils import (
 )
 from dashboard.shared.chart_helpers import _ROOT, render_top_bar
 from dashboard.shared.squareoff_monitor import render_squareoff_monitor
+from dashboard.shared.cache import STOCK_SEARCH_MAP  # FIX MH6
 from analysis.portfolio_concentration import analyze_concentration, concentration_grade
 from analysis.portfolio_fundamentals import batch_fetch_fundamentals, compute_quality_score
 
@@ -65,6 +88,22 @@ st.markdown(
 
 render_squareoff_monitor(poll_every=60, show_badge=True)
 
+
+# FIX MH4 — PortfolioManager(csv_path) does Path(csv_path) internally and has
+# always required a real file path, never a DataFrame. This writes the
+# in-memory holdings list to a temp CSV and returns the path; caller is
+# responsible for deleting it (done in a finally block below).
+def _holdings_csv_tmpfile(df: pd.DataFrame) -> str:
+    _tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", prefix="nse_portfolio_", delete=False, newline=""
+    )
+    try:
+        df.to_csv(_tmp.name, index=False)
+    finally:
+        _tmp.close()
+    return _tmp.name
+
+
 # ════════════════════════════════════════════════════════════════════════
 # FIX MH1 — MANUAL HOLDINGS: add / edit / remove
 # ════════════════════════════════════════════════════════════════════════
@@ -75,11 +114,31 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
         "Enter your holding details manually. No price or quantity suggestions — "
         "type exactly what you hold."
     )
+
+    # FIX MH6 — searchable company lookup, outside the form so picking a
+    # name can update the ticker field live (form widgets don't rerun on
+    # their own change, so this lives just above the form instead).
+    _MH_NONE = "— search by company name (optional) —"
+    _mh_company_options = [_MH_NONE] + sorted(STOCK_SEARCH_MAP.keys())
+    _mh_picked_company = st.selectbox(
+        "🔎 Find by company name",
+        _mh_company_options,
+        key="mh_company_lookup",
+        help="Start typing a company name to filter — selecting one fills in the "
+             "ticker below. Leave on the default option to type a ticker manually.",
+    )
+    _mh_looked_up_ticker = (
+        STOCK_SEARCH_MAP.get(_mh_picked_company, "") if _mh_picked_company != _MH_NONE else ""
+    )
+    if _mh_looked_up_ticker:
+        st.caption(f"→ Ticker: **{_mh_looked_up_ticker}**")
+
     with st.form("mh_add_form", clear_on_submit=True):
         _f1, _f2, _f3, _f4 = st.columns([2, 1, 1, 1.3])
         with _f1:
-            _mh_ticker = st.text_input(
-                "Ticker", placeholder="e.g. RELIANCE or RELIANCE.NS"
+            _mh_ticker_manual = st.text_input(
+                "Ticker (or use the lookup above)",
+                placeholder="e.g. RELIANCE or RELIANCE.NS",
             ).strip().upper()
         with _f2:
             _mh_qty = st.number_input("Quantity", min_value=0.0, step=1.0, value=0.0)
@@ -94,8 +153,11 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
         )
 
     if _mh_submit:
+        # FIX MH6 — the company-name lookup wins if a real company was
+        # selected; otherwise fall back to whatever was typed manually.
+        _mh_ticker = _mh_looked_up_ticker.replace(".NS", "") if _mh_looked_up_ticker else _mh_ticker_manual
         if not _mh_ticker:
-            st.error("Ticker is required.")
+            st.error("Ticker is required — type one, or pick a company from the lookup above.")
         elif _mh_qty <= 0:
             st.error("Quantity must be greater than 0.")
         elif _mh_price <= 0:
@@ -116,6 +178,19 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
 
 if _holdings:
     with st.expander(f"✏️ Manage holdings ({len(_holdings)})", expanded=False):
+        # FIX MH5 — header row so the unlabeled input boxes below are clear
+        # at a glance (previously this expander had no labels at all).
+        _mhh1, _mhh2, _mhh3, _mhh4, _mhh5 = st.columns([2, 1, 1, 1.3, 0.8])
+        _mhh1.markdown("**Ticker**")
+        _mhh2.markdown("**Qty**")
+        _mhh3.markdown("**Avg ₹**")
+        _mhh4.markdown("**Date bought**")
+        _mhh5.markdown("**Del**")
+        st.markdown(
+            '<hr style="margin:2px 0 8px 0;border-color:rgba(255,255,255,.08)">',
+            unsafe_allow_html=True,
+        )
+
         for _i, _h in enumerate(_holdings):
             _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns([2, 1, 1, 1.3, 0.8])
             _mc1.markdown(f"**{_h['ticker'].replace('.NS','')}**")
@@ -313,10 +388,16 @@ if _csv_source is not None:
         st.caption(f"Live price strip skipped: {_e}")
 
     st.markdown("---")
+    # FIX MH4 — PortfolioManager always expected a real CSV file path
+    # (it does Path(csv_path) internally), never a DataFrame. Write the
+    # in-memory holdings to a temp file and point PortfolioManager at that,
+    # cleaning the temp file up afterwards regardless of success/failure.
+    _pm_tmp_csv_path = None
     with st.spinner("Scoring your portfolio (parallel)… ~10–20 s for 5–10 stocks"):
         try:
             from analysis.portfolio_manager import PortfolioManager
-            pm = PortfolioManager(_csv_source)
+            _pm_tmp_csv_path = _holdings_csv_tmpfile(_csv_source)
+            pm = PortfolioManager(_pm_tmp_csv_path)
             summary = pm.mark_to_market(parallel=True)
 
             pnl_sign  = "+" if summary.total_pnl >= 0 else ""
@@ -800,6 +881,13 @@ if _csv_source is not None:
             st.error(f"Portfolio analysis failed: {type(e).__name__}: {e}")
             with st.expander("Show technical details (for debugging)"):
                 st.code(_pf_tb.format_exc())
+        finally:
+            # FIX MH4 — always clean up the temp CSV, success or failure.
+            if _pm_tmp_csv_path:
+                try:
+                    os.remove(_pm_tmp_csv_path)
+                except Exception:
+                    pass
 else:
     st.markdown("---")
     st.info(
