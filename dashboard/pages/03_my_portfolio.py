@@ -16,6 +16,7 @@ from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.trade_utils import (
     _action_emoji,
+    _display_label,                # Phase 2 UI honesty
     _paper_trade_popover,
     _portfolio_live_prices,
     clear_price_caches,            # FIX3
@@ -37,7 +38,7 @@ render_top_bar()
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
 st.title("🏠 My Portfolio")
 st.markdown(
-    "Your holdings health check — live prices, plain English buy/hold/sell recommendations, and news for each stock."
+    "Your holdings health check — live prices, trend-quality scores, and plain English guidance for each stock."
 )
 
 # ── Market status badge + MIS auto square-off monitor ─────────────────
@@ -345,11 +346,12 @@ if _csv_source is not None:
             _pf_sells = [h for h in summary.holdings if h.action in _PF_SELL]
 
             if _pf_flips:
+                # PATCH 5 — flip banner uses _display_label for honest labels
                 _fl_rows = "".join(
                     f'<div style="font-size:12.5px;color:#fff;margin:2px 0">'
                     f'{"🟢" if _d == "buy" else "🔴"} <b>{_t}</b> '
-                    f'<span style="color:#9aa">{_p}</span> → '
-                    f'<b style="color:{"#26a69a" if _d == "buy" else "#ef5350"}">{_a}</b></div>'
+                    f'<span style="color:#9aa">{_display_label(_p)}</span> → '
+                    f'<b style="color:{"#26a69a" if _d == "buy" else "#ef5350"}">{_display_label(_a)}</b></div>'
                     for _t, _p, _a, _d in _pf_flips)
                 st.markdown(
                     f'<div style="background:linear-gradient(135deg,#2a1c05,#332208);'
@@ -359,12 +361,17 @@ if _csv_source is not None:
                     f'⚡ {len(_pf_flips)} signal change(s) since your last check</div>'
                     f'{_fl_rows}</div>', unsafe_allow_html=True)
                 for _t, _p, _a, _d in _pf_flips:
-                    st.toast(f"{'🟢' if _d == 'buy' else '🔴'} {_t}: {_p} → {_a}", icon="⚡")
+                    st.toast(
+                        f'{"🟢" if _d == "buy" else "🔴"} {_t}: '
+                        f'{_display_label(_p)} → {_display_label(_a)}',
+                        icon="⚡",
+                    )
 
+            # PATCH 3 — caption uses honest trend-quality language
             st.caption(
-                f"📡 **{len(_pf_buys)}** holding(s) signalling **BUY**, "
-                f"**{len(_pf_sells)}** signalling **SELL/EXIT** right now — see the cards below. "
-                "Recommendations only; the app never auto-executes real trades. "
+                f"📡 **{len(_pf_buys)}** holding(s) in an **Uptrend / Strong Trend**, "
+                f"**{len(_pf_sells)}** showing **Weakening / Exit Signal** right now — see the cards below. "
+                "Trend-quality scores only; the app never auto-executes real trades. "
                 "Toggle **Auto-refresh** to keep this live while the page is open.")
 
             if _pf_auto:
@@ -625,7 +632,7 @@ if _csv_source is not None:
             # ── Holdings cards (2-column grid) ────────────────────────
             st.markdown("---")
             _hh1, _hh2 = st.columns([3, 2])
-            _hh1.subheader("📋 Your Holdings — What to Do")
+            _hh1.subheader("📋 Your Holdings — Trend Quality")
             with _hh2:
                 _h_sort = st.selectbox(
                     "Sort by",
@@ -633,6 +640,7 @@ if _csv_source is not None:
                      "Score (best first)", "Value (high→low)", "Action (buy→exit)"],
                     key="pf_holdings_sort", label_visibility="collapsed",
                 )
+            # _ACT_ORDER keys stay as internal strings — sort logic unchanged
             _ACT_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2, "HOLD": 3,
                           "CAUTION": 4, "EXIT": 5}
             _hold_sorted = list(summary.holdings)
@@ -642,7 +650,6 @@ if _csv_source is not None:
                 elif _h_sort == "Total P&L (low→high)":
                     _hold_sorted.sort(key=lambda h: h.pnl)
                 elif _h_sort == "Today's change":
-                    # FIX14: sort by today_chg_pct if available; fall back to pnl_pct
                     _hold_sorted.sort(
                         key=lambda h: -getattr(h, "today_chg_pct", getattr(h, "pnl_pct", 0))
                     )
@@ -675,17 +682,17 @@ if _csv_source is not None:
                 _h_tp  = h.target    or (h.avg_buy_price * 1.10)
                 _h_rng = max(_h_tp - _h_sl, 0.01)
                 _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
-                # _h_ep_pct removed — was computed but never rendered (FIX7)
                 _h_bar_c   = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
                 _h_score_w = min(int(h.score), 100)
 
+                # PATCH 2 — display honest label, not raw action string
                 _h_html = (
                     f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
                     f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
-                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">{_h_emoji} {h.action}</span>'
+                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">{_h_emoji} {_display_label(h.action)}</span>'
                     f'</div>'
                     f'<div style="text-align:right">'
                     f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
@@ -760,7 +767,6 @@ if _csv_source is not None:
 
             # ── Export ─────────────────────────────────────────────────
             st.markdown("---")
-            # export_path removed — pm.export_summary_csv() side-effect not needed here (FIX8)
             export_df = pd.DataFrame([{
                 "Ticker": h.ticker.replace(".NS",""),
                 "Qty": h.quantity,
@@ -770,7 +776,7 @@ if _csv_source is not None:
                 "P&L (%)": round(h.pnl_pct, 2),
                 "Score": h.score,
                 "Grade": h.grade,
-                "Action": h.action,
+                "Action": h.action,          # internal string kept in CSV for data use
                 "Signal": h.signal.replace("🟢","G").replace("🟡","Y").replace("🔴","R"),
                 "Sector": h.sector,
             } for h in summary.holdings])
@@ -791,40 +797,42 @@ if _csv_source is not None:
             with st.expander("Show technical details (for debugging)"):
                 st.code(_pf_tb.format_exc())
 else:
-    # Empty state guidance
+    # ── PATCH 4 — Empty state legend: honest trend-quality language ────
     st.markdown("---")
     st.warning(
         "No portfolio.csv found at the default path. "
         "Upload a CSV above to get started.  \n\n"
         "**Required columns:** `ticker, quantity, avg_buy_price, date_bought`  \n"
         "**What you'll see:**  \n"
-        "- 🟢 Green = BUY MORE  |  🟡 Yellow = HOLD  |  🔴 Red = Consider Selling  \n"
-        "- Trend-quality score (0–100) for each stock — higher = stronger, more persistent trend (not a return forecast)  \n"
+        "- 🚀 Strong Trend / Uptrend = strong, persistent trend momentum  \n"
+        "- 🟡 Neutral = mixed signals, no clear edge  \n"
+        "- ⚠️ Weakening / Exit Signal = trend deteriorating  \n"
+        "- Trend-quality score (0–100) — higher = stronger trend (not a return forecast)  \n"
         "- Plain English explanation and suggested stop-loss / target per holding"
     )
     col_ex1, col_ex2, col_ex3 = st.columns(3)
     with col_ex1:
         st.markdown("""
         <div class="card-green">
-        <b>🟢 STRONG BUY (Score ≥ 80)</b><br>
-        The stock's technicals, momentum, and volume are all aligned.
-        Adding to your position here makes sense.
+        <b>🚀 Strong Trend ▲▲ / Uptrend ▲ (Score ≥ 65)</b><br>
+        Technicals, momentum, and volume are aligned.
+        This is a trend-quality score — not a return forecast or advice to buy.
         </div>
         """, unsafe_allow_html=True)
     with col_ex2:
         st.markdown("""
         <div class="card-yellow">
-        <b>🟡 HOLD (Score 40–65)</b><br>
+        <b>🟡 Neutral (Score 40–64)</b><br>
         Mixed signals — some positives, some caution.
-        Best to hold your current position and monitor.
+        Monitor your position; no clear directional edge right now.
         </div>
         """, unsafe_allow_html=True)
     with col_ex3:
         st.markdown("""
         <div class="card-red">
-        <b>🔴 CAUTION / EXIT (Score &lt; 40)</b><br>
-        Technicals are deteriorating.
-        Consider reducing position size or setting a tight stop-loss.
+        <b>⚠️ Weakening ▼ / Exit Signal ▼▼ (Score &lt; 40)</b><br>
+        Trend quality is deteriorating.
+        Consider reviewing your position size or tightening your stop-loss.
         </div>
         """, unsafe_allow_html=True)
 
