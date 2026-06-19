@@ -30,6 +30,18 @@ A6  Sector rank metric guard: f"#{cs.sector_rank}" is now
 
 A7  df.iloc[-2] is now guarded with len(df) >= 2 to avoid IndexError on
     single-row dataframes (new listings, data gaps).
+
+A8  Ticker handoff from My Portfolio (or anywhere else) via
+    st.session_state["analyze_ticker"] is now actually consumed. Previously
+    My Portfolio's "📊 Analyze" button set this key and navigated here, but
+    this page never read it — so the search box stayed empty and the user
+    had to manually retype the ticker. The prefilled ticker now forces the
+    analysis to run immediately on arrival, and the session key is popped
+    so it doesn't keep re-forcing on subsequent manual interactions.
+
+A9  Portfolio Fit holdings source now reads load_manual_holdings() instead
+    of a portfolio.csv path / Angel One tmp path, matching the My Portfolio
+    page's move away from file-based holdings to manual entry.
 """
 
 import os, sys
@@ -64,6 +76,7 @@ from dashboard.shared.trade_utils import (
     _action_emoji,
     _grade_color,
     _paper_trade_popover,      # FIX A1: use popover instead of direct call
+    load_manual_holdings,      # FIX A9: manual holdings replace CSV/Angel One path
 )
 from dashboard.shared.chart_helpers import (
     _ROOT,
@@ -88,6 +101,13 @@ from dashboard.shared.disclosures import (
 )
 _render_regime_note()
 _render_score_methodology()
+
+# FIX A8: consume a ticker handed off from My Portfolio (or elsewhere) via
+# session_state — must happen BEFORE the search widgets render so the
+# selectbox/text_input default values stay untouched (we don't fight the
+# widget state, we just override the *resolved* ticker and force the run).
+_prefill_ticker = st.session_state.pop("analyze_ticker", None)
+_prefill_active = bool(_prefill_ticker)
 
 # ── Stock search ───────────────────────────────────────────────────────────
 search_options = [
@@ -121,6 +141,9 @@ with col_btn:
     st.write("")
     analyze_btn = st.button("🔍 Analyze", type="primary", key="analyze_btn")
 
+if _prefill_active:
+    st.caption(f"📥 Opened from My Portfolio — analyzing **{_prefill_ticker.replace('.NS','')}**.")
+
 _ui_period = st.radio(
     "Chart period",
     list(_AS_PERIOD_MAP.keys()),
@@ -136,7 +159,10 @@ if _mt_err:
     st.stop()
 
 ticker = ""
-if _mt_clean:
+if _prefill_active:
+    # FIX A8: a handed-off ticker always wins over stale widget state
+    ticker = _prefill_ticker if _prefill_ticker.endswith(".NS") else _prefill_ticker + ".NS"
+elif _mt_clean:
     ticker = _mt_clean + ".NS"
 elif selected_option != "— type to search —":
     raw_sym = selected_option.rsplit("(", 1)[-1].rstrip(")")
@@ -145,7 +171,7 @@ elif selected_option != "— type to search —":
 if not ticker:
     ticker = "RELIANCE.NS"
 
-if analyze_btn or (
+if analyze_btn or _prefill_active or (
     "last_analyzed" in st.session_state
     and st.session_state.last_analyzed == ticker
 ):
@@ -863,7 +889,7 @@ if analyze_btn or (
             except Exception as _th_e:
                 st.caption(f"⚠️ Thesis unavailable: {_th_e}")
 
-            # ── Portfolio Fit — FIX A5: cache CSV read ────────────────────
+            # ── Portfolio Fit — FIX A5 + A9: cached, reads manual holdings ──
             st.markdown("---")
             st.subheader("🧩 Portfolio Fit Assessment")
             st.caption(
@@ -871,39 +897,20 @@ if analyze_btn or (
                 "diversification, sector mix, beta and concentration. Not investment advice."
             )
             try:
-                import pandas as _pf_pd
-                import pathlib as _pf_pl
-
-                _pf_csv_path = st.session_state.get("_ao_portfolio_path") or str(
-                    _pf_pl.Path(_ROOT) / "portfolio.csv"
-                )
-
-                # FIX A5: cache the CSV read keyed on path + file mtime
-                @st.cache_data(ttl=300, show_spinner=False)
-                def _load_portfolio_csv(_path: str, _mtime: float) -> list:
-                    _holds = []
-                    try:
-                        _df = _pf_pd.read_csv(_path)
-                        for _, _r in _df.iterrows():
-                            _t = str(_r.get("ticker", "")).strip()
-                            if _t and not _t.upper().endswith(".NS"):
-                                _t += ".NS"
-                            _q = float(_r.get("quantity", 0) or 0)
-                            if _t and _q > 0:
-                                _holds.append({"ticker": _t, "quantity": _q})
-                    except Exception:
-                        pass
-                    return _holds
-
-                _pf_mtime = 0.0
-                if _pf_pl.Path(_pf_csv_path).exists():
-                    _pf_mtime = _pf_pl.Path(_pf_csv_path).stat().st_mtime
-
-                _pf_holds = _load_portfolio_csv(_pf_csv_path, _pf_mtime) if _pf_mtime else []
+                # FIX A9: manual holdings (kv-backed) replace the old CSV path read
+                _pf_holds_raw = load_manual_holdings()
+                _pf_holds = []
+                for _r in _pf_holds_raw:
+                    _t = str(_r.get("ticker", "")).strip()
+                    if _t and not _t.upper().endswith(".NS"):
+                        _t += ".NS"
+                    _q = float(_r.get("quantity", 0) or 0)
+                    if _t and _q > 0:
+                        _pf_holds.append({"ticker": _t, "quantity": _q})
 
                 if not _pf_holds:
                     st.info(
-                        "No portfolio found — add holdings on the **📂 My Portfolio** page "
+                        "No holdings found — add holdings on the **🏠 My Portfolio** page "
                         "to see how this stock would fit your book."
                     )
                 else:
