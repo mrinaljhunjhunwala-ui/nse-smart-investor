@@ -499,7 +499,9 @@ def _live_quote_price(ticker: str) -> Optional[float]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _action_color(action: str) -> str:
-    if action in ("STRONG BUY", "BUY"):
+    if action == "STRONG BUY":
+        return "card-green pulse-green"   # extra glow to distinguish from plain BUY
+    elif action == "BUY":
         return "card-green"
     elif action in ("WATCHLIST", "HOLD"):
         return "card-yellow"
@@ -512,6 +514,33 @@ def _action_emoji(action: str) -> str:
         "STRONG BUY": "🚀", "BUY": "🟢", "WATCHLIST": "👀",
         "HOLD": "🟡",       "CAUTION": "⚠️", "EXIT": "🔴",
     }.get(action, "")
+
+
+# Phase 2 UI honesty — map internal action strings to honest display labels.
+# Internal strings (engine, DB, CSV, sort keys) are NEVER changed.
+# Only this function touches what the user actually reads.
+_ACTION_DISPLAY_LABELS = {
+    "STRONG BUY": "Strong Trend ▲▲",
+    "BUY":        "Uptrend ▲",
+    "WATCHLIST":  "Watch",
+    "HOLD":       "Neutral",
+    "CAUTION":    "Weakening ▼",
+    "EXIT":       "Exit Signal ▼▼",
+    "SELL":       "Exit Signal ▼▼",   # legacy alias from signals.py
+}
+
+
+def _display_label(action: str) -> str:
+    """Return the honest UI display label for an internal action string.
+
+    Phase 2 UI honesty audit: replaces imperative labels like 'STRONG BUY'
+    with descriptive trend-quality language consistent with the efficacy study
+    finding that these are trend-quality scores, not return forecasts.
+
+    The internal action string is preserved everywhere else (DB, CSV export,
+    sort keys, signal logic). Only the display layer uses this function.
+    """
+    return _ACTION_DISPLAY_LABELS.get(action, action)
 
 
 def _grade_color(grade: str) -> str:
