@@ -308,8 +308,15 @@ def render_sidebar(current: str = None) -> None:
     with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
         try:
             from dashboard.shared.trade_utils import load_manual_holdings
-            _qdf = load_manual_holdings()
-            if _qdf is not None and not _qdf.empty:
+            # FIX: load_manual_holdings() returns a list[dict] (same as
+            # my_portfolio.py consumes it — .append()/.pop() on it directly),
+            # not a DataFrame. Calling .empty/.itertuples() on the raw list
+            # is what threw "'list' object has no attribute 'empty'" in the
+            # sidebar. Wrap it in a DataFrame here, same as my_portfolio.py
+            # does locally before handing it to PortfolioManager.
+            _holdings_list = load_manual_holdings()
+            _qdf = pd.DataFrame(_holdings_list) if _holdings_list else pd.DataFrame()
+            if not _qdf.empty:
                 _qsyms = tuple((t if str(t).endswith(".NS") else f"{t}.NS")
                                for t in _qdf["ticker"].tolist())
                 _qlp = _qv_prices(_qsyms)
