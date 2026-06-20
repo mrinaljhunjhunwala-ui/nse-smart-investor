@@ -109,6 +109,22 @@ def _holdings_csv_tmpfile(df: pd.DataFrame) -> str:
 # ════════════════════════════════════════════════════════════════════════
 _holdings = load_manual_holdings()
 
+# FIX MH7 — the company-name lookup dropdown lives OUTSIDE the form (so
+# picking a name can update the ticker live), which meant clear_on_submit
+# never touched it: after a successful add it kept showing the previously
+# picked company, and that stale selection then silently overrode whatever
+# new ticker you typed manually on the NEXT add (this is the "still shows
+# the previous stock name when adding" bug). Streamlit also raises
+# "cannot be modified after the widget is instantiated" if you try to reset
+# a widget's session_state value after that widget has already rendered in
+# the current script run — so the reset can't happen at submit time, it has
+# to be deferred to the TOP of the next run, before the selectbox exists
+# yet. Same clear-pending pattern Analyze Stock already uses for its own
+# search box.
+_MH_NONE = "— search by company name (optional) —"
+if st.session_state.pop("_mh_clear_pending", False):
+    st.session_state["mh_company_lookup"] = _MH_NONE
+
 with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
     st.caption(
         "Enter your holding details manually. No price or quantity suggestions — "
@@ -118,7 +134,6 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
     # FIX MH6 — searchable company lookup, outside the form so picking a
     # name can update the ticker field live (form widgets don't rerun on
     # their own change, so this lives just above the form instead).
-    _MH_NONE = "— search by company name (optional) —"
     _mh_company_options = [_MH_NONE] + sorted(STOCK_SEARCH_MAP.keys())
     _mh_picked_company = st.selectbox(
         "🔎 Find by company name",
@@ -164,6 +179,30 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
             st.error("Avg buy price must be greater than 0.")
         else:
             _norm_ticker = _mh_ticker if _mh_ticker.endswith(".NS") else _mh_ticker + ".NS"
+
+            # FIX MH8 — unlike Analyze Stock (which validates the ticker and
+            # tells you plainly if NSE doesn't recognise it), this form used
+            # to save whatever was typed with zero feedback either way. Now:
+            # 1) try resolving via data.universe.resolve_ticker (handles a
+            #    correctable typo / partial name), 2) probe a real live
+            #    price for the resolved ticker so "saved but is it actually
+            #    a tradeable NSE symbol?" gets an honest answer immediately,
+            #    not a silent save followed by a blank "Live Price: —" later.
+            try:
+                from data.universe import resolve_ticker as _mh_resolve
+                _resolved = _mh_resolve(_mh_ticker)
+                if _resolved:
+                    _norm_ticker = _resolved
+            except Exception:
+                pass  # keep the manually-typed/looked-up ticker as-is
+
+            _mh_recognized = False
+            try:
+                _mh_probe = _portfolio_live_prices((_norm_ticker,))
+                _mh_recognized = bool(_mh_probe.get(_norm_ticker, {}).get("price"))
+            except Exception:
+                _mh_recognized = False  # network hiccup — don't block the save on this
+
             _holdings = [h for h in _holdings if h["ticker"] != _norm_ticker]
             _holdings.append({
                 "ticker":        _norm_ticker,
@@ -173,6 +212,22 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
             })
             save_manual_holdings(_holdings)
             clear_price_caches()
+            # FIX MH7 — reset the lookup dropdown on the NEXT run, not now.
+            st.session_state["_mh_clear_pending"] = True
+
+            if _mh_recognized:
+                st.success(
+                    f"✅ Recognized **{_norm_ticker.replace('.NS','')}** on NSE — "
+                    "added to your portfolio."
+                )
+            else:
+                st.warning(
+                    f"⚠️ Added **{_norm_ticker.replace('.NS','')}**, but couldn't confirm "
+                    "it against live NSE prices just now. Double-check the spelling "
+                    "(e.g. Vedanta's ticker is **VEDL**, not VEDANTA) — if it's wrong, "
+                    "delete it below and re-add with the correct ticker, or use the "
+                    "company-name lookup above instead of typing it manually."
+                )
             st.success(f"Added {_norm_ticker.replace('.NS','')} to your portfolio.")
             st.rerun()
 
