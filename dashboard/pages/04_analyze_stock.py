@@ -44,23 +44,19 @@ A9  Portfolio Fit holdings source now reads load_manual_holdings() instead
     page's move away from file-based holdings to manual entry.
 """
 
-import os, sys
+import os
+import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import streamlit as st
-from dashboard.shared.design import apply_design
-from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
 
 from analysis.fundamentals.service import default_service as _fund_service
 from analysis.fundamentals import analytics as _fund_analytics
 
-import os
-import streamlit as st
-import sys
 from dashboard.shared.design import apply_design
+from dashboard.shared.nav import render_sidebar
 from dashboard.shared.cache import (
     STOCK_SEARCH_MAP,
     _deep_confirmation,
@@ -79,7 +75,6 @@ from dashboard.shared.trade_utils import (
     load_manual_holdings,      # FIX A9: manual holdings replace CSV/Angel One path
 )
 from dashboard.shared.chart_helpers import (
-    _ROOT,
     build_price_chart,
     render_top_bar,
 )
@@ -120,14 +115,44 @@ _AS_PERIOD_MAP = {
     "1D": "1d", "5D": "5d", "1M": "1m",
     "6M": "6m", "YTD": "ytd", "Max": "max",
 }
+_AS_PLACEHOLDER = "— type to search —"
 
-col_search, col_manual, col_btn = st.columns([3, 2, 1])
+# BUGFIX: the dropdown and the manual ticker box were independent widgets
+# with no relationship — picking a dropdown stock left old text sitting in
+# the manual box (which silently took priority below), and typing a manual
+# ticker left the dropdown showing a stale company name. Neither cleared on
+# its own, so switching between the two required manually wiping whichever
+# field you weren't using. These on_change callbacks make using one field
+# automatically clear the other, and the explicit "✖ Clear" button below
+# resets both at once.
+#
+# The clear-pending flag (rather than writing the widget keys directly from
+# the button block) is required because Streamlit raises
+# "cannot be modified after the widget ... is instantiated" if you assign to
+# st.session_state for a widget's key anywhere after that widget has already
+# been created in the same script run — and the Clear button sits below the
+# selectbox/text_input in this layout. Setting a flag + st.rerun() defers the
+# actual reset to the top of the next run, before either widget exists yet.
+if st.session_state.pop("_as_clear_pending", False):
+    st.session_state["stock_search_select"] = _AS_PLACEHOLDER
+    st.session_state["manual_ticker_input"] = ""
+
+def _as_on_dropdown_change():
+    if st.session_state.get("stock_search_select", _AS_PLACEHOLDER) != _AS_PLACEHOLDER:
+        st.session_state["manual_ticker_input"] = ""
+
+def _as_on_manual_change():
+    if st.session_state.get("manual_ticker_input", "").strip():
+        st.session_state["stock_search_select"] = _AS_PLACEHOLDER
+
+col_search, col_manual, col_clear, col_btn = st.columns([3, 2, 1, 1])
 with col_search:
     selected_option = st.selectbox(
         "Search by company name or symbol",
-        options=["— type to search —"] + search_options_sorted,
+        options=[_AS_PLACEHOLDER] + search_options_sorted,
         index=0,
         key="stock_search_select",
+        on_change=_as_on_dropdown_change,
     )
 with col_manual:
     manual_ticker = st.text_input(
@@ -135,7 +160,14 @@ with col_manual:
         value="",
         placeholder="e.g. INFY or INFY.NS",
         key="manual_ticker_input",
+        on_change=_as_on_manual_change,
     ).strip().upper()
+with col_clear:
+    st.write("")
+    st.write("")
+    if st.button("✖ Clear", key="as_clear_search", use_container_width=True):
+        st.session_state["_as_clear_pending"] = True
+        st.rerun()
 with col_btn:
     st.write("")
     st.write("")
@@ -164,7 +196,7 @@ if _prefill_active:
     ticker = _prefill_ticker if _prefill_ticker.endswith(".NS") else _prefill_ticker + ".NS"
 elif _mt_clean:
     ticker = _mt_clean + ".NS"
-elif selected_option != "— type to search —":
+elif selected_option != _AS_PLACEHOLDER:
     raw_sym = selected_option.rsplit("(", 1)[-1].rstrip(")")
     ticker  = raw_sym + ".NS" if not raw_sym.endswith(".NS") else raw_sym
 
@@ -180,6 +212,23 @@ if analyze_btn or _prefill_active or (
     with st.spinner(f"Scoring {ticker}…"):
         try:
             cs = get_composite_score(ticker)
+
+            # BUGFIX: get_composite_score() already catches fetch failures
+            # internally and returns an UNAVAILABLE sentinel rather than
+            # raising — but this page never checked for it, so execution kept
+            # going straight into load_ticker_df(ticker) below, which has no
+            # such protection and raises a raw
+            # "ValueError: No data for X.NS. All sources failed: [...]" that
+            # fell through to the generic exception handler at the bottom,
+            # dumping a Python traceback at the user. An invalid/misspelled
+            # ticker now gets a plain, friendly message and stops here.
+            if cs.action == "UNAVAILABLE":
+                st.error(
+                    f"❌ **Couldn't find '{ticker.replace('.NS','')}' on NSE.** "
+                    "Double-check the spelling, or search by company name above "
+                    "(e.g. RELIANCE, INFY, TCS)."
+                )
+                st.stop()
 
             # Live price
             _an_live = None
@@ -974,6 +1023,21 @@ if analyze_btn or _prefill_active or (
                 st.caption(f"⚠️ Portfolio fit unavailable: {_pf_e}")
 
         except Exception as e:
-            st.error(f"Analysis failed: {e}")
-            import traceback
-            st.code(traceback.format_exc())
+            # BUGFIX: previously every failure here — including a simple
+            # misspelled/unknown ticker reaching this point via some other
+            # path — dumped "Analysis failed: <raw exception>" plus a full
+            # Python traceback. fetch_single() raises a ValueError starting
+            # with "No data for" specifically when no source recognises the
+            # symbol, so that one known case now gets a plain message instead;
+            # anything else still shows the traceback since that's a genuine
+            # bug worth seeing, not a typo.
+            if isinstance(e, ValueError) and str(e).startswith("No data for"):
+                st.error(
+                    f"❌ **Couldn't find '{ticker.replace('.NS','')}' on NSE.** "
+                    "Double-check the spelling, or search by company name above "
+                    "(e.g. RELIANCE, INFY, TCS)."
+                )
+            else:
+                st.error(f"Analysis failed: {e}")
+                import traceback
+                st.code(traceback.format_exc())
