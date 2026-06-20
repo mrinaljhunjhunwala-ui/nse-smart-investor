@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import urllib.request
 import warnings
 from typing import Dict, List, Optional, Tuple
@@ -40,6 +41,8 @@ import numpy as np
 import pandas as pd
 
 warnings.filterwarnings("ignore")
+
+_log = logging.getLogger("analysis.macro")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,8 +99,10 @@ def _fetch_yahoo_macro(symbol: str, period: str = "3mo") -> pd.DataFrame:
         import urllib.parse as _up
         _opener, _crumb = _get_yf_crumb()
         _cqs = f"&crumb={_up.quote(_crumb)}" if _crumb else ""
-    except Exception:
+    except Exception as e:
         _opener, _cqs = None, ""
+        _log.debug("Yahoo crumb auth unavailable for %s, falling back to unauthenticated request: %s",
+                   symbol, e)
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
            f"?interval=1d&range={yf_range}&includePrePost=false{_cqs}")
     req = urllib.request.Request(
@@ -143,8 +148,12 @@ def fetch_macro_data(period: str = "3mo") -> Dict[str, pd.DataFrame]:
             df = _fetch_yahoo_macro(sym, period=period)
             if not df.empty and len(df) >= 5:
                 result[name] = df
-        except Exception:
-            pass
+            else:
+                _log.warning("macro fetch for %s (%s) returned insufficient data (%d rows)",
+                            name, sym, len(df))
+        except Exception as e:
+            _log.warning("macro fetch failed for %s (%s): %s: %s",
+                        name, sym, type(e).__name__, e)
     return result
 
 
