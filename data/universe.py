@@ -15,6 +15,25 @@ Helpers:
     resolve_ticker(query)       → "RELIANCE.NS" (accepts partial / no-suffix names)
     get_sector(ticker)          → str
     get_tickers_by_sector(sector) → List[str]
+
+CHANGES in this revision
+─────────────────────────
+C_VEDANTA  Vedanta Ltd completed a four-way demerger effective 15-Jun-2026:
+    the combined entity split into Vedanta Aluminium Metal Ltd (VAML.NS),
+    Vedanta Oil & Gas Ltd (VOGL.NS, ex-Malco Energy), Vedanta Power Ltd
+    (VEDPOWER.NS, ex-Talwandi Sabo Power), and Vedanta Iron & Steel Ltd
+    (VISL.NS), with VEDL.NS continuing as the residual entity (critical
+    minerals / Hindustan Zinc). None of the four new entities existed in
+    this universe or in cache.py's STOCK_SEARCH_MAP before this fix, which
+    is why "Vedanta Iron & Steel" (and the other three) couldn't be found
+    by company-name search anywhere in the app. All four are now in
+    NIFTY_NEXT50 and SECTOR_MAP below. Note: as very recent listings,
+    Yahoo Finance (the app's price/history source) may still have thin or
+    incomplete daily-bar history for these tickers for a while after
+    listing — a "DATA_UNAVAILABLE" trend-quality score on these specific
+    names can be a genuine upstream data-depth gap (e.g. SMA_200 needs
+    ~200 trading days, which a stock listed in June 2026 simply doesn't
+    have yet), not necessarily an app bug.
 """
 
 from __future__ import annotations
@@ -54,6 +73,12 @@ NIFTY_NEXT50: List[str] = [
     # Consumer Discretionary
     "ZYDUSLIFE.NS", "LUPIN.NS", "LODHA.NS",
     "IRCTC.NS", "NAUKRI.NS", "ZOMATO.NS",
+    # FIX C_VEDANTA — four entities from Vedanta Ltd's 15-Jun-2026 demerger.
+    # VEDL.NS (above) continues as the residual critical-minerals entity.
+    "VAML.NS",       # Vedanta Aluminium Metal Ltd
+    "VOGL.NS",       # Vedanta Oil & Gas Ltd (ex-Malco Energy Ltd)
+    "VEDPOWER.NS",   # Vedanta Power Ltd (ex-Talwandi Sabo Power Ltd)
+    "VISL.NS",       # Vedanta Iron & Steel Ltd
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -273,12 +298,16 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "RECLTD.NS", "NHPC.NS", "SJVN.NS", "NLCINDIA.NS",
         "IGL.NS", "MGL.NS", "PETRONET.NS", "GAIL.NS",
         "HPCL.NS", "IOC.NS", "SUZLON.NS", "RPOWER.NS",
+        # FIX C_VEDANTA — oil & gas and power businesses spun out of VEDL.NS
+        "VOGL.NS", "VEDPOWER.NS",
     ],
     "Metal": [
         "TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS",
         "HINDZINC.NS", "NMDC.NS", "SAIL.NS", "MOIL.NS",
         "VEDL.NS", "RATNAMANI.NS", "APARINDS.NS", "JINDALSAW.NS",
         "SHYAMMETL.NS", "SUNFLAG.NS", "TATAMETALI.NS",
+        # FIX C_VEDANTA — aluminium and iron/steel businesses spun out of VEDL.NS
+        "VAML.NS", "VISL.NS",
     ],
     "Chemicals": [
         "PIDILITIND.NS", "AARTIIND.NS", "DEEPAKNITR.NS",
