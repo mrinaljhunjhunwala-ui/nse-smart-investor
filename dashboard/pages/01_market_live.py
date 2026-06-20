@@ -59,16 +59,16 @@ with col_h2:
 st.markdown(f"*{_ms['day']} — {_ms['detail']}*")
 st.markdown("---")
 
-# ── Fetch NSE 500 prices — Angel One (priority) → Yahoo → NSE fallback ───────
+# ── Fetch broad NSE prices — Angel One (priority) → Yahoo → NSE fallback ──
 @st.cache_data(ttl=60 if _ms["is_open"] else 3600, show_spinner=False)
 def _load_nifty_snapshot():
     """
-    Cloud-safe NSE broad snapshot (Nifty 500 universe).
+    Cloud-safe NSE broad snapshot (Nifty Total Market ~750 stocks).
     Priority: Angel One batch quotes → Yahoo Finance JSON API.
     """
     from data.universe import get_universe as _gu
 
-    tickers_list = _gu("nifty500")   # ~400 liquid NSE stocks
+    tickers_list = _gu("niftytotalmarket")   # ~750 liquid NSE stocks
     raw: dict = {}
     _source = "Yahoo Finance"
 
@@ -89,7 +89,7 @@ def _load_nifty_snapshot():
     # Tier 2: Yahoo Finance JSON
     if not raw:
         from utils.live_price import get_live_prices_batch
-        raw     = get_live_prices_batch(tickers_list, max_workers=12)
+        raw     = get_live_prices_batch(tickers_list, max_workers=20)
         _source = "Yahoo Finance"
 
     rows = []
@@ -118,7 +118,7 @@ def _load_nifty_snapshot():
     df = pd.DataFrame(rows).sort_values("chg_pct", ascending=False)
     return df
 
-with st.spinner("Loading NSE market snapshot…"):
+with st.spinner("Loading NSE market snapshot (~750 stocks)…"):
     snap = _load_nifty_snapshot()
 
 if snap.empty:
