@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import sys
+import logging
 import warnings
 import numpy as np
 import pandas as pd
@@ -41,6 +42,8 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 warnings.filterwarnings("ignore")
+
+_log = logging.getLogger("analysis.score")
 
 # ── Ensure project root is on sys.path (one-time, at import — not per call) ──
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,11 +77,17 @@ def _load_deps() -> bool:
         try:
             from utils.vix import get_india_vix_regime
             _get_india_vix_regime = get_india_vix_regime
-        except Exception:
-            pass
+        except Exception as e:
+            # Optional dependency — VIX regime sentiment falls back to "normal"
+            # when unavailable (see score_stock), but log so a real import
+            # break in utils.vix isn't invisible.
+            _log.debug("utils.vix unavailable, VIX regime sentiment disabled: %s: %s",
+                       type(e).__name__, e)
         _DEPS_LOADED = True
         return True
-    except Exception:
+    except Exception as e:
+        _log.warning("analysis.score core dependencies failed to load: %s: %s",
+                     type(e).__name__, e)
         return False
 
 
@@ -88,8 +97,10 @@ def _setup_encoding() -> None:
         try:
             sys.stdout.reconfigure(encoding="utf-8")
             sys.stderr.reconfigure(encoding="utf-8")
-        except AttributeError:
-            pass
+        except AttributeError as e:
+            # Older Python / non-standard stream wrappers may lack reconfigure();
+            # harmless, but log so it's visible during diagnosis.
+            _log.debug("stdout/stderr reconfigure unavailable: %s", e)
         os.environ.setdefault("PYTHONUTF8", "1")
 
 
@@ -669,15 +680,18 @@ def score_stock(
     # Resolve ticker — catches all exception types, not just ValueError
     try:
         canonical = _resolve_ticker(ticker)
-    except Exception:
+    except Exception as e:
         canonical = ticker if ticker.endswith(".NS") else ticker + ".NS"
+        _log.debug("ticker resolution failed for %r, falling back to %r: %s",
+                   ticker, canonical, e)
 
     # VIX
     if vix_info is None:
         try:
             vix_info = _get_india_vix_regime() if _get_india_vix_regime else None
-        except Exception:
+        except Exception as e:
             vix_info = None
+            _log.debug("VIX regime lookup failed, defaulting to 'normal': %s", e)
         if vix_info is None:
             vix_info = {"regime": "normal", "vix": None, "allow_buy": True}
 
@@ -723,7 +737,10 @@ def score_stock(
             if live and live["price"] > 0:
                 result.entry = live["price"]
                 result.price = live["price"]
-    except Exception:
-        pass  # live price update is best-effort — never fail the score
+    except Exception as e:
+        # live price update is best-effort — never fail the score, but log
+        # so a broken Angel One connection isn't invisible during diagnosis.
+        _log.debug("live price update skipped for %s: %s: %s",
+                   canonical, type(e).__name__, e)
 
     return result
