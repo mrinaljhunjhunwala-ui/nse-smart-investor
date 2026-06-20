@@ -76,8 +76,11 @@ class FundamentalsService:
                 info = provider.company_info(symbol)
                 name, sector = info.get("company_name"), info.get("sector")
                 currency = info.get("currency") or "INR"
-            except Exception:
-                pass
+            except Exception as e:
+                # Optional metadata — name/sector/currency stay None/default,
+                # but log so a broken company_info() call isn't invisible.
+                _log.debug("company_info failed for %s via %s: %s: %s",
+                           symbol, provider.name, type(e).__name__, e)
 
         stmt_date = None
         if inc and inc[0].period:
