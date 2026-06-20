@@ -152,22 +152,25 @@ with st.spinner("Computing sector scores…"):
     except Exception as e:
         st.warning(f"Sector scores error: {e}")
 
-# ── Top movers from NIFTY50 ────────────────────────────────────────────
+# ── Top movers from broad NSE universe ────────────────────────────────
 st.markdown("---")
-st.subheader("🚀 NIFTY50 Top Movers")
+st.subheader("🚀 NSE Top Movers")
+st.caption("Scanning ~750 stocks across Nifty Total Market universe")
 
 @st.cache_data(ttl=180)
 def get_top_movers():
     """
-    Fetch Nifty50 movers using Yahoo JSON direct API (cloud-safe, no rate limits).
-    Falls back to Stooq EOD price if Yahoo JSON fails for a ticker.
+    Fetch broad NSE movers using Yahoo JSON direct API (cloud-safe, no rate limits).
+    Uses niftytotalmarket (~750 stocks) instead of Nifty50-only for a true market view.
+    Falls back gracefully per-ticker if Yahoo JSON fails.
     """
-    from data.fetcher import NIFTY50_TICKERS
+    from data.universe import get_universe as _gu
     from utils.live_price import get_live_prices_batch
-    tickers_list = list(NIFTY50_TICKERS[:50])
+
+    tickers_list = _gu("niftytotalmarket")   # ~750 liquid NSE stocks
 
     # Parallel fetch — Yahoo JSON tier 1, NSE tier 2, Stooq EOD tier 3
-    raw = get_live_prices_batch(tickers_list, max_workers=12)
+    raw = get_live_prices_batch(tickers_list, max_workers=20)
 
     rows = []
     for t in tickers_list:
@@ -176,18 +179,17 @@ def get_top_movers():
             continue
         try:
             rows.append({
-                "Ticker":   t,                               # keep .NS for routing
-                "Price":    round(q["price"],     2),
-                "Day (%)":  round(q["chg_pct"],   2),
-                "Prev":     round(q["prev_close"], 2),
-                "5d (%)":   round(q["chg_pct"],   2),       # same as day when using EOD
+                "Ticker":    t,
+                "Price":     round(q["price"],     2),
+                "Day (%)":   round(q["chg_pct"],   2),
+                "Prev":      round(q["prev_close"], 2),
                 "Vol Ratio": 1.0,
             })
         except Exception:
             continue
     return pd.DataFrame(rows).sort_values("Day (%)", ascending=False) if rows else pd.DataFrame()
 
-with st.spinner("Fetching NIFTY50 movers…"):
+with st.spinner("Fetching NSE broad movers (~750 stocks)…"):
     movers = get_top_movers()
     if not movers.empty:
         top5 = movers.head(5)
@@ -213,13 +215,13 @@ with st.spinner("Fetching NIFTY50 movers…"):
             btn_a, btn_b, btn_c = st.columns([1, 1, 1])
             if btn_a.button("📊 Analyze", key=f"mover_analyze_{tick}",
                             use_container_width=True):
-                st.session_state["_goto_page"] ="🔍 Analyze Stock"
+                st.session_state["_goto_page"] = "🔍 Analyze Stock"
                 st.session_state["manual_ticker_input"] = short
                 st.session_state["last_analyzed"] = tick
                 st.rerun()
             if btn_b.button("📝 Paper Trade", key=f"mover_trade_{tick}",
                             use_container_width=True):
-                st.session_state["_goto_page"] ="📂 Paper Trades"
+                st.session_state["_goto_page"] = "📂 Paper Trades"
                 st.session_state["pt_prefill_ticker"] = tick
                 st.rerun()
             if btn_c.button("＋ Watchlist", key=f"mover_wl_{tick}",
@@ -236,6 +238,8 @@ with st.spinner("Fetching NIFTY50 movers…"):
             st.markdown("**📉 Top Losers Today**")
             for _, row in bot5.iterrows():
                 _mover_row(row, is_gain=False)
+    else:
+        st.warning("Could not fetch mover data. Try refreshing in 30 seconds.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
