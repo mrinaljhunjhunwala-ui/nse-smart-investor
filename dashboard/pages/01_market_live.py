@@ -73,6 +73,7 @@ def _load_nifty_snapshot():
     _source = "Yahoo Finance"
 
     # Tier 1: Angel One (real-time, preferred)
+    import logging as _ml_log
     try:
         from data.angel_fetcher import (
             is_configured as _aoc,
@@ -83,8 +84,8 @@ def _load_nifty_snapshot():
             if _ao_raw and sum(1 for v in _ao_raw.values() if v) > 10:
                 raw     = _ao_raw
                 _source = "Angel One (real-time)"
-    except Exception:
-        pass
+    except Exception as _ao_e:
+        _ml_log.getLogger("dashboard.market_live").debug("Angel One batch fetch failed: %s", _ao_e)
 
     # Tier 2: Yahoo Finance JSON
     if not raw:
@@ -110,7 +111,8 @@ def _load_nifty_snapshot():
                 "volume":     q.get("volume", 0),
                 "_source":    _source,
             })
-        except Exception:
+        except Exception as _row_e:
+            _ml_log.getLogger("dashboard.market_live").debug("Skipping ticker %s in snapshot: %s", t, _row_e)
             continue
 
     if not rows:
@@ -296,8 +298,9 @@ else:
                 icon = "📰" if s == "neutral" else ("🟢" if s == "positive" else "🔴")
                 reasons.append(f"{icon} News: {h}…")
 
-        except Exception:
-            pass
+        except Exception as _expl_e:
+            import logging as _expl_log
+            _expl_log.getLogger("dashboard.market_live").debug("_explain_mover(%s) failed: %s", ticker, _expl_e)
         return reasons if reasons else ["No specific technical catalyst detected"]
 
     # ── Drill into any mover (one panel, no nested-expander clutter) ───────
