@@ -97,7 +97,7 @@ def _rsi_oversold_delta(rsi: float) -> float:
 
 def _walk_forward_variants(ticker: str, df: pd.DataFrame,
                            vix_regimes: Optional[pd.Series],
-                           mkt_regimes: Optional[pd.Series]) -> List[Dict]:
+                           mkt_regimes: Optional[pd.Series]) -> "Tuple[List[Dict], int]":
     from analysis.score import score_dataframe
 
     closes = df["Close"].astype(float).values
@@ -116,12 +116,14 @@ def _walk_forward_variants(ticker: str, df: pd.DataFrame,
     last  = n - MAX_HORIZON - 1
 
     rows: List[Dict] = []
+    score_failures = 0
     for i in range(start, last, SAMPLE_STEP):
         sub = df.iloc[: i + 1]
         try:
             cs = score_dataframe(sub, ticker, vix_info=_NEUTRAL_VIX,
                                  sector_rank=_NEUTRAL_SECTOR_RANK, sector="Other")
         except Exception:
+            score_failures += 1
             continue
         entry = closes[i]
         if entry <= 0 or not np.isfinite(entry):
@@ -154,7 +156,7 @@ def _walk_forward_variants(ticker: str, df: pd.DataFrame,
             "fwd_60d": fwd60,
             "trend_persist_20": persist,
         })
-    return rows
+    return rows, score_failures
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +244,7 @@ def main() -> int:
     mkt_regimes = _market_regime_series()
 
     frames: Dict[str, pd.DataFrame] = {}
+    prep_failures = 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(_prepare_ticker, t, PERIOD): t for t in universe}
         done = 0
@@ -252,18 +255,27 @@ def main() -> int:
                 if df is not None:
                     frames[t] = df
             except Exception:
-                pass
+                prep_failures += 1
             done += 1
             if done % 50 == 0:
                 print(f"  fetched {done}/{len(universe)} [{time.time()-t0:.0f}s]")
+    if prep_failures:
+        print(f"  {prep_failures}/{len(universe)} tickers raised an exception during "
+              f"prepare/fetch (excluded from frames)")
 
     print(f"Usable tickers: {len(frames)}/{len(universe)} [{time.time()-t0:.0f}s]")
 
     all_rows: List[Dict] = []
+    total_score_failures = 0
     for k, (t, df) in enumerate(frames.items(), 1):
-        all_rows.extend(_walk_forward_variants(t, df, vix_regimes, mkt_regimes))
+        rows, score_failures = _walk_forward_variants(t, df, vix_regimes, mkt_regimes)
+        all_rows.extend(rows)
+        total_score_failures += score_failures
         if k % 50 == 0:
             print(f"  scored {k}/{len(frames)} ({len(all_rows)} obs) [{time.time()-t0:.0f}s]")
+    if total_score_failures:
+        print(f"  score_dataframe raised an exception {total_score_failures} times "
+              f"across all walk-forward samples (those sample points were skipped)")
 
     obs = pd.DataFrame(all_rows)
     if obs.empty:
