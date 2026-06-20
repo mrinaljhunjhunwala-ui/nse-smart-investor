@@ -82,11 +82,17 @@ def _vix_regime_series(period: str = "2y") -> Optional[pd.Series]:
             return "panic"
 
         return v.map(lab)
-    except Exception:
+    except Exception as e:
+        print(f"  VIX regime series unavailable ({type(e).__name__}: {e}) — "
+              f"regime will be 'unknown' for all rows")
         return None
 
 
+_regime_for_failures = 0
+
+
 def _regime_for(date, regimes: Optional[pd.Series]) -> str:
+    global _regime_for_failures
     if regimes is None:
         return "unknown"
     try:
@@ -95,6 +101,7 @@ def _regime_for(date, regimes: Optional[pd.Series]) -> str:
             return "unknown"
         return str(regimes.loc[idx])
     except Exception:
+        _regime_for_failures += 1
         return "unknown"
 
 
@@ -123,7 +130,7 @@ def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
 
 
 def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
-                  regimes: Optional[pd.Series]) -> List[Dict]:
+                  regimes: Optional[pd.Series]) -> "Tuple[List[Dict], int]":
     """Score the production model at weekly sample points; measure forward."""
     from analysis.score import score_dataframe
 
@@ -142,12 +149,14 @@ def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
     last  = n - MAX_HORIZON - 1                 # need a full 60-day forward path
 
     rows: List[Dict] = []
+    score_failures = 0
     for i in range(start, last, SAMPLE_STEP):
         sub = df.iloc[: i + 1]
         try:
             cs = score_dataframe(sub, ticker, vix_info=_NEUTRAL_VIX,
                                  sector_rank=_NEUTRAL_SECTOR_RANK, sector=sector)
         except Exception:
+            score_failures += 1
             continue
 
         entry = closes[i]
@@ -207,7 +216,7 @@ def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
             "ambiguous":  ambiguous,
             "days_to_outcome": days_to,
         })
-    return rows
+    return rows, score_failures
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,7 +290,9 @@ def aggregate(obs: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         try:
             spread20 = float(t.loc[10, "fwd20"]) - float(t.loc[1, "fwd20"])
             spread60 = float(t.loc[10, "fwd60"]) - float(t.loc[1, "fwd60"])
-        except Exception:
+        except Exception as e:
+            print(f"  decile spread calc failed for ranking '{name}' "
+                  f"({type(e).__name__}: {e}) — spread set to NaN")
             spread20 = spread60 = float("nan")
         rows.append({
             "ranking": name,
@@ -343,6 +354,7 @@ def main() -> int:
 
     # Fetch + indicator-enrich in parallel (network bound)
     frames: Dict[str, pd.DataFrame] = {}
+    prep_failures = 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(_prepare_ticker, t): t for t in universe}
         done = 0
@@ -353,26 +365,42 @@ def main() -> int:
                 if df is not None:
                     frames[t] = df
             except Exception:
-                pass
+                prep_failures += 1
             done += 1
             if done % 25 == 0:
                 print(f"  fetched {done}/{len(universe)} "
                       f"({len(frames)} usable) [{time.time()-t0:.0f}s]")
+    if prep_failures:
+        print(f"  {prep_failures}/{len(universe)} tickers raised an exception during "
+              f"prepare/fetch (excluded from frames)")
 
     print(f"Usable tickers: {len(frames)}/{len(universe)} [{time.time()-t0:.0f}s]")
 
     # Walk-forward scoring (CPU bound, fast)
     all_rows: List[Dict] = []
+    total_score_failures = 0
+    sector_failures = 0
     for k, (t, df) in enumerate(frames.items(), 1):
         sector = "Other"
         try:
             sector = get_sector(t)
         except Exception:
-            pass
-        all_rows.extend(_walk_forward(t, df, sector, regimes))
+            sector_failures += 1
+        rows, score_failures = _walk_forward(t, df, sector, regimes)
+        all_rows.extend(rows)
+        total_score_failures += score_failures
         if k % 25 == 0:
             print(f"  scored {k}/{len(frames)} tickers "
                   f"({len(all_rows)} obs) [{time.time()-t0:.0f}s]")
+    if sector_failures:
+        print(f"  sector lookup failed for {sector_failures}/{len(frames)} tickers "
+              f"(defaulted to 'Other')")
+    if total_score_failures:
+        print(f"  score_dataframe raised an exception {total_score_failures} times "
+              f"across all walk-forward samples (those sample points were skipped)")
+    if _regime_for_failures:
+        print(f"  regime lookup raised an exception {_regime_for_failures} times "
+              f"(treated as 'unknown')")
 
     obs = pd.DataFrame(all_rows)
     if obs.empty:
