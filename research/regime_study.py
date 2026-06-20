@@ -83,7 +83,9 @@ def _market_regime_series() -> Optional[pd.Series]:
         lab[(c < sma200) & (sma50 < sma200)] = "bear"
         lab[sma200.isna()] = "unknown"
         return lab
-    except Exception:
+    except Exception as e:
+        print(f"  market regime series unavailable ({type(e).__name__}: {e}) — "
+              f"mkt_regime will be 'unknown' for all rows")
         return None
 
 
@@ -93,7 +95,7 @@ def _market_regime_series() -> Optional[pd.Series]:
 
 def _walk_forward_5y(ticker: str, df: pd.DataFrame, sector: str,
                      vix_regimes: Optional[pd.Series],
-                     mkt_regimes: Optional[pd.Series]) -> List[Dict]:
+                     mkt_regimes: Optional[pd.Series]) -> "Tuple[List[Dict], int]":
     from analysis.score import score_dataframe
 
     closes = df["Close"].astype(float).values
@@ -115,12 +117,14 @@ def _walk_forward_5y(ticker: str, df: pd.DataFrame, sector: str,
     rets[1:] = closes[1:] / closes[:-1] - 1.0
 
     rows: List[Dict] = []
+    score_failures = 0
     for i in range(start, last, SAMPLE_STEP):
         sub = df.iloc[: i + 1]
         try:
             cs = score_dataframe(sub, ticker, vix_info=_NEUTRAL_VIX,
                                  sector_rank=_NEUTRAL_SECTOR_RANK, sector=sector)
         except Exception:
+            score_failures += 1
             continue
         entry = closes[i]
         if entry <= 0 or not np.isfinite(entry):
@@ -161,7 +165,7 @@ def _walk_forward_5y(ticker: str, df: pd.DataFrame, sector: str,
             "fwd_sharpe_20": sharpe20,
             "trend_persist_20": persist,
         })
-    return rows
+    return rows, score_failures
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +262,7 @@ def main() -> int:
               mkt_regimes.value_counts().to_dict())
 
     frames: Dict[str, pd.DataFrame] = {}
+    prep_failures = 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(_prepare_ticker, t, PERIOD): t for t in universe}
         done = 0
@@ -268,25 +273,38 @@ def main() -> int:
                 if df is not None:
                     frames[t] = df
             except Exception:
-                pass
+                prep_failures += 1
             done += 1
             if done % 50 == 0:
                 print(f"  fetched {done}/{len(universe)} "
                       f"({len(frames)} usable) [{time.time()-t0:.0f}s]")
+    if prep_failures:
+        print(f"  {prep_failures}/{len(universe)} tickers raised an exception during "
+              f"prepare/fetch (excluded from frames)")
 
     print(f"Usable tickers: {len(frames)}/{len(universe)} [{time.time()-t0:.0f}s]")
 
     all_rows: List[Dict] = []
+    total_score_failures = 0
+    sector_failures = 0
     for k, (t, df) in enumerate(frames.items(), 1):
         sector = "Other"
         try:
             sector = get_sector(t)
         except Exception:
-            pass
-        all_rows.extend(_walk_forward_5y(t, df, sector, vix_regimes, mkt_regimes))
+            sector_failures += 1
+        rows, score_failures = _walk_forward_5y(t, df, sector, vix_regimes, mkt_regimes)
+        all_rows.extend(rows)
+        total_score_failures += score_failures
         if k % 50 == 0:
             print(f"  scored {k}/{len(frames)} ({len(all_rows)} obs) "
                   f"[{time.time()-t0:.0f}s]")
+    if sector_failures:
+        print(f"  sector lookup failed for {sector_failures}/{len(frames)} tickers "
+              f"(defaulted to 'Other')")
+    if total_score_failures:
+        print(f"  score_dataframe raised an exception {total_score_failures} times "
+              f"across all walk-forward samples (those sample points were skipped)")
 
     obs = pd.DataFrame(all_rows)
     if obs.empty:
