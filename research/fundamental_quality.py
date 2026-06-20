@@ -79,7 +79,7 @@ def _fetch_statements(tickers: List[str], workers: int = 6) -> Dict[str, List[Di
         try:
             cf = svc.get_fundamentals(t)
             if cf is None:
-                return t, None
+                return t, None, None
             inc = {s.period.period_end: s for s in cf.income_statements
                    if s.period and s.period.period_end}
             bal = {s.period.period_end: s for s in cf.balance_sheets
@@ -96,19 +96,26 @@ def _fetch_statements(tickers: List[str], workers: int = 6) -> Dict[str, List[Di
                     "equity":     getattr(b, "total_equity", None) if b else None,
                     "debt":       getattr(b, "total_debt", None) if b else None,
                 })
-            return t, rows if rows else None
-        except Exception:
-            return t, None
+            return t, (rows if rows else None), None
+        except Exception as e:
+            return t, None, f"{type(e).__name__}: {e}"
 
     out: Dict[str, List[Dict]] = {}
+    failures: List[Tuple[str, str]] = []
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(one, t) for t in tickers]
         for k, f in enumerate(as_completed(futs), 1):
-            t, rows = f.result()
+            t, rows, err = f.result()
             if rows:
                 out[t] = rows
+            elif err:
+                failures.append((t, err))
             if k % 25 == 0:
                 print(f"  fundamentals {k}/{len(tickers)} ({len(out)} usable)")
+    if failures:
+        print(f"  fundamentals: {len(failures)}/{len(tickers)} tickers raised an exception "
+              f"(treated as no-data) — first 10: "
+              f"{', '.join(f'{t} [{e}]' for t, e in failures[:10])}")
     return out
 
 
@@ -201,6 +208,8 @@ def main() -> int:
     positions = list(range(start_pos, last_pos, SAMPLE_STEP))
     print(f"Sample dates: {len(positions)} ({didx[positions[0]].date()} -> {didx[positions[-1]].date()})")
 
+    _tq_failures = [0]
+
     def _tq_at(ticker: str, t: pd.Timestamp) -> Optional[float]:
         s = tq_series.get(ticker)
         if s is None or s.empty:
@@ -208,12 +217,14 @@ def main() -> int:
         try:
             d = s.index.asof(t)
         except Exception:
+            _tq_failures[0] += 1
             return None
         if pd.isna(d) or (t - d).days > 12:
             return None
         return float(s.loc[d])
 
     rows: List[Dict] = []
+    regime_failures = 0
     for pos in positions:
         t = didx[pos]
         reg = "unknown"
@@ -222,7 +233,7 @@ def main() -> int:
                 ridx = mkt_regimes.index.asof(t)
                 reg = str(mkt_regimes.loc[ridx]) if pd.notna(ridx) else "unknown"
             except Exception:
-                pass
+                regime_failures += 1
         for tk, s in stmts.items():
             if tk not in closes.columns:
                 continue
@@ -243,6 +254,11 @@ def main() -> int:
             })
 
     df = pd.DataFrame(rows)
+    if regime_failures:
+        print(f"  regime lookup failed for {regime_failures}/{len(positions)} sample dates "
+              f"(treated as 'unknown')")
+    if _tq_failures[0]:
+        print(f"  TQS asof-lookup raised an exception {_tq_failures[0]} times (treated as no-TQS)")
     if df.empty:
         print("No observations.")
         return 1
