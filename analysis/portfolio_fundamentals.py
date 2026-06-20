@@ -35,8 +35,11 @@ def _val(ar) -> Optional[float]:
     try:
         if getattr(ar, "available", False) and ar.value is not None:
             return float(ar.value)
-    except Exception:
-        pass
+    except Exception as e:
+        # Shouldn't normally happen (would mean ar.value isn't float-convertible) —
+        # log at debug level so it's traceable instead of silently disappearing.
+        _log.debug("_val() could not coerce AnalyticResult value to float: %s: %s",
+                   type(e).__name__, e)
     return None
 
 
