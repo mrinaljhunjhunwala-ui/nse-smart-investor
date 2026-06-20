@@ -52,6 +52,7 @@ def main() -> int:
 
     def one(t: str):
         rg, conf, shares = None, "", None
+        err_fund, err_px = None, None
         try:
             cf = svc.get_fundamentals(t)
             if cf is not None:
@@ -62,27 +63,40 @@ def main() -> int:
                     if getattr(s, "shares_diluted", None):
                         shares = float(s.shares_diluted)
                         break
-        except Exception:
-            pass
+        except Exception as e:
+            err_fund = f"{type(e).__name__}: {e}"
         px = None
         try:
             df = fetch_single(t, period="1m")
             if df is not None and not df.empty:
                 px = float(df["Close"].iloc[-1])
-        except Exception:
-            pass
-        return t, rg, conf, shares, px
+        except Exception as e:
+            err_px = f"{type(e).__name__}: {e}"
+        return t, rg, conf, shares, px, err_fund, err_px
 
     rows = []
+    fund_failures, px_failures = [], []
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = [ex.submit(one, t) for t in universe]
         for k, f in enumerate(as_completed(futs), 1):
-            t, rg, conf, shares, px = f.result()
+            t, rg, conf, shares, px, err_fund, err_px = f.result()
+            if err_fund:
+                fund_failures.append((t, err_fund))
+            if err_px:
+                px_failures.append((t, err_px))
             rows.append({"ticker": t, "rev_g": rg, "conf": conf,
                          "sector": get_sector(t),
                          "mcap": (px * shares) if (px and shares) else None})
             if k % 40 == 0:
                 print(f"  {k}/{len(universe)} [{time.time()-t0:.0f}s]")
+    if fund_failures:
+        print(f"  fundamentals fetch raised an exception for {len(fund_failures)}/{len(universe)} "
+              f"tickers (rev_g left None) — first 10: "
+              f"{', '.join(f'{t} [{e}]' for t, e in fund_failures[:10])}")
+    if px_failures:
+        print(f"  price fetch raised an exception for {len(px_failures)}/{len(universe)} "
+              f"tickers (mcap left None) — first 10: "
+              f"{', '.join(f'{t} [{e}]' for t, e in px_failures[:10])}")
 
     df = pd.DataFrame(rows)
 
