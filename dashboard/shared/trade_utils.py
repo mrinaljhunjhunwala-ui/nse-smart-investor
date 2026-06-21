@@ -717,7 +717,16 @@ def _paper_trade_popover(
                 f"in '{_selected_acct}'",
                 icon="✅",
             )
-            st.cache_data.clear()
+            # FIX TU-confirm: paper_open_trade() writes straight to trade_store
+            # (uncached) — nothing here needs st.cache_data invalidated. The old
+            # blanket st.cache_data.clear() also wiped Top Picks (5-min scan),
+            # Tomorrow's Watchlist (1-hr EOD scan), and sector ranks, which on
+            # pages with their own cold-cache state machine (e.g. Tomorrow's
+            # Watchlist) forced an immediate "first run, scanning…" banner on
+            # the very next rerun — burying this toast before it was ever seen.
+            # Only the live-price cache for this ticker is now stale (the new
+            # position needs a fresh quote), so clear just that.
+            _fetch_single_live_price.clear()
             st.rerun()
 
 
