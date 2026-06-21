@@ -250,12 +250,18 @@ def render_sidebar(current: str = None) -> None:
     # ── Grouped navigation — single-click collapsible sections ─────────────────
     # FIX (nav): the old selectbox→radio combo needed two separate interactions
     # to reach any page outside the current section (pick a Section, THEN pick
-    # a Page). Replaced with st.page_link inside per-section expanders — the
-    # section you're currently in opens auto-expanded, every page link is a
-    # single click, and switching sections is also a single click (expand the
-    # other section). The _goto_page programmatic hook (used by buttons all
-    # over the app to jump pages) and _nav_target deep-link resolution both
-    # still work exactly as before — only the widgets they feed have changed.
+    # a Page). Originally replaced with st.page_link inside per-section
+    # expanders, but st.page_link resolves its target page's registry entry
+    # (url_pathname) EAGERLY at render time — not just on click. When a page
+    # is run standalone (as the CI smoke test does via AppTest.from_file on
+    # one pages/*.py file at a time, with no sibling pages registered) that
+    # lookup raises KeyError('url_pathname') immediately on render, before
+    # any interaction. Using st.button + st.switch_page instead defers page
+    # resolution until an actual click — which never happens in the smoke
+    # test — while still keeping every page a single click away in the
+    # sidebar. The _goto_page programmatic hook (used by buttons all over the
+    # app to jump pages) and _nav_target deep-link resolution both still work
+    # exactly as before.
     _cur_grp = next((_g for _g, _ps in _NAV_GROUPS.items() if current in _ps), None)
 
     def _nav_to(_name):
@@ -278,11 +284,12 @@ def render_sidebar(current: str = None) -> None:
         ):
             for _p in _pages:
                 _is_cur_page = _is_cur_grp and (_p == current)
-                st.page_link(
-                    _PAGE_FILE[_p],
-                    label=(f"**{_PAGE_EMOJI[_p]} {_p}**" if _is_cur_page else f"{_PAGE_EMOJI[_p]} {_p}"),
-                    use_container_width=True,
-                )
+                _label = (f"**{_PAGE_EMOJI[_p]} {_p}**" if _is_cur_page else f"{_PAGE_EMOJI[_p]} {_p}")
+                if st.button(
+                    _label, key=f"navbtn_{_p}", use_container_width=True,
+                    disabled=_is_cur_page,
+                ):
+                    _nav_to(_p)
 
 
     # ── Portfolio quick-view (right under the nav — value + today's P&L) ───────────
