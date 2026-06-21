@@ -793,7 +793,6 @@ with st.expander("🔔 Background Alerts (Telegram) — fire even when this app 
         "(Settings → Secrets and variables → Actions)."
     )
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE 1 — MY PORTFOLIO
 # ═══════════════════════════════════════════════════════════════════════════════
