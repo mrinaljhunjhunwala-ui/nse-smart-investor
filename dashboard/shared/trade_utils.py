@@ -616,11 +616,36 @@ def _suggest_position(
 # Paper trade popover (account selector inside)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@st.fragment
 def _paper_trade_popover(
     ticker: str, entry: float, sl: float, tp: float,
     reason: str, key: str, label: str = "📌 Paper Trade",
 ) -> None:
-    """Open-a-paper-trade popover that enters at the live market price by default."""
+    """Open-a-paper-trade popover that enters at the live market price by default.
+
+    FIX (lag + missing confirmation): this used to be a plain function, so
+    EVERY interaction inside it — typing a qty, switching account, even just
+    opening the popover — triggered a full-page rerun. On this app that means
+    re-running the whole sidebar (live prices, notification bell, portfolio
+    quick view, VIX/macro pulse) on every keystroke, which is the main source
+    of the page feeling slow/laggy. Wrapping this in @st.fragment means its
+    own reruns (including the one st.rerun() fires on confirm) are scoped to
+    just this small widget — the rest of the page, including the sidebar,
+    is left untouched.
+
+    One side effect: because confirming a trade no longer triggers a
+    full-page rerun, things elsewhere on the page that depend on the new
+    trade (e.g. the sidebar's open-position count, notification bell) won't
+    reflect it until the next full-page interaction. That's an intentional
+    trade-off for responsiveness; the trade itself is saved immediately
+    either way.
+
+    Also: st.toast() alone was easy to miss — it's a few seconds and the
+    page used to be busy re-fetching the whole sidebar while it showed, so
+    it was often gone by the time the page settled. Added a persistent
+    inline success banner (st.success, shown right above the button — does
+    not auto-expire) as a more reliable confirmation than the toast alone.
+    """
     _tlbl = ticker.replace(".NS", "")
     _cap  = float(st.session_state.get("trade_capital", 500_000.0))
     _rkp  = float(st.session_state.get("risk_pct", 1.0))
@@ -628,6 +653,16 @@ def _paper_trade_popover(
     _analysis_entry = float(entry or 0)
     _sl_dist = (_analysis_entry - float(sl)) if (sl and _analysis_entry) else None
     _tp_dist = (float(tp) - _analysis_entry) if (tp and _analysis_entry) else None
+
+    # Persistent confirmation banner — survives until the next trade from
+    # this same button (unlike st.toast, doesn't auto-expire after a few sec).
+    _msg_key = f"{key}_success_msg"
+    _last_msg = st.session_state.get(_msg_key)
+    if _last_msg:
+        st.success(_last_msg, icon="✅")
+        if st.button("Dismiss", key=f"{key}_dismiss", use_container_width=True):
+            st.session_state.pop(_msg_key, None)
+            st.rerun()
 
     with st.popover(label, use_container_width=True):
         st.markdown(f"**{_tlbl}** — open paper trade")
@@ -716,6 +751,10 @@ def _paper_trade_popover(
                 f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f} "
                 f"in '{_selected_acct}'",
                 icon="✅",
+            )
+            st.session_state[_msg_key] = (
+                f"Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f} "
+                f"in '{_selected_acct}'"
             )
             # FIX TU-confirm: paper_open_trade() writes straight to trade_store
             # (uncached) — nothing here needs st.cache_data invalidated. The old
