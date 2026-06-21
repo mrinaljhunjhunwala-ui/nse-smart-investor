@@ -14,6 +14,22 @@ C_TICKER  Tata Motors demerger correction (effective 1-Oct-2025): the original
     TATAMOTORS.NS entry is flagged with a comment noting the business has
     changed shape since the universe list was likely curated.
 
+C_VEDANTA  Vedanta Ltd completed a four-way demerger effective 15-Jun-2026,
+    splitting into Vedanta Aluminium Metal Ltd (VAML.NS), Vedanta Oil & Gas
+    Ltd (VOGL.NS, ex-Malco Energy), Vedanta Power Ltd (VEDPOWER.NS, ex-Talwandi
+    Sabo Power), and Vedanta Iron & Steel Ltd (VISL.NS), with VEDL.NS
+    continuing as the residual critical-minerals/Hindustan Zinc entity.
+    STOCK_SEARCH_MAP previously had NO entry for "Vedanta" at all (not even
+    the parent) — that's why neither the parent nor any of the four new
+    spin-offs could be found via company-name search anywhere in the app.
+    All five are now listed explicitly. Note: as very recent listings, the
+    four new entities may still have thin/incomplete daily-bar history on
+    Yahoo Finance (the app's data source) for a while after listing — a
+    "DATA_UNAVAILABLE" trend-quality score specifically on these names can
+    be a genuine upstream data-depth gap (score_stock needs ~200 trading
+    days for SMA_200, which a June-2026 listing doesn't have yet), not
+    necessarily an app bug.
+
 C1  _tomorrow_watchlist bucket assignment — added an explicit precedence
     comment documenting that the elif chain order is deliberate (breakout
     checked before reversal buckets), and added debug logging when a stock's
@@ -136,6 +152,15 @@ STOCK_SEARCH_MAP = {
     "Mahindra & Mahindra (M&M)": "M&M.NS",
     "LTIMindtree": "LTIM.NS",
     "Shriram Finance": "SHRIRAMFIN.NS",
+    # FIX C_VEDANTA: Vedanta Ltd demerged effective 15-Jun-2026 into a
+    # residual entity (critical minerals / Hindustan Zinc) plus four newly
+    # listed standalone businesses. None of these five had any entry here
+    # before — "Vedanta" itself was missing entirely, not just the splits.
+    "Vedanta Limited (residual — Zinc, Copper, Critical Minerals)": "VEDL.NS",
+    "Vedanta Aluminium Metal": "VAML.NS",
+    "Vedanta Oil & Gas": "VOGL.NS",
+    "Vedanta Power": "VEDPOWER.NS",
+    "Vedanta Iron & Steel": "VISL.NS",
     # Nifty Next 50
     "Cholamandalam Finance": "CHOLAFIN.NS",
     "Muthoot Finance": "MUTHOOTFIN.NS",
@@ -174,7 +199,6 @@ STOCK_SEARCH_MAP = {
     "REC Limited": "RECLTD.NS",
     "Canara Bank": "CANBK.NS",
     "Bank of Baroda": "BANKBARODA.NS",
-    "Vedanta": "VEDL.NS",
     "Pidilite Industries": "PIDILITIND.NS",
     "Berger Paints": "BERGEPAINT.NS",
     "Indus Towers": "INDUSTOWER.NS",
@@ -1073,4 +1097,3 @@ def warm_caches() -> dict:
 
     _log.info("cache.warm_caches complete: %s", results)
     return results
-    
