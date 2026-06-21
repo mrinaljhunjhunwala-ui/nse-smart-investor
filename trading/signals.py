@@ -569,6 +569,27 @@ def check_momentum_signal(
 # Multi-screen scan  (main entry point)
 # ─────────────────────────────────────────────────────────────────────────────
 
+_DASHBOARD_SINGLE_SCREEN_FNS = {
+    # FIX SR1: explicit single-screen routing for the dashboard's screen-type
+    # dropdown (06_smart_screener.py). Previously ANY strategy string other
+    # than the two legacy CLI values ("rsi_macd", "momentum") fell through to
+    # the "run all 5 screens, take first match" branch below — so selecting
+    # "Oversold Bounce" silently ran Oversold+Fib+Pullback20+Pullback50+
+    # Breakout+MomentumLeader combined instead of just Oversold.
+    #
+    # "momentum_leader" (NOT "momentum") is deliberately a distinct key from
+    # the legacy "momentum" string, which main.py's CLI scan/backtest mode
+    # still relies on to reach the OLD check_momentum_signal() for backward
+    # compatibility — that routing is left untouched below.
+    "oversold":        lambda d: check_oversold_bounce(d),
+    "breakout":        lambda d: check_breakout(d),
+    "pullback_SMA20":  lambda d: check_pullback_to_sma(d, "SMA_20"),
+    "pullback_SMA50":  lambda d: check_pullback_to_sma(d, "SMA_50"),
+    "fibonacci":       lambda d: check_fibonacci_pullback(d),
+    "momentum_leader": lambda d: check_momentum_leader(d),
+}
+
+
 def scan_tickers(
     tickers:       List[str],
     strategy:      str  = "all",
@@ -579,10 +600,14 @@ def scan_tickers(
     top_n_sectors: int  = 3,
 ) -> List[Dict]:
     """
-    Scan tickers across all 5 screens (or a single legacy strategy).
+    Scan tickers across all 5 screens (or a single legacy strategy, or a
+    single explicit dashboard screen — see _DASHBOARD_SINGLE_SCREEN_FNS).
 
     FIX: VIX block now uses `continue` instead of `break` so remaining
     screens are still tried when one screen's BUY is blocked by VIX.
+
+    FIX SR1: strategy values in _DASHBOARD_SINGLE_SCREEN_FNS now run ONLY
+    that one screen, instead of silently falling through to "run all 5".
     """
     params  = params or {}
     signals = []
@@ -613,14 +638,22 @@ def scan_tickers(
             print(f"  Sector filter error ({exc}) — filter disabled")
 
     if strategy == "rsi_macd":
-        legacy_fn  = check_rsi_macd_signal
-        use_legacy = True
+        legacy_fn    = check_rsi_macd_signal
+        use_legacy   = True
+        single_fn    = None
     elif strategy == "momentum":
-        legacy_fn  = check_momentum_signal
-        use_legacy = True
+        legacy_fn    = check_momentum_signal
+        use_legacy   = True
+        single_fn    = None
+    elif strategy in _DASHBOARD_SINGLE_SCREEN_FNS:
+        # FIX SR1: run exactly the one requested screen instead of all 5.
+        use_legacy   = False
+        legacy_fn    = None
+        single_fn    = _DASHBOARD_SINGLE_SCREEN_FNS[strategy]
     else:
-        use_legacy = False
-        legacy_fn  = None
+        use_legacy   = False
+        legacy_fn    = None
+        single_fn    = None
 
     for ticker in tickers:
         try:
@@ -647,6 +680,28 @@ def scan_tickers(
                         continue
                     sig["ticker"] = ticker
                     fired.append(sig)
+            elif single_fn is not None:
+                # FIX SR1: exactly one screen requested — don't fall through
+                # to the other 4/5 screens if it doesn't fire.
+                sig = single_fn(df)
+                if sig:
+                    if sig["action"] == "BUY" and not vix_info["allow_buy"]:
+                        print(f"  -- {ticker:<22}  BUY suppressed (VIX panic)")
+                    else:
+                        sig["ticker"]   = ticker
+                        sig["strategy"] = sig["screen"]
+                        sig["sector"]   = _TICKER_SECTOR.get(ticker, "Unknown")
+
+                        if struct_stop and struct_stop > 0 and sig["action"] in ("BUY", "WATCHLIST"):
+                            atr_sl = sig.get("sl", 0) or 0
+                            if struct_stop > atr_sl:
+                                sig["sl"]        = struct_stop
+                                sig["stop_type"] = "structure"
+                            else:
+                                sig["stop_type"] = "atr"
+                            sig["structure_stop"] = struct_stop
+
+                        fired.append(sig)
             else:
                 # 5-screen priority: first match wins
                 for fn in [
