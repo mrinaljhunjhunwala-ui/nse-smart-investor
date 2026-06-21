@@ -106,12 +106,13 @@ with tab_scan:
         else:
             rows = []
             prog = st.progress(0, text="Scanning…")
+            import logging as _tqs_log
             for i, t in enumerate(tickers):
                 try:
                     r = score_ticker(t, period=period)
                     rows.append(r.as_dict())
-                except Exception:
-                    pass
+                except Exception as _tqs_e:
+                    _tqs_log.getLogger("dashboard.tqs_scanner").debug("score_ticker(%s) failed: %s — skipped", t, _tqs_e)
                 prog.progress((i + 1) / len(tickers), text=f"Scored {t}")
             prog.empty()
 
