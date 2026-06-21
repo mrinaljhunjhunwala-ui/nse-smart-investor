@@ -330,8 +330,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         else:
             st.caption("ℹ️ **Using free sources** (Stooq → Yahoo). Set up **Angel One** on its "
                        "page for faster, more reliable scans.")
-    except Exception:
-        pass
+    except Exception as _ao_cc_e:
+        import logging; logging.getLogger("dashboard.command_centre").debug("Angel One config check failed: %s", _ao_cc_e)
 
     # ── Decide whether a (re)scan is needed, then kick it off in the background ──
     _now = datetime.datetime.now()
