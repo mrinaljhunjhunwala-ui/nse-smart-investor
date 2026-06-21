@@ -36,8 +36,8 @@ import urllib.request
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
+except Exception as _enc_e:
+    print(f"[startup] stdout reconfigure skipped: {_enc_e}")
 
 # Make project root importable (script lives in <root>/alerts/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -158,7 +158,8 @@ def check_price_alerts(state: dict, today: str) -> int:
         condition = str(r.get("condition", "")).strip().lower()
         try:
             level = float(r.get("level", 0))
-        except Exception:
+        except Exception as _lvl_e:
+            print(f"[price] {r.get('ticker','?')}: invalid level '{r.get('level')}' — {_lvl_e}")
             continue
         note = str(r.get("note", "")).strip()
         if not ticker or condition not in ("above", "below") or level <= 0:
