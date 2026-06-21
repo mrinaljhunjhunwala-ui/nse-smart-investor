@@ -247,27 +247,21 @@ def render_sidebar(current: str = None) -> None:
 
 
 
-    # ── Grouped navigation ───────────────────────────────────────────────────
-    # The widgets are SYNCED to the page we're on each run (so the radio highlights
-    # the current page and no spurious switch fires on a fresh/deep-linked load).
-    # Navigation happens only via explicit user action: the on_change callbacks
-    # below (radio = pick page, selectbox = jump to a section's first page) and the
-    # _goto_page programmatic hook used by buttons across the app.
+    # ── Grouped navigation — single-click collapsible sections ─────────────────
+    # FIX (nav): the old selectbox→radio combo needed two separate interactions
+    # to reach any page outside the current section (pick a Section, THEN pick
+    # a Page). Replaced with st.page_link inside per-section expanders — the
+    # section you're currently in opens auto-expanded, every page link is a
+    # single click, and switching sections is also a single click (expand the
+    # other section). The _goto_page programmatic hook (used by buttons all
+    # over the app to jump pages) and _nav_target deep-link resolution both
+    # still work exactly as before — only the widgets they feed have changed.
+    _cur_grp = next((_g for _g, _ps in _NAV_GROUPS.items() if current in _ps), None)
+
     def _nav_to(_name):
         _t = _PAGE_FILE.get(_name)
         if _t:
             st.switch_page(_t)
-
-    # Callbacks only RECORD the desired target — they must not call st.switch_page /
-    # st.rerun (those are no-ops inside a callback). The actual switch happens in the
-    # script body below, after the widgets render.
-    def _on_page_change():
-        st.session_state['_nav_target'] = st.session_state.get('nav', '').split(' ', 1)[-1]
-
-    def _on_group_change():
-        _g = st.session_state.get('nav_group', '').split(' ', 1)[-1]
-        if _g in _NAV_GROUPS:
-            st.session_state['_nav_target'] = _NAV_GROUPS[_g][0]   # section's first page
 
     # Programmatic nav: a button elsewhere set _goto_page to a full page name.
     if st.session_state.get('_goto_page'):
@@ -277,23 +271,18 @@ def render_sidebar(current: str = None) -> None:
         if _match and _match != current:
             _nav_to(_match)
 
-    # Force both widgets to reflect the current page BEFORE they are instantiated.
-    _cur_grp = next((_g for _g, _ps in _NAV_GROUPS.items() if current in _ps), None)
-    if _cur_grp:
-        st.session_state['nav_group'] = f'{_group_icons[_cur_grp]} {_cur_grp}'
-        st.session_state['nav']       = f'{_PAGE_EMOJI[current]} {current}'
-
-    st.sidebar.selectbox('Section', [f'{_group_icons[g]} {g}' for g in _NAV_GROUPS],
-                         key='nav_group', label_visibility='collapsed',
-                         on_change=_on_group_change)
-    _selected_group = st.session_state['nav_group'].split(' ', 1)[1]
-    st.sidebar.radio('Page', [f'{_PAGE_EMOJI[p]} {p}' for p in _NAV_GROUPS[_selected_group]],
-                     key='nav', label_visibility='collapsed', on_change=_on_page_change)
-
-    # Resolve a pending nav request HERE (valid in the body; a no-op inside a callback).
-    _target = st.session_state.pop('_nav_target', None)
-    if _target and _target != current:
-        _nav_to(_target)
+    for _grp, _pages in _NAV_GROUPS.items():
+        _is_cur_grp = (_grp == _cur_grp)
+        with st.sidebar.expander(
+            f"{_group_icons[_grp]} {_grp}", expanded=_is_cur_grp,
+        ):
+            for _p in _pages:
+                _is_cur_page = _is_cur_grp and (_p == current)
+                st.page_link(
+                    _PAGE_FILE[_p],
+                    label=(f"**{_PAGE_EMOJI[_p]} {_p}**" if _is_cur_page else f"{_PAGE_EMOJI[_p]} {_p}"),
+                    use_container_width=True,
+                )
 
 
     # ── Portfolio quick-view (right under the nav — value + today's P&L) ───────────
