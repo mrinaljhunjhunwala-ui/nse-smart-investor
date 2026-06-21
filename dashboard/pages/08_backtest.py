@@ -306,8 +306,8 @@ if st.session_state.get("bt_running", False):
             # FIX B4: write to portfolio_results.csv so the top table refreshes
             try:
                 _bt_res.to_csv("portfolio_results.csv")
-            except Exception:
-                pass
+            except Exception as _csv_e:
+                import logging; logging.getLogger("dashboard.backtest").warning("Could not write portfolio_results.csv: %s", _csv_e)
             st.success(
                 f"✅ Backtested {len(_bt_res)} stocks "
                 f"({st.session_state.get('bt_result_label','')})."
@@ -449,4 +449,4 @@ if st.button("📊 Show Normalised Performance", key="compare_btn"):
                     "is apples-to-apples."
                 )
     else:
-        st.warning("No price data could be loaded for the selected tickers.")    
+        st.warning("No price data could be loaded for the selected tickers.")
