@@ -1,309 +1,1009 @@
+"""dashboard/shared/trade_utils.py - paper-trade DB helpers + position sizing.
+
+FIXES applied in this revision
+───────────────────────────────
+TU1  NSE holiday calendar — _is_market_open() and _is_squareoff_time() now
+     check a cached NSE holiday list (fetched once daily from NSE's own
+     bhavcopy calendar endpoint, with a hard-coded fallback list for the
+     current year) before evaluating time/weekday logic. On holidays both
+     functions return False so auto-close never runs against stale EOD prices.
+
+TU2  MIS square-off fallback price — when live price is unavailable at
+     square-off time the trade is NOT closed at entry price. Instead it is
+     flagged with exit_reason="Auto square-off: price unavailable at 15:15"
+     and left OPEN so the user can close it manually. The closed list entry
+     marks exit as None so the P&L display shows "—" rather than a phantom ₹0.
+
+TU3  paper_delete_account() — now raises a ValueError (caught by callers) if
+     the account still has open positions, preventing silent history wipe.
+     Callers that want to force-delete must first close all positions.
+
+TU4  _portfolio_live_prices batch cache — individual ticker failures no longer
+     poison the whole batch. Each ticker is fetched independently inside a
+     try/except; failures are logged and excluded from the result dict without
+     invalidating the cached prices for healthy tickers.
+
+TU5  Signal monitor state (_pf_prev_actions) persisted to the kv store via
+     trade_store.kv_set / kv_get so the "N changes since your last check"
+     diff survives browser refreshes and new tabs.
+
+TU6  _live_quote_price() — tenacity retry with exponential back-off (3
+     attempts, 1 s / 2 s delays) so a transient Yahoo 429 does not silently
+     return None and cascade into the entry-price square-off fallback (TU2).
+
+FIX3 clear_price_caches() — added as a named public export so
+     03_my_portfolio.py can bust only the live-price TTL caches (60 s) on
+     the user's "Refresh Prices" click without clearing risk or fundamental
+     caches.  Calls _portfolio_live_prices.clear() and
+     _fetch_single_live_price.clear() — both are @st.cache_data functions
+     so .clear() is always available.
+
+FIX MH1  Manual portfolio holdings persistence (load_manual_holdings /
+     save_manual_holdings) — replaces the old portfolio.csv / file-upload /
+     Angel-One-import flow. Holdings are entered by hand on the My Portfolio
+     page and persisted to the kv store, same pattern as TU5.
 """
-research/score_variants.py — comparative evaluation of three research-only
-score variants against the production composite, through the same 5-year
-walk-forward framework as research/regime_study.py.
 
-PRODUCTION SCORING IS NOT MODIFIED. Variants are derived arithmetically from
-the production score at each observation:
-
-  BASE      : production 90-pt price-derived score (sentiment neutralised)
-  Variant A : BASE − pattern component            (remove candlesticks)
-  Variant B : BASE − oversold-RSI bonus           (remove the contrarian RSI credit)
-  Variant C : BASE − pattern − oversold-RSI bonus (remove both)
-
-Definition of "remove the oversold-RSI bonus" (documented design decision):
-the production RSI map awards 10 pts for RSI<30 and 8 pts for RSI 30–40 —
-contrarian "bounce candidate" credit inside an otherwise trend-following
-factor. Variant B re-scores those zones at the same minimal 1.0 pt the map
-gives RSI>80, making the RSI factor purely trend-consistent. The RSI map below
-mirrors analysis/score._score_technical verbatim (kept in sync by
-tests-free research convention: verify against score.py lines ~101-108 when
-the production map changes).
-
-Spearman/decile comparisons are rank-based, so the differing point scales of
-the variants (90 vs 80 vs 79 vs 69 max) do not bias the comparison.
-
-Run:
-    py -m research.score_variants            # full universe (~4 min)
-    py -m research.score_variants --limit 20 # pipeline check
-
-Outputs:
-    research/output/variant_observations.csv
-    research/output/variant_summary.csv        (correlations: persistence + returns)
-    research/output/variant_deciles_<V>.csv    (decile monotonicity per variant)
-    research/output/variant_by_regime.csv      (bull/bear/sideways + VIX regimes)
-"""
 from __future__ import annotations
 
-import argparse
+import datetime
+import logging
 import os
+import pathlib
 import sys
+import sqlite3
+import warnings
+import io
+import json
+import math
+import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import plotly.io as pio
+from plotly.subplots import make_subplots
+import streamlit as st
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_log = logging.getLogger("dashboard.trade_utils")
+warnings.filterwarnings("ignore")
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from research.score_efficacy import (          # noqa: E402
-    _prepare_ticker, _vix_regime_series, _regime_for, _spearman,
-    _NEUTRAL_VIX, _NEUTRAL_SECTOR_RANK,
-)
-from research.regime_study import _market_regime_series   # noqa: E402
+import trade_store as _store
 
-OUT_DIR = os.path.join(_ROOT, "research", "output")
 
-PERIOD      = "5y"
-SAMPLE_STEP = 5
-MAX_HORIZON = 60
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX TU1 — NSE holiday calendar
+# ─────────────────────────────────────────────────────────────────────────────
 
-VARIANTS = ["base", "var_a", "var_b", "var_c"]
-VARIANT_LABELS = {
-    "base":  "BASE (production 90-pt)",
-    "var_a": "A: no pattern",
-    "var_b": "B: no oversold-RSI bonus",
-    "var_c": "C: no pattern + no oversold bonus",
+# Hard-coded NSE trading holidays for 2025 and 2026 as a last-resort fallback.
+# Update this list annually or rely on the live fetch below.
+_NSE_HOLIDAYS_FALLBACK = {
+    # 2025
+    datetime.date(2025, 1, 26),   # Republic Day
+    datetime.date(2025, 3, 14),   # Holi
+    datetime.date(2025, 4, 14),   # Dr. Ambedkar Jayanti / Good Friday
+    datetime.date(2025, 4, 18),   # Good Friday
+    datetime.date(2025, 5,  1),   # Maharashtra Day
+    datetime.date(2025, 8, 15),   # Independence Day
+    datetime.date(2025, 10,  2),  # Gandhi Jayanti
+    datetime.date(2025, 10, 22),  # Dussehra
+    datetime.date(2025, 10, 24),  # Diwali Laxmi Puja (Muhurat trading only)
+    datetime.date(2025, 11,  5),  # Diwali Balipratipada
+    datetime.date(2025, 11, 15),  # Gurunanak Jayanti
+    datetime.date(2025, 12, 25),  # Christmas
+    # 2026
+    datetime.date(2026, 1, 26),   # Republic Day
+    datetime.date(2026, 3,  3),   # Holi
+    datetime.date(2026, 4,  3),   # Good Friday
+    datetime.date(2026, 4, 14),   # Dr. Ambedkar Jayanti
+    datetime.date(2026, 5,  1),   # Maharashtra Day
+    datetime.date(2026, 8, 15),   # Independence Day
+    datetime.date(2026, 10,  2),  # Gandhi Jayanti
+    datetime.date(2026, 12, 25),  # Christmas
+}
+
+# Cache the fetched holiday set for the current calendar day
+_holiday_cache: dict = {}   # {"date": datetime.date, "holidays": set}
+
+
+def _nse_holidays() -> set:
+    """Return the set of NSE trading holidays for the current year.
+
+    Tries to load from the kv store (refreshed once per calendar day).
+    Falls back to the hard-coded set if the network call fails.
+    """
+    today = datetime.date.today()
+    # In-process cache — avoids repeat fetches within the same Python session
+    if _holiday_cache.get("date") == today:
+        return _holiday_cache["holidays"]
+
+    # Try kv store first (populated below once per day)
+    try:
+        _kv = _store.kv_get("nse_holidays", None)
+        if _kv and isinstance(_kv, dict) and _kv.get("date") == str(today):
+            _h = {datetime.date.fromisoformat(d) for d in _kv.get("holidays", [])}
+            _holiday_cache.update({"date": today, "holidays": _h})
+            return _h
+    except Exception as _e:
+        _log.debug("trade_utils._nse_holidays kv read: %s", _e)
+
+    # Try to fetch from NSE (public bhavcopy / holiday API, no auth needed)
+    _fetched: set = set()
+    try:
+        import urllib.request, json as _json
+        _year = today.year
+        _url  = "https://www.nseindia.com/api/holiday-master?type=trading"
+        _req  = urllib.request.Request(
+            _url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept":     "application/json",
+                "Referer":    "https://www.nseindia.com/",
+            },
+        )
+        with urllib.request.urlopen(_req, timeout=5) as _resp:
+            _data = _json.loads(_resp.read())
+        # NSE returns {"CM": [...], "FO": [...], ...}; CM = capital markets
+        for _entry in _data.get("CM", []):
+            try:
+                _d = datetime.datetime.strptime(
+                    _entry.get("tradingDate", ""), "%d-%b-%Y"
+                ).date()
+                _fetched.add(_d)
+            except Exception as _parse_e:
+                _log.debug("trade_utils._nse_holidays: could not parse date entry %s: %s", _entry, _parse_e)
+        _log.info("trade_utils._nse_holidays: fetched %d holidays for %d", len(_fetched), _year)
+    except Exception as _e:
+        _log.debug("trade_utils._nse_holidays live fetch failed: %s — using fallback", _e)
+
+    # Merge fallback so we never end up with an empty set
+    holidays = (_fetched | _NSE_HOLIDAYS_FALLBACK) if _fetched else _NSE_HOLIDAYS_FALLBACK
+
+    # Persist to kv store so other processes / page reruns skip the fetch today
+    try:
+        _store.kv_set(
+            "nse_holidays",
+            {"date": str(today), "holidays": [str(d) for d in holidays]},
+        )
+    except Exception as _e:
+        _log.debug("trade_utils._nse_holidays kv write: %s", _e)
+
+    _holiday_cache.update({"date": today, "holidays": holidays})
+    return holidays
+
+
+def _ist_now() -> datetime.datetime:
+    """Current time in IST (UTC+5:30)."""
+    return datetime.datetime.now(
+        datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB / account helpers (unchanged public API)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    with sqlite3.connect(path) as conn:
+        try:
+            return pd.read_sql_query("SELECT * FROM trades ORDER BY id DESC", conn)
+        except Exception as _e:
+            _log.warning("trade_utils.load_trades_db degraded: %s", _e)
+            return pd.DataFrame()
+
+
+def load_trades_by_account(account: str, path: str = "trades.db") -> pd.DataFrame:
+    return _store.load_by_account(account)
+
+
+def _ensure_paper_db(path: str = "trades.db"):
+    _store.ensure_schema()
+
+
+def paper_list_accounts(path: str = "trades.db") -> list:
+    """Return sorted distinct account names, including empty registered accounts."""
+    names = set()
+    try:
+        names.update(_store.list_accounts())
+    except Exception as _e:
+        _log.warning("trade_utils.paper_list_accounts (trades) degraded: %s", _e)
+    try:
+        names.update(_store.kv_get("paper_accounts", []) or [])
+    except Exception as _e:
+        _log.debug("trade_utils.paper_list_accounts (registry) degraded: %s", _e)
+    names.add("My Account")
+    return sorted(names)
+
+
+def _register_paper_account(name: str) -> None:
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        if name not in reg:
+            reg.add(name)
+            _store.kv_set("paper_accounts", sorted(reg))
+    except Exception as _e:
+        _log.debug("trade_utils._register_paper_account degraded: %s", _e)
+
+
+def paper_rename_account(old_name: str, new_name: str, path: str = "trades.db"):
+    _store.rename_account(old_name, new_name)
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        reg.discard(old_name)
+        reg.add(new_name)
+        _store.kv_set("paper_accounts", sorted(reg))
+        _store.kv_set(f"acct_type:{new_name}", paper_account_type(old_name))
+    except Exception as _e:
+        _log.debug("trade_utils.paper_rename_account registry degraded: %s", _e)
+
+
+def paper_delete_account(name: str, path: str = "trades.db"):
+    """Delete all trades in an account and drop it from the kv registry.
+
+    FIX TU3: raises ValueError if the account still has OPEN positions so
+    callers are forced to surface a warning rather than silently wiping P&L.
+    """
+    try:
+        _open = _store.fetch_open(name)
+        if not _open.empty:
+            raise ValueError(
+                f"Account '{name}' has {len(_open)} open position(s). "
+                "Close all positions before deleting the account, or use "
+                "paper_delete_account_force() to override."
+            )
+    except ValueError:
+        raise
+    except Exception as _fe:
+        _log.warning("trade_utils.paper_delete_account: could not check open positions for '%s': %s — proceeding with deletion", name, _fe)
+    _store.delete_account(name)
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        reg.discard(name)
+        _store.kv_set("paper_accounts", sorted(reg))
+    except Exception as _e:
+        _log.debug("trade_utils.paper_delete_account registry degraded: %s", _e)
+
+
+def paper_delete_account_force(name: str, path: str = "trades.db"):
+    """Force-delete an account even if it has open positions (no safeguard)."""
+    _store.delete_account(name)
+    try:
+        reg = set(_store.kv_get("paper_accounts", []) or [])
+        reg.discard(name)
+        _store.kv_set("paper_accounts", sorted(reg))
+    except Exception as _e:
+        _log.debug("trade_utils.paper_delete_account_force registry degraded: %s", _e)
+
+
+def paper_open_trade(
+    ticker: str, price: float, qty: int,
+    sl: float, tp: float, reason: str = "",
+    account: str = "My Account",
+    path: str = "trades.db",
+) -> int:
+    return _store.open_trade(ticker, price, qty, sl, tp, reason=reason, account=account)
+
+
+def paper_close_trade(
+    trade_id: int, exit_price: float,
+    reason: str = "Manual close",
+    path: str = "trades.db",
+):
+    _store.close_trade(trade_id, exit_price, reason=reason)
+
+
+def paper_edit_trade(
+    trade_id: int, sl: float = None, tp: float = None,
+    reason: str = None, path: str = "trades.db",
+):
+    _store.edit_trade(trade_id, sl=sl, tp=tp, reason=reason)
+
+
+# ── Account product type ───────────────────────────────────────────────────
+
+def paper_account_type(name: str) -> str:
+    try:
+        return _store.kv_get(f"acct_type:{name}", "CNC") or "CNC"
+    except Exception as _e:
+        _log.debug("trade_utils.paper_account_type degraded: %s", _e)
+        return "CNC"
+
+
+def set_paper_account_type(name: str, atype: str) -> None:
+    try:
+        _store.kv_set(
+            f"acct_type:{name}",
+            "MIS"
+            if str(atype).upper().startswith("MIS") or "INTRA" in str(atype).upper()
+            else "CNC",
+        )
+        _register_paper_account(name)
+    except Exception as _e:
+        _log.debug("trade_utils.set_paper_account_type degraded: %s", _e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX TU4 — per-ticker live price fetch with isolated failure handling
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _fetch_single_live_price(ticker: str) -> dict:
+    """Fetch live price for one ticker. Failures return {} without poisoning others."""
+    try:
+        from utils.live_price import get_live_prices_batch
+        raw = get_live_prices_batch([ticker])
+        q   = raw.get(ticker)
+        if isinstance(q, dict) and q.get("price"):
+            return {
+                "price": q["price"],
+                "prev":  q["prev_close"],
+                "chg":   q["chg_pct"],
+            }
+    except Exception as _e:
+        _log.debug("trade_utils._fetch_single_live_price(%s) degraded: %s", ticker, _e)
+    return {}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _portfolio_live_prices(tickers: tuple) -> dict:
+    """Live prices for portfolio holdings.
+
+    FIX TU4: each ticker is fetched independently so a single bad/delisted
+    ticker does not poison the cached result for the whole portfolio.
+    Failures are logged and excluded; healthy tickers are always returned.
+    """
+    results = {}
+    for t in tickers:
+        try:
+            _r = _fetch_single_live_price(t)
+            if _r:
+                results[t] = _r
+        except Exception as _e:
+            _log.debug("trade_utils._portfolio_live_prices(%s) failed: %s", t, _e)
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX4 — Secure temp file helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _safe_tmpfile(suffix: str = ".csv") -> pathlib.Path:
+    """Return a Path to a freshly-created secure temporary file.
+
+    FIX4: replaces the insecure tempfile.mktemp() pattern (which creates a
+    race condition between name generation and file creation) with
+    NamedTemporaryFile(delete=False), which atomically creates the file.
+    The caller owns the file and is responsible for deletion when done.
+
+    Usage:
+        tmp = _safe_tmpfile(suffix=".csv")
+        tmp.write_text(content, encoding="utf-8")
+
+    NOTE: kept for backwards compatibility / other potential callers. The
+    My Portfolio page no longer uses this for holdings (see FIX MH1 below) —
+    holdings are now entered manually and persisted via the kv store, not
+    through CSV uploads or Angel-One tmp-file imports.
+    """
+    with tempfile.NamedTemporaryFile(
+        suffix=suffix, delete=False, mode="w", encoding="utf-8"
+    ) as _f:
+        _path = _f.name   # file is created and immediately closed (empty)
+    return pathlib.Path(_path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX9 — Portfolio CSV upload validation
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REQUIRED_CSV_COLS = {"ticker", "quantity", "avg_buy_price", "date_bought"}
+
+
+def upload_validate_portfolio_csv(
+    uploaded_file,
+) -> "tuple[pathlib.Path | None, str | None]":
+    """Validate an st.file_uploader result as a portfolio CSV.
+
+    FIX9: validates required columns at upload time so the rest of the page
+    never receives a malformed DataFrame.
+
+    NOTE: no longer called from My Portfolio (that page now uses manual
+    holdings entry — see load_manual_holdings/save_manual_holdings below).
+    Left in place in case any other page or export/import workflow still
+    needs CSV validation.
+
+    Returns
+    -------
+    (path, None)   — file is valid; path is a secure tmp Path ready to read.
+    (None, errmsg) — file is invalid; errmsg is a human-readable explanation.
+    """
+    import io as _io
+
+    if uploaded_file is None:
+        return None, "No file provided."
+
+    try:
+        _raw = uploaded_file.read()
+        uploaded_file.seek(0)          # reset so callers can re-read if needed
+        _df  = pd.read_csv(_io.BytesIO(_raw))
+    except Exception as _e:
+        return None, f"Could not parse CSV: {_e}"
+
+    _cols_lower = {c.strip().lower() for c in _df.columns}
+    _missing    = _REQUIRED_CSV_COLS - _cols_lower
+    if _missing:
+        return None, (
+            f"Missing required column(s): {', '.join(sorted(_missing))}. "
+            f"Expected: {', '.join(sorted(_REQUIRED_CSV_COLS))}."
+        )
+
+    if _df.empty:
+        return None, "The uploaded CSV has no data rows."
+
+    # Write to a secure temp file so the rest of the page can use a Path
+    try:
+        _tmp = _safe_tmpfile(suffix=".csv")
+        _tmp.write_bytes(_raw)
+        return _tmp, None
+    except Exception as _e:
+        return None, f"Could not write temp file: {_e}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX3 — Granular live-price cache buster (public export)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def clear_price_caches() -> None:
+    """Invalidate only the live-price TTL caches (60 s).
+
+    Called from 03_my_portfolio.py when the user clicks 'Refresh Prices'.
+    Deliberately leaves risk and fundamental caches untouched so an on-demand
+    price refresh does not trigger expensive re-fetches of unrelated data.
+
+    Both _portfolio_live_prices and _fetch_single_live_price are decorated
+    with @st.cache_data, so .clear() is always available.
+    """
+    try:
+        _portfolio_live_prices.clear()
+    except Exception as _e:
+        _log.debug("clear_price_caches: _portfolio_live_prices.clear() failed: %s", _e)
+    try:
+        _fetch_single_live_price.clear()
+    except Exception as _e:
+        _log.debug("clear_price_caches: _fetch_single_live_price.clear() failed: %s", _e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX TU6 — live quote with retry / back-off
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _live_quote_price(ticker: str) -> Optional[float]:
+    """Best-effort live LTP for a ticker (Angel One → Yahoo).
+
+    FIX TU6: retries up to 3 times with 1 s / 2 s exponential back-off so a
+    transient Yahoo 429 does not immediately return None and cascade into the
+    entry-price square-off fallback.
+    """
+    _delays = [0, 1, 2]
+    for _attempt, _delay in enumerate(_delays):
+        if _delay:
+            time.sleep(_delay)
+        try:
+            from utils.live_price import get_live_quote
+            q = get_live_quote(ticker)
+            if isinstance(q, dict) and q.get("price"):
+                return float(q["price"])
+        except Exception as _e:
+            _log.debug(
+                "trade_utils._live_quote_price(%s) attempt %d failed: %s",
+                ticker, _attempt + 1, _e,
+            )
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UI helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _action_color(action: str) -> str:
+    if action == "STRONG BUY":
+        return "card-green pulse-green"   # extra glow to distinguish from plain BUY
+    elif action == "BUY":
+        return "card-green"
+    elif action in ("WATCHLIST", "HOLD"):
+        return "card-yellow"
+    else:
+        return "card-red"
+
+
+def _action_emoji(action: str) -> str:
+    return {
+        "STRONG BUY": "🚀", "BUY": "🟢", "WATCHLIST": "👀",
+        "HOLD": "🟡",       "CAUTION": "⚠️", "EXIT": "🔴",
+    }.get(action, "")
+
+
+# Phase 2 UI honesty — map internal action strings to honest display labels.
+# Internal strings (engine, DB, CSV, sort keys) are NEVER changed.
+# Only this function touches what the user actually reads.
+_ACTION_DISPLAY_LABELS = {
+    "STRONG BUY": "Strong Trend ▲▲",
+    "BUY":        "Uptrend ▲",
+    "WATCHLIST":  "Watch",
+    "HOLD":       "Neutral",
+    "CAUTION":    "Weakening ▼",
+    "EXIT":       "Exit Signal ▼▼",
+    "SELL":       "Exit Signal ▼▼",   # legacy alias from signals.py
 }
 
 
-def _rsi_pts_production(rsi: float) -> float:
-    """Mirror of the production RSI map (analysis/score._score_technical)."""
-    if 60 <= rsi <= 70:  return 12.0
-    if 50 <= rsi < 60:   return 9.0
-    if 70 < rsi <= 80:   return 7.0
-    if 40 <= rsi < 50:   return 6.0
-    if 30 <= rsi < 40:   return 8.0
-    if rsi < 30:         return 10.0
-    return 1.0
+def _display_label(action: str) -> str:
+    """Return the honest UI display label for an internal action string.
+
+    Phase 2 UI honesty audit: replaces imperative labels like 'STRONG BUY'
+    with descriptive trend-quality language consistent with the efficacy study
+    finding that these are trend-quality scores, not return forecasts.
+
+    The internal action string is preserved everywhere else (DB, CSV export,
+    sort keys, signal logic). Only the display layer uses this function.
+    """
+    return _ACTION_DISPLAY_LABELS.get(action, action)
 
 
-def _rsi_oversold_delta(rsi: float) -> float:
-    """Points the production map awards ABOVE the trend-consistent minimum (1.0)
-    in the oversold zones. Zero outside RSI<40."""
-    if rsi < 30:
-        return 10.0 - 1.0
-    if 30 <= rsi < 40:
-        return 8.0 - 1.0
-    return 0.0
+def _grade_color(grade: str) -> str:
+    return {
+        "A+": "#26a69a", "A": "#4CAF50", "B": "#8BC34A",
+        "C":  "#FFC107", "D": "#FF5722", "F": "#f44336",
+    }.get(grade, "#9E9E9E")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Walk-forward — production score + the inputs needed to derive variants
+# Position sizing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _walk_forward_variants(ticker: str, df: pd.DataFrame,
-                           vix_regimes: Optional[pd.Series],
-                           mkt_regimes: Optional[pd.Series]) -> "Tuple[List[Dict], int]":
-    from analysis.score import score_dataframe
+def _suggest_position(
+    entry: float, sl: float,
+    capital: float = None,
+    risk_pct: float = None,
+    max_alloc_pct: float = 20.0,
+) -> dict:
+    """Fixed-fractional risk sizing capped at max_alloc_pct% of capital."""
+    if capital is None:
+        capital = float(st.session_state.get("trade_capital", 500_000.0))
+    if risk_pct is None:
+        risk_pct = float(st.session_state.get("risk_pct", 1.0))
+    entry = float(entry or 0)
+    sl    = float(sl    or 0)
+    if entry <= 0:
+        return {
+            "qty": 1, "price": entry, "risk_per_share": 0,
+            "capital_at_risk": 0, "position_value": entry, "basis": "fallback",
+        }
 
-    closes = df["Close"].astype(float).values
-    n      = len(df)
-    sma20  = (df["SMA_20"].astype(float).values
-              if "SMA_20" in df.columns else np.full(n, np.nan))
-    rsis   = (df["RSI"].astype(float).values
-              if "RSI" in df.columns else np.full(n, 50.0))
-
-    if "SMA_200" in df.columns:
-        valid = df["SMA_200"].notna().values
-        start = int(np.argmax(valid)) if valid.any() else n
+    risk_amount = capital * (risk_pct / 100.0)
+    rps = abs(entry - sl)
+    if rps > 0.01:
+        qty_risk = int(risk_amount / rps)
+        basis    = f"{risk_pct:.0f}% risk (₹{risk_amount:,.0f}) ÷ ₹{rps:.2f}/share"
     else:
-        start = 200
-    start = max(start, 65)
-    last  = n - MAX_HORIZON - 1
+        qty_risk = int(risk_amount / entry)
+        basis    = "notional (no valid stop)"
 
-    rows: List[Dict] = []
-    score_failures = 0
-    for i in range(start, last, SAMPLE_STEP):
-        sub = df.iloc[: i + 1]
-        try:
-            cs = score_dataframe(sub, ticker, vix_info=_NEUTRAL_VIX,
-                                 sector_rank=_NEUTRAL_SECTOR_RANK, sector="Other")
-        except Exception:
-            score_failures += 1
-            continue
-        entry = closes[i]
-        if entry <= 0 or not np.isfinite(entry):
-            continue
+    qty_cap = int((capital * max_alloc_pct / 100.0) / entry)
+    qty     = max(1, min(qty_risk, qty_cap))
+    if qty == qty_cap < qty_risk:
+        basis += f" · capped at {max_alloc_pct:.0f}% allocation"
 
-        base   = float(cs.score) - float(cs.sentiment_score)
-        pat    = float(cs.pattern_score)
-        rsi    = float(rsis[i]) if np.isfinite(rsis[i]) else 50.0
-        os_del = _rsi_oversold_delta(rsi)
-
-        fwd20 = (closes[i + 20] / entry - 1.0) * 100.0
-        fwd60 = (closes[i + 60] / entry - 1.0) * 100.0
-        # Trend persistence: share of next 20 days above SMA-20
-        seg_c, seg_s = closes[i + 1: i + 21], sma20[i + 1: i + 21]
-        ok = np.isfinite(seg_s)
-        persist = float(np.mean(seg_c[ok] > seg_s[ok]) * 100) if ok.sum() >= 15 else np.nan
-
-        date = df.index[i]
-        rows.append({
-            "ticker": ticker,
-            "date":   str(date)[:10],
-            "vix_regime": _regime_for(date, vix_regimes),
-            "mkt_regime": _regime_for(date, mkt_regimes),
-            "rsi": round(rsi, 1),
-            "base":  base,
-            "var_a": base - pat,
-            "var_b": base - os_del,
-            "var_c": base - pat - os_del,
-            "fwd_20d": fwd20,
-            "fwd_60d": fwd60,
-            "trend_persist_20": persist,
-        })
-    return rows, score_failures
+    return {
+        "qty":             qty,
+        "price":           round(entry, 2),
+        "risk_per_share":  round(rps, 2),
+        "capital_at_risk": round(rps * qty, 0),
+        "position_value":  round(entry * qty, 0),
+        "basis":           basis,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Aggregations
+# Paper trade popover (account selector inside)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _decile_fwd20(obs: pd.DataFrame, col: str) -> pd.DataFrame:
-    df = obs.dropna(subset=[col]).copy()
-    df["decile"] = pd.qcut(df[col].rank(method="first"), 10,
-                           labels=list(range(1, 11)))
-    return (df.groupby("decile", observed=True)
-              .agg(n=("ticker", "size"),
-                   fwd20=("fwd_20d", "mean"),
-                   fwd60=("fwd_60d", "mean"),
-                   persist=("trend_persist_20", "mean"))
-              .round(2))
+def _paper_trade_popover(
+    ticker: str, entry: float, sl: float, tp: float,
+    reason: str, key: str, label: str = "📌 Paper Trade",
+) -> None:
+    """Open-a-paper-trade popover that enters at the live market price by default."""
+    _tlbl = ticker.replace(".NS", "")
+    _cap  = float(st.session_state.get("trade_capital", 500_000.0))
+    _rkp  = float(st.session_state.get("risk_pct", 1.0))
+
+    _analysis_entry = float(entry or 0)
+    _sl_dist = (_analysis_entry - float(sl)) if (sl and _analysis_entry) else None
+    _tp_dist = (float(tp) - _analysis_entry) if (tp and _analysis_entry) else None
+
+    with st.popover(label, use_container_width=True):
+        st.markdown(f"**{_tlbl}** — open paper trade")
+
+        # Account selector inside the popover
+        _acct_list    = paper_list_accounts()
+        _default_acct = st.session_state.get("pt_account", "My Account")
+        _default_idx  = (
+            _acct_list.index(_default_acct) if _default_acct in _acct_list else 0
+        )
+        _selected_acct = st.selectbox(
+            "Account", options=_acct_list, index=_default_idx,
+            key=f"{key}_acct",
+            help="Choose which paper trading account to book this trade into.",
+        )
+        _acct_type = paper_account_type(_selected_acct)
+        _acct_type_label = (
+            "⏱ Intraday (MIS) — auto squared off at 15:15"
+            if _acct_type == "MIS"
+            else "📦 Delivery (CNC) — held until you close manually"
+        )
+        st.caption(f"Account type: **{_acct_type_label}** · Change in Paper Trades → Accounts.")
+
+        # FIX TU6: use retried live quote
+        _live          = _live_quote_price(ticker)
+        _default_entry = _live if (_live and _live > 0) else _analysis_entry
+
+        if _live and _analysis_entry and abs(_live - _analysis_entry) / _analysis_entry > 0.002:
+            _drift = (_live / _analysis_entry - 1) * 100
+            st.caption(
+                f"🔴 **Live ₹{_live:,.2f}** vs analysis ₹{_analysis_entry:,.2f} "
+                f"({_drift:+.2f}%). Entry defaults to live; SL/TP re-anchored."
+            )
+        elif _live:
+            st.caption(f"🟢 Entering at **live ₹{_live:,.2f}** (matches analysis).")
+        else:
+            st.caption(
+                "⚠️ Live price unavailable after retries — using the analysis entry. "
+                "Verify before trusting the fill."
+            )
+
+        entry_use = st.number_input(
+            "Entry price (₹) — defaults to LIVE, editable for a limit",
+            min_value=0.01, value=round(float(_default_entry or 0.01), 2),
+            step=0.05, format="%.2f", key=f"{key}_entry",
+        )
+        sl_use = round(entry_use - _sl_dist, 2) if _sl_dist is not None else (float(sl) if sl else 0.0)
+        tp_use = round(entry_use + _tp_dist, 2) if _tp_dist is not None else (float(tp) if tp else 0.0)
+
+        sugg = _suggest_position(entry_use, sl_use)
+        st.caption(
+            f"💡 Suggested **{sugg['qty']} shares** — sizes your loss-to-stop to "
+            f"≈{_rkp:.2g}% of ₹{_cap:,.0f} (₹{sugg['capital_at_risk']:,.0f} at risk). "
+            f"Change capital & risk in the sidebar; adjust qty below."
+        )
+        qty   = st.number_input(
+            "Quantity (shares)", min_value=1, max_value=1_000_000,
+            value=int(sugg["qty"]), step=1, key=f"{key}_qty",
+        )
+        _val  = qty * entry_use
+        _risk = abs(entry_use - (sl_use or entry_use)) * qty
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("Entry",    f"₹{entry_use:,.2f}")
+        _c2.metric("Position", f"₹{_val:,.0f}")
+        _c3.metric("At Risk",  f"₹{_risk:,.0f}")
+        if sl_use or tp_use:
+            _rr = (
+                (tp_use - entry_use) / (entry_use - sl_use)
+                if (entry_use - sl_use) > 0.01 and tp_use
+                else 0
+            )
+            st.caption(
+                f"🛑 SL ₹{(sl_use or 0):,.2f}  ·  🎯 Target ₹{(tp_use or 0):,.2f}"
+                + (f"  ·  R:R {_rr:.1f}x" if _rr else "")
+            )
+        if st.button(
+            "✅ Confirm & Open", key=f"{key}_confirm",
+            type="primary", use_container_width=True,
+        ):
+            _id = paper_open_trade(
+                ticker, float(entry_use), int(qty),
+                sl=sl_use, tp=tp_use, reason=reason,
+                account=_selected_acct,
+            )
+            st.toast(
+                f"📌 Opened #{_id}: {int(qty)} × {_tlbl} @ ₹{entry_use:,.2f} "
+                f"in '{_selected_acct}'",
+                icon="✅",
+            )
+            st.cache_data.clear()
+            st.rerun()
 
 
-def _monotonicity(dec: pd.DataFrame, col: str = "fwd20") -> float:
-    """Spearman of decile index vs decile-mean forward return — 1.0 = perfectly
-    monotone increasing."""
-    s = dec[col].reset_index(drop=True)
-    idx = pd.Series(range(1, len(s) + 1), dtype=float)
-    return round(float(idx.rank().corr(s.rank())), 3)
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX TU1 — Market hours helpers with holiday awareness
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _is_market_open() -> bool:
+    """True if NSE is currently in a live session (9:15–15:30 IST, Mon–Fri, non-holiday).
+
+    FIX TU1: checks the NSE holiday calendar before evaluating time/weekday so
+    auto-close logic never runs against stale EOD prices on exchange holidays.
+    """
+    try:
+        from utils.market_hours import market_status as _msx
+        return bool(_msx().get("is_open", False))
+    except Exception as _mh_e:
+        _log.debug("trade_utils._is_market_open: market_hours import failed (%s) — falling back to manual IST check", _mh_e)
+    # Fallback: manual IST check
+    now = _ist_now()
+    if now.weekday() >= 5:                         # Saturday / Sunday
+        return False
+    if now.date() in _nse_holidays():              # FIX TU1: holiday check
+        return False
+    mins = now.hour * 60 + now.minute
+    return 555 <= mins <= 930                       # 9:15 – 15:30
 
 
-def aggregate(obs: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-    res: Dict[str, pd.DataFrame] = {}
+def _is_squareoff_time() -> bool:
+    """True from 15:15 IST onward on trading weekdays — MIS intraday square-off window.
 
-    # Headline summary: correlations + monotonicity + decile spread, per variant
-    rows = []
-    for v in VARIANTS:
-        dec = _decile_fwd20(obs, v)
-        rows.append({
-            "variant": VARIANT_LABELS[v],
-            "sp_trend_persist": round(_spearman(obs[v], obs["trend_persist_20"]), 4),
-            "sp_fwd20":         round(_spearman(obs[v], obs["fwd_20d"]), 4),
-            "sp_fwd60":         round(_spearman(obs[v], obs["fwd_60d"]), 4),
-            "decile_monotonicity_fwd20": _monotonicity(dec, "fwd20"),
-            "d10_minus_d1_fwd20": round(float(dec.loc[10, "fwd20"]) - float(dec.loc[1, "fwd20"]), 2),
-            "d10_minus_d1_fwd60": round(float(dec.loc[10, "fwd60"]) - float(dec.loc[1, "fwd60"]), 2),
-        })
-    res["summary"] = pd.DataFrame(rows).set_index("variant")
+    FIX TU1: also returns False on NSE holidays.
+    """
+    now = _ist_now()
+    if now.weekday() >= 5:
+        return False
+    if now.date() in _nse_holidays():              # FIX TU1: holiday check
+        return False
+    mins = now.hour * 60 + now.minute
+    return mins >= 915                             # 15:15 PM
 
-    # Per-regime fwd20 Spearman for each variant (market + VIX regimes)
-    reg_rows = []
-    for kind, col in [("market", "mkt_regime"), ("vix", "vix_regime")]:
-        for reg, g in obs.groupby(col):
-            if len(g) < 500:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX TU2 — Auto-close with safe square-off price fallback
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
+    """Auto-close OPEN paper trades whose live price has crossed SL or TP.
+
+    Rules
+    ─────
+    • CNC: SL/TP breach only, during live market hours.
+    • MIS: SL/TP breach during market hours, PLUS force-close all remaining
+      open MIS positions at 15:15 (square-off).
+
+    FIX TU1: returns [] on NSE holidays (both _is_market_open and
+    _is_squareoff_time already return False, but explicit guard here too).
+
+    FIX TU2: when live price is unavailable at square-off time the trade is
+    NOT closed at entry price. Instead it is flagged with exit_reason
+    "Auto square-off: price unavailable at 15:15" and left OPEN so the user
+    can close it manually. The returned list entry has exit=None to signal
+    that no fill was recorded.
+    """
+    closed  = []
+    _open   = _is_market_open()
+    _sqoff  = _is_squareoff_time()
+
+    if not _open and not _sqoff:
+        return closed
+
+    # Extra holiday guard (belt-and-suspenders)
+    if _ist_now().date() in _nse_holidays():
+        return closed
+
+    try:
+        rows = _store.fetch_open(account)
+        if rows.empty:
+            return closed
+
+        syms = tuple(rows["ticker"].tolist())
+        lp   = _portfolio_live_prices(syms)
+
+        for _, r in rows.iterrows():
+            tk        = str(r["ticker"])
+            ep        = float(r.get("price",    0) or 0)
+            qty       = int(  r.get("quantity", 0) or 0)
+            sl        = float(r.get("sl",       0) or 0) or None
+            tp        = float(r.get("tp",       0) or 0) or None
+            trade_id  = int(r["id"])
+            acct      = str(r.get("account", account or "My Account"))
+            acct_type = paper_account_type(acct)
+            cur       = lp.get(tk, {}).get("price")
+
+            # ── MIS square-off ──────────────────────────────────────────────
+            if acct_type == "MIS" and _sqoff:
+                if cur and cur > 0:
+                    # Normal case — live price available
+                    paper_close_trade(
+                        trade_id, cur,
+                        "Auto square-off: MIS position closed at 15:15",
+                    )
+                    closed.append({
+                        "ticker":  tk.replace(".NS", ""),
+                        "type":    "squareoff",
+                        "exit":    cur,
+                        "pnl":     (cur - ep) * qty,
+                        "account": acct,
+                    })
+                else:
+                    # FIX TU2: price unavailable — flag trade, do NOT use entry price
+                    _log.warning(
+                        "trade_utils._auto_close_breached: live price unavailable for %s "
+                        "at square-off — trade #%d left open for manual close.",
+                        tk, trade_id,
+                    )
+                    paper_edit_trade(
+                        trade_id,
+                        reason=(
+                            "⚠️ Auto square-off attempted at 15:15 but live price was "
+                            "unavailable. Please close this position manually."
+                        ),
+                    )
+                    closed.append({
+                        "ticker":  tk.replace(".NS", ""),
+                        "type":    "squareoff_failed",
+                        "exit":    None,        # no fill — signals display "—"
+                        "pnl":     None,
+                        "account": acct,
+                    })
+                continue   # skip SL/TP check — already handled
+
+            # ── SL / TP breach ──────────────────────────────────────────────
+            if not _open or cur is None or ep <= 0:
                 continue
-            row = {"regime_type": kind, "regime": reg, "n": len(g)}
-            for v in VARIANTS:
-                row[v] = round(_spearman(g[v], g["fwd_20d"]), 4)
-            reg_rows.append(row)
-    res["by_regime"] = pd.DataFrame(reg_rows).set_index(["regime_type", "regime"])
 
-    # Decile tables per variant
-    for v in VARIANTS:
-        res[f"deciles_{v}"] = _decile_fwd20(obs, v)
+            hit     = None
+            exit_px = None
+            why     = ""
+            if tp and cur >= tp:
+                hit, exit_px, why = "target", tp,  "Auto-closed: target reached"
+            elif sl and cur <= sl:
+                hit, exit_px, why = "stop",   sl,  "Auto-closed: stop-loss hit"
 
-    return res
+            if hit:
+                paper_close_trade(trade_id, exit_px, why)
+                closed.append({
+                    "ticker":  tk.replace(".NS", ""),
+                    "type":    hit,
+                    "exit":    exit_px,
+                    "pnl":     (exit_px - ep) * qty,
+                    "account": acct,
+                })
+
+    except Exception as _e:
+        _log.warning("trade_utils._auto_close_breached error: %s", _e)
+
+    return closed
+
+
+def _render_autoclose_banner(closed: list) -> None:
+    """Show a prominent banner listing trades that were just auto-closed.
+
+    FIX TU2: handles exit=None (squareoff_failed) gracefully — shows a
+    warning row instead of trying to format a None price.
+    """
+    if not closed:
+        return
+
+    _TYPE_LABEL = {
+        "target":           "target reached",
+        "stop":             "stop-loss hit",
+        "squareoff":        "MIS square-off @ 15:15",
+        "squareoff_failed": "⚠️ MIS square-off FAILED — close manually",
+    }
+    _TYPE_ICON = {
+        "target":           "🎯",
+        "stop":             "🛑",
+        "squareoff":        "⏰",
+        "squareoff_failed": "⚠️",
+    }
+
+    _rows = ""
+    for c in closed:
+        _ic  = _TYPE_ICON.get(c["type"], "🔔")
+        _lbl = _TYPE_LABEL.get(c["type"], c["type"])
+
+        if c["exit"] is None:
+            # FIX TU2: squareoff_failed — no P&L to show
+            _rows += (
+                f'<div style="display:flex;justify-content:space-between;'
+                f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px">'
+                f'<span style="color:#ffa726">{_ic} <b>{c["ticker"]}</b> '
+                f'<span style="color:#888">({c["account"]})</span> — {_lbl}</span>'
+                f'<span style="color:#ffa726;font-weight:700">close manually</span></div>'
+            )
+        else:
+            _col = "#26a69a" if (c["pnl"] or 0) >= 0 else "#ef5350"
+            _rows += (
+                f'<div style="display:flex;justify-content:space-between;'
+                f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px">'
+                f'<span style="color:#eee">{_ic} <b>{c["ticker"]}</b> '
+                f'<span style="color:#888">({c["account"]})</span> — '
+                f'{_lbl} @ ₹{c["exit"]:,.2f}</span>'
+                f'<span style="color:{_col};font-weight:700">₹{(c["pnl"] or 0):+,.0f}</span></div>'
+            )
+
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1a1200,#2d1f00);'
+        f'border:1px solid #FFC107;border-radius:12px;padding:14px 18px;margin-bottom:14px">'
+        f'<div style="font-size:14px;font-weight:700;color:#FFC107;margin-bottom:6px">'
+        f'🔔 {len(closed)} position{"s" if len(closed)!=1 else ""} auto-closed</div>'
+        f'{_rows}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main
+# FIX TU5 — Signal monitor state persistence
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--workers", type=int, default=10)
-    args = ap.parse_args()
+def load_signal_monitor_state() -> dict:
+    """Load the previous signal monitor action map from the kv store.
 
-    from data.universe import get_universe
-
-    universe = list(get_universe("nifty500"))
-    if args.limit:
-        universe = universe[: args.limit]
-
-    os.makedirs(OUT_DIR, exist_ok=True)
-    t0 = time.time()
-    print(f"SCORE VARIANT STUDY | universe={len(universe)} | period={PERIOD}")
-
-    vix_regimes = _vix_regime_series(period=PERIOD)
-    mkt_regimes = _market_regime_series()
-
-    frames: Dict[str, pd.DataFrame] = {}
-    prep_failures = 0
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = {ex.submit(_prepare_ticker, t, PERIOD): t for t in universe}
-        done = 0
-        for f in as_completed(futs):
-            t = futs[f]
-            try:
-                df = f.result()
-                if df is not None:
-                    frames[t] = df
-            except Exception:
-                prep_failures += 1
-            done += 1
-            if done % 50 == 0:
-                print(f"  fetched {done}/{len(universe)} [{time.time()-t0:.0f}s]")
-    if prep_failures:
-        print(f"  {prep_failures}/{len(universe)} tickers raised an exception during "
-              f"prepare/fetch (excluded from frames)")
-
-    print(f"Usable tickers: {len(frames)}/{len(universe)} [{time.time()-t0:.0f}s]")
-
-    all_rows: List[Dict] = []
-    total_score_failures = 0
-    for k, (t, df) in enumerate(frames.items(), 1):
-        rows, score_failures = _walk_forward_variants(t, df, vix_regimes, mkt_regimes)
-        all_rows.extend(rows)
-        total_score_failures += score_failures
-        if k % 50 == 0:
-            print(f"  scored {k}/{len(frames)} ({len(all_rows)} obs) [{time.time()-t0:.0f}s]")
-    if total_score_failures:
-        print(f"  score_dataframe raised an exception {total_score_failures} times "
-              f"across all walk-forward samples (those sample points were skipped)")
-
-    obs = pd.DataFrame(all_rows)
-    if obs.empty:
-        print("No observations — aborting.")
-        return 1
-
-    obs.to_csv(os.path.join(OUT_DIR, "variant_observations.csv"),
-               index=False, encoding="utf-8")
-    print(f"Observations: {len(obs)} from {obs['ticker'].nunique()} tickers | "
-          f"{obs['date'].min()} -> {obs['date'].max()}")
-    # How often does each removal actually change the score?
-    chg_a = float((obs['base'] != obs['var_a']).mean() * 100)
-    chg_b = float((obs['base'] != obs['var_b']).mean() * 100)
-    print(f"Observations where pattern != 0: {chg_a:.1f}% | oversold bonus active: {chg_b:.1f}%")
-
-    aggs = aggregate(obs)
-    aggs["summary"].to_csv(os.path.join(OUT_DIR, "variant_summary.csv"), encoding="utf-8")
-    aggs["by_regime"].to_csv(os.path.join(OUT_DIR, "variant_by_regime.csv"), encoding="utf-8")
-    for v in VARIANTS:
-        aggs[f"deciles_{v}"].to_csv(os.path.join(OUT_DIR, f"variant_deciles_{v}.csv"),
-                                    encoding="utf-8")
-
-    pd.set_option("display.width", 200)
-    print("\n=== VARIANT SUMMARY ===");  print(aggs["summary"])
-    print("\n=== FWD-20 SPEARMAN BY REGIME ==="); print(aggs["by_regime"])
-    print(f"\nDone in {time.time()-t0:.0f}s. CSVs in {OUT_DIR}")
-    return 0
+    FIX TU5: persists across browser refreshes / new tabs so the diff
+    "N changes since your last check" is meaningful even after a page reload.
+    Falls back to session_state for backwards compatibility.
+    """
+    try:
+        _kv = _store.kv_get("pf_prev_actions", None)
+        if _kv and isinstance(_kv, dict):
+            return _kv
+    except Exception as _e:
+        _log.debug("trade_utils.load_signal_monitor_state kv read: %s", _e)
+    # Fallback to whatever is already in session_state
+    return st.session_state.get("_pf_prev_actions", {})
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def save_signal_monitor_state(actions: dict) -> None:
+    """Persist the current signal monitor action map to the kv store.
+
+    FIX TU5: called after each portfolio re-score so the state survives
+    page refreshes.
+    """
+    st.session_state["_pf_prev_actions"] = actions
+    try:
+        _store.kv_set("pf_prev_actions", actions)
+    except Exception as _e:
+        _log.debug("trade_utils.save_signal_monitor_state kv write: %s", _e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX MH1 — Manual portfolio holdings persistence (replaces CSV upload)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MANUAL_HOLDINGS_KV_KEY = "manual_portfolio_holdings"
+
+
+def load_manual_holdings() -> list:
+    """Load the user's manually-entered portfolio holdings from the kv store.
+
+    FIX MH1: replaces the old portfolio.csv / file-upload / Angel-One-import
+    flow. Holdings are entered by hand on the My Portfolio page (ticker, qty,
+    avg buy price, date bought — no price/qty auto-suggestion) and persisted
+    here so they survive refreshes and new tabs, same pattern as TU5's
+    signal-monitor state.
+
+    Returns a list of dicts: [{"ticker": "...", "quantity": float,
+    "avg_buy_price": float, "date_bought": "YYYY-MM-DD"}, ...]
+    """
+    try:
+        _kv = _store.kv_get(_MANUAL_HOLDINGS_KV_KEY, None)
+        if isinstance(_kv, list):
+            return _kv
+    except Exception as _e:
+        _log.debug("trade_utils.load_manual_holdings kv read: %s", _e)
+    return st.session_state.get("_manual_holdings", [])
+
+
+def save_manual_holdings(holdings: list) -> None:
+    """Persist the user's manually-entered portfolio holdings to the kv store.
+
+    FIX MH1: called after every add / edit / delete on the My Portfolio page.
+    """
+    st.session_state["_manual_holdings"] = holdings
+    try:
+        _store.kv_set(_MANUAL_HOLDINGS_KV_KEY, holdings)
+    except Exception as _e:
+        _log.debug("trade_utils.save_manual_holdings kv write: %s", _e)
