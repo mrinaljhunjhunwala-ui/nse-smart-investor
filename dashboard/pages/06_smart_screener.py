@@ -118,7 +118,8 @@ if scan_btn:
                     sig["narrative"]       = cs.headline
                     sig["stop_loss"]       = round(cs.stop_loss, 2)
                     sig["target"]          = round(cs.target, 2)
-                except Exception:
+                except Exception as _score_e:
+                    import logging; logging.getLogger("dashboard.smart_screener").debug("score_stock failed for %s: %s — using neutral fallback", sig.get("ticker"), _score_e)
                     sig["composite_score"] = 50
                     sig["grade"]           = "C"
                     sig["action"]          = sig.get("action", "WATCHLIST")
@@ -143,8 +144,8 @@ if scan_btn:
                         r = revenue_cagr(cf, years=5)
                         if getattr(r, "available", False) and r.value is not None:
                             return float(r.value)
-                except Exception:
-                    pass
+                except Exception as _rg_thr_e:
+                    import logging; logging.getLogger("dashboard.smart_screener").debug("rev growth fetch failed for %s: %s", sig.get('ticker'), _rg_thr_e)
                 return None
 
             _rg_pool = ThreadPoolExecutor(max_workers=8)
@@ -154,7 +155,8 @@ if scan_btn:
                 for _f in _done:
                     try:
                         _rg_futs[_f]["rev_growth"] = _f.result(timeout=0)
-                    except Exception:
+                    except Exception as _rg_res_e:
+                        import logging; logging.getLogger("dashboard.smart_screener").debug("rev growth result fetch failed for %s: %s", _rg_futs[_f].get("ticker"), _rg_res_e)
                         _rg_futs[_f]["rev_growth"] = None
             finally:
                 # BUGFIX: previously shutdown(wait=False) left any still-running
