@@ -276,7 +276,20 @@ _PICKS_TTL_SECONDS = 300  # matches _home_top_picks' own cache TTL
 
 def _picks_background_fetch(vix_regime: str, sector_ranks: tuple) -> None:
     """Runs in a worker thread. Only touches st.session_state — never calls
-    st.* UI functions, which are not safe off the main script thread."""
+    st.* UI functions, which are not safe off the main script thread.
+
+    FIX (stuck-scanning bug): a bare threading.Thread has no Streamlit
+    ScriptRunContext attached. Touching st.session_state with no context
+    raises NoSessionContext on modern Streamlit — and since BOTH the
+    try-block writes AND the except-block's own write below would raise,
+    the exception from the except handler itself goes unhandled and the
+    thread dies silently (it's a daemon thread) before the `finally` ever
+    runs. That left `_fetching` stuck True forever, so the fragment kept
+    showing "Running the first scan…" with no result ever landing. The
+    caller now attaches the calling thread's ScriptRunContext to this
+    thread via add_script_run_ctx() before starting it, so these
+    session_state writes work normally.
+    """
     try:
         result = _home_top_picks(vix_regime=vix_regime, sector_ranks=sector_ranks)
         st.session_state[_PICKS_KEY] = result
@@ -339,6 +352,20 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     _is_stale = (_last_ts is None) or ((_now - _last_ts).total_seconds() > _PICKS_TTL_SECONDS)
     _fetching = st.session_state.get(f"{_PICKS_KEY}_fetching", False)
 
+    # FIX (stuck-scanning watchdog): if a scan has been "fetching" for longer
+    # than any real scan should ever take, the background thread has died
+    # (crashed, killed, or — before the ScriptRunContext fix above — a
+    # NoSessionContext error) without ever resetting the flag. Self-heal
+    # instead of showing "scanning…" forever.
+    _fetch_started = st.session_state.get(f"{_PICKS_KEY}_fetch_started")
+    if _fetching and _fetch_started and (_now - _fetch_started).total_seconds() > 180:
+        st.session_state[f"{_PICKS_KEY}_fetching"] = False
+        st.session_state[f"{_PICKS_KEY}_error"] = (
+            "Previous scan attempt stalled and was reset automatically."
+        )
+        _fetching = False
+        _is_stale = True
+
     if _run_picks:
         # "Scan Now" always forces a fresh background fetch — but the cards
         # already on screen are left untouched until it completes.
@@ -346,11 +373,25 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
 
     if _is_stale and not _fetching:
         st.session_state[f"{_PICKS_KEY}_fetching"] = True
-        threading.Thread(
+        st.session_state[f"{_PICKS_KEY}_fetch_started"] = _now
+        _bg_thread = threading.Thread(
             target=_picks_background_fetch,
             args=(vix_regime, sector_tuple),
             daemon=True,
-        ).start()
+        )
+        # FIX (stuck-scanning bug): without this, st.session_state writes
+        # inside _picks_background_fetch raise NoSessionContext and the
+        # thread dies before `_fetching` is ever reset to False — see the
+        # docstring on _picks_background_fetch for the full failure chain.
+        try:
+            from streamlit.runtime.scriptrunner import add_script_run_ctx
+            add_script_run_ctx(_bg_thread)
+        except Exception as _ctx_e:
+            import logging as _ctx_log
+            _ctx_log.getLogger("dashboard.command_centre").warning(
+                "Could not attach ScriptRunContext to Top Picks scan thread: %s", _ctx_e
+            )
+        _bg_thread.start()
         _fetching = True
 
     _picks = st.session_state.get(_PICKS_KEY)
