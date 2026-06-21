@@ -193,14 +193,15 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
                 _resolved = _mh_resolve(_mh_ticker)
                 if _resolved:
                     _norm_ticker = _resolved
-            except Exception:
-                pass  # keep the manually-typed/looked-up ticker as-is
+            except Exception as _res_e:
+                import logging; logging.getLogger("dashboard.my_portfolio").debug("resolve_ticker(%s) failed: %s — using raw input", _mh_ticker, _res_e)
 
             _mh_recognized = False
             try:
                 _mh_probe = _portfolio_live_prices((_norm_ticker,))
                 _mh_recognized = bool(_mh_probe.get(_norm_ticker, {}).get("price"))
-            except Exception:
+            except Exception as _probe_e:
+                import logging; logging.getLogger("dashboard.my_portfolio").debug("live-price probe failed for %s: %s — treating as unrecognized, not blocking save", _norm_ticker, _probe_e)
                 _mh_recognized = False  # network hiccup — don't block the save on this
 
             _holdings = [h for h in _holdings if h["ticker"] != _norm_ticker]
@@ -261,7 +262,8 @@ if _holdings:
             )
             try:
                 _cur_date = _dt.date.fromisoformat(str(_h.get("date_bought"))[:10])
-            except Exception:
+            except Exception as _dtparse_e:
+                import logging; logging.getLogger("dashboard.my_portfolio").debug("date_bought parse failed for %s: %s — defaulting to today", _h.get("ticker"), _dtparse_e)
                 _cur_date = _dt.date.today()
             _new_date = _mc4.date_input(
                 "Date", value=_cur_date, key=f"mh_date_{_i}",
@@ -598,8 +600,8 @@ if _csv_source is not None:
                             if isinstance(_ix, _pd.DatetimeIndex) and _ix.tz is not None:
                                 _df = _df.copy()
                                 _df.index = _ix.tz_localize(None)
-                    except Exception:
-                        pass
+                    except Exception as _tz_e:
+                        import logging; logging.getLogger("dashboard.my_portfolio").debug("tz_localize skipped for %s: %s", _tkr, _tz_e)
                     return _df
 
                 return compute_portfolio_risk(
@@ -740,7 +742,8 @@ if _csv_source is not None:
                     for _f in batch_fetch_fundamentals(list(tickers_tuple)):
                         try:
                             _q = compute_quality_score(_f)
-                        except Exception:
+                        except Exception as _qs_e:
+                            import logging; logging.getLogger("dashboard.my_portfolio").debug("compute_quality_score failed for %s: %s", _f.get("ticker"), _qs_e)
                             _q = None
                         rows.append({
                             "Stock":      str(_f.get("ticker", "")).replace(".NS", ""),
@@ -803,7 +806,8 @@ if _csv_source is not None:
                     _hold_sorted.sort(key=lambda h: -(h.current_price * h.quantity))
                 elif _h_sort == "Action (buy→exit)":
                     _hold_sorted.sort(key=lambda h: _ACT_ORDER.get(h.action, 9))
-            except Exception:
+            except Exception as _sort_e:
+                import logging; logging.getLogger("dashboard.my_portfolio").debug("Holdings sort failed (%s): %s — using default order", _h_sort, _sort_e)
                 _hold_sorted = list(summary.holdings)
 
             _ACT_CARD_STYLE = {
@@ -941,8 +945,8 @@ if _csv_source is not None:
             if _pm_tmp_csv_path:
                 try:
                     os.remove(_pm_tmp_csv_path)
-                except Exception:
-                    pass
+                except Exception as _rm_e:
+                    import logging; logging.getLogger("dashboard.my_portfolio").debug("Could not remove tmp CSV %s: %s", _pm_tmp_csv_path, _rm_e)
 else:
     st.markdown("---")
     st.info(
