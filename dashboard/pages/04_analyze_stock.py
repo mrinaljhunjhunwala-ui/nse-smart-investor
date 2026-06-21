@@ -237,8 +237,8 @@ if analyze_btn or _prefill_active or (
                 _anq = _an_lq(ticker)
                 if isinstance(_anq, dict) and _anq.get("price"):
                     _an_live = float(_anq["price"])
-            except Exception:
-                pass
+            except Exception as _lq_e:
+                import logging; logging.getLogger("dashboard.analyze_stock").debug("Live quote fetch failed for %s: %s", ticker, _lq_e)
             _an_drift = (
                 abs(_an_live - cs.price) / cs.price * 100
                 if (_an_live and cs.price)
@@ -267,8 +267,8 @@ if analyze_btn or _prefill_active or (
                     if getattr(_rg_res, "available", False) and _rg_res.value is not None:
                         _rg_val  = float(_rg_res.value)
                         _rg_conf = str(_rg_res.confidence)
-            except Exception:
-                pass
+            except Exception as _rg_e:
+                import logging; logging.getLogger("dashboard.analyze_stock").debug("Revenue growth fetch failed for %s: %s", ticker, _rg_e)
 
             # ── Score hero section ─────────────────────────────────────────
             st.markdown("---")
@@ -373,8 +373,8 @@ if analyze_btn or _prefill_active or (
                             f"🟢 Settled EOD close{f' · {_dlabel}' if _dlabel else ''} "
                             "(market closed — official end-of-day price)."
                         )
-                except Exception:
-                    pass
+                except Exception as _ms_e:
+                    import logging; logging.getLogger("dashboard.analyze_stock").debug("Market status check failed: %s", _ms_e)
 
                 tc1, tc2, tc3, tc4 = st.columns(4)
                 tc1.metric("Entry (now)", f"₹{cs.entry:,.2f}")
