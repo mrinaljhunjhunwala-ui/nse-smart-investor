@@ -156,8 +156,8 @@ try:
                            "running. Reboot the app from 'Manage app'.")
         else:
             st.caption("Click to verify the database is connected and the schema is valid.")
-except Exception:
-    pass
+except Exception as _pers_e:
+    import logging; logging.getLogger("dashboard.paper_trades").warning("Persistence status banner failed: %s", _pers_e)
 
 # Pre-fill ticker if navigated from Market Overview "Trade" button
 if "pt_prefill_ticker" in st.session_state and st.session_state["pt_prefill_ticker"]:
@@ -263,8 +263,8 @@ if len(_all_accounts) > 1:
             _del_trades = load_trades_by_account(_selected_account)
             if not _del_trades.empty and "status" in _del_trades.columns:
                 _del_open_count = int((_del_trades["status"] == "OPEN").sum())
-        except Exception:
-            pass
+        except Exception as _del_e:
+            import logging; logging.getLogger("dashboard.paper_trades").warning("Could not count open positions for '%s': %s — proceeding without count", _selected_account, _del_e)
 
         if _del_open_count > 0:
             st.error(
