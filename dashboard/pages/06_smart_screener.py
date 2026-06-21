@@ -58,7 +58,11 @@ with sc2:
     screen_map = {
         "All 4 screens": "all",
         "Oversold Bounce": "oversold",
-        "Momentum Leaders": "momentum",
+        "Momentum Leaders": "momentum_leader",   # FIX SR1: was "momentum" — collided
+                                                  # with the legacy CLI strategy string
+                                                  # in trading/signals.py and silently
+                                                  # ran check_momentum_signal() instead
+                                                  # of check_momentum_leader().
         "Breakouts": "breakout",
         "Pullback to SMA": "pullback_SMA20",
     }
