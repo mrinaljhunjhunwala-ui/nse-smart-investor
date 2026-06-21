@@ -110,8 +110,8 @@ with tab_gap:
                     if v > 0:     return "background-color:#1a2a1a; color:#a5d6a7"
                     if v <= -1.5: return "background-color:#3a1a1a; color:#ef5350"
                     if v < 0:     return "background-color:#2a1a1a; color:#ef9a9a"
-                except Exception:
-                    pass
+                except (ValueError, TypeError):
+                    pass  # non-numeric cell — return empty style
                 return ""
 
             styled = _disp.style.map(_color_gap, subset=["Gap %","Day Chg %"])
