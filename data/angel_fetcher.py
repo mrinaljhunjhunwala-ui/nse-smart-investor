@@ -10,6 +10,29 @@ Fixes applied vs previous version:
   - modify_order accepts `product` param (was hardcoded "DELIVERY")
   - _log.warning used for real failures (was _log.debug — invisible in prod)
   - get_batch_quotes applies rate limiting (same as fetch_historical)
+
+FIX AO1 — _get_token() (searchScrip) had NO rate limiting, unlike
+fetch_historical()'s getCandleData call right next to it. Every other
+function in this file (fetch_historical, get_full_quote, get_batch_quotes,
+get_market_depth, place_order, modify_order, place_gtt, cancel_gtt) calls
+_get_token() first, so a full-universe scan (e.g. NIFTY 500) fired ~500
+unthrottled searchScrip calls in a few seconds — blowing through Angel
+One's documented combined limit of 1 request/second/client. Angel's API
+appears to respond to this by returning empty/non-JSON bodies rather than
+clean error objects, producing "Expecting value: line 1 column 1" on
+every single ticker once the limit is breached — i.e. total Tier-0
+outage even though login/credentials are perfectly valid.
+
+  - _angel_rate_limit() (renamed from _hist_rate_limit, same shared
+    module-level limiter) is now called inside _get_token() itself, so
+    every caller is protected automatically without touching each one.
+  - A circuit breaker trips after 5 consecutive _get_token() failures
+    and pauses ALL Angel One attempts for 5 minutes, instead of paying a
+    throttled-but-doomed round trip on every remaining ticker in the scan.
+  - Failed token lookups are now cached for only 5 minutes (_TOKEN_FAIL_TTL),
+    separate from the 6-hour TTL for real successes — so once Angel
+    recovers, previously-poisoned tickers retry promptly instead of being
+    stuck returning None for up to 6 hours.
 """
 
 from __future__ import annotations
@@ -45,19 +68,70 @@ _http.mount("https://", HTTPAdapter(
 _SESSION:      Dict = {"jwt": None, "feed_token": None, "api_key": "", "ts": 0.0}
 _SESSION_LOCK  = threading.Lock()                           # guards login race condition
 _TOKEN_CACHE:  Dict[str, Tuple[Optional[str], float]] = {} # symbol → (token, timestamp)
-_TOKEN_TTL     = 3600 * 6                                  # 6 hours — handles delistings
+_TOKEN_TTL      = 3600 * 6  # 6 hours for a real resolved token — handles delistings
+_TOKEN_FAIL_TTL = 300       # FIX AO1: only 5 min for a FAILED lookup — a failure during
+                            # a rate-limit/breaker event shouldn't poison a ticker for 6h
 
-# ── Historical-data rate limiter ──────────────────────────────────────────────
+# ── Shared rate limiter for ALL Angel One data-read calls ────────────────────
+# FIX AO1: was "_hist_rate_limit", used only by fetch_historical(). Angel One's
+# combined rate limit applies across endpoints, not per-endpoint, and the
+# heaviest call volume by far is _get_token()'s searchScrip lookup (once per
+# ticker, called by every other function below). Renamed + now called from
+# _get_token() itself so every caller is protected without separate changes.
 _HIST_LOCK         = threading.Lock()
 _HIST_LAST         = [0.0]
-_HIST_MIN_INTERVAL = 0.4   # ~2.5 req/s, safely under Angel's cap
+_HIST_MIN_INTERVAL = 1.0   # 1 req/s — matches Angel's documented combined limit
 
-def _hist_rate_limit() -> None:
+def _angel_rate_limit() -> None:
     with _HIST_LOCK:
         elapsed = time.time() - _HIST_LAST[0]
         if elapsed < _HIST_MIN_INTERVAL:
             time.sleep(_HIST_MIN_INTERVAL - elapsed)
         _HIST_LAST[0] = time.time()
+
+_hist_rate_limit = _angel_rate_limit  # back-compat alias, same function
+
+
+# ── Circuit breaker for Angel One outages ─────────────────────────────────────
+# FIX AO1: when Angel starts failing repeatedly (rate-limit ban, transient
+# upstream outage), stop attempting calls for a cooldown period rather than
+# paying a throttled-but-doomed round trip on every remaining ticker in a
+# full-universe scan. Trips after 5 consecutive _get_token() failures; resets
+# on the next success after cooldown expires.
+_BREAKER_LOCK       = threading.Lock()
+_BREAKER_FAILS      = [0]
+_BREAKER_TRIPPED_AT = [0.0]
+_BREAKER_THRESHOLD  = 5
+_BREAKER_COOLDOWN   = 300  # 5 minutes
+
+
+def _breaker_tripped() -> bool:
+    with _BREAKER_LOCK:
+        if _BREAKER_TRIPPED_AT[0]:
+            if time.time() - _BREAKER_TRIPPED_AT[0] < _BREAKER_COOLDOWN:
+                return True
+            # cooldown expired — give Angel another chance
+            _BREAKER_TRIPPED_AT[0] = 0.0
+            _BREAKER_FAILS[0] = 0
+        return False
+
+
+def _breaker_record_failure() -> None:
+    with _BREAKER_LOCK:
+        _BREAKER_FAILS[0] += 1
+        if _BREAKER_FAILS[0] >= _BREAKER_THRESHOLD and not _BREAKER_TRIPPED_AT[0]:
+            _BREAKER_TRIPPED_AT[0] = time.time()
+            _log.warning(
+                "angel_fetcher: circuit breaker TRIPPED after %d consecutive "
+                "_get_token() failures — pausing Angel One calls for %ds",
+                _BREAKER_FAILS[0], _BREAKER_COOLDOWN,
+            )
+
+
+def _breaker_record_success() -> None:
+    with _BREAKER_LOCK:
+        _BREAKER_FAILS[0] = 0
+        _BREAKER_TRIPPED_AT[0] = 0.0
 
 _BASE = "https://apiconnect.angelbroking.com"
 
@@ -193,18 +267,29 @@ def _get_session() -> Optional[Dict]:
 def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
     """
     Get Angel One numeric token for a base NSE symbol (no .NS suffix).
-    Cached per symbol with a 6-hour TTL — handles delistings/token changes.
+    Cached per symbol — 6h TTL for a real token, 5min TTL for a failed
+    lookup (FIX AO1, see _TOKEN_FAIL_TTL).
+
+    FIX AO1: now rate-limited (was the one unthrottled call in this file)
+    and gated by the circuit breaker — if Angel has failed 5+ times in a
+    row recently, skip the network call entirely instead of adding to the
+    pile-up that's keeping it rate-limited.
     """
     key        = symbol_base.upper()
     _search_key = key.replace("&", "%26") if "&" in key else key
 
-    # Check cache with TTL
+    # Check cache — different TTL depending on whether it was a hit or a miss
     if key in _TOKEN_CACHE:
         token, ts = _TOKEN_CACHE[key]
-        if time.time() - ts < _TOKEN_TTL:
+        ttl = _TOKEN_TTL if token is not None else _TOKEN_FAIL_TTL
+        if time.time() - ts < ttl:
             return token
 
+    if _breaker_tripped():
+        return None  # Angel is in a known-bad state — don't pile on
+
     try:
+        _angel_rate_limit()
         resp = _http.post(
             f"{_BASE}/rest/secure/angelbroking/order/v1/searchScrip",
             json={"exchange": "NSE", "searchscrip": _search_key},
@@ -225,11 +310,13 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
             token = str(scrips[0]["symboltoken"])
 
         _TOKEN_CACHE[key] = (token, time.time())
+        _breaker_record_success()
         return token
 
     except Exception as e:
         _log.warning("angel_fetcher._get_token(%s) failed: %s", key, e)
         _TOKEN_CACHE[key] = (None, time.time())
+        _breaker_record_failure()
         return None
 
 
