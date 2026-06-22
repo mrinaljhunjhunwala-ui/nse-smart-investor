@@ -60,7 +60,7 @@ NIFTY_NEXT50: List[str] = [
     "TORNTPHARM.NS", "AUROPHARMA.NS", "MANKIND.NS",
     # FMCG / Consumer
     "MARICO.NS", "DABUR.NS", "GODREJCP.NS", "COLPAL.NS",
-    "MCDOWELL-N.NS", "TRENT.NS", "NYKAA.NS",
+    "UNITDSPR.NS", "TRENT.NS", "NYKAA.NS",
     # Cement / Real Estate
     "AMBUJACEM.NS", "ACC.NS", "OBEROIRLTY.NS", "DLF.NS",
     # Energy / Power / Infra
@@ -72,7 +72,7 @@ NIFTY_NEXT50: List[str] = [
     "INDUSTOWER.NS",
     # Consumer Discretionary
     "ZYDUSLIFE.NS", "LUPIN.NS", "LODHA.NS",
-    "IRCTC.NS", "NAUKRI.NS", "ZOMATO.NS",
+    "IRCTC.NS", "NAUKRI.NS", "ETERNAL.NS",
     # FIX C_VEDANTA — four entities from Vedanta Ltd's 15-Jun-2026 demerger.
     # VEDL.NS (above) continues as the residual critical-minerals entity.
     "VAML.NS",       # Vedanta Aluminium Metal Ltd
@@ -109,13 +109,13 @@ NIFTY_MIDCAP: List[str] = [
     "NBCC.NS", "CONCOR.NS", "IRFC.NS",
     # Energy / Oil & Gas
     "IGL.NS", "MGL.NS", "PETRONET.NS", "GAIL.NS",
-    "NHPC.NS", "SJVN.NS", "NLCINDIA.NS", "HPCL.NS", "IOC.NS",
+    "NHPC.NS", "SJVN.NS", "NLCINDIA.NS", "HINDPETRO.NS", "IOC.NS",
     # Metals / Mining
     "HINDZINC.NS", "NMDC.NS", "SAIL.NS", "MOIL.NS",
     # Real Estate
     "GODREJPROP.NS", "PHOENIXLTD.NS", "PRESTIGE.NS", "SOBHA.NS",
     # Chemicals / Specialty
-    "AARTIIND.NS", "DEEPAKNITR.NS", "SRF.NS", "GNFC.NS",
+    "AARTIIND.NS", "DEEPAKNTR.NS", "SRF.NS", "GNFC.NS",
     # Financial Services (exchanges, AMC)
     "CDSL.NS", "BSE.NS", "MCX.NS", "CAMS.NS", "HDFCAMC.NS",
     # Healthcare Services
@@ -123,7 +123,7 @@ NIFTY_MIDCAP: List[str] = [
     # Hotels / Travel
     "INDHOTEL.NS",
     # Textiles
-    "TRIDENT.NS", "VARDHMAN.NS",
+    "TRIDENT.NS", "VTL.NS",
     # Others
     "MFSL.NS", "PIIND.NS", "POLYCAB.NS", "DIXON.NS",
 ]
@@ -133,9 +133,9 @@ NIFTY_MIDCAP: List[str] = [
 # ─────────────────────────────────────────────────────────────────────────────
 NIFTY_SMALLCAP: List[str] = [
     # Finance
-    "MANAPPURAM.NS", "UJJIVAN.NS", "JMFINANCIL.NS", "IIFL.NS",
+    "MANAPPURAM.NS", "UJJIVANSFB.NS", "JMFINANCIL.NS", "IIFL.NS",
     # IT
-    "NIIT.NS", "BSOFT.NS",
+    "NIITLTD.NS", "BSOFT.NS",
     # Pharma
     "ABBOTINDIA.NS", "SOLARA.NS",
     # Consumer
@@ -148,7 +148,7 @@ NIFTY_SMALLCAP: List[str] = [
     # Chemicals
     "VINATIORGA.NS", "FLUOROCHEM.NS", "NOCIL.NS",
     # Auto
-    "AMARAJABAT.NS",
+    "ARE&M.NS",
     # Others
     "PAGEIND.NS", "MRF.NS", "SCHAEFFLER.NS", "SOLARINDS.NS",
     "VBL.NS", "JUBLFOOD.NS", "TATACOMM.NS", "SUNTV.NS",
@@ -236,7 +236,7 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS",
         "LTIM.NS", "PERSISTENT.NS", "COFORGE.NS", "MPHASIS.NS", "LTTS.NS",
         "KPITTECH.NS", "TATAELXSI.NS", "CYIENT.NS", "MASTEK.NS",
-        "NIIT.NS", "BSOFT.NS", "TANLA.NS", "RATEGAIN.NS", "ROUTE.NS",
+        "NIITLTD.NS", "BSOFT.NS", "TANLA.NS", "RATEGAIN.NS", "ROUTE.NS",
         "INTELLECT.NS", "ZENSAR.NS", "HEXAWARE.NS", "HAPPSTMNDS.NS",
         "NEWGEN.NS", "BIRLASOFT.NS", "DATAMATICS.NS", "SAKSOFT.NS", "OFSS.NS",
     ],
@@ -252,7 +252,7 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "BAJFINANCE.NS", "BAJAJFINSV.NS", "SHRIRAMFIN.NS", "CHOLAFIN.NS",
         "MUTHOOTFIN.NS", "BAJAJHLDNG.NS", "HDFCAMC.NS", "ICICIGI.NS",
         "ICICIPRULI.NS", "SBICARD.NS", "ABCAPITAL.NS", "SUNDARMFIN.NS",
-        "LICHSGFIN.NS", "MANAPPURAM.NS", "UJJIVAN.NS", "MFSL.NS",
+        "LICHSGFIN.NS", "MANAPPURAM.NS", "UJJIVANSFB.NS", "MFSL.NS",
         "JMFINANCIL.NS", "IIFL.NS", "ANGELONE.NS", "360ONE.NS",
         "CDSL.NS", "BSE.NS", "MCX.NS", "CAMS.NS",
         "EDELWEISS.NS", "MOTILALOFS.NS", "NUVAMA.NS", "POONAWALLA.NS",
@@ -276,10 +276,10 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "MEDANTA.NS", "NARAYANA.NS", "YATHARTH.NS",
     ],
     "Auto": [
-        "MARUTI.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS",
+        "MARUTI.NS", "TMCV.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS",
         "HEROMOTOCO.NS", "TVSMOTOR.NS", "ASHOKLEY.NS", "ESCORTS.NS",
         "BALKRISIND.NS", "EXIDEIND.NS", "SUNDRMFAST.NS", "TIINDIA.NS",
-        "MOTHERSON.NS", "BOSCHLTD.NS", "AMARAJABAT.NS", "SCHAEFFLER.NS",
+        "MOTHERSON.NS", "BOSCHLTD.NS", "ARE&M.NS", "SCHAEFFLER.NS",
         "OLECTRA.NS", "SUPRAJIT.NS", "GABRIEL.NS", "SUBROS.NS",
         "LUMAXIND.NS", "SANDHAR.NS", "ENDURANCE.NS", "MINDA.NS",
         "FIEM.NS", "ROLEX.NS",
@@ -287,7 +287,7 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
     "FMCG": [
         "HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS",
         "TATACONSUM.NS", "MARICO.NS", "DABUR.NS", "GODREJCP.NS",
-        "COLPAL.NS", "MCDOWELL-N.NS", "EMAMILTD.NS", "JYOTHYLAB.NS",
+        "COLPAL.NS", "UNITDSPR.NS", "EMAMILTD.NS", "JYOTHYLAB.NS",
         "BIKAJI.NS", "RADICO.NS", "VBL.NS", "JUBLFOOD.NS",
         "BATAINDIA.NS", "VSTIND.NS", "GODFRYPHLP.NS", "GILLETTE.NS",
         "ZYDUSWELL.NS", "BAJAJCON.NS", "HAWKINCOOK.NS",
@@ -297,7 +297,7 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "TATAPOWER.NS", "ADANIGREEN.NS", "ADANITRANS.NS", "PFC.NS",
         "RECLTD.NS", "NHPC.NS", "SJVN.NS", "NLCINDIA.NS",
         "IGL.NS", "MGL.NS", "PETRONET.NS", "GAIL.NS",
-        "HPCL.NS", "IOC.NS", "SUZLON.NS", "RPOWER.NS",
+        "HINDPETRO.NS", "IOC.NS", "SUZLON.NS", "RPOWER.NS",
         # FIX C_VEDANTA — oil & gas and power businesses spun out of VEDL.NS
         "VOGL.NS", "VEDPOWER.NS",
     ],
@@ -310,7 +310,7 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "VAML.NS", "VISL.NS",
     ],
     "Chemicals": [
-        "PIDILITIND.NS", "AARTIIND.NS", "DEEPAKNITR.NS",
+        "PIDILITIND.NS", "AARTIIND.NS", "DEEPAKNTR.NS",
         "SRF.NS", "GNFC.NS", "VINATIORGA.NS", "FLUOROCHEM.NS", "NOCIL.NS",
         "SOLARINDS.NS", "CLEAN.NS", "TATACHEM.NS", "ALKYLAMINE.NS",
         "FINEORG.NS", "NAVINFLUOR.NS", "SUDARSCHEM.NS", "BALAMINES.NS",
@@ -355,7 +355,7 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
         "SUNTV.NS", "ZEEL.NS", "PVRINOX.NS", "NAZARA.NS",
     ],
     "Textiles": [
-        "TRIDENT.NS", "VARDHMAN.NS", "KPRMILL.NS", "RAYMOND.NS",
+        "TRIDENT.NS", "VTL.NS", "KPRMILL.NS", "RAYMOND.NS",
         "SIYARAM.NS", "NITIN.NS", "GARFIBRES.NS",
     ],
     "Hospitality": [
