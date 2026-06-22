@@ -2,17 +2,21 @@
 
 FIXES applied in this revision
 ───────────────────────────────
-C_TICKER  Tata Motors demerger correction (effective 1-Oct-2025): the original
-    combined company split into two separately listed entities. TATAMOTORS.NS
-    kept the old ticker but is now commercial-vehicles-only (trucks/buses);
-    the passenger vehicle + EV + Jaguar Land Rover business spun off as a new
-    entity trading under TMPV.NS. STOCK_SEARCH_MAP previously had a single
-    mislabeled entry ("Tata Motors (TMPV - PV)" → TMPV.NS) with no separate
-    entry for the CV business, so a plain "Tata Motors" search silently
-    resolved to only the PV-only post-demerger entity. Both entities are now
-    listed explicitly so users can disambiguate. _HOME_SCAN_UNIVERSE's
-    TATAMOTORS.NS entry is flagged with a comment noting the business has
-    changed shape since the universe list was likely curated.
+C_TICKER  Tata Motors demerger correction (effective 1-Oct-2025), UPDATED: a
+    second renaming since this fix was first written means the original
+    comment below had the two resulting entities backwards. Per Yahoo
+    Finance's own company-history field: the entity that kept continuous
+    identity was renamed "Tata Motors Limited" → "Tata Motors Passenger
+    Vehicles Limited" (PV + EVs + Jaguar Land Rover) and now trades under
+    TMPV.NS — i.e. TMPV.NS is the *renamed continuation* of the original
+    company, not a fresh spin-off. The commercial-vehicles business was
+    the genuinely NEW entity (incorporated 2024 as "TML Commercial
+    Vehicles Limited", renamed "Tata Motors Limited" again in Oct 2025)
+    and trades under the brand-new ticker TMCV.NS. The OLD "TATAMOTORS"
+    ticker itself is retired on Yahoo — neither successor trades under it,
+    and any code still referencing TATAMOTORS.NS gets a hard 404. Both
+    entities are now listed explicitly under their correct current tickers
+    so users can disambiguate.
 
 C_VEDANTA  Vedanta Ltd completed a four-way demerger effective 15-Jun-2026,
     splitting into Vedanta Aluminium Metal Ltd (VAML.NS), Vedanta Oil & Gas
@@ -127,7 +131,7 @@ STOCK_SEARCH_MAP = {
     # separately listed companies. The old combined entity no longer exists
     # as a single stock — searching "Tata Motors" must let the user pick
     # which successor business they mean.
-    "Tata Motors (Commercial Vehicles - CV)": "TATAMOTORS.NS",
+    "Tata Motors (Commercial Vehicles - CV)": "TMCV.NS",
     "Tata Motors Passenger Vehicles (incl. JLR, EVs)": "TMPV.NS",
     "Adani Enterprises": "ADANIENT.NS",
     "JSW Steel": "JSWSTEEL.NS",
@@ -187,7 +191,7 @@ STOCK_SEARCH_MAP = {
     "Dabur India": "DABUR.NS",
     "Godrej Consumer Products": "GODREJCP.NS",
     "Colgate Palmolive": "COLPAL.NS",
-    "United Spirits (McDowell's)": "MCDOWELL-N.NS",
+    "United Spirits (McDowell's)": "UNITDSPR.NS",
     "Trent": "TRENT.NS",
     "Nykaa (FSN E-Commerce)": "NYKAA.NS",
     "Ambuja Cements": "AMBUJACEM.NS",
@@ -254,7 +258,7 @@ STOCK_SEARCH_MAP = {
     "GAIL India": "GAIL.NS",
     "NHPC": "NHPC.NS",
     "SJVN": "SJVN.NS",
-    "HPCL": "HPCL.NS",
+    "HPCL": "HINDPETRO.NS",
     "Indian Oil (IOC)": "IOC.NS",
     "Suzlon Energy": "SUZLON.NS",
     "Hindustan Zinc": "HINDZINC.NS",
@@ -265,7 +269,7 @@ STOCK_SEARCH_MAP = {
     "Prestige Estates": "PRESTIGE.NS",
     "Sobha Developers": "SOBHA.NS",
     "Aarti Industries": "AARTIIND.NS",
-    "Deepak Nitrite": "DEEPAKNITR.NS",
+    "Deepak Nitrite": "DEEPAKNTR.NS",
     "SRF": "SRF.NS",
     "CDSL (Depository)": "CDSL.NS",
     "BSE": "BSE.NS",
@@ -570,15 +574,17 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: t
 
 # Curated liquid large/mid-cap universe for the home-page "Top Picks" scan.
 # Kept ~36 names so a full scan finishes fast (Angel One: ~15-25 s) and stays cached.
-# NOTE (FIX C_TICKER): TATAMOTORS.NS changed underlying business on 1-Oct-2025 —
-# it is now the commercial-vehicles-only entity (the PV/EV/JLR business spun
-# off separately as TMPV.NS). Scores against this ticker reflect the CV
-# business only; if this universe was curated for the pre-demerger combined
-# company's profile, consider whether TMPV.NS should also be added.
+# NOTE (FIX C_TICKER): the old TATAMOTORS.NS ticker is retired on Yahoo (see
+# the C_TICKER note above) and was swapped for TMPV.NS here — the renamed
+# continuation of the original entity (PV + EVs + Jaguar Land Rover), and by
+# far the larger/more market-cap-relevant of the two post-demerger entities,
+# which is what a "top blue-chip picks" list should track. The smaller,
+# domestic-only commercial-vehicles entity (TMCV.NS) is tracked separately
+# in the sector-rotation / auto-sector groupings instead.
 _HOME_SCAN_UNIVERSE = [
     "RELIANCE.NS","TCS.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS","SBIN.NS",
     "BHARTIARTL.NS","LT.NS","ITC.NS","AXISBANK.NS","KOTAKBANK.NS","HINDUNILVR.NS",
-    "BAJFINANCE.NS","MARUTI.NS","SUNPHARMA.NS","TATAMOTORS.NS","NTPC.NS","TITAN.NS",
+    "BAJFINANCE.NS","MARUTI.NS","SUNPHARMA.NS","TMPV.NS","NTPC.NS","TITAN.NS",
     "ULTRACEMCO.NS","ASIANPAINT.NS","WIPRO.NS","ADANIENT.NS","JSWSTEEL.NS","POWERGRID.NS",
     "TATASTEEL.NS","HCLTECH.NS","ONGC.NS","COALINDIA.NS","BAJAJFINSV.NS","TECHM.NS",
     "DRREDDY.NS","CIPLA.NS","HINDALCO.NS","GRASIM.NS","EICHERMOT.NS","TRENT.NS",
@@ -1096,4 +1102,4 @@ def warm_caches() -> dict:
         results["tomorrow_watchlist"] = {"ok": False, "error": str(_e)}
 
     _log.info("cache.warm_caches complete: %s", results)
-    return results
+    return resultso
