@@ -33,6 +33,28 @@ outage even though login/credentials are perfectly valid.
     separate from the 6-hour TTL for real successes — so once Angel
     recovers, previously-poisoned tickers retry promptly instead of being
     stuck returning None for up to 6 hours.
+
+FIX AO2 — _get_session() (loginByPassword) had the exact same gap as FIX AO1
+did for _get_token(): no circuit breaker. Every other function in this file
+calls _get_session() first, so broken credentials (rotated/expired
+ANGEL_TOTP_SECRET, clock drift breaking the TOTP code, wrong password, or a
+transient Angel outage) mean a full-universe scan fires ~500 unthrottled
+loginByPassword POSTs in a row — not even covered by _angel_rate_limit().
+Repeated failed logins against a broker's auth endpoint risk a temporary
+account lock, a much costlier failure mode than the rate-limit issue FIX
+AO1 addressed, so this breaker is deliberately stricter: it trips after
+fewer consecutive failures and stays tripped longer than the token breaker.
+
+  - A separate _LOGIN_BREAKER_* state (own lock/counters — failures here
+    are unrelated to searchScrip failures and shouldn't share a counter)
+    mirrors _breaker_tripped()/_record_failure()/_record_success() via
+    _login_breaker_tripped()/_login_breaker_record_failure()/_success().
+  - _get_session()'s slow path checks _login_breaker_tripped() right
+    before attempting login (after the credentials-configured check,
+    which is a separate "not set up at all" case) and returns None
+    immediately without hitting the network if it's tripped.
+  - A failed login (resp.get("status") falsy, or any exception) records a
+    breaker failure; a successful login resets it.
 """
 
 from __future__ import annotations
@@ -133,6 +155,50 @@ def _breaker_record_success() -> None:
         _BREAKER_FAILS[0] = 0
         _BREAKER_TRIPPED_AT[0] = 0.0
 
+
+# ── Circuit breaker for Angel One LOGIN failures ──────────────────────────────
+# FIX AO2: separate from the _BREAKER_* state above — _get_token() failures
+# (rate-limit/searchScrip) and login failures are different problems with
+# different blast radii and shouldn't share a counter. Deliberately stricter
+# than the token breaker: trips faster (3 vs 5) and stays tripped longer
+# (10 min vs 5 min), because repeated failed loginByPassword attempts risk
+# a temporary account lock from Angel — a costlier failure mode than being
+# rate-limited on a read endpoint.
+_LOGIN_BREAKER_LOCK       = threading.Lock()
+_LOGIN_BREAKER_FAILS      = [0]
+_LOGIN_BREAKER_TRIPPED_AT = [0.0]
+_LOGIN_BREAKER_THRESHOLD  = 3
+_LOGIN_BREAKER_COOLDOWN   = 600  # 10 minutes
+
+
+def _login_breaker_tripped() -> bool:
+    with _LOGIN_BREAKER_LOCK:
+        if _LOGIN_BREAKER_TRIPPED_AT[0]:
+            if time.time() - _LOGIN_BREAKER_TRIPPED_AT[0] < _LOGIN_BREAKER_COOLDOWN:
+                return True
+            # cooldown expired — give login another chance
+            _LOGIN_BREAKER_TRIPPED_AT[0] = 0.0
+            _LOGIN_BREAKER_FAILS[0] = 0
+        return False
+
+
+def _login_breaker_record_failure() -> None:
+    with _LOGIN_BREAKER_LOCK:
+        _LOGIN_BREAKER_FAILS[0] += 1
+        if _LOGIN_BREAKER_FAILS[0] >= _LOGIN_BREAKER_THRESHOLD and not _LOGIN_BREAKER_TRIPPED_AT[0]:
+            _LOGIN_BREAKER_TRIPPED_AT[0] = time.time()
+            _log.warning(
+                "angel_fetcher: LOGIN circuit breaker TRIPPED after %d consecutive "
+                "_get_session() failures — pausing login attempts for %ds",
+                _LOGIN_BREAKER_FAILS[0], _LOGIN_BREAKER_COOLDOWN,
+            )
+
+
+def _login_breaker_record_success() -> None:
+    with _LOGIN_BREAKER_LOCK:
+        _LOGIN_BREAKER_FAILS[0] = 0
+        _LOGIN_BREAKER_TRIPPED_AT[0] = 0.0
+
 _BASE = "https://apiconnect.angelbroking.com"
 
 _INTERVAL_MAP: Dict[str, str] = {
@@ -205,6 +271,10 @@ def _get_session() -> Optional[Dict]:
     Login and return session dict (jwt, feed_token, api_key).
     Cached for 50 minutes. Thread-safe via double-check locking —
     prevents two concurrent threads from both logging in simultaneously.
+
+    FIX AO2: gated by a circuit breaker — if login has failed 3+ times in
+    a row recently, skip the network call entirely instead of risking a
+    temporary account lock from repeated bad-credential attempts.
     """
     global _SESSION
     # Fast path: no lock needed if session is valid
@@ -219,6 +289,9 @@ def _get_session() -> Optional[Dict]:
         creds = _get_credentials()
         if not all(creds.values()):
             return None
+
+        if _login_breaker_tripped():
+            return None  # Angel login is in a known-bad state — don't pile on
 
         try:
             import pyotp
@@ -245,6 +318,7 @@ def _get_session() -> Optional[Dict]:
 
             if not resp.get("status"):
                 _log.warning("angel_fetcher: login failed — %s", resp.get("message", "unknown"))
+                _login_breaker_record_failure()
                 return None
 
             _SESSION.update({
@@ -253,10 +327,12 @@ def _get_session() -> Optional[Dict]:
                 "api_key":    creds["api_key"],
                 "ts":         time.time(),
             })
+            _login_breaker_record_success()
             return _SESSION
 
         except Exception as e:
             _log.warning("angel_fetcher._get_session failed: %s", e)
+            _login_breaker_record_failure()
             return None
 
 
