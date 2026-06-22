@@ -369,7 +369,7 @@ def _index_strip_data():
 def _ticker_tape_data():
     _names = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
               "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "AXISBANK.NS",
-              "MARUTI.NS", "TATAMOTORS.NS", "SUNPHARMA.NS", "TITAN.NS"]
+              "MARUTI.NS", "TMCV.NS", "SUNPHARMA.NS", "TITAN.NS"]
     try:
         from utils.live_price import get_live_prices_batch
         raw = get_live_prices_batch(_names, max_workers=10)
