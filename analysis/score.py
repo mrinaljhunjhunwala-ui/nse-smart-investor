@@ -735,8 +735,27 @@ def score_stock(
         if is_configured():
             live = get_live_quote(canonical)
             if live and live["price"] > 0:
-                result.entry = live["price"]
-                result.price = live["price"]
+                live_price = live["price"]
+                # FIX (entry/SL/TP staleness): stop_loss/target were computed
+                # by _compute_entry_levels() against the previous CLOSE price.
+                # Overwriting only entry/price with the live quote and leaving
+                # SL/TP untouched could leave the displayed entry below its
+                # own stop-loss, or a risk:reward ratio that no longer matches
+                # the displayed numbers, any time the live price has moved
+                # from the close (the normal case during market hours).
+                # Preserve the ATR-based stop distance and conviction-scaled
+                # target distance already computed, and re-anchor both to
+                # the live price rather than recomputing from scratch (which
+                # would need a fresh fetch + indicator pass).
+                close_entry = result.entry
+                risk_dist   = close_entry - result.stop_loss
+                reward_dist = result.target - close_entry
+                result.entry     = live_price
+                result.price     = live_price
+                result.stop_loss = round(live_price - risk_dist, 2)
+                result.target    = round(live_price + reward_dist, 2)
+                # risk_reward is a ratio of the two distances above, which
+                # are unchanged — only re-anchored — so it stays valid as-is.
     except Exception as e:
         # live price update is best-effort — never fail the score, but log
         # so a broken Angel One connection isn't invisible during diagnosis.
