@@ -2,15 +2,31 @@
 utils/live_price.py — Real-time NSE equity prices.
 
 Tier hierarchy (fastest → most reliable fallback):
-  1. Yahoo Finance JSON API  — direct HTTP, no library, works from cloud IPs,
-                               returns live price during market hours
-  2. NSE India official API  — real-time but needs cookie, may fail on cloud
-  3. Stooq EOD              — yesterday's close, never fails
+  Tier 0: Angel One SmartAPI   — true real-time LTP, no delay, official exchange feed.
+           get_live_prices_batch() uses get_batch_quotes() (up to 50 symbols per HTTP
+           call) so the entire portfolio/scanner resolves in 1–2 network round-trips
+           instead of N parallel single-symbol calls that trip the rate limiter.
+  Tier 1: Yahoo Finance JSON API — direct HTTP, no library, works from cloud IPs.
+           Returns regularMarketPrice which is live during market hours but can be
+           15-min delayed outside them or when Yahoo throttles cloud IPs.
+  Tier 2: NSE India official API — real-time but needs session cookies; may return
+           403 from datacenter IPs (Streamlit Cloud included).
+  Tier 3: Stooq EOD             — yesterday's close, never fails, last resort.
 
-Why not yfinance?
-  yfinance.download() is rate-limited from Streamlit Cloud / datacenter IPs.
-  The direct Yahoo JSON endpoint (query1.finance.yahoo.com) is a lighter path
-  that avoids the rate-limiting applied to the Python library's batch calls.
+Root cause of previous price variance
+──────────────────────────────────────
+The old get_live_prices_batch() called get_live_quote() once per symbol inside a
+ThreadPoolExecutor. Each call hit _get_token() (rate-limited at 1 req/s) + a quote
+endpoint call with NO rate limit. With 8 workers and N stocks, Angel One received a
+burst of N requests in a few seconds, responded with empty/error bodies, and every
+symbol silently fell through to Yahoo's 15-min delayed regularMarketPrice — even
+though Angel One credentials were perfectly valid.
+
+Fix: batch path calls angel_fetcher.get_batch_quotes() which sends all symbols in
+a single "mode=FULL, exchangeTokens={NSE: [tok1,tok2,...]}" POST (max 50 per call).
+Token lookup is the only sequential step (still rate-limited); the quote fetch itself
+is one round-trip per 50 symbols. Symbols not resolved by Angel One fall back to the
+per-symbol Yahoo → NSE → Stooq chain.
 """
 
 from __future__ import annotations
@@ -33,6 +49,12 @@ def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
     Fetch live quote from Yahoo Finance JSON endpoint.
     Uses cookie+crumb session (required since mid-2024).
     Returns dict with 'price', 'prev_close', or None on failure.
+
+    Note: regularMarketPrice is the last traded price during market hours.
+    Outside hours it reflects the closing price of the last session — this
+    is correct behaviour, not a delay. The 15-min delay only appears when
+    Yahoo throttles requests from datacenter IPs; Angel One Tier 0 bypasses
+    this entirely during market hours.
     """
     try:
         from data.fetcher import _get_yf_crumb
@@ -58,7 +80,7 @@ def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
                 "prev_close": float(prev_close) if prev_close else float(price),
             }
     except Exception as e:
-        _log.debug("yahoo JSON quote failed for %s: %s", ticker_ns, e)  # tier fallback
+        _log.debug("yahoo JSON quote failed for %s: %s", ticker_ns, e)
     return None
 
 
@@ -84,7 +106,7 @@ def _get_nse_session():
         try:
             s.get("https://www.nseindia.com/", timeout=6)
         except Exception as e:
-            _log.debug("NSE session warm-up failed: %s", e)  # cookie may still work
+            _log.debug("NSE session warm-up failed: %s", e)
         _nse_session = s
         _nse_session_ts = time.time()
     return _nse_session
@@ -105,7 +127,7 @@ def _nse_live_price(symbol: str) -> Optional[dict]:
         if price:
             return {"price": float(price), "prev_close": float(prev or price)}
     except Exception as e:
-        _log.debug("NSE live price failed for %s: %s", symbol, e)  # tier fallback
+        _log.debug("NSE live price failed for %s: %s", symbol, e)
     return None
 
 
@@ -135,8 +157,21 @@ def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
         prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else price
         return {"price": price, "prev_close": prev}
     except Exception as e:
-        _log.debug("Stooq EOD price failed for %s: %s", ticker_ns, e)  # last tier
+        _log.debug("Stooq EOD price failed for %s: %s", ticker_ns, e)
         return None
+
+
+# ─── Internal: build a normalised quote dict ─────────────────────────────────
+
+def _normalise(q: dict) -> dict:
+    """Add chg_pct to a raw {price, prev_close} dict."""
+    p  = float(q["price"])
+    pc = float(q.get("prev_close") or p)
+    return {
+        "price":      p,
+        "prev_close": pc,
+        "chg_pct":    (p / pc - 1) * 100 if pc > 0 else 0.0,
+    }
 
 
 # ─── Public interface ────────────────────────────────────────────────────────
@@ -155,6 +190,9 @@ def get_live_quote(symbol: str) -> Optional[dict]:
     Get price + prev_close dict for one NSE symbol.
     Returns {"price": float, "prev_close": float, "chg_pct": float} or None.
 
+    For fetching multiple symbols at once, prefer get_live_prices_batch() —
+    it resolves the whole list in 1-2 Angel One round-trips instead of N.
+
     Priority:
       Tier 0: Angel One SmartAPI (real-time, if credentials configured)
       Tier 1: Yahoo Finance direct JSON (live during market hours)
@@ -164,17 +202,18 @@ def get_live_quote(symbol: str) -> Optional[dict]:
     clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
     clean    = symbol.replace(".NS", "").upper()
 
-    # Tier 0: Angel One (real-time, no rate limits)
+    # Tier 0: Angel One (real-time, true LTP)
     try:
         from data.angel_fetcher import get_live_quote as _ao_quote, is_configured as _ao_ok
         if _ao_ok():
             q = _ao_quote(clean_ns)
             if q:
+                # angel_fetcher already returns chg_pct — pass through directly
                 return q
     except Exception as e:
-        _log.debug("Angel One live quote failed for %s: %s", clean_ns, e)  # tier 0 fallback
+        _log.debug("Angel One live quote failed for %s: %s", clean_ns, e)
 
-    # Tier 1–3: existing fallbacks
+    # Tiers 1–3: fallbacks
     for fetch_fn, arg in [
         (_yahoo_json_quote, clean_ns),
         (_nse_live_price,   clean),
@@ -182,43 +221,89 @@ def get_live_quote(symbol: str) -> Optional[dict]:
     ]:
         q = fetch_fn(arg)
         if q:
-            p  = q["price"]
-            pc = q["prev_close"]
-            return {
-                "price":      p,
-                "prev_close": pc,
-                "chg_pct":    (p / pc - 1) * 100 if pc > 0 else 0.0,
-            }
-    # All tiers failed — this IS a data-loss event, so warn (not silent).
+            return _normalise(q)
+
     _log.warning("all live-price tiers failed for %s — no quote available", symbol)
     return None
 
 
-def get_live_prices_batch(symbols: List[str], max_workers: int = 8) -> Dict[str, Optional[dict]]:
+def get_live_prices_batch(
+    symbols: List[str],
+    max_workers: int = 8,
+) -> Dict[str, Optional[dict]]:
     """
-    Fetch live quotes for multiple symbols in parallel.
+    Fetch live quotes for multiple symbols.
     Returns {symbol: {"price", "prev_close", "chg_pct"} or None}
+
+    Batch strategy
+    ──────────────
+    Tier 0 (Angel One): calls get_batch_quotes() which groups all symbols into
+    50-symbol bulk POST requests.  The entire list resolves in ceil(N/50) round-
+    trips — typically 1 for a portfolio, 2–3 for a 100-stock screener scan.
+    This replaces the old approach of N parallel get_live_quote() calls which
+    saturated Angel One's rate limiter and caused silent fallthrough to Yahoo.
+
+    Any symbol that Angel One returns None for (not configured, circuit breaker
+    tripped, delisted, BSE-only stock) falls back to the per-symbol Yahoo →
+    NSE → Stooq chain via a thread pool.
     """
+    if not symbols:
+        return {}
+
+    results: Dict[str, Optional[dict]] = {s: None for s in symbols}
+    remaining: List[str] = list(symbols)
+
+    # ── Tier 0: Angel One bulk batch ────────────────────────────────────────
+    try:
+        from data.angel_fetcher import get_batch_quotes as _ao_batch, is_configured as _ao_ok
+        if _ao_ok():
+            ao_results = _ao_batch(remaining)
+            resolved: List[str] = []
+            for sym, q in ao_results.items():
+                if q and float(q.get("price", 0)) > 0:
+                    # angel_fetcher returns a full dict including chg_pct
+                    results[sym] = q
+                    resolved.append(sym)
+            remaining = [s for s in remaining if s not in resolved]
+            if resolved:
+                _log.debug(
+                    "live_prices_batch: Angel One resolved %d/%d symbols",
+                    len(resolved), len(symbols),
+                )
+    except Exception as e:
+        _log.debug("live_prices_batch: Angel One batch failed: %s — falling back per-symbol", e)
+
+    # ── Tiers 1–3: per-symbol fallback for anything Angel One missed ─────────
+    if not remaining:
+        return results
+
     from concurrent.futures import ThreadPoolExecutor, wait as _wait
 
-    results: Dict[str, Optional[dict]] = {}
+    def _fallback(sym: str) -> tuple:
+        clean_ns = sym if sym.endswith(".NS") else f"{sym}.NS"
+        clean    = sym.replace(".NS", "").upper()
+        for fetch_fn, arg in [
+            (_yahoo_json_quote, clean_ns),
+            (_nse_live_price,   clean),
+            (_stooq_eod_price,  clean_ns),
+        ]:
+            q = fetch_fn(arg)
+            if q:
+                return sym, _normalise(q)
+        _log.warning("all live-price tiers failed for %s — no quote available", sym)
+        return sym, None
+
     pool = ThreadPoolExecutor(max_workers=max_workers)
     try:
-        futs = {pool.submit(get_live_quote, sym): sym for sym in symbols}
+        futs = {pool.submit(_fallback, sym): sym for sym in remaining}
         done, _ = _wait(list(futs.keys()), timeout=20)
         for fut in done:
-            sym = futs[fut]
             try:
-                val = fut.result(timeout=0)
-                # Ensure we only store proper dicts — never raw exceptions or other types
-                results[sym] = val if isinstance(val, dict) else None
+                sym, val = fut.result(timeout=0)
+                results[sym] = val
             except Exception as e:
-                _log.debug("batch quote failed for %s: %s", sym, e)
-                results[sym] = None
+                _log.debug("fallback quote worker failed: %s", e)
     finally:
         pool.shutdown(wait=False)
 
-    for sym in symbols:
-        if sym not in results:
-            results[sym] = None
     return results
