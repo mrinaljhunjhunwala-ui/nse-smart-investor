@@ -11,6 +11,50 @@ Fixes applied vs previous version:
   - _log.warning used for real failures (was _log.debug — invisible in prod)
   - get_batch_quotes applies rate limiting (same as fetch_historical)
 
+FIX AO4 — Quote response field names were snake_case/lowercase guesses
+(e.g. "totaltradedvolume", "uppercircuit", "52weekhigh", "averagetradedprice",
+"opentrades") that do not match Angel One's actual Market Data API response,
+which is camelCase ("tradeVolume", "upperCircuit", "52WeekHigh", "avgPrice",
+"opnInterest" — confirmed against Angel's published quote/v1 sample
+responses). Every .get() on those keys silently missed and fell back to the
+"or 0" default, so volume / circuits / 52-week high-low / avg price always
+rendered as 0 even when the request succeeded. The `ltp` and `close` keys
+(which drive price / prev_close / chg_pct) were already correctly cased, so
+this did NOT cause the wrong-LTP symptom — it's a separate, narrower bug
+fixed alongside FIX AO3 since it lives in the same response-parsing code.
+
+FIX AO3 — _load_instrument_master() keyed _INST_MAP off the instrument
+master's "symbol" field taken verbatim (e.g. "RELIANCE-EQ", "SBIN-EQ",
+"BAJAJ-AUTO-EQ"). But every caller in this module looks up the BARE ticker
+with no suffix (ticker.replace(".NS", "") -> "RELIANCE"), because that's
+the form used everywhere else (fetch_historical, get_full_quote,
+get_batch_quotes, place_order, etc.). "RELIANCE" was therefore never a key
+in a map full of "RELIANCE-EQ" — _get_token()'s O(1) instrument-master
+lookup missed on every single real call, silently negating FIX AO2 (it
+still logged "instrument master loaded — N tokens cached", but no caller
+could ever hit it).
+
+  Effect in production: every _get_token() call fell through to the
+  rate-limited searchScrip path again — i.e. the exact 1-req/sec bottleneck
+  FIX AO2 was written to eliminate. A single manually-checked ticker still
+  resolves fine (one rate-limited call, ~1s). But a multi-ticker scan
+  (Smart Screener, Tomorrow Watchlist, any dashboard page batch-quoting
+  50-500+ symbols) blows straight through Streamlit's 60s cache TTL while
+  sequentially resolving tokens at 1/sec, so most tickers time out, return
+  None, and the page silently falls through to Yahoo Finance — whose
+  regularMarketPrice can lag true NSE LTP by several minutes from
+  datacenter IPs. That stale Yahoo price is what was rendering as
+  "incorrect LTP" on every page except the one ticker checked by hand.
+
+  Fix: match on "symbol" requiring the canonical "-EQ" suffix (the
+  standard way to isolate the cash-equity series — confirmed via Angel's
+  own forum guidance), then strip the suffix to produce the bare ticker
+  key. Matching on "name" instead would have been simpler but is unsafe:
+  sibling series for the same company (e.g. RELIANCE-EQ, RELIANCE-BL,
+  RELIANCE-BE) share the same "name", so a name-keyed map risks a
+  non-tradable series token silently overwriting the correct EQ token
+  depending on file ordering.
+
 FIX AO2 — Instrument Master pre-load eliminates per-symbol searchScrip calls.
 
 Root cause of live price variance on Streamlit Cloud:
@@ -96,11 +140,17 @@ _TOKEN_TTL      = 3600 * 6  # 6 hours for a real resolved token — handles deli
 _TOKEN_FAIL_TTL = 300       # FIX AO1: only 5 min for a FAILED lookup — a failure during
                             # a rate-limit/breaker event shouldn't poison a ticker for 6h
 
-# ── Instrument master (FIX AO2) ───────────────────────────────────────────────
+# ── Instrument master (FIX AO2 / FIX AO3) ─────────────────────────────────────
 # Angel One publishes a full instrument file (no auth required). Downloading it
 # once gives us all 50k+ tokens in a single HTTP call, eliminating per-symbol
 # searchScrip calls entirely. _get_token() checks this dict before any network call.
-_INST_MAP:      Dict[str, str] = {}   # SYMBOL_UPPER -> token string (NSE EQ only)
+#
+# FIX AO3: keys are the BARE ticker (e.g. "RELIANCE", "BAJAJ-AUTO") — the same
+# form produced by ticker.replace(".NS", "") everywhere else in this module —
+# NOT the master file's raw "symbol" field, which carries a series suffix
+# ("RELIANCE-EQ"). See FIX AO3 note above for why we strip "-EQ" rather than
+# reading the master's "name" field directly.
+_INST_MAP:      Dict[str, str] = {}   # SYMBOL_UPPER (no series suffix) -> token string
 _INST_MAP_LOCK  = threading.Lock()
 _INST_MAP_TS:   List[float] = [0.0]  # last successful load timestamp
 _INST_MAP_TTL   = 3600 * 4            # refresh every 4 hours
@@ -132,11 +182,28 @@ def _load_instrument_master() -> bool:
             instruments = req.json()
             new_map: Dict[str, str] = {}
             for inst in instruments:
-                exch  = inst.get("exch_seg", "")
-                itype = inst.get("instrumenttype", "")
-                sym   = inst.get("symbol", "").strip().upper()
-                tok   = inst.get("token", "")
-                if exch == "NSE" and itype in ("", "EQ") and sym and tok:
+                exch    = inst.get("exch_seg", "")
+                itype   = inst.get("instrumenttype", "")
+                raw_sym = inst.get("symbol", "").strip().upper()
+                tok     = inst.get("token", "")
+                # FIX AO3: Angel's master keys the cash-equity series under
+                # "symbol" as e.g. "RELIANCE-EQ" / "BAJAJ-AUTO-EQ" — not the
+                # bare ticker. The bare ticker lives in "name", but "name" is
+                # shared across sibling series for the same company (e.g.
+                # RELIANCE-EQ, RELIANCE-BL, RELIANCE-BE all have
+                # name="RELIANCE"), so keying off "name" risks a non-EQ
+                # series token silently overwriting the correct one
+                # depending on file ordering. Requiring the canonical "-EQ"
+                # suffix on "symbol" (the standard way to isolate the cash
+                # series) and stripping it gives the bare ticker used
+                # everywhere else in this module, with no collision risk.
+                if (
+                    exch == "NSE"
+                    and itype in ("", "EQ")
+                    and raw_sym.endswith("-EQ")
+                    and tok
+                ):
+                    sym = raw_sym[:-3]  # strip trailing "-EQ"
                     new_map[sym] = str(tok)
             if len(new_map) < 500:
                 _log.warning(
@@ -144,7 +211,7 @@ def _load_instrument_master() -> bool:
                     len(new_map),
                 )
                 return False
-            _INST_MAP     = new_map
+            _INST_MAP       = new_map
             _INST_MAP_TS[0] = time.time()
             _log.info(
                 "angel_fetcher: instrument master loaded — %d NSE EQ tokens cached",
@@ -351,10 +418,11 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
     """
     Get Angel One numeric token for a base NSE symbol (no .NS suffix).
 
-    FIX AO2: checks instrument master (_INST_MAP) first — O(1) dict lookup,
-    no network call, no rate limit. The master covers all ~1500+ NSE EQ
-    instruments so the searchScrip fallback is only needed for brand-new
-    listings in the hours after they appear before the next master refresh.
+    FIX AO2/AO3: checks instrument master (_INST_MAP) first — O(1) dict
+    lookup, no network call, no rate limit. The master covers all ~1500+
+    NSE EQ instruments, keyed by bare ticker (FIX AO3), so the searchScrip
+    fallback is only needed for brand-new listings in the hours after they
+    appear before the next master refresh.
 
     FIX AO1: searchScrip fallback is still rate-limited and circuit-breaker
     gated so it cannot pile up if Angel One is in a degraded state.
@@ -369,7 +437,7 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
         if time.time() - ts < ttl:
             return token
 
-    # ── FIX AO2: instrument master lookup (O(1), no network) ────────────────
+    # ── FIX AO2/AO3: instrument master lookup (O(1), no network) ────────────
     # Load master lazily on first token miss — one HTTP call populates all tokens.
     if not _INST_MAP:
         _load_instrument_master()
@@ -527,6 +595,12 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
         if price <= 0:
             return None
 
+        # FIX AO4: Angel's quote response uses camelCase for these fields —
+        # "tradeVolume", "avgPrice", "upperCircuit", "lowerCircuit",
+        # "52WeekHigh", "52WeekLow", "opnInterest" — NOT the lowercase
+        # guesses used previously, which always silently missed and fell
+        # back to 0. "ltp"/"close" (price/prev_close above) were already
+        # correctly cased.
         return {
             "ticker":          symbol,
             "price":           price,
@@ -535,13 +609,13 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
             "open":            float(q.get("open",  0)),
             "high":            float(q.get("high",  0)),
             "low":             float(q.get("low",   0)),
-            "volume":          int(q.get("totaltradedvolume", 0) or 0),
-            "avg_price":       float(q.get("averagetradedprice", 0) or 0),
-            "upper_circuit":   float(q.get("uppercircuit", 0) or 0),
-            "lower_circuit":   float(q.get("lowercircuit", 0) or 0),
-            "week_52_high":    float(q.get("52weekhigh", 0) or 0),
-            "week_52_low":     float(q.get("52weeklow",  0) or 0),
-            "oi":              int(q.get("opentrades", 0) or 0),
+            "volume":          int(q.get("tradeVolume", 0) or 0),
+            "avg_price":       float(q.get("avgPrice", 0) or 0),
+            "upper_circuit":   float(q.get("upperCircuit", 0) or 0),
+            "lower_circuit":   float(q.get("lowerCircuit", 0) or 0),
+            "week_52_high":    float(q.get("52WeekHigh", 0) or 0),
+            "week_52_low":     float(q.get("52WeekLow",  0) or 0),
+            "oi":              int(q.get("opnInterest", 0) or 0),
             "bid":             float((q.get("depth", {}).get("buy",  [{}])[0] or {}).get("price",    0)),
             "ask":             float((q.get("depth", {}).get("sell", [{}])[0] or {}).get("price",    0)),
             "bid_qty":         int((q.get("depth",   {}).get("buy",  [{}])[0] or {}).get("quantity", 0)),
@@ -625,6 +699,7 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
                 prev_close = float(q.get("close", price))
                 if price <= 0:
                     continue
+                # FIX AO4: see note in get_full_quote — camelCase keys.
                 results[orig] = {
                     "ticker":        orig,
                     "price":         price,
@@ -633,11 +708,11 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
                     "open":          float(q.get("open", 0)),
                     "high":          float(q.get("high", 0)),
                     "low":           float(q.get("low",  0)),
-                    "volume":        int(q.get("totaltradedvolume", 0) or 0),
-                    "upper_circuit": float(q.get("uppercircuit", 0) or 0),
-                    "lower_circuit": float(q.get("lowercircuit", 0) or 0),
-                    "week_52_high":  float(q.get("52weekhigh", 0) or 0),
-                    "week_52_low":   float(q.get("52weeklow",  0) or 0),
+                    "volume":        int(q.get("tradeVolume", 0) or 0),
+                    "upper_circuit": float(q.get("upperCircuit", 0) or 0),
+                    "lower_circuit": float(q.get("lowerCircuit", 0) or 0),
+                    "week_52_high":  float(q.get("52WeekHigh", 0) or 0),
+                    "week_52_low":   float(q.get("52WeekLow",  0) or 0),
                     "net_chg":       price - prev_close,
                 }
         except Exception as e:
