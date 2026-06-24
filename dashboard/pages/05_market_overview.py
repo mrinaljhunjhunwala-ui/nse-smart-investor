@@ -33,8 +33,17 @@ render_top_bar()
 st.title("📊 Market Overview")
 st.caption("Live market snapshot — VIX, sector momentum, and top movers")
 
-if st.button("🔄 Refresh Data", type="primary"):
-    st.cache_data.clear()
+_mo_refresh_clicked = st.button("🔄 Refresh Data", type="primary")
+if _mo_refresh_clicked:
+    # FIX MKT2: was a blanket st.cache_data.clear() — wiped every other
+    # page's cached data too (Top Picks, watchlist scans, etc.), not just
+    # this page's own VIX/sector/movers data. load_vix_data is imported
+    # from dashboard.shared.cache so it already exists here and can be
+    # cleared immediately; get_sector_data/get_top_movers are defined
+    # further down this script (Streamlit pages run top-to-bottom on every
+    # interaction) so their clearing is deferred until just below their
+    # definitions, where they actually exist.
+    load_vix_data.clear()
 
 # ── India VIX section ──────────────────────────────────────────────────
 with st.spinner("Loading VIX & Nifty…"):
@@ -123,6 +132,9 @@ def get_sector_data():
     from strategies.sector_rotation import compute_sector_scores
     return compute_sector_scores(period="1y")
 
+if _mo_refresh_clicked:
+    get_sector_data.clear()
+
 with st.spinner("Computing sector scores…"):
     try:
         scores = get_sector_data()
@@ -188,6 +200,9 @@ def get_top_movers():
         except Exception:
             continue
     return pd.DataFrame(rows).sort_values("Day (%)", ascending=False) if rows else pd.DataFrame()
+
+if _mo_refresh_clicked:
+    get_top_movers.clear()
 
 with st.spinner("Fetching NSE broad movers (~750 stocks)…"):
     movers = get_top_movers()
