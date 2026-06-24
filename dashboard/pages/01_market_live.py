@@ -52,9 +52,14 @@ with col_h2:
     <b style='font-size:16px'>{_ms['status']}</b><br>
     <span style='font-size:11px;color:#aaa'>{_ms['time_ist']}</span>
     </div>""", unsafe_allow_html=True)
-    if st.button("🔄 Refresh Now"):
-        st.cache_data.clear()
-        st.rerun()
+    # FIX MKT1: was a blanket st.cache_data.clear() — wiped every other
+    # page's cached data (Top Picks, watchlist scans, etc.) along with this
+    # page's own snapshot. "Refresh Now" only means this page's data.
+    # _load_nifty_snapshot is defined further down this script (Streamlit
+    # pages run top-to-bottom on every interaction), so the click is just
+    # captured here and the actual .clear() happens right before the
+    # function is first called below, once it actually exists.
+    _mkt_refresh_clicked = st.button("🔄 Refresh Now")
 
 st.markdown(f"*{_ms['day']} — {_ms['detail']}*")
 st.markdown("---")
@@ -119,6 +124,13 @@ def _load_nifty_snapshot():
         return pd.DataFrame()
     df = pd.DataFrame(rows).sort_values("chg_pct", ascending=False)
     return df
+
+# Now that _load_nifty_snapshot exists, honor an earlier "Refresh Now"
+# click (captured before this point in the script, since the button is
+# rendered above the function definition).
+if _mkt_refresh_clicked:
+    _load_nifty_snapshot.clear()
+    st.rerun()
 
 with st.spinner("Loading NSE market snapshot (~750 stocks)…"):
     snap = _load_nifty_snapshot()
