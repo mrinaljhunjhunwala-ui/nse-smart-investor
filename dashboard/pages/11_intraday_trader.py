@@ -521,13 +521,19 @@ if tab_pos is not None:
     with tab_pos:
         st.subheader("Live Intraday Positions — Angel One")
         st.caption("Real-time MIS + CNC positions from your Angel One account.")
-        if st.button("🔄 Refresh Positions", key="it_pos_refresh"):
-            st.cache_data.clear()
+        # FIX MKT5: was a blanket st.cache_data.clear() — wiped every other
+        # page's cached data too. _it_positions is defined just below (it's
+        # local to this tab), so the click is captured here and the actual
+        # .clear() happens right after the function is defined.
+        _it_pos_refresh_clicked = st.button("🔄 Refresh Positions", key="it_pos_refresh")
 
         @st.cache_data(ttl=30, show_spinner=False)
         def _it_positions():
             from data.angel_fetcher import get_positions as _gp, get_funds as _gf
             return _gp(), _gf()
+
+        if _it_pos_refresh_clicked:
+            _it_positions.clear()
 
         with st.spinner("Fetching positions…"):
             _it_pos_data, _it_funds = _it_positions()
