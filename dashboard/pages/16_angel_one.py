@@ -131,8 +131,14 @@ with tab_ao1:
             st.markdown("*Funds data unavailable*")
 
     if st.button("🔄 Refresh Session", key="ao_refresh"):
+        # FIX MKT6: was also calling a blanket st.cache_data.clear() here,
+        # which wiped every other page's cached data (Top Picks, watchlist
+        # scans, etc.) for zero benefit — this page doesn't actually use
+        # st.cache_data for any of its own data (funds/holdings/positions
+        # are fetched live from angel_fetcher on every rerun already).
+        # _ao_clear_session() is what actually matters: it forces a fresh
+        # login on the next request.
         _ao_clear_session()
-        st.cache_data.clear()
         st.success("Session cleared — reconnecting on next request")
         st.rerun()
 
