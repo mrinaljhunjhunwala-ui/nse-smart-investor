@@ -623,7 +623,13 @@ with st.expander("➕ Open a New Paper Trade", expanded=True):
                 f"**{int(_form_qty)} × {_form_ticker.replace('.NS','')}** @ ₹{_form_price:,.2f}  "
                 f"| SL ₹{_form_sl:,.2f} | Target ₹{_form_tp:,.2f}"
             )
-            st.cache_data.clear()
+            # FIX MKT7: was a blanket st.cache_data.clear() (x7 sites in this
+            # file) — wiped every other page's cached data too (Top Picks,
+            # watchlist scans, etc.). trade_store.py has no @st.cache_data of
+            # its own (trades are read fresh from the DB every rerun already),
+            # so _paper_trade_suggestions (this file's one cached function,
+            # defined above) is the only thing that actually needs clearing.
+            _paper_trade_suggestions.clear()
             # FIX NEW: signal form reset, FIX P3: rerun so new trade appears immediately
             st.session_state["_pt_reset_form"] = True
             st.rerun()
@@ -651,7 +657,7 @@ with _tcol:
 with _rcol:
     st.write("")
     if st.button("🔄 Refresh", key="paper_refresh"):
-        st.cache_data.clear()
+        _paper_trade_suggestions.clear()
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -670,7 +676,7 @@ def _autoclose_fragment():
     )
     if _pt_closed:
         _render_autoclose_banner(_pt_closed)
-        st.cache_data.clear()
+        _paper_trade_suggestions.clear()
         st.rerun()
 
 _autoclose_fragment()
@@ -869,13 +875,13 @@ else:
             _cb1, _cb2, _cb3 = st.columns(3)
             if _cb1.button(f"❌ Close @ ₹{_cur:,.2f}", key=f"cl_live_{_tid}", use_container_width=True):
                 paper_close_trade(_tid, _cur, "Closed at live price")
-                st.cache_data.clear(); st.rerun()
+                _paper_trade_suggestions.clear(); st.rerun()
             if _cb2.button(f"🔴 Close @ SL ₹{_sl:,.2f}", key=f"cl_sl_{_tid}", use_container_width=True):
                 paper_close_trade(_tid, _sl, "Stop-loss triggered")
-                st.cache_data.clear(); st.rerun()
+                _paper_trade_suggestions.clear(); st.rerun()
             if _cb3.button(f"🎯 Close @ Target ₹{_tp:,.2f}", key=f"cl_tp_{_tid}", use_container_width=True):
                 paper_close_trade(_tid, _tp, "Target reached")
-                st.cache_data.clear(); st.rerun()
+                _paper_trade_suggestions.clear(); st.rerun()
 
             with st.expander("✏️ Edit Stop-Loss / Target"):
                 _ne1, _ne2 = st.columns(2)
@@ -900,7 +906,7 @@ else:
                              type="primary", use_container_width=True):
                     paper_edit_trade(_tid, sl=_nsl, tp=_ntp)
                     st.toast(f"Updated SL ₹{_nsl:,.2f} · TP ₹{_ntp:,.2f}", icon="✅")
-                    st.cache_data.clear(); st.rerun()
+                    _paper_trade_suggestions.clear(); st.rerun()
 
         st.markdown("---")
 
