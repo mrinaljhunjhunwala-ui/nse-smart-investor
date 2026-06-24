@@ -266,7 +266,11 @@ st.markdown("---")
 _rf1, _rf2 = st.columns([5, 1])
 with _rf2:
     if st.button("🔄 Re-scan now", key="tw_manual_rescan"):
-        st.cache_data.clear()
+        # FIX MKT4: was a blanket st.cache_data.clear() — wiped every other
+        # page's cached data too (Command Centre's Top Picks, etc.), not
+        # just this page's own scan. _tomorrow_watchlist is already
+        # imported at the top of this module, so it's safe to clear here.
+        _tomorrow_watchlist.clear()
         st.session_state["tw_running"]   = False
         st.session_state.pop("tw_bg_holder", None)
         st.session_state.pop("tw_bg_thread", None)
