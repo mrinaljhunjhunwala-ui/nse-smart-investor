@@ -4,6 +4,82 @@ Computes technical indicators: MA, RSI, MACD, BB, ATR, VWAP, ADX, Stochastic,
 Fibonacci retracements, Supertrend, CPR/Pivot Points,
 candlestick patterns, and RSI divergence.
 Uses pure pandas/numpy — no TA-Lib C library required.
+
+FIX IND1 — add_rsi(): when a stock has zero down-days inside the lookback
+window (a realistic case during a strong multi-day rally — common for NSE
+momentum names), avg_loss hits exactly 0, so the old
+`avg_gain / avg_loss.replace(0, np.nan)` produced RS = NaN and therefore
+RSI = NaN for the entire stretch, instead of the conventional RSI = 100
+(no losses at all = maximally overbought). Verified with a synthetic
+20-day pure-uptrend series: RSI silently went NaN once avg_loss hit 0, not
+100. Since RSI feeds composite/momentum scoring, this meant exactly the
+strongest-momentum candidates could drop out of ranked/sorted output or
+get miscompared against NaN. Fixed by explicitly setting RSI = 100 where
+avg_loss == 0 and avg_gain > 0 (and RSI = 50 in the degenerate all-flat
+case where both are 0, rather than leaving it NaN).
+
+FIX IND2 — add_supertrend(): three independent bugs, all verified against
+synthetic OHLC data with controlled ATR.
+
+  (c) NaN-poisoning bug — THE dominant one, affecting every single call in
+      production: `upper_band = upper_raw.values.copy()` seeds the whole
+      band array directly from the raw ATR-based formula, whose row 0 is
+      ALWAYS NaN for any real OHLCV series (ATR's rolling window needs
+      `period` rows before its first valid value — true for any period,
+      not a corner case). The tightening loop —
+          if upper_raw.iloc[i] < upper_band[i-1] or close[i-1] > upper_band[i-1]:
+              upper_band[i] = upper_raw.iloc[i]
+          else:
+              upper_band[i] = upper_band[i-1]
+      — can never recover from a NaN previous value: any comparison
+      against NaN evaluates False (IEEE754), so neither branch condition
+      can ever be True once upper_band[i-1] is NaN, and "else" just
+      re-copies the same NaN forward forever — even long after upper_raw
+      itself becomes perfectly valid. Verified directly: fed a synthetic
+      series with ATR NaN for the first 9 bars then valid (3.0) from bar 9
+      onward, and ST_Upper stayed NaN for all 20 bars regardless. In
+      production this means Supertrend / ST_Upper / ST_Lower /
+      ST_Direction / ST_Signal were ALL NaN for the ENTIRE history of
+      EVERY stock, on every page that calls add_supertrend() — not a rare
+      edge case, the default behavior. Fixed by finding the first index
+      where the raw bands are actually valid and seeding the recursion
+      there (mirroring what the old code intended to do at index 0),
+      rather than seeding from a row that's structurally guaranteed NaN.
+
+  (a) Initialization-order bug: even setting aside (c), `supertrend[0] =
+      upper_band[0]` and `direction[0] = -1` were set AFTER the main
+      `for i in range(1, n)` loop, but the loop's very first iteration
+      (i=1) reads `prev_st = supertrend[i - 1]` i.e. `supertrend[0]` —
+      which at that point is still its `np.zeros(n)` default (0.0), not
+      the intended seed value. The `prev_st = supertrend[i-1] if i > 0
+      else upper_band[0]` ternary's else-branch is dead code, since i is
+      always > 0 in this loop. Net effect, confirmed on a plain 6-bar
+      monotonic downtrend (100→98→96→94→92→90 — nothing ambiguous about
+      this trend): the indicator flashed BULLISH (+1) for 4 consecutive
+      bars right at the start before self-correcting back to bearish at
+      bar 5. Since ST_Signal (buy/sell flags) is derived from direction
+      changes, this is a false BUY signal fired into an obvious
+      downtrend. Fixed (now folded into the (c) fix) by seeding at the
+      first valid bar BEFORE the loop runs, instead of after.
+
+  (b) Band-comparison bug: the trend-flip check compared the current
+      bar's close against the CURRENT bar's band (`upper_band[i]` /
+      `lower_band[i]`), which may have already been tightened earlier in
+      the same iteration. The canonical Supertrend definition (matching
+      TradingView's built-in indicator — the reference Indian traders
+      actually look at) compares against the PRIOR bar's band
+      (`upper_band[i-1]` / `lower_band[i-1]`), since that's the level
+      that was actually in force when the bar closed. Verified with a
+      volatility-squeeze synthetic case (ATR contracting sharply mid-
+      series): even after fixing (a), the old current-bar comparison
+      still flipped bullish one bar earlier than the prior-bar comparison
+      — i.e. a real, independent discrepancy from the standard
+      definition, not just a side-effect of (a).
+
+  ST_Direction is now 0 (not a fake +1) for the unavoidable warm-up bars
+  before ATR has enough data — distinguishable from real -1/+1 readings —
+  and ST_Signal is explicitly suppressed on the first real bar (no prior
+  trend exists yet to "flip" from).
 """
 
 import pandas as pd
@@ -58,7 +134,19 @@ def add_rsi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
     rs       = avg_gain / avg_loss.replace(0, np.nan)
-    df["RSI"] = 100 - (100 / (1 + rs))
+    rsi      = 100 - (100 / (1 + rs))
+
+    # FIX IND1: avg_loss == 0 (zero down-days in the window — a real
+    # multi-day-rally case, not just a theoretical edge) made `rs` NaN via
+    # the replace(0, nan) above, so RSI went NaN instead of the
+    # conventional 100 (no losses at all = maximally overbought). The
+    # degenerate case where avg_gain is ALSO 0 (price dead flat the whole
+    # window) is set to a neutral 50 rather than left NaN.
+    no_loss = avg_loss == 0
+    rsi = rsi.mask(no_loss & (avg_gain > 0), 100.0)
+    rsi = rsi.mask(no_loss & (avg_gain == 0), 50.0)
+
+    df["RSI"] = rsi
     return df
 
 
@@ -569,6 +657,36 @@ def add_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) 
         Supertrend     : current active support/resistance value
         ST_Direction   : 1 = bullish (price above band), -1 = bearish
         ST_Signal      : +1 = just crossed up (buy), -1 = just crossed down (sell)
+
+    FIX IND2: three bugs fixed here, all verified against synthetic OHLC
+    series with controlled ATR (see indicators.py module docstring for
+    the full writeup):
+      (c) — the dominant one — upper_band/lower_band used to be seeded
+          directly from upper_raw/lower_raw, whose row 0 is ALWAYS NaN
+          for any real series (ATR needs `period` rows of warm-up). The
+          tightening recursion below can never recover from a NaN
+          previous value (any comparison against NaN is False), so that
+          NaN silently propagated forward through the ENTIRE rest of the
+          series, every time, for every stock — not a rare edge case.
+          Fixed by seeding the recursion at the first bar where the raw
+          bands are actually valid, instead of at a row that's
+          structurally guaranteed to be NaN.
+      (a) supertrend[i]/direction[i] are now seeded at that first valid
+          bar BEFORE the loop starts, not after — the loop's first real
+          iteration reads the previous bar's supertrend value as its
+          `prev_st`, and a too-late assignment leaves prev_st at an
+          uninitialized default for that critical first comparison. This
+          caused obvious downtrends to flash a false bullish flip for
+          several bars at the start.
+      (b) the trend-flip check compares against the PRIOR bar's band
+          (upper_band[i-1] / lower_band[i-1]) rather than the current
+          bar's just-tightened band — matching the standard Supertrend
+          definition (TradingView's reference implementation).
+
+    ST_Direction is 0 (not a fake +1) for the unavoidable ATR warm-up
+    bars at the start of any series — distinguishable from a real -1/+1
+    reading — and ST_Signal is suppressed on the first real bar (there's
+    no prior trend yet to have "flipped" from).
     """
     if "ATR" not in df.columns:
         df = add_atr(df, period=period)
@@ -582,11 +700,33 @@ def add_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) 
     n           = len(df)
     upper_band  = upper_raw.values.copy()
     lower_band  = lower_raw.values.copy()
-    supertrend  = np.zeros(n)
-    direction   = np.ones(n, dtype=int)   # 1 = bullish
+    supertrend  = np.full(n, np.nan)
+    direction   = np.zeros(n, dtype=int)   # 0 = undefined (warm-up); 1 = bullish, -1 = bearish
     close       = df["Close"].values
 
-    for i in range(1, n):
+    # FIX IND2(c): find the first bar where the raw ATR-based bands are
+    # actually valid — seeding from row 0 directly is unsafe since ATR's
+    # rolling window guarantees row 0 is NaN.
+    valid_mask = ~np.isnan(upper_raw.values)
+    if not valid_mask.any():
+        # Not even one bar of valid ATR (series shorter than `period`) —
+        # return honest NaN/undefined columns rather than guessing.
+        df["ST_Upper"]     = upper_band
+        df["ST_Lower"]     = lower_band
+        df["Supertrend"]   = supertrend
+        df["ST_Direction"] = direction
+        df["ST_Signal"]    = 0
+        return df
+
+    start = int(np.argmax(valid_mask))
+
+    # FIX IND2(a): seed BEFORE the loop runs, at the first real bar — not
+    # row 0 (which is guaranteed NaN) and not after the loop (too late
+    # for the loop's first iteration to see it).
+    supertrend[start] = upper_band[start]
+    direction[start]  = -1
+
+    for i in range(start + 1, n):
         # Upper band: only move DOWN (tighten)
         if upper_raw.iloc[i] < upper_band[i - 1] or close[i - 1] > upper_band[i - 1]:
             upper_band[i] = upper_raw.iloc[i]
@@ -600,34 +740,37 @@ def add_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) 
             lower_band[i] = lower_band[i - 1]
 
         # Direction flipping
-        prev_st = supertrend[i - 1] if i > 0 else upper_band[0]
+        prev_st = supertrend[i - 1]
         if prev_st == upper_band[i - 1]:          # was bearish
-            if close[i] > upper_band[i]:
+            # FIX IND2(b): compare against the PRIOR bar's band (the level
+            # actually in force when this bar closed), not the current
+            # bar's already-tightened band.
+            if close[i] > upper_band[i - 1]:
                 direction[i] = 1                   # flipped bullish
                 supertrend[i] = lower_band[i]
             else:
                 direction[i] = -1
                 supertrend[i] = upper_band[i]
         else:                                      # was bullish
-            if close[i] < lower_band[i]:
+            if close[i] < lower_band[i - 1]:
                 direction[i] = -1                  # flipped bearish
                 supertrend[i] = upper_band[i]
             else:
                 direction[i] = 1
                 supertrend[i] = lower_band[i]
 
-    # Initialize first bar
-    supertrend[0] = upper_band[0]
-    direction[0]  = -1
-
     df["ST_Upper"]     = upper_band
     df["ST_Lower"]     = lower_band
     df["Supertrend"]   = supertrend
     df["ST_Direction"] = direction
 
-    # Signal: +1 on bar where direction flips from -1 to +1, -1 vice versa
-    dir_series     = pd.Series(direction, index=df.index)
-    df["ST_Signal"] = (dir_series.diff() > 0).astype(int) - (dir_series.diff() < 0).astype(int)
+    # Signal: +1 on bar where direction flips from -1 to +1, -1 vice versa.
+    # Suppressed at `start` itself — no prior trend exists yet to flip from.
+    dir_series      = pd.Series(direction, index=df.index)
+    diff            = dir_series.diff()
+    signal          = (diff > 0).astype(int) - (diff < 0).astype(int)
+    signal.iloc[start] = 0
+    df["ST_Signal"] = signal
     return df
 
 
