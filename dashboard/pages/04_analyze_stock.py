@@ -580,7 +580,12 @@ if analyze_btn or _prefill_active or (
                 st.session_state["pt_prefill_ticker"] = ticker
                 st.rerun()
             if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", use_container_width=True):
-                st.cache_data.clear()
+                # FIX MKT3: was a blanket st.cache_data.clear() — wiped every
+                # other page's cached data too (Top Picks, watchlist scans,
+                # etc.), not just this ticker's analysis. load_ticker_df is
+                # already imported at the top of this module, so it's safe
+                # to clear directly here.
+                load_ticker_df.clear()
                 st.rerun()
 
             # ── Technical indicators ───────────────────────────────────────
