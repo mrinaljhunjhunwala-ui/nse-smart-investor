@@ -27,6 +27,22 @@ a single "mode=FULL, exchangeTokens={NSE: [tok1,tok2,...]}" POST (max 50 per cal
 Token lookup is the only sequential step (still rate-limited); the quote fetch itself
 is one round-trip per 50 symbols. Symbols not resolved by Angel One fall back to the
 per-symbol Yahoo → NSE → Stooq chain.
+
+FIX LP1 — get_live_prices_batch()'s fallback ThreadPoolExecutor used a flat
+20-second `wait(timeout=20)` regardless of how many symbols needed the
+fallback chain. Each fallback call can take up to ~24s in the worst case
+(Yahoo's 8s timeout + NSE's 6s + Stooq's 10s, tried sequentially when all
+three fail). With max_workers=8, any remaining list bigger than 8 needs
+multiple sequential "rounds" through the pool — e.g. 20 remaining symbols
+needs ceil(20/8)=3 rounds, up to ~72s worst case — but the old code only
+ever waited 20s total, then silently abandoned everything still running:
+those symbols' results were never collected and just stayed None. This is
+exactly the scenario this fallback path exists for (Angel One Tier-0 not
+covering a chunk of symbols — circuit breaker tripped, new listings, BSE-
+only names), so it tended to fail precisely when it mattered most. Fixed by
+scaling the wait to the actual workload (bounded so one bad batch can't hang
+the page indefinitely) and logging — not silently dropping — anything still
+outstanding when the wait ends.
 """
 
 from __future__ import annotations
@@ -246,6 +262,11 @@ def get_live_prices_batch(
     Any symbol that Angel One returns None for (not configured, circuit breaker
     tripped, delisted, BSE-only stock) falls back to the per-symbol Yahoo →
     NSE → Stooq chain via a thread pool.
+
+    FIX LP1: the fallback wait is now sized to the actual remaining workload
+    (each fetch_fn already self-bounds to 6-10s per call, ~24s worst case per
+    symbol across all 3 tiers) instead of a flat 20s that silently truncated
+    anything past the first round of max_workers symbols. See module docstring.
     """
     if not symbols:
         return {}
@@ -293,16 +314,33 @@ def get_live_prices_batch(
         _log.warning("all live-price tiers failed for %s — no quote available", sym)
         return sym, None
 
+    # FIX LP1: scale the wait to the real workload instead of a flat 20s.
+    # Worst case per symbol is ~24s (Yahoo 8s + NSE 6s + Stooq 10s, all
+    # failing in sequence). With max_workers concurrent slots, N remaining
+    # symbols need ceil(N / max_workers) sequential "rounds" through the
+    # pool. Capped at 120s so one pathological batch can't hang the page
+    # indefinitely — anything still outstanding past that is logged
+    # (not silently dropped) and returns None, same as a genuine failure.
+    rounds       = math.ceil(len(remaining) / max_workers)
+    wait_timeout = min(120, rounds * 26 + 4)
+
     pool = ThreadPoolExecutor(max_workers=max_workers)
     try:
         futs = {pool.submit(_fallback, sym): sym for sym in remaining}
-        done, _ = _wait(list(futs.keys()), timeout=20)
+        done, not_done = _wait(list(futs.keys()), timeout=wait_timeout)
         for fut in done:
             try:
                 sym, val = fut.result(timeout=0)
                 results[sym] = val
             except Exception as e:
                 _log.debug("fallback quote worker failed: %s", e)
+        if not_done:
+            pending_syms = [futs[f] for f in not_done]
+            _log.warning(
+                "live_prices_batch: %d/%d fallback lookups still running after "
+                "%.0fs wait — returning None for them (first 10: %s)",
+                len(not_done), len(futs), wait_timeout, ", ".join(pending_syms[:10]),
+            )
     finally:
         pool.shutdown(wait=False)
 
