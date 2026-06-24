@@ -436,7 +436,15 @@ def render_sidebar(current: str = None) -> None:
         )
         if _ms["is_open"]:
             if st.sidebar.button("🔄 Refresh Prices", key="sidebar_refresh"):
-                st.cache_data.clear()
+                # FIX NAV1: was a blanket st.cache_data.clear() — this runs on
+                # EVERY page (nav.py is loaded sidebar-wide), so clicking it
+                # from anywhere silently wiped Command Centre's Top Picks
+                # cache, the watchlist scan, and every other page's cached
+                # data too, forcing expensive unrelated re-scans. "Refresh
+                # Prices" only means this sidebar's own price helpers.
+                _qv_prices.clear()
+                _sidebar_all.clear()
+                _watchlist_prices.clear()
                 st.rerun()
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
