@@ -16,12 +16,15 @@ Benchmark: Nifty 50 (^NSEI)
 from __future__ import annotations
 
 import json
+import logging
 import urllib.request
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
 from data.fetcher import fetch_single
+
+_log = logging.getLogger("analysis.hedging")
 
 # NSE Nifty 50 — hedge benchmark
 _NIFTY = "^NSEI"
@@ -78,7 +81,8 @@ def calculate_stock_beta(
         beta = cov_matrix[0, 1] / cov_matrix[1, 1] if cov_matrix[1, 1] != 0 else np.nan
         return round(float(beta), 3)
 
-    except Exception:
+    except Exception as e:
+        _log.debug("calculate_stock_beta: failed for %s, returning NaN: %s", ticker, e)
         return np.nan
 
 
@@ -116,7 +120,8 @@ def calculate_portfolio_beta(
     # Fetch Nifty once and reuse
     try:
         nifty_df = fetch_single(_NIFTY, period=period)
-    except Exception:
+    except Exception as e:
+        _log.warning("calculate_portfolio_beta: Nifty fetch failed, betas will be unavailable: %s", e)
         nifty_df = None
 
     total_value = sum(h["value_rs"] for h in holdings if "value_rs" in h)
@@ -197,7 +202,12 @@ def hedge_sizing(
         try:
             nifty_df   = fetch_single(_NIFTY, period="5d")
             nifty_spot = float(nifty_df["Close"].iloc[-1])
-        except Exception:
+        except Exception as e:
+            _log.warning(
+                "hedge_sizing: live Nifty spot fetch failed, falling back to hardcoded "
+                "23,000 — hedge sizing may be inaccurate if the index has moved "
+                "significantly since this constant was last updated: %s", e
+            )
             nifty_spot = 23_000   # fallback
 
     lot_value      = nifty_spot * _NIFTY_LOT
@@ -267,7 +277,11 @@ def suggest_hedge(
             _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
             _valid  = [v for v in _closes if v is not None]
             vix = float(_valid[-1]) if _valid else 16.0
-        except Exception:
+        except Exception as e:
+            _log.warning(
+                "suggest_hedge: live VIX fetch failed, falling back to hardcoded "
+                "16.0 — hedge recommendation may not reflect current volatility regime: %s", e
+            )
             vix = 16.0
 
     beta_result = calculate_portfolio_beta(holdings, period=period)
