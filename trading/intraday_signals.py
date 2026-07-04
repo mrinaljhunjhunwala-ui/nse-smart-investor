@@ -13,10 +13,13 @@ All functions expect an intraday DataFrame from fetch_intraday() (5m/15m bars).
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, time as dtime
 from typing import Dict, List, Optional
+
+_log = logging.getLogger("trading.intraday_signals")
 
 from utils.indicators import add_all_indicators, add_anchored_vwap
 
@@ -77,7 +80,8 @@ def compute_orb(df: pd.DataFrame, orb_minutes: int = 15) -> Dict:
             "open_price":    round(open_px, 2),
             "orb_bars":      len(orb_df),
         }
-    except Exception:
+    except Exception as e:
+        _log.debug("compute_orb: failed to compute opening range, returning NaN sentinel: %s", e)
         return {"orb_high": np.nan, "orb_low": np.nan, "orb_range": np.nan,
                 "orb_range_pct": np.nan, "narrow": False, "open_price": np.nan, "orb_bars": 0}
 
@@ -117,7 +121,8 @@ def check_orb_signal(
     try:
         post_mask = df.index.time > cutoff
         post_df   = df[post_mask]
-    except Exception:
+    except Exception as e:
+        _log.debug("check_orb_signal: time-based post-ORB slice failed, using positional fallback: %s", e)
         post_df = df.tail(len(df) - orb["orb_bars"])
 
     if post_df.empty:
@@ -131,7 +136,8 @@ def check_orb_signal(
     try:
         orb_mask    = (df.index.time >= start_time) & (df.index.time <= cutoff)
         orb_avg_vol = float(df[orb_mask]["Volume"].mean())
-    except Exception:
+    except Exception as e:
+        _log.debug("check_orb_signal: ORB volume calc failed, disabling volume check: %s", e)
         orb_avg_vol = vol / vol_mult   # disable volume check
 
     vol_ok = vol >= vol_mult * max(orb_avg_vol, 1)
