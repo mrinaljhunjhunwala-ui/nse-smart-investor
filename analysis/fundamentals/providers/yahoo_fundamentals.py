@@ -72,7 +72,8 @@ _CASHFLOW_MAP = {
 def _to_date(col) -> Optional[date]:
     try:
         return pd.Timestamp(col).date()
-    except Exception:
+    except Exception as e:
+        _log.debug("_to_date: could not parse %r as a date: %s", col, e)
         return None
 
 
@@ -105,7 +106,8 @@ class YahooFundamentalProvider(FundamentalProvider):
         try:
             import yfinance  # noqa: F401
             return True
-        except Exception:
+        except Exception as e:
+            _log.debug("YahooFundamentalsProvider.is_available: yfinance import failed: %s", e)
             return False
 
     # ── raw fetch (the only network seam — monkeypatched in tests) ───────────
@@ -118,7 +120,8 @@ class YahooFundamentalProvider(FundamentalProvider):
             inc, bal, cfl = tk.income_stmt, tk.balance_sheet, tk.cashflow
         try:
             info = tk.info or {}
-        except Exception:
+        except Exception as e:
+            _log.debug("_fetch_raw: tk.info fetch failed for %s: %s", symbol, e)
             info = {}
         return {"income": inc, "balance": bal, "cashflow": cfl, "info": info}
 

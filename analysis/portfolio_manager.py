@@ -289,7 +289,8 @@ class PortfolioManager:
         try:
             from utils.vix import get_india_vix_regime
             vix_info = get_india_vix_regime()
-        except Exception:
+        except Exception as e:
+            _log.debug("portfolio VIX fetch failed, defaulting to 'normal' regime: %s", e)
             vix_info = {"vix": None, "regime": "normal",
                         "allow_buy": True, "vix_pct_chg": 0.0}
 
@@ -379,7 +380,11 @@ class PortfolioManager:
         try:
             bought_dt = datetime.strptime(date_bought, "%Y-%m-%d")
             days_held = (datetime.today() - bought_dt).days
-        except Exception:
+        except Exception as e:
+            _log.warning(
+                "%s: date_bought=%r is unparseable, days_held defaulting to 0 "
+                "(this affects holding-period-based logic): %s", ticker, date_bought, e
+            )
             days_held = 0
 
         try:

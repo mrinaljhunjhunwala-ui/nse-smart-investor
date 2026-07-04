@@ -237,7 +237,8 @@ def _parse_date(x) -> Optional[date]:
         return x
     try:
         return pd.Timestamp(x).date()
-    except Exception:
+    except Exception as e:
+        _log.debug("date coercion failed for %r: %s", x, e)
         return None
 
 
@@ -368,5 +369,6 @@ def compute_portfolio_risk(holdings: List[Dict], period: str = "1y",
 def _as_date(idx) -> Optional[date]:
     try:
         return pd.Timestamp(idx).date()
-    except Exception:
+    except Exception as e:
+        _log.debug("_as_date: could not parse %r as a date: %s", idx, e)
         return None
