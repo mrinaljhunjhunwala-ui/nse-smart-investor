@@ -8,7 +8,9 @@ Source priority (fastest / most reliable first):
   Tier 1 : Stooq CSV            — free, no API key, cloud-safe (daily bars only).
   Tier 2 : Yahoo Finance v8 API — direct urllib + cookie+crumb auth (since mid-2024).
 
-In-memory cache: each (ticker, period, interval) fetched only once per process.
+In-memory cache: each (ticker, period, interval) fetched once per TTL window (5 min).
+  - Caches (dataframe, timestamp) tuples to enable TTL expiry across Streamlit sessions.
+  - Batch operations use 16 workers with per-ticker timeout (6s) + 1 retry on timeout/connection errors.
 """
 
 import http.cookiejar
@@ -19,15 +21,18 @@ import datetime
 import urllib.parse
 import urllib.request
 import pandas as pd
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # Structured logging for the data-source fallback chain (Angel → Stooq → Yahoo).
 # Failures at each tier are logged at WARNING with provider + exception type + symbol;
 # the tier that ultimately serves the data is logged so a degraded path is diagnosable.
 _log = logging.getLogger("data.fetcher")
 
-# ── In-process cache  {(ticker, period, interval): DataFrame} ────────────────
+# ── In-process cache: {(ticker, period, interval): (dataframe, timestamp)} ──────
+# Entries expire after _FETCH_CACHE_TTL seconds (5 min, matching utils/vix.py pattern)
 _FETCH_CACHE: dict = {}
+_FETCH_CACHE_TTL = 300  # 5 minutes — consistent with VIX cache TTL
+
 
 # ── Yahoo Finance session cache (cookie jar + crumb token) ───────────────────
 _YF_SESSION: dict = {"opener": None, "crumb": "", "ts": 0.0}
@@ -309,7 +314,7 @@ def fetch_data(
 ) -> pd.DataFrame:
     """
     Download OHLCV for multiple tickers (backtesting / batch use).
-    Uses parallel fetch_single() calls — Stooq first, direct Yahoo fallback.
+    Uses parallel fetch_single() calls with per-ticker timeout + retry logic.
     No yfinance library; avoids rate-limiting from cloud IPs.
     Returns a MultiIndex DataFrame compatible with yfinance batch output.
     """
@@ -317,22 +322,57 @@ def fetch_data(
     print(f"  Fetching {len(tickers)} ticker(s) | period={period} | interval={interval}")
 
     results: dict = {}
+    
+    # Per-ticker timeout (6s) + 1 retry on timeout/connection errors before giving up.
+    # If even one retry fails, log and continue (cap drops from results, not a fatal error).
+    _TICKER_TIMEOUT = 6
+    _BATCH_TIMEOUT = min(120, len(tickers) * 8 + 10)  # Hard cap on total batch time
 
-    def _one(t):
-        return t, fetch_single(t, period=period, interval=interval)
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futs = {pool.submit(_one, t): t for t in tickers}
-        for fut in as_completed(futs, timeout=60):
+    def _fetch_with_retry(t: str) -> Tuple[str, Optional[pd.DataFrame]]:
+        """Fetch a single ticker with one retry on timeout/connection errors."""
+        for attempt in range(2):
             try:
-                t, df = fut.result(timeout=0)
+                df = fetch_single(t, period=period, interval=interval)
                 if df is not None and not df.empty:
-                    results[t] = df
+                    return t, df
+                else:
+                    _log.warning("batch fetch: symbol=%s returned empty dataframe", t)
+                    return t, None
+            except (TimeoutError, urllib.error.URLError, ConnectionError) as e:
+                if attempt == 0:
+                    _log.debug("batch fetch: symbol=%s attempt 1 timeout/connection, retrying: %s",
+                              t, type(e).__name__)
+                    time.sleep(1)  # brief backoff before retry
+                    continue
+                else:
+                    _log.warning("batch fetch: symbol=%s attempt 2 also failed: %s: %s",
+                                t, type(e).__name__, e)
+                    return t, None
             except Exception as e:
-                _log.debug("batch fetch worker failed: %s", e)  # name simply omitted from results
+                # Real data errors (no data, bad format, etc.) don't retry — fail immediately
+                _log.warning("batch fetch: symbol=%s data error (no retry): %s: %s",
+                            t, type(e).__name__, e)
+                return t, None
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        futs = {pool.submit(_fetch_with_retry, t): t for t in tickers}
+        try:
+            for fut in as_completed(futs, timeout=_BATCH_TIMEOUT):
+                try:
+                    t, df = fut.result(timeout=_TICKER_TIMEOUT)
+                    if df is not None:
+                        results[t] = df
+                except Exception as e:
+                    # Timeout or other executor issue — log and skip this ticker
+                    ticker_name = futs.get(fut, "unknown")
+                    _log.warning("batch fetch: future result failed for %s: %s: %s",
+                                ticker_name, type(e).__name__, e)
+        except TimeoutError:
+            _log.warning("batch fetch: batch timeout reached (%ds), %d tickers completed",
+                        _BATCH_TIMEOUT, len(results))
 
     if not results:
-        raise ValueError(f"No data returned for tickers: {tickers}")
+        raise ValueError(f"No data returned for any of {len(tickers)} tickers")
 
     # Build MultiIndex DataFrame (Price × Ticker) to match yfinance batch format
     frames = []
@@ -345,7 +385,7 @@ def fetch_data(
     if dropna:
         combined.dropna(how="all", inplace=True)
 
-    print(f"  OK Fetched {len(combined)} rows × {len(results)} tickers")
+    print(f"  OK Fetched {len(combined)} rows × {len(results)}/{len(tickers)} tickers")
     return combined
 
 
@@ -353,11 +393,23 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     """
     Fetch OHLCV for one ticker.
     Priority: Angel One (Tier 0) → Stooq (Tier 1) → Yahoo Finance (Tier 2).
-    Results are cached in-process — repeated calls return the cached copy.
+    Results are cached in-process with TTL expiry (5 minutes) — repeated calls
+    within the TTL window return the cached copy; expired entries trigger a re-fetch.
     """
     cache_key = (ticker, period, interval)
+    now = time.time()
+    
+    # Check cache: if entry exists and hasn't expired, return cached copy
     if cache_key in _FETCH_CACHE:
-        return _FETCH_CACHE[cache_key].copy()
+        cached_df, cached_ts = _FETCH_CACHE[cache_key]
+        if now - cached_ts < _FETCH_CACHE_TTL:
+            _log.debug("cache hit: symbol=%s (age=%.0fs)", ticker, now - cached_ts)
+            return cached_df.copy()
+        else:
+            # Cache expired — remove and re-fetch
+            del _FETCH_CACHE[cache_key]
+            _log.debug("cache expired: symbol=%s (age=%.0fs, ttl=%ds)", 
+                      ticker, now - cached_ts, _FETCH_CACHE_TTL)
 
     df = None
     served = None
@@ -416,7 +468,8 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     else:
         _log.debug("data served: symbol=%s provider=%s rows=%d", ticker, served, len(df))
 
-    _FETCH_CACHE[cache_key] = df
+    # Store in cache with current timestamp
+    _FETCH_CACHE[cache_key] = (df, now)
     return df.copy()
 
 
