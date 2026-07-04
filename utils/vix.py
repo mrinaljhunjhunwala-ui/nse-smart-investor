@@ -111,7 +111,8 @@ def get_india_vix_regime() -> Dict:
             "_ts":         time.time(),
         }
 
-    except Exception:
+    except Exception as e:
+        _log.warning("India VIX fetch failed, defaulting to 'unknown' regime: %s", e)
         _VIX_CACHE = {
             "vix": None, "regime": "unknown",
             "allow_buy": True, "vix_pct_chg": 0.0,
