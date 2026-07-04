@@ -330,8 +330,8 @@ def _get_credentials() -> Dict[str, str]:
             "password":    str(ao.get("password",    "")),
             "totp_secret": str(ao.get("totp_secret", "")),
         }
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug("_get_credentials: st.secrets['angel_one'] unavailable, falling back to env vars: %s", e)
     for key, env in (
         ("api_key",     "ANGEL_API_KEY"),
         ("client_id",   "ANGEL_CLIENT_ID"),
