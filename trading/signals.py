@@ -12,11 +12,14 @@ Fixes applied:
 from __future__ import annotations
 
 import time
+import logging
 import warnings
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Optional
 from datetime import datetime
+
+_log = logging.getLogger("trading.signals")
 
 warnings.filterwarnings("ignore")
 
@@ -85,7 +88,8 @@ def get_india_vix_regime() -> Dict:
         }
         _VIX_CACHE_TS = time.time()
 
-    except Exception:
+    except Exception as e:
+        _log.warning("India VIX fetch failed, defaulting to 'unknown' regime: %s", e)
         _VIX_CACHE    = {"vix": None, "regime": "unknown", "allow_buy": True, "vix_pct_chg": 0.0}
         _VIX_CACHE_TS = time.time()
 
@@ -616,8 +620,8 @@ def scan_tickers(
     if use_vix:
         try:
             vix_info = get_india_vix_regime()
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("scan_tickers: VIX regime lookup failed, proceeding without it: %s", e)
 
     vix_str = (f"  India VIX: {vix_info['vix']} | Regime: {vix_info['regime'].upper()}"
                if vix_info["vix"] else "  India VIX: unavailable")

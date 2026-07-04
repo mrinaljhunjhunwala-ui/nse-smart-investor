@@ -162,8 +162,9 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
 
     try:
         df = pd.read_csv(io.StringIO(raw))
-    except Exception:
+    except Exception as e:
         # Fallback: python engine is more lenient with malformed CSV rows
+        _log.debug("stooq CSV parse failed for %s, retrying with lenient parser: %s", ticker, e)
         df = pd.read_csv(io.StringIO(raw), engine="python", on_bad_lines="skip")
     df.columns = [c.strip().title() for c in df.columns]
     if "Date" not in df.columns:
@@ -213,8 +214,9 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
     try:
         with _opener.open(req, timeout=15) as r:
             data = json.loads(r.read())
-    except Exception:
+    except Exception as e:
         # Session may have expired — reset cache and retry once with query2
+        _log.debug("yfinance query1 failed for %s, resetting session and retrying query2: %s", ticker, e)
         _YF_SESSION["opener"] = None
         url2 = (f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
                 f"?interval={yf_interval}&range={yf_range}&includePrePost=false")

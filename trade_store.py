@@ -71,15 +71,18 @@ def _database_url() -> Optional[str]:
         if secrets is not None:
             try:
                 url = secrets["database"]["url"]
-            except Exception:
+            except Exception as e:
                 url = None
+                _log.debug("trade_store._database_url: secrets['database']['url'] unavailable: %s", e)
             if not url:
                 try:
                     url = secrets["DATABASE_URL"]
-                except Exception:
+                except Exception as e:
                     url = None
-    except Exception:
+                    _log.debug("trade_store._database_url: secrets['DATABASE_URL'] unavailable: %s", e)
+    except Exception as e:
         url = None
+        _log.debug("trade_store._database_url: st.secrets access failed: %s", e)
     return (url or os.environ.get("DATABASE_URL")) or None
 
 
