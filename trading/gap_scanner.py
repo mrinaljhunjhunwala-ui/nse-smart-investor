@@ -26,8 +26,11 @@ Data: uses EOD daily bars only (no intraday needed — open/close from daily bar
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
+
+_log = logging.getLogger("trading.gap_scanner")
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
@@ -117,7 +120,8 @@ def _single_gap(ticker: str) -> Optional[Dict]:
             "bias":         info["bias"],
             "strategy":     info["strategy"],
         }
-    except Exception:
+    except Exception as e:
+        _log.debug("_single_gap: failed to compute gap for %s: %s", ticker, e)
         return None
 
 
@@ -151,8 +155,8 @@ def scan_gaps(
                 result = fut.result(timeout=0)
                 if result and abs(result["gap_pct"]) >= min_gap_pct:
                     rows.append(result)
-            except Exception:
-                pass
+            except Exception as e:
+                _log.debug("scan_gaps: %s failed in pool: %s", futs[fut], e)
 
     if not rows:
         return pd.DataFrame(columns=[
