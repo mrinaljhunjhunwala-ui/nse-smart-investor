@@ -60,6 +60,16 @@ _list_sectors          = None
 _add_all_indicators    = None
 _get_india_vix_regime  = None
 
+# FIX LAZY1 — score_stock() previously called add_all_indicators() with no
+# argument, computing all 14 indicator groups (82 columns) even though this
+# function only ever reads columns from 6 of them. Verified by grepping every
+# column access in this file: SMA_20/50/200 ("ma"), RSI ("rsi"),
+# MACD/MACD_Signal/MACD_Hist ("macd"), ADX ("adx"), Volume_Ratio/OBV
+# ("volume"), ATR ("atr"). Do NOT add groups here speculatively — if
+# score_stock() is changed to read a new indicator column, add that column's
+# group here at the same time, or it will KeyError at the dropna/read site.
+_SCORE_INDICATOR_GROUPS = ("ma", "rsi", "macd", "adx", "volume", "atr")
+
 def _load_deps() -> bool:
     global _DEPS_LOADED, _fetch_single, _get_sector, _resolve_ticker
     global _list_sectors, _add_all_indicators, _get_india_vix_regime
@@ -706,7 +716,7 @@ def score_stock(
     # Fetch + indicators
     try:
         df = _fetch_single(canonical, period=period)
-        df = _add_all_indicators(df)
+        df = _add_all_indicators(df, groups=_SCORE_INDICATOR_GROUPS)
         df.dropna(subset=["RSI", "ATR"], inplace=True)
         if len(df) < 30:
             raise ValueError(f"Insufficient data for {canonical}")
