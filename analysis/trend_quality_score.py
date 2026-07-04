@@ -21,10 +21,13 @@ if _ROOT not in sys.path:
 
 import numpy as np
 import pandas as pd
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Union
 
 pd.options.mode.chained_assignment = None
+
+_log = logging.getLogger("analysis.trend_quality_score")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +41,8 @@ def fetch_data(ticker: str, period: str = "5y") -> pd.DataFrame:
     try:
         from data.fetcher import fetch_single
         df = fetch_single(ticker, period=period)
-    except Exception:
+    except Exception as e:
+        _log.debug("%s: tiered fetcher unavailable, falling back to raw yfinance: %s", ticker, e)
         import yfinance as yf
         df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
