@@ -84,29 +84,91 @@ synthetic OHLC data with controlled ATR.
 
 import pandas as pd
 import numpy as np
+from typing import Optional, Iterable, List
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Core call: add everything to a DataFrame
 # ─────────────────────────────────────────────────────────────────────────────
 
-def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Add all standard indicators to a single-stock OHLCV DataFrame."""
-    df = add_moving_averages(df)
-    df = add_rsi(df)
-    df = add_macd(df)
-    df = add_bollinger_bands(df)
-    df = add_atr(df)
-    df = add_vwap(df)
-    df = add_adx(df)
-    df = add_stochastic(df)
-    df = add_volume_indicators(df)
-    df = add_returns(df)
-    df = add_fibonacci_levels(df)
-    df = add_supertrend(df)
-    df = add_pivot_points(df)
-    df = detect_candlestick_patterns(df)
-    df = detect_rsi_divergence(df)
+# FIX LAZY1 — add_all_indicators() unconditionally computed all 14 indicator
+# groups on every call, even for callers (analysis/score.py's screening path)
+# that only read a handful of the resulting columns. For a 500-ticker screen
+# this meant computing Bollinger Bands, VWAP, Stochastic, Fibonacci levels,
+# Supertrend, pivot points, and candlestick patterns on every stock, purely
+# to throw those columns away unused.
+#
+# `groups=None` (the default) computes every group exactly as before — this
+# is a strict backward-compat guarantee for the 14+ existing call sites
+# (backtest/*, trading/*, models/*, dashboard/*, tests/*) that rely on the
+# full column set. Only a caller that has verified which columns it actually
+# reads (like score_stock(), see analysis/score.py) should pass an explicit
+# subset.
+#
+# _INDICATOR_GROUPS itself is populated at the BOTTOM of this file (after
+# every add_*/detect_* function has been defined — Python can't reference a
+# function before it exists). add_all_indicators() below only reads that
+# dict at call time, well after module import has finished populating it,
+# so the forward reference is safe.
+
+# Groups whose output is only meaningful if a dependency group also ran.
+# detect_rsi_divergence() degrades gracefully (returns 0/0 columns) rather
+# than crashing if RSI is missing, but that's a silent-wrong-answer trap —
+# so if "divergence" is explicitly requested, pull "rsi" in automatically
+# rather than let it silently produce all-zero divergence flags.
+_GROUP_DEPENDENCIES = {"divergence": ("rsi",)}
+
+_ALL_GROUPS = (
+    "ma", "rsi", "macd", "bollinger", "atr", "vwap", "adx", "stochastic",
+    "volume", "returns", "fibonacci", "supertrend", "pivot", "patterns",
+    "divergence",
+)
+
+
+def add_all_indicators(df: pd.DataFrame, groups: Optional[Iterable[str]] = None) -> pd.DataFrame:
+    """
+    Add technical indicators to a single-stock OHLCV DataFrame.
+
+    Args:
+        df:     OHLCV DataFrame (must have Open/High/Low/Close/Volume).
+        groups: Optional subset of indicator groups to compute. Valid names:
+                "ma", "rsi", "macd", "bollinger", "atr", "vwap", "adx",
+                "stochastic", "volume", "returns", "fibonacci", "supertrend",
+                "pivot", "patterns", "divergence".
+                When None (default), ALL groups are computed — identical to
+                the original unconditional behavior, so every existing
+                caller is unaffected. Pass an explicit subset only when
+                you've verified which columns your code actually reads;
+                requesting too narrow a subset will raise KeyError deep in
+                unrelated code the moment it tries to read a column you
+                didn't ask for.
+
+    Returns:
+        df with the requested indicator columns added.
+
+    Raises:
+        ValueError: if `groups` contains an unrecognized group name.
+    """
+    if groups is None:
+        selected: List[str] = list(_ALL_GROUPS)
+    else:
+        selected = list(dict.fromkeys(groups))  # de-dupe, preserve order
+        unknown = set(selected) - set(_ALL_GROUPS)
+        if unknown:
+            raise ValueError(
+                f"Unknown indicator group(s): {sorted(unknown)}. "
+                f"Valid groups: {list(_ALL_GROUPS)}"
+            )
+        # Auto-include hard dependencies not explicitly requested (see
+        # _GROUP_DEPENDENCIES docstring above) so a partial subset never
+        # silently produces trivially-wrong output.
+        for grp in list(selected):
+            for dep in _GROUP_DEPENDENCIES.get(grp, ()):
+                if dep not in selected:
+                    selected.insert(selected.index(grp), dep)
+
+    for grp in selected:
+        df = _INDICATOR_GROUPS[grp](df)
     return df
 
 
@@ -916,6 +978,36 @@ def add_fibonacci_levels(df: pd.DataFrame, lookback: int = 252) -> pd.DataFrame:
     df["Fib_Zone"] = np.select(conditions, zone_labels, default="unknown")
 
     return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Indicator group registry (must come AFTER every add_*/detect_* function
+# above is defined) — used by add_all_indicators()'s optional `groups` param.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_INDICATOR_GROUPS = {
+    "ma":         add_moving_averages,
+    "rsi":        add_rsi,
+    "macd":       add_macd,
+    "bollinger":  add_bollinger_bands,
+    "atr":        add_atr,
+    "vwap":       add_vwap,
+    "adx":        add_adx,
+    "stochastic": add_stochastic,
+    "volume":     add_volume_indicators,
+    "returns":    add_returns,
+    "fibonacci":  add_fibonacci_levels,
+    "supertrend": add_supertrend,
+    "pivot":      add_pivot_points,
+    "patterns":   detect_candlestick_patterns,
+    "divergence": detect_rsi_divergence,
+}
+
+assert set(_INDICATOR_GROUPS) == set(_ALL_GROUPS), (
+    "_INDICATOR_GROUPS and _ALL_GROUPS have drifted apart — every group "
+    "name declared near add_all_indicators() must have exactly one "
+    "function registered here, and vice versa."
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
