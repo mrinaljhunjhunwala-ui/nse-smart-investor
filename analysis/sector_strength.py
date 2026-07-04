@@ -17,9 +17,12 @@ Why constituent momentum (not NSE sector indices):
 from __future__ import annotations
 
 import concurrent.futures as _cf
+import logging
 from typing import Dict, List, Optional
 
 import pandas as pd
+
+_log = logging.getLogger("analysis.sector_strength")
 
 
 def _ticker_momentum(ticker: str, lookback: int = 21) -> Optional[float]:
@@ -31,7 +34,8 @@ def _ticker_momentum(ticker: str, lookback: int = 21) -> Optional[float]:
         if len(close) < lookback + 1:
             return None
         return float(close.iloc[-1] / close.iloc[-(lookback + 1)] - 1) * 100.0
-    except Exception:
+    except Exception as e:
+        _log.debug("_ticker_momentum: failed for %s: %s", ticker, e)
         return None
 
 
@@ -65,7 +69,8 @@ def rank_sectors(top_n_per_sector: int = 3, lookback: int = 21) -> pd.DataFrame:
             futs = {ex.submit(_ticker_momentum, t, lookback): t for t in all_tickers}
             for f in _cf.as_completed(futs):
                 moms[futs[f]] = f.result()
-    except Exception:
+    except Exception as e:
+        _log.warning("rank_sectors: parallel momentum fetch pool failed, falling back to serial: %s", e)
         for t in all_tickers:
             moms[t] = _ticker_momentum(t, lookback)
 

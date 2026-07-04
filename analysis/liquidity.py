@@ -17,8 +17,11 @@ integration seam that fetches via the existing tiered loader.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
+
+_log = logging.getLogger("analysis.liquidity")
 
 # Turnover tier thresholds, in ₹ (daily average).
 CR = 1e7                       # 1 crore = 10,000,000
@@ -122,7 +125,8 @@ def liquidity_for_ticker(ticker: str, *, period: str = "6mo", price_loader=None
     if price_loader is None:
         try:
             from data.fetcher import fetch_single as price_loader
-        except Exception:
+        except Exception as e:
+            _log.debug("liquidity_for_ticker: default price_loader import failed: %s", e)
             return LiquidityContext(reason="price loader unavailable")
     try:
         df = price_loader(ticker, period=period)
