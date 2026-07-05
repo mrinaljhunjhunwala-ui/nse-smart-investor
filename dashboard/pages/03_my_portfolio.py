@@ -44,6 +44,35 @@ Phase2  UI honesty — all action labels shown to the user go through
 
 QualityFix  compute_quality_score returns 0 for no-data; UI now treats
      0 as None so the table shows "—" instead of a misleading Quality=0.
+
+DC1  DECISION-CLARITY REORDER (this revision) — the page previously buried
+     the actual buy/hold/exit decision (holdings cards with score, action,
+     SL/target, headline) below six other sections: live-price table, PM
+     scoring spinner, health metrics, signal monitor, sector breakdown, and
+     a full Risk & Performance block with NAV curve / correlation matrix.
+     Someone opening the page had to scroll past all of that to reach the
+     one thing that actually helps them decide anything. Reordered to:
+     (1) fast top-line today/overall/value boxes, (2) PM scoring,
+     (3) signal-flip alerts + health narrative, (4) the actual decision —
+     holdings cards, right up top, (5) everything else under a clearly
+     labelled "📊 Deeper Analysis (optional)" divider, unchanged internally.
+
+DC2  MERGED REDUNDANT VIEWS — the old page rendered the SAME per-stock P&L
+     twice: once as a plain live-price table, once as the scored holdings
+     cards below. That's wasted render work and, worse, gives two numbers
+     for "today's change" that can drift apart (table used live-price-cache
+     `chg`, cards used PortfolioManager's `today_chg_pct` — same underlying
+     data, two code paths). The table is gone; the fast top-line boxes
+     (today/overall/value) are the only thing that runs off the quick
+     live-price cache now, and the cards are the only per-stock P&L view.
+
+DC3  CARDS NOW SURFACE RISK-REWARD + THE FULL "WHY" — score_stock() already
+     computes a risk_reward ratio and a full multi-sentence narrative
+     (pattern detection, sector rank, VIX regime context, entry/SL/TP
+     reasoning) but the old card only ever showed the one-line headline and
+     threw the rest away. No new fetches: added an RR badge on the card and
+     a one-click "Why?" expander with the full narrative, straight from the
+     HoldingResult that PortfolioManager already computed.
 """
 import os
 import sys
@@ -285,7 +314,10 @@ _csv_source = pd.DataFrame(_holdings) if _holdings else None
 
 if _csv_source is not None:
 
-    # ── LIVE PRICES STRIP ─────────────────────────────────────────────
+    # ── FAST TOP-LINE (DC2) — today's/overall P&L + value only, off the ─────
+    # quick 60s live-price cache. No per-stock table here anymore — that's
+    # what the Decision Summary cards below are for, using PM's own
+    # today_chg_pct so there's exactly one number per stock, not two.
     try:
         _port_csv = _csv_source.copy()
         _port_tickers = tuple(
@@ -301,7 +333,6 @@ if _csv_source is not None:
             st.markdown("#### 📡 Live Prices (updates every 60 s)")
         _live_prices = _portfolio_live_prices(_port_tickers)
         if _live_prices:
-            _lp_rows = []
             _total_today_pnl   = 0.0
             _total_overall_pnl = 0.0
             _total_port_value  = 0.0
@@ -310,35 +341,13 @@ if _csv_source is not None:
                 _sym = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
                 _lp  = _live_prices.get(_sym, {})
                 _cur = _lp.get("price")
-                _chg = _lp.get("chg", 0.0)
                 _qty = getattr(_row, "quantity", 1)
                 _buy = getattr(_row, "avg_buy_price", 0)
                 if _cur:
-                    _today_pnl  = (_cur - _lp.get("prev", _cur)) * _qty
-                    _total_pnl  = (_cur - _buy) * _qty
-                    _total_pct  = (_cur / _buy - 1) * 100 if _buy > 0 else 0
-                    _total_today_pnl   += _today_pnl
-                    _total_overall_pnl += _total_pnl
+                    _total_today_pnl   += (_cur - _lp.get("prev", _cur)) * _qty
+                    _total_overall_pnl += (_cur - _buy) * _qty
                     _total_port_value  += _cur * _qty
                     _total_invested    += _buy * _qty
-                    _lp_rows.append({
-                        "ticker":     str(_row.ticker).replace(".NS", ""),
-                        "qty":        int(_qty),
-                        "avg_cost":   float(_buy),
-                        "live_price": float(_cur),
-                        "chg_pct":    float(_chg),
-                        "today_pnl":  float(_today_pnl),
-                        "total_pct":  float(_total_pct),
-                        "total_pnl":  float(_total_pnl),
-                    })
-                else:
-                    _lp_rows.append({
-                        "ticker":     str(_row.ticker).replace(".NS", ""),
-                        "qty":        int(getattr(_row, "quantity", 1)),
-                        "avg_cost":   float(getattr(_row, "avg_buy_price", 0)),
-                        "live_price": None, "chg_pct": None,
-                        "today_pnl":  None, "total_pct": None, "total_pnl": None,
-                    })
 
             _td_c = "#26a69a" if _total_today_pnl >= 0 else "#ef5350"
             _ov_c = "#26a69a" if _total_overall_pnl >= 0 else "#ef5350"
@@ -363,84 +372,8 @@ if _csv_source is not None:
                 f'</div>',
                 unsafe_allow_html=True,
             )
-
-            _TH  = "background:#1a2744;padding:8px 12px;font-size:11px;color:#aaa;font-weight:600;border-bottom:2px solid #2a3a5c;text-align:right;white-space:nowrap"
-            _THL = _TH.replace("text-align:right", "text-align:left")
-            _TD  = "padding:8px 12px;font-size:13px;border-bottom:1px solid #1a2744;text-align:right"
-            _TDL = _TD.replace("text-align:right", "text-align:left")
-            _tbl = (
-                '<table style="width:100%;border-collapse:collapse;margin-bottom:6px">'
-                f'<thead><tr>'
-                f'<th style="{_THL}">Stock</th><th style="{_TH}">Qty</th>'
-                f'<th style="{_TH}">Avg Cost</th><th style="{_TH}">Live Price</th>'
-                f'<th style="{_TH}">Today %</th><th style="{_TH}">Today P&amp;L</th>'
-                f'<th style="{_TH}">Total Return</th><th style="{_TH}">Total P&amp;L</th>'
-                f'</tr></thead><tbody>'
-            )
-            for _r in _lp_rows:
-                _lv  = f"₹{_r['live_price']:,.2f}" if _r['live_price'] else "—"
-                _cg  = f"{_r['chg_pct']:+.2f}%"   if _r['chg_pct']  is not None else "—"
-                _tp2 = f"₹{_r['today_pnl']:+,.0f}" if _r['today_pnl'] is not None else "—"
-                _tr2 = f"{_r['total_pct']:+.1f}%"  if _r['total_pct'] is not None else "—"
-                _tnl = f"₹{_r['total_pnl']:+,.0f}" if _r['total_pnl'] is not None else "—"
-                _cgc = "#26a69a" if (_r['chg_pct']   or 0) >= 0 else "#ef5350"
-                _tpc = "#26a69a" if (_r['today_pnl'] or 0) >= 0 else "#ef5350"
-                _tnc = "#26a69a" if (_r['total_pnl'] or 0) >= 0 else "#ef5350"
-                _rbg = "rgba(38,166,154,0.04)" if (_r['today_pnl'] or 0) >= 0 else "rgba(239,83,80,0.04)"
-                _tbl += (
-                    f'<tr style="background:{_rbg}">'
-                    f'<td style="{_TDL}"><b>{_r["ticker"]}</b></td>'
-                    f'<td style="{_TD}">{_r["qty"]}</td>'
-                    f'<td style="{_TD}">₹{_r["avg_cost"]:,.2f}</td>'
-                    f'<td style="{_TD}"><b>{_lv}</b></td>'
-                    f'<td style="{_TD};color:{_cgc};font-weight:600">{_cg}</td>'
-                    f'<td style="{_TD};color:{_tpc};font-weight:700">{_tp2}</td>'
-                    f'<td style="{_TD};color:{_tnc}">{_tr2}</td>'
-                    f'<td style="{_TD};color:{_tnc};font-weight:600">{_tnl}</td>'
-                    f'</tr>'
-                )
-            _tbl += '</tbody></table>'
-            st.markdown(_tbl, unsafe_allow_html=True)
-
-            # FIX MH2 — collapsible heatmap
-            _hm_rows = []
-            for _row in _port_csv.itertuples():
-                _sym = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
-                _lp  = _live_prices.get(_sym, {})
-                _cur = _lp.get("price")
-                _buy = getattr(_row, "avg_buy_price", 0)
-                _qty = getattr(_row, "quantity", 1)
-                if _cur and _buy and _buy > 0:
-                    _pct = (_cur / _buy - 1) * 100
-                    _val = _cur * _qty
-                    _hm_rows.append({
-                        "label": _row.ticker, "value": _val,
-                        "pct": round(_pct, 2),
-                        "text": f"{_row.ticker}<br>{_pct:+.1f}%<br>₹{_val/1000:.0f}K",
-                    })
-            if _hm_rows:
-                with st.expander(
-                    "📊 Portfolio Heatmap — sized by value, coloured by P&L", expanded=False
-                ):
-                    _hm_df = pd.DataFrame(_hm_rows)
-                    import plotly.express as _px2
-                    _fig_hm = _px2.treemap(
-                        _hm_df, path=["label"], values="value", color="pct",
-                        color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
-                        color_continuous_midpoint=0, custom_data=["pct", "text"],
-                    )
-                    _fig_hm.update_traces(
-                        texttemplate="%{customdata[1]}", textfont_size=13,
-                        hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
-                    )
-                    _fig_hm.update_layout(
-                        template="nse_pro", height=300,
-                        margin=dict(l=0, r=0, t=10, b=0),
-                        coloraxis_showscale=False,
-                    )
-                    st.plotly_chart(_fig_hm, use_container_width=True)
         else:
-            st.caption("⚠️ Live prices unavailable — trying again. Showing EOD data below.")
+            st.caption("⚠️ Live prices unavailable — trying again. Showing scored data below once ready.")
     except Exception as _e:
         st.caption(f"Live price strip skipped: {_e}")
 
@@ -460,6 +393,7 @@ if _csv_source is not None:
             pnl_sign  = "+" if summary.total_pnl >= 0 else ""
             pnl_color = "#26a69a" if summary.total_pnl >= 0 else "#ef5350"
 
+            # ── DC1 — Health metrics + narrative come right after scoring ──
             st.markdown("---")
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Portfolio Value",
@@ -481,7 +415,7 @@ if _csv_source is not None:
                 unsafe_allow_html=True
             )
 
-            # ── Auto-Signal Monitor ────────────────────────────────────
+            # ── Auto-Signal Monitor — signal changes right above the decision cards ─
             _PF_BUY  = {"STRONG BUY", "BUY"}
             _PF_SELL = {"CAUTION", "EXIT", "SELL", "REDUCE"}
             _pf_cur  = {h.ticker: h.action for h in summary.holdings}
@@ -495,7 +429,7 @@ if _csv_source is not None:
             save_signal_monitor_state(_pf_cur)
 
             _sg1, _sg2 = st.columns([5, 2])
-            _sg1.markdown("### 🔔 Auto-Signal Monitor")
+            _sg1.markdown("### 🎯 Your Decision Summary")
             _pf_auto = _sg2.toggle("Auto-refresh (5 min)", key="pf_auto_signal")
 
             _pf_buys  = [h for h in summary.holdings if h.action in _PF_BUY]
@@ -534,6 +468,143 @@ if _csv_source is not None:
                     st.rerun()
                 _pf_signal_tick()
 
+            # ── DC1/DC2/DC3 — THE DECISION: holdings cards, moved up front, ──
+            # merged with per-stock P&L (no separate table anymore), each
+            # card now also shows the risk-reward ratio and a "Why?"
+            # expander with the full narrative already computed by
+            # score_stock() — sector rank, VIX context, pattern detection,
+            # entry/SL/TP reasoning — instead of throwing it away.
+            _hh1, _hh2 = st.columns([3, 2])
+            _hh1.markdown("Sorted so the stock most needing a decision is easy to find.")
+            with _hh2:
+                _h_sort = st.selectbox(
+                    "Sort by",
+                    ["Action (buy→exit)", "Total P&L (high→low)", "Total P&L (low→high)",
+                     "Today's change", "Score (best first)", "Value (high→low)"],
+                    key="pf_holdings_sort", label_visibility="collapsed",
+                )
+            _ACT_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2, "HOLD": 3,
+                          "CAUTION": 4, "EXIT": 5}
+            _hold_sorted = list(summary.holdings)
+            try:
+                if _h_sort == "Action (buy→exit)":
+                    _hold_sorted.sort(key=lambda h: _ACT_ORDER.get(h.action, 9))
+                elif _h_sort == "Total P&L (high→low)":
+                    _hold_sorted.sort(key=lambda h: -h.pnl)
+                elif _h_sort == "Total P&L (low→high)":
+                    _hold_sorted.sort(key=lambda h: h.pnl)
+                elif _h_sort == "Today's change":
+                    _hold_sorted.sort(
+                        key=lambda h: -getattr(h, "today_chg_pct", getattr(h, "pnl_pct", 0))
+                    )
+                elif _h_sort == "Score (best first)":
+                    _hold_sorted.sort(key=lambda h: -getattr(h, "score", 0))
+                elif _h_sort == "Value (high→low)":
+                    _hold_sorted.sort(key=lambda h: -(h.current_price * h.quantity))
+            except Exception as _sort_e:
+                import logging; logging.getLogger("dashboard.my_portfolio").debug("Holdings sort failed (%s): %s — using default order", _h_sort, _sort_e)
+                _hold_sorted = list(summary.holdings)
+
+            _ACT_CARD_STYLE = {
+                "STRONG BUY": ("#26a69a", "#0a2a1a"), "BUY": ("#4CAF50", "#0d2510"),
+                "WATCHLIST":  ("#2196F3", "#0d1f3c"), "HOLD": ("#9E9E9E", "#1a1a1a"),
+                "CAUTION":    ("#FF9800", "#1a1200"),  "EXIT": ("#ef5350", "#2a0a0a"),
+            }
+            _hc_grid = st.columns(2)
+            for _hi, h in enumerate(_hold_sorted):
+                _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#9E9E9E", "#1a1a1a"))
+                _h_emoji  = _action_emoji(h.action)
+                _h_pnl_c  = "#26a69a" if h.pnl >= 0 else "#ef5350"
+                _h_pnl_a  = "▲" if h.pnl >= 0 else "▼"
+                _h_lbl    = h.ticker.replace(".NS", "")
+                _h_inv    = h.avg_buy_price * h.quantity
+                _h_val    = h.current_price * h.quantity
+                _h_sl     = h.stop_loss or (h.avg_buy_price * 0.95)
+                _h_tp     = h.target    or (h.avg_buy_price * 1.10)
+                _h_rng    = max(_h_tp - _h_sl, 0.01)
+                _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
+                _h_bar_c  = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
+                _h_score_w = min(int(h.score), 100)
+                _h_today  = getattr(h, "today_chg_pct", None)
+                _h_today_c = "#26a69a" if (_h_today or 0) >= 0 else "#ef5350"
+                _h_today_txt = f"{_h_today:+.2f}% today" if _h_today is not None else ""
+                # DC3 — risk-reward badge, already computed, just unused before
+                _h_rr = getattr(h, "risk_reward", None)
+                _h_rr_txt = f"RR {_h_rr:.1f}:1" if _h_rr else ""
+
+                # Phase 2 — honest display label, not raw action string
+                _h_html = (
+                    f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
+                    f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
+                    f'<div>'
+                    f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
+                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">'
+                    f'{_h_emoji} {_display_label(h.action)}</span>'
+                    f'</div>'
+                    f'<div style="text-align:right">'
+                    f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
+                    f'<div style="width:60px;height:5px;background:#333;border-radius:3px;margin-top:3px">'
+                    f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div>'
+                    f'</div></div></div>'
+                    f'<div style="font-size:15px;color:#fff;margin-bottom:4px">'
+                    f'<b>₹{h.current_price:,.2f}</b>'
+                    f'<span style="font-size:12px;color:{_h_today_c};margin-left:8px;font-weight:600">{_h_today_txt}</span>'
+                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
+                    f'{h.quantity:.0f} shares · held {h.days_held}d</span>'
+                    f'</div>'
+                    f'<div style="font-size:12px;color:#aaa;margin-bottom:6px">'
+                    f'Invested ₹{_h_inv:,.0f} → Now ₹{_h_val:,.0f}'
+                    f'{"  ·  " + _h_rr_txt if _h_rr_txt else ""}'
+                    f'</div>'
+                    f'<div style="font-size:18px;font-weight:700;color:{_h_pnl_c};margin-bottom:8px">'
+                    f'{_h_pnl_a} ₹{abs(h.pnl):,.0f} ({h.pnl_pct:+.1f}%)'
+                    f'</div>'
+                    f'<div style="margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:2px">'
+                    f'<span>SL ₹{_h_sl:,.0f}</span><span>Target ₹{_h_tp:,.0f}</span></div>'
+                    f'<div style="width:100%;height:6px;background:#333;border-radius:3px;position:relative">'
+                    f'<div style="position:absolute;left:0;width:{_h_cur_pct:.0f}%;height:100%;'
+                    f'background:{_h_bar_c};border-radius:3px;opacity:0.7"></div>'
+                    f'<div style="position:absolute;left:{_h_cur_pct:.0f}%;transform:translateX(-50%);'
+                    f'top:-4px;width:14px;height:14px;background:{_h_bar_c};border-radius:50%;'
+                    f'border:2px solid #fff"></div>'
+                    f'</div></div>'
+                    f'<div style="font-size:12px;color:#ccc;margin-top:6px">{h.headline}</div>'
+                    f'</div>'
+                )
+                with _hc_grid[_hi % 2]:
+                    st.markdown(_h_html, unsafe_allow_html=True)
+                    _hb1, _hb2, _hb3 = st.columns(3)
+                    with _hb1:
+                        if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}",
+                                     use_container_width=True):
+                            # FIX MH3
+                            st.session_state["analyze_ticker"] = h.ticker
+                            st.session_state["_goto_page"]     = "🔍 Analyze Stock"
+                            st.rerun()
+                    with _hb2:
+                        _ph_price = h.current_price or h.avg_buy_price
+                        _paper_trade_popover(
+                            h.ticker, _ph_price, h.stop_loss or _ph_price * 0.95, h.target,
+                            reason=f"{h.action}: {h.headline}",
+                            key=f"ph_pt_{h.ticker}",
+                        )
+                    with _hb3:
+                        # DC3 — the full narrative was always computed, just
+                        # never shown. One click, no extra fetch.
+                        with st.popover("❓ Why?", use_container_width=True):
+                            st.caption(h.narrative or h.headline)
+                    if h.error:
+                        st.caption(f"⚠️ {h.error}")
+
+            # ══════════════════════════════════════════════════════════════
+            # DC1 — DEEPER ANALYSIS (optional), everything below unchanged
+            # internally, just moved beneath the decision cards.
+            # ══════════════════════════════════════════════════════════════
+            st.markdown("---")
+            st.markdown("## 📊 Deeper Analysis (optional)")
+
             # ── Diversification ────────────────────────────────────────
             div = summary.diversification
             if div.sector_weights:
@@ -564,6 +635,45 @@ if _csv_source is not None:
                             f'{div.advice}</div>',
                             unsafe_allow_html=True
                         )
+
+            # ── Portfolio Heatmap (moved here from the old top-of-page ──
+            # live-price strip — this is deeper analysis, not a decision).
+            _hm_rows = []
+            for _row in _port_csv.itertuples():
+                _sym = _row.ticker if str(_row.ticker).endswith(".NS") else f"{_row.ticker}.NS"
+                _lp  = _live_prices.get(_sym, {}) if _live_prices else {}
+                _cur = _lp.get("price")
+                _buy = getattr(_row, "avg_buy_price", 0)
+                _qty = getattr(_row, "quantity", 1)
+                if _cur and _buy and _buy > 0:
+                    _pct = (_cur / _buy - 1) * 100
+                    _val = _cur * _qty
+                    _hm_rows.append({
+                        "label": _row.ticker, "value": _val,
+                        "pct": round(_pct, 2),
+                        "text": f"{_row.ticker}<br>{_pct:+.1f}%<br>₹{_val/1000:.0f}K",
+                    })
+            if _hm_rows:
+                with st.expander(
+                    "📊 Portfolio Heatmap — sized by value, coloured by P&L", expanded=False
+                ):
+                    _hm_df = pd.DataFrame(_hm_rows)
+                    import plotly.express as _px2
+                    _fig_hm = _px2.treemap(
+                        _hm_df, path=["label"], values="value", color="pct",
+                        color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
+                        color_continuous_midpoint=0, custom_data=["pct", "text"],
+                    )
+                    _fig_hm.update_traces(
+                        texttemplate="%{customdata[1]}", textfont_size=13,
+                        hovertemplate="<b>%{label}</b><br>P&L: %{customdata[0]:+.1f}%<extra></extra>",
+                    )
+                    _fig_hm.update_layout(
+                        template="nse_pro", height=300,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        coloraxis_showscale=False,
+                    )
+                    st.plotly_chart(_fig_hm, use_container_width=True)
 
             # ── Portfolio Risk & Performance ───────────────────────────
             st.markdown("---")
@@ -777,119 +887,6 @@ if _csv_source is not None:
                 else:
                     st.info("No fundamental data could be retrieved (source may be rate-limited).")
 
-            # ── Holdings cards (2-column grid) ─────────────────────────
-            st.markdown("---")
-            _hh1, _hh2 = st.columns([3, 2])
-            _hh1.subheader("📋 Your Holdings — Trend Quality")
-            with _hh2:
-                _h_sort = st.selectbox(
-                    "Sort by",
-                    ["Total P&L (high→low)", "Total P&L (low→high)", "Today's change",
-                     "Score (best first)", "Value (high→low)", "Action (buy→exit)"],
-                    key="pf_holdings_sort", label_visibility="collapsed",
-                )
-            _ACT_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2, "HOLD": 3,
-                          "CAUTION": 4, "EXIT": 5}
-            _hold_sorted = list(summary.holdings)
-            try:
-                if _h_sort == "Total P&L (high→low)":
-                    _hold_sorted.sort(key=lambda h: -h.pnl)
-                elif _h_sort == "Total P&L (low→high)":
-                    _hold_sorted.sort(key=lambda h: h.pnl)
-                elif _h_sort == "Today's change":
-                    _hold_sorted.sort(
-                        key=lambda h: -getattr(h, "today_chg_pct", getattr(h, "pnl_pct", 0))
-                    )
-                elif _h_sort == "Score (best first)":
-                    _hold_sorted.sort(key=lambda h: -getattr(h, "score", 0))
-                elif _h_sort == "Value (high→low)":
-                    _hold_sorted.sort(key=lambda h: -(h.current_price * h.quantity))
-                elif _h_sort == "Action (buy→exit)":
-                    _hold_sorted.sort(key=lambda h: _ACT_ORDER.get(h.action, 9))
-            except Exception as _sort_e:
-                import logging; logging.getLogger("dashboard.my_portfolio").debug("Holdings sort failed (%s): %s — using default order", _h_sort, _sort_e)
-                _hold_sorted = list(summary.holdings)
-
-            _ACT_CARD_STYLE = {
-                "STRONG BUY": ("#26a69a", "#0a2a1a"), "BUY": ("#4CAF50", "#0d2510"),
-                "WATCHLIST":  ("#2196F3", "#0d1f3c"), "HOLD": ("#9E9E9E", "#1a1a1a"),
-                "CAUTION":    ("#FF9800", "#1a1200"),  "EXIT": ("#ef5350", "#2a0a0a"),
-            }
-            _hc_grid = st.columns(2)
-            for _hi, h in enumerate(_hold_sorted):
-                _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#9E9E9E", "#1a1a1a"))
-                _h_emoji  = _action_emoji(h.action)
-                _h_pnl_c  = "#26a69a" if h.pnl >= 0 else "#ef5350"
-                _h_pnl_a  = "▲" if h.pnl >= 0 else "▼"
-                _h_lbl    = h.ticker.replace(".NS", "")
-                _h_inv    = h.avg_buy_price * h.quantity
-                _h_val    = h.current_price * h.quantity
-                _h_sl     = h.stop_loss or (h.avg_buy_price * 0.95)
-                _h_tp     = h.target    or (h.avg_buy_price * 1.10)
-                _h_rng    = max(_h_tp - _h_sl, 0.01)
-                _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
-                _h_bar_c  = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
-                _h_score_w = min(int(h.score), 100)
-
-                # Phase 2 — honest display label, not raw action string
-                _h_html = (
-                    f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
-                    f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
-                    f'<div>'
-                    f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
-                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">'
-                    f'{_h_emoji} {_display_label(h.action)}</span>'
-                    f'</div>'
-                    f'<div style="text-align:right">'
-                    f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
-                    f'<div style="width:60px;height:5px;background:#333;border-radius:3px;margin-top:3px">'
-                    f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div>'
-                    f'</div></div></div>'
-                    f'<div style="font-size:15px;color:#fff;margin-bottom:4px">'
-                    f'<b>₹{h.current_price:,.2f}</b>'
-                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
-                    f'{h.quantity:.0f} shares · held {h.days_held}d</span>'
-                    f'</div>'
-                    f'<div style="font-size:12px;color:#aaa;margin-bottom:6px">'
-                    f'Invested ₹{_h_inv:,.0f} → Now ₹{_h_val:,.0f}'
-                    f'</div>'
-                    f'<div style="font-size:18px;font-weight:700;color:{_h_pnl_c};margin-bottom:8px">'
-                    f'{_h_pnl_a} ₹{abs(h.pnl):,.0f} ({h.pnl_pct:+.1f}%)'
-                    f'</div>'
-                    f'<div style="margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:2px">'
-                    f'<span>SL ₹{_h_sl:,.0f}</span><span>Target ₹{_h_tp:,.0f}</span></div>'
-                    f'<div style="width:100%;height:6px;background:#333;border-radius:3px;position:relative">'
-                    f'<div style="position:absolute;left:0;width:{_h_cur_pct:.0f}%;height:100%;'
-                    f'background:{_h_bar_c};border-radius:3px;opacity:0.7"></div>'
-                    f'<div style="position:absolute;left:{_h_cur_pct:.0f}%;transform:translateX(-50%);'
-                    f'top:-4px;width:14px;height:14px;background:{_h_bar_c};border-radius:50%;'
-                    f'border:2px solid #fff"></div>'
-                    f'</div></div>'
-                    f'<div style="font-size:12px;color:#ccc;margin-top:6px">{h.headline}</div>'
-                    f'</div>'
-                )
-                with _hc_grid[_hi % 2]:
-                    st.markdown(_h_html, unsafe_allow_html=True)
-                    _hb1, _hb2 = st.columns(2)
-                    with _hb1:
-                        if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}",
-                                     use_container_width=True):
-                            # FIX MH3
-                            st.session_state["analyze_ticker"] = h.ticker
-                            st.session_state["_goto_page"]     = "🔍 Analyze Stock"
-                            st.rerun()
-                    with _hb2:
-                        _ph_price = h.current_price or h.avg_buy_price
-                        _paper_trade_popover(
-                            h.ticker, _ph_price, h.stop_loss or _ph_price * 0.95, h.target,
-                            reason=f"{h.action}: {h.headline}",
-                            key=f"ph_pt_{h.ticker}",
-                        )
-                    if h.error:
-                        st.caption(f"⚠️ {h.error}")
-
             # ── Best / Worst ───────────────────────────────────────────
             st.markdown("---")
             bw_cols = st.columns(2)
@@ -983,8 +980,3 @@ else:
         Consider reviewing your position size or tightening your stop-loss.
         </div>
         """, unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 2 — ANALYZE ANY STOCK
-# ═══════════════════════════════════════════════════════════════════════════════
