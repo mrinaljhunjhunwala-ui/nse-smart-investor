@@ -14,14 +14,20 @@ from typing import Dict, List, Tuple
 from data.fetcher import fetch_single
 
 # ── Sector definitions ────────────────────────────────────────────────────────
+# Fix (v2): Tata Motors demerged Oct 2025 into two separately listed entities —
+# TMCV.NS (commercial vehicles) and TMPV.NS (passenger vehicles/cars — the
+# larger consumer-facing business). Only TMCV.NS was listed here, so Auto
+# sector scoring was blind to the passenger-vehicle side entirely. Added
+# TMPV.NS. Also thickened Metal, which had only 3 constituents (one outlier
+# stock could swing the whole sector average) — added VEDL.NS and NMDC.NS.
 SECTORS: Dict[str, List[str]] = {
     "IT":      ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
     "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS"],
     "Pharma":  ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS"],
-    "Auto":    ["MARUTI.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "TMCV.NS"],
+    "Auto":    ["MARUTI.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "TMCV.NS", "TMPV.NS"],
     "FMCG":    ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"],
     "Energy":  ["RELIANCE.NS", "ONGC.NS", "BPCL.NS", "NTPC.NS", "POWERGRID.NS"],
-    "Metal":   ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS"],
+    "Metal":   ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS", "NMDC.NS"],
 }
 
 # Lookback windows (trading days) and their weights in composite score
@@ -50,6 +56,7 @@ def compute_sector_scores(period: str = "2y") -> pd.DataFrame:
     print(f"  {'─'*55}")
 
     rows = []
+    failed_tickers: List[str] = []   # Fix (v2): surfaced via df.attrs so callers can warn users, not just the console
 
     for sector, tickers in SECTORS.items():
         ticker_returns: List[Dict] = []
@@ -66,6 +73,7 @@ def compute_sector_scores(period: str = "2y") -> pd.DataFrame:
                     ticker_returns.append(entry)
             except Exception as e:
                 print(f"    ⚠ {ticker}: failed to compute returns, excluded from sector avg: {e}")
+                failed_tickers.append(ticker)
 
         if not ticker_returns:
             continue
@@ -90,6 +98,11 @@ def compute_sector_scores(period: str = "2y") -> pd.DataFrame:
 
     df = pd.DataFrame(rows).set_index("Sector").sort_values("composite_score", ascending=False)
     df["Rank"] = range(1, len(df) + 1)
+
+    if failed_tickers:
+        print(f"\n  ⚠ {len(failed_tickers)} ticker(s) failed and were excluded: {', '.join(failed_tickers)}")
+    df.attrs["failed_tickers"] = failed_tickers   # non-breaking: existing callers ignore .attrs by default
+
     return df
 
 
