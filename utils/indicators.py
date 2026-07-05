@@ -329,7 +329,8 @@ def add_anchored_vwap(df: pd.DataFrame) -> pd.DataFrame:
         df["AVWAP_SD2_Upper"] = sd2u
         df["AVWAP_SD2_Lower"] = sd2l
 
-    except Exception:
+    except Exception as e:
+        _log.debug("add_avwap: calculation failed, filling NaN columns: %s", e)
         # Fallback: add NaN columns so downstream code doesn't break
         for col in ["AVWAP", "AVWAP_Pct", "AVWAP_SD1_Upper", "AVWAP_SD1_Lower",
                     "AVWAP_SD2_Upper", "AVWAP_SD2_Lower"]:
@@ -514,7 +515,8 @@ def add_relative_strength(
         df["RS_Trend"] = np.select(conditions, ["outperforming", "underperforming"],
                                    default="inline")
 
-    except Exception:
+    except Exception as e:
+        _log.debug("add_relative_strength: calculation failed, filling NaN columns: %s", e)
         for col in ["RS_Line", "RS_Pct", "RS_Score", "RS_Trend"]:
             df[col] = np.nan
 
