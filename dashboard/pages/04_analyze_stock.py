@@ -46,9 +46,6 @@ A9  Portfolio Fit holdings source now reads load_manual_holdings() instead
 
 import os
 import sys
-import logging
-
-_log = logging.getLogger("dashboard.analyze_stock")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -73,6 +70,7 @@ from dashboard.shared.cache import (
 from dashboard.shared.trade_utils import (
     _action_color,
     _action_emoji,
+    _display_label,            # Phase 2 UI honesty
     _grade_color,
     _paper_trade_popover,      # FIX A1: use popover instead of direct call
     load_manual_holdings,      # FIX A9: manual holdings replace CSV/Angel One path
@@ -357,8 +355,7 @@ if analyze_btn or _prefill_active or (
                     _ms_an = _an_ms()
                     try:
                         _dlabel = df.index[-1].strftime("%d-%b")
-                    except Exception as e:
-                        _log.debug("date label formatting failed: %s", e)
+                    except Exception:
                         _dlabel = ""
                     if _ms_an.get("is_open") and _an_live and _an_drift >= 0.5:
                         # FIX A2: only warn about drift during live market hours
@@ -417,8 +414,8 @@ if analyze_btn or _prefill_active or (
                 f'<div style="background:{_as_bg};border-left:6px solid {_as_border};'
                 f'border-radius:8px;padding:16px 22px;margin:14px 0 6px 0">'
                 f'<span style="font-size:22px;font-weight:700">'
-                f'{_action_emoji(cs.action)} Recommendation: '
-                f'<span style="color:{_as_border}">{cs.action}</span></span>'
+                f'{_action_emoji(cs.action)} Signal: '
+                f'<span style="color:{_as_border}">{_display_label(cs.action)}</span></span>'
                 f'<span style="font-size:13px;color:#bbb;margin-left:16px">'
                 f'Score {cs.score:.0f}/100</span><br>'
                 f'<span style="font-size:13px;color:#ccc">'
