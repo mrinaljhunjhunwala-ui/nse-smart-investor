@@ -19,6 +19,7 @@ from dashboard.shared.chart_helpers import (
     _ROOT,
     render_top_bar,
 )
+from dashboard.shared.trade_utils import _display_label, _action_emoji  # Phase 2 UI honesty
 
 apply_design()
 render_sidebar(current="Investor Guide")
@@ -59,12 +60,12 @@ with tab_g1:
         icon="🔬",
     )
     st.dataframe(pd.DataFrame([
-        {"Score Range": "80 – 100", "Grade": "A+", "Signal": "STRONG BUY 🚀",   "What It Means": "Very strong trend quality — everything aligned and historically likely to keep trending. Not a return guarantee; size and stop as usual."},
-        {"Score Range": "65 – 79",  "Grade": "A",  "Signal": "BUY 🟢",           "What It Means": "Strong trend quality — healthy uptrend with good momentum. Favourable structure for trend-following entries."},
-        {"Score Range": "50 – 64",  "Grade": "B",  "Signal": "WATCHLIST 👀",     "What It Means": "Moderate trend quality — mixed signals. Worth watching for clearer confirmation."},
-        {"Score Range": "40 – 49",  "Grade": "C",  "Signal": "HOLD 🟡",          "What It Means": "Neutral trend — no edge either way. Hold existing positions; no fresh signal."},
-        {"Score Range": "25 – 39",  "Grade": "D",  "Signal": "CAUTION ⚠️",       "What It Means": "Weak/deteriorating trend. Tighten stop-loss, don't add more."},
-        {"Score Range": "0 – 24",   "Grade": "F",  "Signal": "EXIT 🔴",          "What It Means": "Trend broken. Consider exiting to protect capital — though note beaten-down names can rebound sharply in fear regimes."},
+        {"Score Range": "80 – 100", "Grade": "A+", "Signal": f"{_display_label('STRONG BUY')} {_action_emoji('STRONG BUY')}", "What It Means": "Very strong trend quality — everything aligned and historically likely to keep trending. Not a return guarantee; size and stop as usual."},
+        {"Score Range": "65 – 79",  "Grade": "A",  "Signal": f"{_display_label('BUY')} {_action_emoji('BUY')}",               "What It Means": "Strong trend quality — healthy uptrend with good momentum. Favourable structure for trend-following entries."},
+        {"Score Range": "50 – 64",  "Grade": "B",  "Signal": f"{_display_label('WATCHLIST')} {_action_emoji('WATCHLIST')}",   "What It Means": "Moderate trend quality — mixed signals. Worth watching for clearer confirmation."},
+        {"Score Range": "40 – 49",  "Grade": "C",  "Signal": f"{_display_label('HOLD')} {_action_emoji('HOLD')}",             "What It Means": "Neutral trend — no edge either way. Hold existing positions; no fresh signal."},
+        {"Score Range": "25 – 39",  "Grade": "D",  "Signal": f"{_display_label('CAUTION')} {_action_emoji('CAUTION')}",       "What It Means": "Weak/deteriorating trend. Tighten stop-loss, don't add more."},
+        {"Score Range": "0 – 24",   "Grade": "F",  "Signal": f"{_display_label('EXIT')} {_action_emoji('EXIT')}",             "What It Means": "Trend broken. Consider exiting to protect capital — though note beaten-down names can rebound sharply in fear regimes."},
     ]), hide_index=True)
 
     st.markdown("---")

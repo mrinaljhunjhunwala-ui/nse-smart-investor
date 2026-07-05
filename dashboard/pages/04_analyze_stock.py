@@ -70,6 +70,7 @@ from dashboard.shared.cache import (
 from dashboard.shared.trade_utils import (
     _action_color,
     _action_emoji,
+    _display_label,            # Phase 2 UI honesty
     _grade_color,
     _paper_trade_popover,      # FIX A1: use popover instead of direct call
     load_manual_holdings,      # FIX A9: manual holdings replace CSV/Angel One path
@@ -413,8 +414,8 @@ if analyze_btn or _prefill_active or (
                 f'<div style="background:{_as_bg};border-left:6px solid {_as_border};'
                 f'border-radius:8px;padding:16px 22px;margin:14px 0 6px 0">'
                 f'<span style="font-size:22px;font-weight:700">'
-                f'{_action_emoji(cs.action)} Recommendation: '
-                f'<span style="color:{_as_border}">{cs.action}</span></span>'
+                f'{_action_emoji(cs.action)} Signal: '
+                f'<span style="color:{_as_border}">{_display_label(cs.action)}</span></span>'
                 f'<span style="font-size:13px;color:#bbb;margin-left:16px">'
                 f'Score {cs.score:.0f}/100</span><br>'
                 f'<span style="font-size:13px;color:#ccc">'

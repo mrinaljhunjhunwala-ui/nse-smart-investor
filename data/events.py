@@ -26,12 +26,15 @@ Data source
 
 from __future__ import annotations
 
+import logging
 import warnings
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+_log = logging.getLogger("data.events")
 
 try:
     import yfinance as yf
@@ -88,7 +91,8 @@ def get_earnings_date(ticker: str) -> Optional[datetime]:
 
         return None
 
-    except Exception:
+    except Exception as e:
+        _log.debug("get_earnings_date: lookup failed for %s: %s", ticker, e)
         return None
 
 
