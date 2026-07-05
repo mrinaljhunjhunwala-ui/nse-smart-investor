@@ -84,11 +84,18 @@ def _fetch_closes(tickers: List[str], workers: int = 12) -> pd.DataFrame:
             return t, None
 
     out = {}
+    failed = []
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for f in as_completed([ex.submit(one, t) for t in tickers]):
             t, s = f.result()
             if s is not None and len(s) > 300:
                 out[t] = s
+            else:
+                failed.append(t)
+    if failed:
+        print(f"  _fetch_closes: {len(failed)}/{len(tickers)} tickers failed or had "
+              f"insufficient history (< 300 rows) and were dropped: {failed[:10]}"
+              f"{' ...' if len(failed) > 10 else ''}")
     return pd.DataFrame(out).sort_index()
 
 
