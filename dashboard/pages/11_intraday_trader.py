@@ -41,24 +41,19 @@ st.markdown(
     "⚠️ *Data is 15-min delayed via Yahoo Finance free API.*"
 )
 
-# Determine if Angel One is connected for live positions tab
-try:
-    from data.angel_fetcher import is_configured as _it_ao_ok
-    _it_ao = _it_ao_ok()
-except Exception:
-    _it_ao = False
-
+# FIX DEDUP1 — the "Live Positions" tab used to live here too, calling the
+# same data.angel_fetcher.get_positions() already shown on the dedicated
+# 🔗 Angel One page's "Today's Positions" tab. Same data, two places to
+# maintain and two places for a user to have to check. Removed here in
+# favor of the single copy on the Angel One page.
 _it_tabs = ["📊 Pre-Market Gap Scanner", "📈 Intraday Chart",
             "⚡ ORB Setup", "🎯 Live Intraday Signals"]
-if _it_ao:
-    _it_tabs.append("💼 Live Positions")
 
 _tab_objs = st.tabs(_it_tabs)
 tab_gap   = _tab_objs[0]
 tab_chart = _tab_objs[1]
 tab_orb   = _tab_objs[2]
 tab_sigs  = _tab_objs[3]
-tab_pos   = _tab_objs[4] if _it_ao else None
 
 # ── TAB 1: GAP SCANNER ────────────────────────────────────────────────────
 with tab_gap:
@@ -517,65 +512,10 @@ with tab_sigs:
     else:
         st.info("Add stocks (one per line) and click **🎯 Scan All**.")
 
-# ── TAB 5: LIVE POSITIONS (Angel One only) ─────────────────────────────────
-if tab_pos is not None:
-    with tab_pos:
-        st.subheader("Live Intraday Positions — Angel One")
-        st.caption("Real-time MIS + CNC positions from your Angel One account.")
-        # FIX MKT5: was a blanket st.cache_data.clear() — wiped every other
-        # page's cached data too. _it_positions is defined just below (it's
-        # local to this tab), so the click is captured here and the actual
-        # .clear() happens right after the function is defined.
-        _it_pos_refresh_clicked = st.button("🔄 Refresh Positions", key="it_pos_refresh")
-
-        @st.cache_data(ttl=30, show_spinner=False)
-        def _it_positions():
-            from data.angel_fetcher import get_positions as _gp, get_funds as _gf
-            return _gp(), _gf()
-
-        if _it_pos_refresh_clicked:
-            _it_positions.clear()
-
-        with st.spinner("Fetching positions…"):
-            _it_pos_data, _it_funds = _it_positions()
-
-        # Funds strip
-        if _it_funds:
-            _fc1, _fc2, _fc3 = st.columns(3)
-            _fc1.metric("Available Cash", f"Rs {_it_funds['available_cash']:,.0f}")
-            _fc2.metric("Used Margin",    f"Rs {_it_funds['used_margin']:,.0f}")
-            _m2m_val = _it_funds.get("m2m", 0)
-            _fc3.metric("Unrealised P&L", f"Rs {_m2m_val:+,.0f}",
-                        delta_color="normal" if _m2m_val >= 0 else "inverse")
-
-        st.markdown("---")
-
-        if _it_pos_data is None:
-            st.error("Could not fetch positions.")
-        elif not _it_pos_data.get("net"):
-            st.info("No open positions. All flat.")
-        else:
-            _pos_list = _it_pos_data["net"]
-            for _p in _pos_list:
-                _p_clr  = "card-green" if _p["pnl"] >= 0 else "card-red"
-                _p_side_badge = (
-                    '<span class="pill-green">LONG</span>'
-                    if _p["qty"] > 0
-                    else '<span class="pill-red">SHORT</span>'
-                )
-                _p_pnl_clr = "#26a69a" if _p["pnl"] >= 0 else "#ef5350"
-                st.markdown(
-                    f'<div class="{_p_clr}">'
-                    f'<b>{_p["symbol"]}</b>  {_p_side_badge}  '
-                    f'<span style="font-size:12px;color:#aaa">{_p["product"]}</span><br>'
-                    f'Qty: {abs(_p["qty"])}  ·  '
-                    f'Avg: Rs {_p["avg_price"]:.2f}  ·  '
-                    f'LTP: Rs {_p["ltp"]:.2f}  ·  '
-                    f'P&L: <span style="color:{_p_pnl_clr};font-weight:700">'
-                    f'Rs {_p["pnl"]:+,.0f}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+# NOTE: the "Live Positions — Angel One" tab that used to live here has been
+# removed as a duplicate. Real-time Angel One positions (MIS + CNC), along
+# with holdings, funds, orders/trades, and quick order placement, all live
+# on the dedicated 🔗 Angel One page.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
