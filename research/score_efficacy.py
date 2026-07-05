@@ -35,6 +35,7 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -43,6 +44,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+_log = logging.getLogger("research.score_efficacy")
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -109,6 +112,9 @@ def _regime_for(date, regimes: Optional[pd.Series]) -> str:
 # Per-ticker walk-forward
 # ─────────────────────────────────────────────────────────────────────────────
 
+_prepare_ticker_exceptions = 0
+
+
 def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
     """Fetch daily bars (default 2y) and enrich with the production indicators.
 
@@ -116,16 +122,25 @@ def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
     then slicing df.iloc[:i+1] is identical to recomputing on each slice — no
     look-ahead is introduced.
     """
+    global _prepare_ticker_exceptions
     try:
         from data.fetcher import fetch_single
         from utils.indicators import add_all_indicators
         df = fetch_single(ticker, period=period)
         if df is None or df.empty or len(df) < 280:
-            return None
+            return None  # benign: just not enough history, not a real failure
         df = add_all_indicators(df)
         df = df.dropna(subset=["RSI", "ATR"])
         return df if len(df) >= 280 else None
-    except Exception:
+    except Exception as e:
+        # NOTE: this swallows the real exception on purpose so the caller's
+        # ThreadPoolExecutor `f.result()` never raises — but that means the
+        # caller's own `except Exception: prep_failures += 1` can NEVER fire
+        # for a genuine crash in here, silently undercounting real failures
+        # as if they were just "insufficient data." Track separately so
+        # main()'s summary print reflects reality.
+        _prepare_ticker_exceptions += 1
+        _log.debug("_prepare_ticker: %s raised during prep, treated as no-data: %s", ticker, e)
         return None
 
 
@@ -373,6 +388,10 @@ def main() -> int:
     if prep_failures:
         print(f"  {prep_failures}/{len(universe)} tickers raised an exception during "
               f"prepare/fetch (excluded from frames)")
+    if _prepare_ticker_exceptions:
+        print(f"  {_prepare_ticker_exceptions}/{len(universe)} tickers raised an exception "
+              f"INSIDE _prepare_ticker itself (fetch/indicator error, not just insufficient "
+              f"history) — see debug logs for details")
 
     print(f"Usable tickers: {len(frames)}/{len(universe)} [{time.time()-t0:.0f}s]")
 
