@@ -349,23 +349,23 @@ if _csv_source is not None:
                     _total_port_value  += _cur * _qty
                     _total_invested    += _buy * _qty
 
-            _td_c = "#26a69a" if _total_today_pnl >= 0 else "#ef5350"
-            _ov_c = "#26a69a" if _total_overall_pnl >= 0 else "#ef5350"
+            _td_c = "#16c784" if _total_today_pnl >= 0 else "#ff4d4d"
+            _ov_c = "#16c784" if _total_overall_pnl >= 0 else "#ff4d4d"
             _td_a = "▲" if _total_today_pnl >= 0 else "▼"
             _ov_a = "▲" if _total_overall_pnl >= 0 else "▼"
             _ov_p = (_total_overall_pnl / _total_invested * 100) if _total_invested > 0 else 0
             st.markdown(
                 f'<div style="display:flex;gap:14px;margin:0 0 14px 0">'
-                f'<div style="flex:1;background:#0d1f3c;padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
+                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
                 f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s Change</div>'
                 f'<div style="font-size:24px;font-weight:700;color:{_td_c}">{_td_a} ₹{abs(_total_today_pnl):,.0f}</div>'
                 f'</div>'
-                f'<div style="flex:1;background:#0d1f3c;padding:14px 18px;border-radius:10px;border-left:5px solid {_ov_c}">'
+                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid {_ov_c}">'
                 f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Overall P&amp;L</div>'
                 f'<div style="font-size:24px;font-weight:700;color:{_ov_c}">{_ov_a} ₹{abs(_total_overall_pnl):,.0f} '
                 f'<span style="font-size:14px">({_ov_p:+.1f}%)</span></div>'
                 f'</div>'
-                f'<div style="flex:1;background:#0d1f3c;padding:14px 18px;border-radius:10px;border-left:5px solid #2196F3">'
+                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid #2fd1e0">'
                 f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Portfolio Value</div>'
                 f'<div style="font-size:24px;font-weight:700;color:#fff">₹{_total_port_value:,.0f}</div>'
                 f'</div>'
@@ -391,7 +391,7 @@ if _csv_source is not None:
             summary = pm.mark_to_market(parallel=True)
 
             pnl_sign  = "+" if summary.total_pnl >= 0 else ""
-            pnl_color = "#26a69a" if summary.total_pnl >= 0 else "#ef5350"
+            pnl_color = "#16c784" if summary.total_pnl >= 0 else "#ff4d4d"
 
             # ── DC1 — Health metrics + narrative come right after scoring ──
             st.markdown("---")
@@ -440,13 +440,13 @@ if _csv_source is not None:
                     f'<div style="font-size:12.5px;color:#fff;margin:2px 0">'
                     f'{"🟢" if _d == "buy" else "🔴"} <b>{_t}</b> '
                     f'<span style="color:#9aa">{_display_label(_p)}</span> → '
-                    f'<b style="color:{"#26a69a" if _d == "buy" else "#ef5350"}">{_display_label(_a)}</b></div>'
+                    f'<b style="color:{"#16c784" if _d == "buy" else "#ff4d4d"}">{_display_label(_a)}</b></div>'
                     for _t, _p, _a, _d in _pf_flips)
                 st.markdown(
-                    f'<div style="background:linear-gradient(135deg,#2a1c05,#332208);'
-                    f'border-left:4px solid #ff9500;border-radius:10px;padding:10px 14px;'
+                    f'<div style="background:rgba(242,169,59,.08);'
+                    f'border-left:4px solid #f2a93b;border-radius:10px;padding:10px 14px;'
                     f'margin:4px 0 8px">'
-                    f'<div style="font-size:12px;font-weight:700;color:#ff9500;margin-bottom:3px">'
+                    f'<div style="font-size:12px;font-weight:700;color:#f2a93b;margin-bottom:3px">'
                     f'⚡ {len(_pf_flips)} signal change(s) since your last check</div>'
                     f'{_fl_rows}</div>', unsafe_allow_html=True)
                 for _t, _p, _a, _d in _pf_flips:
@@ -505,16 +505,20 @@ if _csv_source is not None:
                 import logging; logging.getLogger("dashboard.my_portfolio").debug("Holdings sort failed (%s): %s — using default order", _h_sort, _sort_e)
                 _hold_sorted = list(summary.holdings)
 
+            # Aligned to design.py's "Dealing Room v2" tokens (bull #16c784 /
+            # bear #ff4d4d / caution #f2a93b / accent #2fd1e0) instead of the
+            # pre-redesign teal/material-green/blue set, so this page matches
+            # the rest of the app now.
             _ACT_CARD_STYLE = {
-                "STRONG BUY": ("#26a69a", "#0a2a1a"), "BUY": ("#4CAF50", "#0d2510"),
-                "WATCHLIST":  ("#2196F3", "#0d1f3c"), "HOLD": ("#9E9E9E", "#1a1a1a"),
-                "CAUTION":    ("#FF9800", "#1a1200"),  "EXIT": ("#ef5350", "#2a0a0a"),
+                "STRONG BUY": ("#16c784", "rgba(22,199,132,.10)"), "BUY": ("#3dbd8f", "rgba(61,189,143,.09)"),
+                "WATCHLIST":  ("#2fd1e0", "rgba(47,209,224,.09)"), "HOLD": ("#8b8d93", "rgba(255,255,255,.04)"),
+                "CAUTION":    ("#f2a93b", "rgba(242,169,59,.09)"), "EXIT": ("#ff4d4d", "rgba(255,77,77,.10)"),
             }
             _hc_grid = st.columns(2)
             for _hi, h in enumerate(_hold_sorted):
-                _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#9E9E9E", "#1a1a1a"))
+                _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#8b8d93", "#1a1a1a"))
                 _h_emoji  = _action_emoji(h.action)
-                _h_pnl_c  = "#26a69a" if h.pnl >= 0 else "#ef5350"
+                _h_pnl_c  = "#16c784" if h.pnl >= 0 else "#ff4d4d"
                 _h_pnl_a  = "▲" if h.pnl >= 0 else "▼"
                 _h_lbl    = h.ticker.replace(".NS", "")
                 _h_inv    = h.avg_buy_price * h.quantity
@@ -523,11 +527,24 @@ if _csv_source is not None:
                 _h_tp     = h.target    or (h.avg_buy_price * 1.10)
                 _h_rng    = max(_h_tp - _h_sl, 0.01)
                 _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
-                _h_bar_c  = "#26a69a" if h.current_price >= h.avg_buy_price else "#ef5350"
+                _h_bar_c  = "#16c784" if h.current_price >= h.avg_buy_price else "#ff4d4d"
                 _h_score_w = min(int(h.score), 100)
                 _h_today  = getattr(h, "today_chg_pct", None)
-                _h_today_c = "#26a69a" if (_h_today or 0) >= 0 else "#ef5350"
-                _h_today_txt = f"{_h_today:+.2f}% today" if _h_today is not None else ""
+                _h_today_c = "#16c784" if (_h_today or 0) >= 0 else "#ff4d4d"
+                # PGF (Portfolio Gap Fix) — the removed live-price table used to be
+                # the only place showing today's ₹ P&L per stock; the cards never
+                # picked that up when the table was dropped. Derived here from
+                # fields HoldingResult already has (current_price, quantity,
+                # today_chg_pct) — no extra fetch, same number the top-line
+                # "Today's Change" box would show if summed across holdings.
+                _h_today_pnl = (
+                    h.current_price * h.quantity * (_h_today / 100.0)
+                    if _h_today is not None else None
+                )
+                _h_today_txt = (
+                    f"{_h_today:+.2f}% · ₹{_h_today_pnl:+,.0f} today"
+                    if _h_today is not None else ""
+                )
                 # DC3 — risk-reward badge, already computed, just unused before
                 _h_rr = getattr(h, "risk_reward", None)
                 _h_rr_txt = f"RR {_h_rr:.1f}:1" if _h_rr else ""
@@ -661,7 +678,7 @@ if _csv_source is not None:
                     import plotly.express as _px2
                     _fig_hm = _px2.treemap(
                         _hm_df, path=["label"], values="value", color="pct",
-                        color_continuous_scale=["#ef5350", "#555555", "#26a69a"],
+                        color_continuous_scale=["#ff4d4d", "#555555", "#16c784"],
                         color_continuous_midpoint=0, custom_data=["pct", "text"],
                     )
                     _fig_hm.update_traces(
@@ -814,13 +831,13 @@ if _csv_source is not None:
                         _conc_holdings.append(_row)
                 _conc  = analyze_concentration(_conc_holdings)
                 _grade = concentration_grade(_conc.hhi)
-                _risk_color = {"LOW": "#26a69a", "MEDIUM": "#ff9500",
-                               "HIGH": "#ff4757"}.get(_conc.risk_level, "#8899bb")
+                _risk_color = {"LOW": "#16c784", "MEDIUM": "#f2a93b",
+                               "HIGH": "#ff4d4d"}.get(_conc.risk_level, "#8b8d93")
                 _cc = st.columns(4)
                 _cc[0].markdown(
                     f'<div class="metric-box"><div class="metric-lbl">HHI Index</div>'
                     f'<div class="metric-val" style="color:{_risk_color}">{_conc.hhi:,.0f}</div>'
-                    f'<div style="font-size:11px;color:#8899bb">{_conc.hhi_category} · Grade {_grade}</div></div>',
+                    f'<div style="font-size:11px;color:#8b8d93">{_conc.hhi_category} · Grade {_grade}</div></div>',
                     unsafe_allow_html=True)
                 _cc[1].metric("Largest Position", f"{_conc.top_1_weight:.1f}%")
                 _cc[2].metric("Top 5 Weight",     f"{_conc.top_5_weight:.1f}%")
