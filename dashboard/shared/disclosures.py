@@ -15,7 +15,10 @@ returns (+0.04), and that its ranking power degrades/inverts in elevated-fear
 regimes. Wording here reflects those findings; the scoring engine is unchanged.
 """
 from __future__ import annotations
+import logging
 import streamlit as st
+
+_log = logging.getLogger("dashboard.disclosures")
 
 
 def render_survivorship_notice() -> None:
@@ -38,7 +41,12 @@ def render_backtest_assumptions() -> None:
         from backtest.runner import (
             TOTAL_COST, STT_RATE, BROKERAGE_RATE, EXCHANGE_FEES,
         )
-    except Exception:
+    except Exception as e:
+        _log.warning(
+            "cost_disclosure: could not import live cost constants from "
+            "backtest.runner, falling back to hardcoded values that may drift "
+            "from the actual engine: %s", e
+        )
         TOTAL_COST, STT_RATE, BROKERAGE_RATE, EXCHANGE_FEES = 0.0023, 0.001, 0.0003, 0.00035
 
     with st.expander("📋 Backtest assumptions & limitations", expanded=False):
@@ -106,7 +114,8 @@ def render_regime_reliability_note() -> None:
         regime = str(info.get("regime", "unknown")).lower()
         vix = info.get("vix")
         vix_txt = f" (India VIX {vix:.1f})" if isinstance(vix, (int, float)) else ""
-    except Exception:
+    except Exception as e:
+        _log.debug("vix_warning_banner: VIX regime lookup failed, skipping banner: %s", e)
         return
 
     if regime in ("elevated", "fear", "panic"):

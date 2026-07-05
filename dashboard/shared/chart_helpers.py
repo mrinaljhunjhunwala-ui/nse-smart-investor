@@ -500,8 +500,8 @@ def render_top_bar():
     """Live indices/ticker bar + index explorer. Call at top of each page."""
     try:
         _live_top_bar()
-    except Exception:
-        pass  # live bar is cosmetic — never break the page over it
+    except Exception as e:
+        _log.debug("render_top_bar: live top bar failed (cosmetic, page continues): %s", e)
     with st.expander("📑 Open an index — see its stocks & day changes", expanded=False):
         _ix_pick = st.selectbox("Index", list(_INDEX_CONSTITUENTS.keys()),
                                 key="ix_explorer_sel", label_visibility="collapsed")

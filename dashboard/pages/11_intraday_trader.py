@@ -17,6 +17,7 @@ from dashboard.shared.design import (
     apply_design,
 )
 from dashboard.shared.trade_utils import (
+    _display_label,            # Phase 2 UI honesty
     _paper_trade_popover,
 )
 from dashboard.shared.cache import (
@@ -496,7 +497,7 @@ with tab_sigs:
                 _tp   = _sig.get("tp", 0);    _rr = _sig.get("rr_ratio", 0)
                 st.markdown(
                     f'<div class="{_clr}">'
-                    f'<span class="signal-big">{_icon} {_t} — {_act} ({_sig.get("screen","")})</span><br>'
+                    f'<span class="signal-big">{_icon} {_t} — {_display_label(_act)} ({_sig.get("screen","")})</span><br>'
                     f'<b>Entry</b> ₹{_p:,.2f} &nbsp;|&nbsp; <b>SL</b> ₹{_sl:,.2f} &nbsp;|&nbsp; '
                     f'<b>TP</b> ₹{_tp:,.2f} &nbsp;|&nbsp; <b>R:R</b> {_rr:.1f}x<br>'
                     f'<small>{_sig.get("reason","")}</small></div>',

@@ -1,288 +1,226 @@
+"""analysis/fundamentals/providers/yahoo_fundamentals.py
+
+The ONLY module in the fundamentals stack that imports yfinance. It fetches raw Yahoo
+financial statements + `info`, then maps them to the normalized schema, normalizing
+units/signs at the edge. Raw responses are cached (24 h) so the four get_* calls for one
+symbol share a single network fetch.
+
+Yahoo notes encoded here:
+  * statement values are absolute INR (no crore scaling needed).
+  * `info["debtToEquity"]` is a PERCENT (45.2) → stored as a ratio (0.452).
+  * `info["returnOnEquity"]` / margins are already FRACTIONS.
+  * capex is reported negative (outflow) → normalized to a positive number.
+  * coverage is ~4 annual years and patchy for small-caps → callers see is_partial.
 """
-alerts/check_alerts.py — Headless market alert checker.
-
-Runs on a schedule (GitHub Actions) during NSE market hours and sends a
-Telegram message when:
-    1. A custom price alert from data/alerts.csv triggers
-       (price crosses above/below a level you defined)
-    2. India VIX enters a fear/panic regime
-    3. Nifty 50 breaks into a confirmed downtrend
-
-NO Streamlit dependency — pure Python stdlib + the project's headless
-data helpers (utils.vix, utils.live_price, data.fetcher). Safe to run in CI.
-
-Credentials (set as GitHub Actions secrets, NEVER committed):
-    TELEGRAM_BOT_TOKEN   — from @BotFather
-    TELEGRAM_CHAT_ID     — your numeric chat id (from @userinfobot)
-
-De-duplication:
-    A small data/alert_state.json records which alerts already fired today,
-    so the same alert is not re-sent every run. The GitHub Actions cache
-    persists this file between runs.
-
-Exit codes: always 0 (a failed alert check should not fail the workflow).
-"""
-
 from __future__ import annotations
 
-import datetime
-import json
-import os
-import sys
-import urllib.parse
-import urllib.request
+import logging
+from datetime import date
+from typing import List, Optional
 
-# Ensure emoji/Unicode in log output never crash on a non-UTF-8 console (Windows)
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception as _enc_e:
-    print(f"[startup] stdout reconfigure skipped: {_enc_e}")
+import pandas as pd
 
-# Make project root importable (script lives in <root>/alerts/)
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+from ..cache import TTLCache
+from ..models import (
+    BalanceSheet, CashFlow, FiscalPeriod, IncomeStatement, PeriodType, RatioSnapshot,
+)
+from ..provider import FundamentalProvider
 
-_ALERTS_CSV  = os.path.join(_ROOT, "data", "alerts.csv")
-_STATE_JSON  = os.path.join(_ROOT, "data", "alert_state.json")
-_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+_log = logging.getLogger("fundamentals.yahoo")
+
+# normalized field -> ordered candidate Yahoo row labels (label set varies by yf version)
+_INCOME_MAP = {
+    "revenue":          ["Total Revenue", "Operating Revenue", "TotalRevenue"],
+    "cost_of_revenue":  ["Cost Of Revenue", "Reconciled Cost Of Revenue"],
+    "gross_profit":     ["Gross Profit"],
+    "operating_income": ["EBIT", "Operating Income", "Total Operating Income As Reported"],
+    "ebitda":           ["EBITDA", "Normalized EBITDA"],
+    "interest_expense": ["Interest Expense", "Interest Expense Non Operating"],
+    "pretax_income":    ["Pretax Income"],
+    "tax_expense":      ["Tax Provision", "Income Tax Expense"],
+    "net_income":       ["Net Income", "Net Income Common Stockholders",
+                         "Net Income From Continuing Operation Net Minority Interest"],
+    "eps_basic":        ["Basic EPS"],
+    "eps_diluted":      ["Diluted EPS"],
+    "shares_diluted":   ["Diluted Average Shares", "Diluted Average Shares Outstanding"],
+}
+_BALANCE_MAP = {
+    "total_assets":        ["Total Assets"],
+    "current_assets":      ["Current Assets", "Total Current Assets"],
+    "current_liabilities": ["Current Liabilities", "Total Current Liabilities"],
+    "total_liabilities":   ["Total Liabilities Net Minority Interest", "Total Liabilities"],
+    "short_term_debt":     ["Current Debt", "Current Debt And Capital Lease Obligation",
+                            "Short Long Term Debt"],
+    "long_term_debt":      ["Long Term Debt", "Long Term Debt And Capital Lease Obligation"],
+    "total_debt":          ["Total Debt"],
+    "cash_and_equivalents":["Cash And Cash Equivalents",
+                            "Cash Cash Equivalents And Short Term Investments"],
+    "total_equity":        ["Stockholders Equity", "Common Stock Equity",
+                            "Total Equity Gross Minority Interest"],
+}
+_CASHFLOW_MAP = {
+    "operating_cash_flow":  ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities",
+                             "Total Cash From Operating Activities"],
+    "capital_expenditure":  ["Capital Expenditure", "Capital Expenditures", "Purchase Of PPE"],
+    "free_cash_flow":       ["Free Cash Flow"],
+    "investing_cash_flow":  ["Investing Cash Flow", "Total Cashflows From Investing Activities"],
+    "financing_cash_flow":  ["Financing Cash Flow", "Total Cash From Financing Activities"],
+    "dividends_paid":       ["Cash Dividends Paid", "Common Stock Dividend Paid"],
+}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Telegram
-# ─────────────────────────────────────────────────────────────────────────────
-
-def send_telegram(text: str) -> bool:
-    """Send an HTML message to the configured Telegram chat."""
-    token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat_id:
-        print("[telegram] TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — printing instead:")
-        print(text)
-        return False
+def _to_date(col) -> Optional[date]:
     try:
-        url  = f"https://api.telegram.org/bot{token}/sendMessage"
-        data = urllib.parse.urlencode({
-            "chat_id":    chat_id,
-            "text":       text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": "true",
-        }).encode()
-        req = urllib.request.Request(url, data=data)
-        with urllib.request.urlopen(req, timeout=15) as r:
-            ok = r.status == 200
-            print(f"[telegram] sent ({r.status})")
-            return ok
+        return pd.Timestamp(col).date()
     except Exception as e:
-        print(f"[telegram] FAILED: {e}")
-        return False
+        _log.debug("_to_date: could not parse %r as a date: %s", col, e)
+        return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# De-dup state (per-day)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _load_state() -> dict:
+def _f(x) -> Optional[float]:
+    """Coerce a raw cell to float, or None (NaN/blank → None, never 0)."""
     try:
-        with open(_STATE_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+        if x is None or pd.isna(x):
+            return None
+        return float(x)
+    except (TypeError, ValueError):
+        return None
 
 
-def _save_state(state: dict) -> None:
-    try:
-        with open(_STATE_JSON, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-    except Exception as e:
-        print(f"[state] could not save: {e}")
+def _row(df: "pd.DataFrame", candidates) -> Optional["pd.Series"]:
+    if df is None or getattr(df, "empty", True):
+        return None
+    for label in candidates:
+        if label in df.index:
+            return df.loc[label]
+    return None
 
 
-def _already_fired(state: dict, key: str, today: str) -> bool:
-    return state.get(key) == today
+class YahooFundamentalProvider(FundamentalProvider):
+    name = "YahooFinance"
 
+    def __init__(self, raw_cache: Optional[TTLCache] = None):
+        self._raw_cache = raw_cache or TTLCache(name="yahoo-raw")
 
-def _mark_fired(state: dict, key: str, today: str) -> None:
-    state[key] = today
-
-
-def _prune_state(state: dict, today: str) -> dict:
-    """Keep only today's entries so the file doesn't grow forever."""
-    return {k: v for k, v in state.items() if v == today}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Market hours guard
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _is_market_hours() -> bool:
-    now = datetime.datetime.now(_IST)
-    if now.weekday() >= 5:                      # Sat/Sun
-        return False
-    open_t  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
-    close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    return open_t <= now <= close_t
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Checks
-# ─────────────────────────────────────────────────────────────────────────────
-
-def check_price_alerts(state: dict, today: str) -> int:
-    """Read data/alerts.csv, fetch live prices, fire on threshold crossings."""
-    sent = 0
-    try:
-        import csv
-        from utils.live_price import get_live_quote
-    except Exception as e:
-        print(f"[price] import failed: {e}")
-        return 0
-
-    rules = []
-    try:
-        with open(_ALERTS_CSV, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                if str(row.get("enabled", "1")).strip() in ("0", "false", "False", ""):
-                    continue
-                rules.append(row)
-    except FileNotFoundError:
-        print(f"[price] no alerts.csv at {_ALERTS_CSV}")
-        return 0
-    except Exception as e:
-        print(f"[price] could not read alerts.csv: {e}")
-        return 0
-
-    for r in rules:
-        ticker    = str(r.get("ticker", "")).strip().upper()
-        condition = str(r.get("condition", "")).strip().lower()
+    def is_available(self) -> bool:
         try:
-            level = float(r.get("level", 0))
-        except Exception as _lvl_e:
-            print(f"[price] {r.get('ticker','?')}: invalid level '{r.get('level')}' — {_lvl_e}")
-            continue
-        note = str(r.get("note", "")).strip()
-        if not ticker or condition not in ("above", "below") or level <= 0:
-            continue
+            import yfinance  # noqa: F401
+            return True
+        except Exception as e:
+            _log.debug("YahooFundamentalsProvider.is_available: yfinance import failed: %s", e)
+            return False
 
-        key = f"price_{ticker}_{condition}_{level:.2f}"
-        if _already_fired(state, key, today):
-            continue
+    # ── raw fetch (the only network seam — monkeypatched in tests) ───────────
+    def _fetch_raw(self, symbol: str, period: PeriodType) -> dict:
+        import yfinance as yf
+        tk = yf.Ticker(symbol)
+        if period == "quarterly":
+            inc, bal, cfl = tk.quarterly_income_stmt, tk.quarterly_balance_sheet, tk.quarterly_cashflow
+        else:
+            inc, bal, cfl = tk.income_stmt, tk.balance_sheet, tk.cashflow
+        try:
+            info = tk.info or {}
+        except Exception as e:
+            _log.debug("_fetch_raw: tk.info fetch failed for %s: %s", symbol, e)
+            info = {}
+        return {"income": inc, "balance": bal, "cashflow": cfl, "info": info}
 
-        q = get_live_quote(ticker)
-        if not q or not q.get("price"):
-            print(f"[price] {ticker}: no quote")
-            continue
-        price = float(q["price"])
+    def _raw(self, symbol: str, period: PeriodType) -> dict:
+        key = f"raw|{symbol}|{period}"
+        cached = self._raw_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            raw = self._fetch_raw(symbol, period)
+        except Exception as e:   # transport failure → surface so the service can fall back
+            _log.warning("Yahoo raw fetch failed symbol=%s: %s: %s",
+                         symbol, type(e).__name__, e)
+            raise RuntimeError(f"Yahoo fetch failed for {symbol}: {e}") from e
+        self._raw_cache.set(key, raw)
+        return raw
 
-        hit = (condition == "above" and price >= level) or \
-              (condition == "below" and price <= level)
-        if not hit:
-            continue
+    # ── normalized statement builders ───────────────────────────────────────
+    def get_income_statement(self, symbol, period: PeriodType = "annual",
+                             limit: int = 10) -> List[IncomeStatement]:
+        df = self._raw(symbol, period).get("income")
+        if df is None or getattr(df, "empty", True):
+            return []
+        rows = {k: _row(df, c) for k, c in _INCOME_MAP.items()}
+        out: List[IncomeStatement] = []
+        for col in list(df.columns)[:limit]:
+            d = _to_date(col)
+            stmt = IncomeStatement(
+                period=FiscalPeriod(period_end=d, fiscal_year=d.year if d else None,
+                                    period_type=period),
+                **{k: (_f(r[col]) if r is not None else None) for k, r in rows.items()},
+            )
+            out.append(stmt)
+        return out
 
-        arrow = "🔼" if condition == "above" else "🔽"
-        chg   = q.get("chg_pct", 0.0)
-        msg = (
-            f"{arrow} <b>{ticker}</b> price alert\n"
-            f"Now <b>₹{price:,.2f}</b> ({chg:+.2f}% today)\n"
-            f"Crossed <b>{condition} ₹{level:,.2f}</b>"
-            + (f"\n📝 {note}" if note else "")
+    def get_balance_sheet(self, symbol, period: PeriodType = "annual",
+                          limit: int = 10) -> List[BalanceSheet]:
+        df = self._raw(symbol, period).get("balance")
+        if df is None or getattr(df, "empty", True):
+            return []
+        rows = {k: _row(df, c) for k, c in _BALANCE_MAP.items()}
+        out: List[BalanceSheet] = []
+        for col in list(df.columns)[:limit]:
+            d = _to_date(col)
+            vals = {k: (_f(r[col]) if r is not None else None) for k, r in rows.items()}
+            # derive total_debt if vendor gave only the parts
+            if vals.get("total_debt") is None:
+                st, lt = vals.get("short_term_debt"), vals.get("long_term_debt")
+                if st is not None or lt is not None:
+                    vals["total_debt"] = (st or 0.0) + (lt or 0.0)
+            out.append(BalanceSheet(
+                period=FiscalPeriod(period_end=d, fiscal_year=d.year if d else None,
+                                    period_type=period), **vals))
+        return out
+
+    def get_cash_flow(self, symbol, period: PeriodType = "annual",
+                      limit: int = 10) -> List[CashFlow]:
+        df = self._raw(symbol, period).get("cashflow")
+        if df is None or getattr(df, "empty", True):
+            return []
+        rows = {k: _row(df, c) for k, c in _CASHFLOW_MAP.items()}
+        out: List[CashFlow] = []
+        for col in list(df.columns)[:limit]:
+            d = _to_date(col)
+            vals = {k: (_f(r[col]) if r is not None else None) for k, r in rows.items()}
+            # capex → positive outflow
+            if vals.get("capital_expenditure") is not None:
+                vals["capital_expenditure"] = abs(vals["capital_expenditure"])
+            # derive FCF if absent but OCF + capex present
+            if vals.get("free_cash_flow") is None:
+                ocf, capex = vals.get("operating_cash_flow"), vals.get("capital_expenditure")
+                if ocf is not None and capex is not None:
+                    vals["free_cash_flow"] = ocf - capex
+            out.append(CashFlow(
+                period=FiscalPeriod(period_end=d, fiscal_year=d.year if d else None,
+                                    period_type=period), **vals))
+        return out
+
+    def get_ratios(self, symbol: str) -> RatioSnapshot:
+        info = self._raw(symbol, "annual").get("info") or {}
+        d2e = _f(info.get("debtToEquity"))
+        return RatioSnapshot(
+            as_of=date.today(),
+            roe=_f(info.get("returnOnEquity")),
+            roce=None,                                   # Yahoo has no ROCE — derived later
+            roa=_f(info.get("returnOnAssets")),
+            debt_to_equity=(d2e / 100.0) if d2e is not None else None,   # percent → ratio
+            current_ratio=_f(info.get("currentRatio")),
+            gross_margin=_f(info.get("grossMargins")),
+            operating_margin=_f(info.get("operatingMargins")),
+            net_margin=_f(info.get("profitMargins")),
+            pe=_f(info.get("trailingPE")),
+            pb=_f(info.get("priceToBook")),
+            # already present in the Yahoo `info` we fetch — just surfaced now (Phase C1)
+            ev_ebitda=_f(info.get("enterpriseToEbitda")),
         )
-        if send_telegram(msg):
-            _mark_fired(state, key, today)
-            sent += 1
-    return sent
 
-
-def check_vix_regime(state: dict, today: str) -> int:
-    """Alert when India VIX is in a fear/panic regime."""
-    try:
-        from utils.vix import get_india_vix_regime
-        info = get_india_vix_regime()
-    except Exception as e:
-        print(f"[vix] failed: {e}")
-        return 0
-
-    regime = str(info.get("regime", "unknown")).lower()
-    vix    = info.get("vix")
-    if regime not in ("fear", "panic"):
-        return 0
-
-    key = f"vix_{regime}"
-    if _already_fired(state, key, today):
-        return 0
-
-    icon = "🚨" if regime == "panic" else "🔴"
-    msg = (
-        f"{icon} <b>Market volatility alert</b>\n"
-        f"India VIX is in <b>{regime.upper()}</b> territory"
-        + (f" at <b>{vix:.1f}</b>" if vix else "")
-        + "\nNew long entries are higher-risk — protect open positions, "
-          "tighten stops, avoid fresh leverage."
-    )
-    if send_telegram(msg):
-        _mark_fired(state, key, today)
-        return 1
-    return 0
-
-
-def check_nifty_trend(state: dict, today: str) -> int:
-    """Alert when Nifty 50 is in a confirmed downtrend (price < SMA20 < SMA50)."""
-    try:
-        from data.fetcher import fetch_single
-        df = fetch_single("^NSEI", period="3mo")
-    except Exception as e:
-        print(f"[nifty] fetch failed: {e}")
-        return 0
-    if df is None or df.empty or len(df) < 50:
-        return 0
-
-    close = df["Close"]
-    price = float(close.iloc[-1])
-    sma20 = float(close.rolling(20).mean().iloc[-1])
-    sma50 = float(close.rolling(50).mean().iloc[-1])
-    if not (price < sma20 < sma50):
-        return 0
-
-    key = "nifty_downtrend"
-    if _already_fired(state, key, today):
-        return 0
-
-    chg5 = (price / float(close.iloc[-6]) - 1) * 100 if len(close) >= 6 else 0.0
-    msg = (
-        f"📉 <b>Nifty 50 downtrend</b>\n"
-        f"Nifty at <b>{price:,.0f}</b> ({chg5:+.1f}% 5d), now below both "
-        f"SMA20 ({sma20:,.0f}) and SMA50 ({sma50:,.0f}).\n"
-        f"Trend has turned down — be defensive with new buys."
-    )
-    if send_telegram(msg):
-        _mark_fired(state, key, today)
-        return 1
-    return 0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
-
-def main() -> int:
-    force = "--force" in sys.argv      # bypass market-hours guard for testing
-    if not force and not _is_market_hours():
-        print("[main] outside NSE market hours — nothing to do.")
-        return 0
-
-    today = datetime.datetime.now(_IST).strftime("%Y-%m-%d")
-    state = _prune_state(_load_state(), today)
-
-    total = 0
-    total += check_price_alerts(state, today)
-    total += check_vix_regime(state, today)
-    total += check_nifty_trend(state, today)
-
-    _save_state(state)
-    print(f"[main] done — {total} alert(s) sent.")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    def company_info(self, symbol: str) -> dict:
+        info = self._raw(symbol, "annual").get("info") or {}
+        return {"company_name": info.get("longName") or info.get("shortName"),
+                "sector": info.get("sector"),
+                "currency": info.get("financialCurrency") or "INR"}

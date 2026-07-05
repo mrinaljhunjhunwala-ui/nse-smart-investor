@@ -28,6 +28,7 @@ from dashboard.shared.cache import (
 )
 from dashboard.shared.trade_utils import (
     _auto_close_breached,
+    _display_label,            # Phase 2 UI honesty
     _is_squareoff_time,
     _paper_trade_popover,
     _portfolio_live_prices,
@@ -729,7 +730,7 @@ for _cct in _cc_sorted:
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
             f'<div style="flex:1">'
             f'<span style="font-size:18px;font-weight:700;color:#fff">{_lbl}</span>'
-            f'&nbsp;&nbsp;<span style="font-size:14px;font-weight:700;color:{_ac}">{_ai} {_act}</span>'
+            f'&nbsp;&nbsp;<span style="font-size:14px;font-weight:700;color:{_ac}">{_ai} {_display_label(_act)}</span>'
             f'<div style="margin:5px 0 3px 0;display:flex;align-items:center;gap:8px">'
             f'<span style="font-size:12px;font-weight:700;color:{_ac}">{_score:.0f}/100</span>'
             f'<div style="width:120px;height:6px;background:#333;border-radius:3px">'

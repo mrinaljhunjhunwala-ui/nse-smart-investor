@@ -1,5 +1,8 @@
 """My Watchlist - NSE Smart Investor (multipage page; body verbatim from app.py)."""
 import os, sys
+import logging
+
+_log = logging.getLogger("dashboard.my_watchlist")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -59,7 +62,8 @@ def _wl_add(ticker: str, notes: str = "", target: float = None, sl: float = None
         )
         _wl_con.commit()
         return True
-    except Exception:
+    except Exception as e:
+        _log.warning("watchlist DB write failed for %s: %s", ticker, e)
         return False
 
 def _wl_remove(ticker: str):
@@ -107,7 +111,8 @@ else:
                     "rsi":       round(cs.technical_indicators.get("rsi", 0), 1),
                     "change_1d": round(cs.technical_indicators.get("return_1d", 0) * 100, 2),
                 })
-            except Exception:
+            except Exception as e:
+                _log.debug("watchlist scoring failed for %s: %s", tkr, e)
                 rows.append({"ticker": tkr, "price": None, "score": None,
                              "signal": "Error", "rsi": None, "change_1d": None})
         return rows

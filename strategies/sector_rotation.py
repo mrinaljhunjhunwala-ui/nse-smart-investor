@@ -64,8 +64,8 @@ def compute_sector_scores(period: str = "2y") -> pd.DataFrame:
                         entry[key] = float((close.iloc[-1] / close.iloc[-n - 1] - 1) * 100)
                 if entry:
                     ticker_returns.append(entry)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"    ⚠ {ticker}: failed to compute returns, excluded from sector avg: {e}")
 
         if not ticker_returns:
             continue
