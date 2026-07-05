@@ -46,6 +46,9 @@ A9  Portfolio Fit holdings source now reads load_manual_holdings() instead
 
 import os
 import sys
+import logging
+
+_log = logging.getLogger("dashboard.analyze_stock")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -354,7 +357,8 @@ if analyze_btn or _prefill_active or (
                     _ms_an = _an_ms()
                     try:
                         _dlabel = df.index[-1].strftime("%d-%b")
-                    except Exception:
+                    except Exception as e:
+                        _log.debug("date label formatting failed: %s", e)
                         _dlabel = ""
                     if _ms_an.get("is_open") and _an_live and _an_drift >= 0.5:
                         # FIX A2: only warn about drift during live market hours
