@@ -1,5 +1,8 @@
 """Angel One - NSE Smart Investor (multipage page; body verbatim from app.py)."""
 import os, sys
+import logging
+
+_log = logging.getLogger("dashboard.angel_one")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -107,7 +110,8 @@ with tab_ao1:
                     f'Exchanges: {", ".join(_prof["exchanges"])}</div>',
                     unsafe_allow_html=True,
                 )
-        except Exception:
+        except Exception as e:
+            _log.debug("Angel One profile display failed: %s", e)
             st.markdown("*Profile unavailable*")
 
     with col_f:
@@ -127,7 +131,8 @@ with tab_ao1:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-        except Exception:
+        except Exception as e:
+            _log.debug("Angel One funds display failed: %s", e)
             st.markdown("*Funds data unavailable*")
 
     if st.button("🔄 Refresh Session", key="ao_refresh"):
