@@ -24,6 +24,9 @@ B4  In-app run now writes to portfolio_results.csv (same filename the loader
 """
 
 import os, sys
+import logging
+
+_log = logging.getLogger("dashboard.backtest")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -67,7 +70,8 @@ def load_backtest_csv(path: str = "portfolio_results.csv") -> pd.DataFrame:
     if os.path.exists(path):
         try:
             return pd.read_csv(path, index_col=0)
-        except Exception:
+        except Exception as e:
+            _log.warning("load_backtest_csv: %s exists but failed to parse: %s", path, e)
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -221,6 +225,7 @@ def _run_backtest_worker(
                 })
         except Exception as _e:
             # Record skip without crashing the worker
+            _log.debug("backtest sweep: %s skipped: %s", t, _e)
             partial_results.append({
                 "Ticker":  t.replace(".NS", "") + " ⚠️",
                 "Return (%)": None, "Buy & Hold (%)": None,
@@ -237,7 +242,8 @@ if _bt_run and not st.session_state.get("bt_running", False):
         from strategies.momentum import MomentumStrategy
         try:
             from backtest.runner import TOTAL_COST as _BT_COST
-        except Exception:
+        except Exception as e:
+            _log.debug("TOTAL_COST import failed, using fallback constant: %s", e)
             _BT_COST = 0.0023
 
         _strat_cls   = RSIMACDStrategy if _bt_strat.startswith("RSI") else MomentumStrategy
