@@ -1,5 +1,8 @@
 """Market Overview - NSE Smart Investor (multipage page; body verbatim from app.py)."""
 import os, sys
+import logging
+
+_log = logging.getLogger("dashboard.market_overview")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -197,7 +200,8 @@ def get_top_movers():
                 "Prev":      round(q["prev_close"], 2),
                 "Vol Ratio": 1.0,
             })
-        except Exception:
+        except Exception as e:
+            _log.debug("market_overview: failed to build row for %s: %s", t, e)
             continue
     return pd.DataFrame(rows).sort_values("Day (%)", ascending=False) if rows else pd.DataFrame()
 
