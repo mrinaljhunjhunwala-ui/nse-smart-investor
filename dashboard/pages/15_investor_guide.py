@@ -32,9 +32,10 @@ st.markdown(
     "Read this once and you will understand exactly what every number means and when to act."
 )
 
-tab_g1, tab_g2, tab_g3, tab_g4, tab_g5 = st.tabs([
+tab_g1, tab_g2, tab_g3, tab_g4, tab_g5, tab_g6, tab_g7 = st.tabs([
     "🎯 Scores & Signals", "📊 Indicators", "🔴 Stop-Loss & Risk",
-    "📰 News Signals", "📌 Paper Trading SOP"
+    "📰 News Signals", "📌 Paper Trading SOP", "🧭 Universe & Coverage",
+    "📈 TQS Scanner"
 ])
 
 # ── TAB 1: SCORES & SIGNALS ───────────────────────────────────────────────
@@ -299,6 +300,98 @@ with tab_g5:
         "📖 **Remember:** The model gives signals based on historical patterns. "
         "No model is 100% accurate. Always use stop-losses. "
         "Paper trade first to verify the signals work for you before using real money."
+    )
+
+# ── TAB 6: UNIVERSE & COVERAGE ────────────────────────────────────────────
+with tab_g6:
+    st.subheader("How Many Stocks Does the Platform Actually Scan?")
+    st.markdown(
+        "Pages like **Market Live**, **Smart Screener**, **Top Picks**, and "
+        "**Tomorrow's Watchlist** scan a *universe* — a defined list of NSE "
+        "tickers — rather than every stock on the exchange. Which universe a "
+        "page uses determines how broad (and how slow) a scan is."
+    )
+    st.dataframe(pd.DataFrame([
+        {"Universe": "Nifty 50",            "Size": "50",   "Composition": "The 50 largest, most liquid blue-chip stocks."},
+        {"Universe": "Nifty 100",           "Size": "~100", "Composition": "Nifty 50 + Nifty Next 50."},
+        {"Universe": "Nifty 500",           "Size": "~500", "Composition": "Nifty 100 + Nifty Midcap 150 + Nifty Smallcap 250 — the broad, standard \"large + mid + small cap\" index."},
+        {"Universe": "Nifty Total Market",  "Size": "~745", "Composition": "Nifty 500 + Nifty Microcap 250 (ranks 501–750). The broadest scan available — used by default on Market Live for maximum coverage."},
+    ]), hide_index=True)
+    st.info(
+        "🔧 **Recently fixed:** the Midcap 150 and Smallcap 250 ticker lists that "
+        "feed these scans were hand-curated samples that had drifted well short of "
+        "the real index membership (missing over a third of their constituents), "
+        "and the Microcap 250 tier didn't exist in the platform at all. This meant "
+        "broad scans were silently covering only ~330–450 stocks instead of the "
+        "intended ~745–750. Both lists have been rebuilt from NSE's official "
+        "index constituent files, and the missing Microcap 250 tier has been added.",
+        icon="🔧",
+    )
+    st.markdown(
+        "**What this means for you:** a wider universe surfaces more candidates "
+        "but takes longer to scan and includes smaller, less liquid names — check "
+        "average daily volume before sizing a position in anything outside the "
+        "Nifty 500."
+    )
+
+# ── TAB 7: TQS SCANNER ────────────────────────────────────────────────────
+with tab_g7:
+    st.subheader("Trend Quality Score (TQS) Scanner — A Separate Model")
+    st.warning(
+        "⚠️ **Don't confuse this with the Trend Quality Score (0–90) described "
+        "in the Scores & Signals tab.** They share a name but are two distinct "
+        "scoring systems built for different purposes: the Analyze Stock score "
+        "(0–90) blends Technical + Momentum + Volume + Sentiment for a single "
+        "buy/hold/exit call. The **TQS Scanner** page runs a separate 0–100 "
+        "model, described below, purpose-built for ranking many stocks by pure "
+        "trend health.",
+        icon="⚠️",
+    )
+    st.markdown(
+        "The **TQS Scanner** page (📊 Trend Quality Score in the sidebar) scores "
+        "every stock in a chosen universe across **four equally-weighted pillars "
+        "(22.5 points each, 90 max before rounding to a 0–100 scale)**:"
+    )
+    st.dataframe(pd.DataFrame([
+        {"Pillar": "P1 — Trend Strength",       "What It Measures": "Moving-average alignment (Close > SMA20 > SMA50 > SMA200), ADX trend intensity, and SMA200 slope."},
+        {"Pillar": "P2 — Trend Persistence",    "What It Measures": "Rolling Sharpe ratio over 5, 20, and 60 days — rewards steady, low-noise trends over choppy ones."},
+        {"Pillar": "P3 — Momentum Quality",     "What It Measures": "RSI positioned in a healthy 55–70 band (not just \"high\"), plus MACD histogram direction and bullish/bearish state."},
+        {"Pillar": "P4 — Technical Confirmation","What It Measures": "OBV z-score and slope percentile (is volume confirming the move?), plus the volume ratio vs. the 20-day average."},
+    ]), hide_index=True)
+    st.markdown("---")
+    st.subheader("Grades & Signals")
+    st.markdown(
+        "**Note:** Grade and Signal come from two separate threshold scales in "
+        "the underlying model, so they don't line up row-for-row — a score of "
+        "76, for example, shows Grade **A** (≥70) alongside Signal **STRONG "
+        "TREND** (≥75) at the same time. Use whichever one you find clearer; "
+        "both describe the same underlying TQS number."
+    )
+    _tqs_g1, _tqs_g2 = st.columns(2)
+    with _tqs_g1:
+        st.markdown("**Grade scale**")
+        st.dataframe(pd.DataFrame([
+            {"TQS Range": "80 – 100", "Grade": "A+"},
+            {"TQS Range": "70 – 79",  "Grade": "A"},
+            {"TQS Range": "55 – 69",  "Grade": "B"},
+            {"TQS Range": "40 – 54",  "Grade": "C"},
+            {"TQS Range": "25 – 39",  "Grade": "D"},
+            {"TQS Range": "0 – 24",   "Grade": "F"},
+        ]), hide_index=True)
+    with _tqs_g2:
+        st.markdown("**Signal scale**")
+        st.dataframe(pd.DataFrame([
+            {"TQS Range": "75 – 100", "Signal": "STRONG TREND"},
+            {"TQS Range": "60 – 74",  "Signal": "TRENDING"},
+            {"TQS Range": "45 – 59",  "Signal": "NEUTRAL"},
+            {"TQS Range": "30 – 44",  "Signal": "WEAK"},
+            {"TQS Range": "0 – 29",   "Signal": "AVOID"},
+        ]), hide_index=True)
+    st.markdown(
+        "**How to use it:** use the TQS Scanner to *rank a whole universe* and "
+        "find the healthiest trends quickly, then open **Analyze Stock** on the "
+        "top candidates for the full picture (fundamentals, news, stop-loss "
+        "levels, and the 0–90 composite score) before acting."
     )
 
 
