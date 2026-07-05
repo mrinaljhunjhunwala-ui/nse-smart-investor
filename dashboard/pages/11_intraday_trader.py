@@ -1,5 +1,8 @@
 """Intraday Trader - NSE Smart Investor (multipage page; body verbatim from app.py)."""
 import os, sys
+import logging
+
+_log = logging.getLogger("dashboard.intraday_trader")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -44,7 +47,8 @@ st.markdown(
 try:
     from data.angel_fetcher import is_configured as _it_ao_ok
     _it_ao = _it_ao_ok()
-except Exception:
+except Exception as e:
+    _log.debug("is_configured check failed, assuming Angel One not connected: %s", e)
     _it_ao = False
 
 _it_tabs = ["📊 Pre-Market Gap Scanner", "📈 Intraday Chart",
@@ -287,7 +291,8 @@ with tab_chart:
                         _orb_end_t  = _dt.datetime.combine(_first_date, _dt.time(9, 29))
                         _orb_end_t  = _orb_end_t.replace(tzinfo=_orb_start.tzinfo)
                         _orb_end_idx = _ic_df.index[_ic_df.index <= _orb_end_t][-1] if len(_ic_df.index[_ic_df.index <= _orb_end_t]) else _ic_df.index[2]
-                    except Exception:
+                    except Exception as e:
+                        _log.debug("ORB chart annotation fallback: %s", e)
                         _orb_start   = _ic_df.index[0]
                         _orb_end_idx = _ic_df.index[min(3, len(_ic_df)-1)]
                     fig_ic.add_vrect(
@@ -416,6 +421,7 @@ with tab_orb:
                     "Day Type":  "Narrow⚡" if _orb_r.get("narrow") else "Normal",
                 })
             except Exception as _oe:
+                _log.debug("ORB scanner row failed for %s: %s", _ot, _oe)
                 _orb_rows.append({"Ticker": _ot.replace(".NS",""), "Price":"err", "ORB High":"—",
                                   "ORB Low":"—","Range %":"—","AVWAP":"—","CPR Zone":"—","Day Type":"error"})
             _orb_prog.progress((_oi+1)/len(_orb_tickers))
@@ -431,7 +437,8 @@ with tab_sigs:
     try:
         from data.angel_fetcher import is_configured as _ls_ao_ok
         _ls_ao = _ls_ao_ok()
-    except Exception:
+    except Exception as e:
+        _log.debug("is_configured check failed, assuming Angel One not connected: %s", e)
         _ls_ao = False
     if _ls_ao:
         st.markdown('<span class="pill-green">⚡ Live data: Angel One (real-time, no rate limits)</span>',
@@ -478,7 +485,8 @@ with tab_sigs:
                     })
                     for s in _sigs:
                         _fired.append((_t, _sym, s))
-            except Exception:
+            except Exception as e:
+                _log.debug("intraday scan failed for %s: %s", _t, e)
                 _rows.append({"Stock": _t, "Price": None, "Trend": "—",
                               "CPR": "—", "Signal": "err"})
             _prog.progress((_i + 1) / max(len(_ls_tickers), 1),
