@@ -4,11 +4,26 @@ NSE stock universe — from NIFTY50 to ~750 liquid stocks.
 
 Universe levels:
     "nifty50"          — 50 blue-chip stocks
-    "nifty100"         — NIFTY50 + NIFTY_NEXT50  (100 total)
-    "nifty200"         — nifty100 + NIFTY_MIDCAP (200 total)
-    "nifty500"         — nifty200 + NIFTY_SMALLCAP (≈400 total)
-    "niftytotalmarket" — nifty500 + NIFTY_MIDCAP150 + NIFTY_SMALLCAP250 (≈750 total)
+    "nifty100"         — NIFTY50 + NIFTY_NEXT50  (≈100 total)
+    "nifty200"         — nifty100 + NIFTY_MIDCAP  (≈200 total)
+    "nifty500"         — nifty100 + NIFTY_MIDCAP150 + NIFTY_SMALLCAP250,
+                         plus the legacy NIFTY_MIDCAP/NIFTY_SMALLCAP samples
+                         for extra coverage (≈500 total, matches NSE's real
+                         Nifty 500 = Nifty 100 + Midcap 150 + Smallcap 250)
+    "niftytotalmarket" — nifty500 + NIFTY_MICROCAP250 (≈750 total, matches
+                         NSE's real Nifty Total Market composition)
     "all"              — alias for niftytotalmarket
+
+FIX UNI1 (this revision): NIFTY_MIDCAP150 and NIFTY_SMALLCAP250 were
+hand-curated samples (96 and 30 tickers respectively) instead of the real
+150/250-member index constituent lists, and NIFTY_MICROCAP250 (ranks
+501-750) didn't exist at all. This meant get_universe("niftytotalmarket")
+returned ~327-344 tickers instead of the documented ~750 — the root cause
+of the Market Live / Top Picks / Tomorrow's Watchlist coverage gap. All
+three lists have been replaced/added using NSE Indices' official constituent
+CSVs (ind_niftymidcap150list.csv, ind_niftysmallcap250list.csv,
+ind_niftymicrocap250_list.csv). get_universe("niftytotalmarket") now returns
+745 deduplicated tickers.
 
 Helpers:
     get_universe(level)         → List[str]
@@ -155,77 +170,199 @@ NIFTY_SMALLCAP: List[str] = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NIFTY MIDCAP 150  (ranks 101–250 by free-float market cap)
+# NIFTY MIDCAP 150  (ranks 101-250 by free-float market cap)
+# FIX UNI1 — replaced a hand-curated 96-ticker sample with the full 150-ticker
+# official constituent list (NSE Indices, ind_niftymidcap150list.csv). The old
+# sample was ~54 tickers short of the real index and was the primary cause of
+# Market Live scanning ~327 stocks instead of the documented ~750: this list
+# alone was silently missing over a third of its members, and the same problem
+# was even worse in NIFTY_SMALLCAP250 and the (missing) microcap tier below.
 # ─────────────────────────────────────────────────────────────────────────────
 NIFTY_MIDCAP150: List[str] = [
-    # Banking / Finance
-    "CREDITACC.NS", "EQUITASBNK.NS", "JKBANK.NS", "DCBBANK.NS",
-    "SOUTHBANK.NS", "EDELWEISS.NS", "MOTILALOFS.NS", "NUVAMA.NS",
-    "POONAWALLA.NS", "HOMEFIRST.NS", "APTUS.NS", "AAVAS.NS",
-    # IT / Tech
-    "RATEGAIN.NS", "ROUTE.NS", "INTELLECT.NS", "ZENSAR.NS",
-    "HEXAWARE.NS", "HAPPSTMNDS.NS", "NEWGEN.NS", "BIRLASOFT.NS",
-    # Auto Ancillaries
-    "OLECTRA.NS", "SUPRAJIT.NS", "GABRIEL.NS", "SUBROS.NS",
-    "LUMAXIND.NS", "SANDHAR.NS", "ENDURANCE.NS", "MINDA.NS",
-    # Pharma / Healthcare
-    "ERIS.NS", "MARKSANS.NS", "JB.NS", "MEDANTA.NS",
-    "NARAYANA.NS", "YATHARTH.NS", "GLAND.NS", "NEULANDLAB.NS",
-    # Consumer / FMCG / Retail
-    "CAMPUS.NS", "VSTIND.NS", "GODFRYPHLP.NS", "GILLETTE.NS",
-    "DEVYANI.NS", "WESTLIFE.NS", "SAPPHIRE.NS", "BAJAJELEC.NS",
-    "VMART.NS", "ZYDUSWELL.NS", "BAJAJCON.NS",
-    # Capital Goods / Infra / Defence
-    "TITAGARH.NS", "GRINDWELL.NS", "KAYNES.NS", "SYRMA.NS",
-    "TEJASNET.NS", "IRCON.NS", "RAILTEL.NS",
-    "VGUARD.NS", "FINOLEX.NS", "ELGIEQUIP.NS",
-    # Chemicals
-    "CLEAN.NS", "TATACHEM.NS", "ALKYLAMINE.NS", "FINEORG.NS",
-    "NAVINFLUOR.NS", "SUDARSCHEM.NS", "BALAMINES.NS",
-    "EPIGRAL.NS", "AETHER.NS",
-    # Real Estate / Cement
-    "MAHLIFE.NS", "KOLTEPATIL.NS", "BRIGADE.NS", "SUNTECK.NS",
-    "HEIDELBERG.NS", "INDIACEM.NS", "STARCEMENT.NS",
-    "ASHIANA.NS",
-    # Media / Entertainment
-    "ZEEL.NS", "PVRINOX.NS", "NAZARA.NS",
-    # Textiles / Apparel
-    "KPRMILL.NS", "RAYMOND.NS", "SIYARAM.NS",
-    # Metals
-    "RATNAMANI.NS", "APARINDS.NS", "JINDALSAW.NS",
-    # Hotels / Hospitality
-    "CHALET.NS", "WONDERLA.NS", "TAJGVK.NS",
-    # Others
-    "CRISIL.NS", "ICRA.NS", "CARERATING.NS",
-    "PRAJIND.NS", "ELECON.NS", "GARFIBRES.NS",
-    "GESHIP.NS", "SCI.NS", "COCHINSHIP.NS", "MAZDOCK.NS",
+    "360ONE.NS", "3MINDIA.NS", "ACC.NS", "AIAENG.NS",
+    "APLAPOLLO.NS", "AUBANK.NS", "AWL.NS", "ABBOTINDIA.NS",
+    "ATGL.NS", "ABCAPITAL.NS", "AJANTPHARM.NS", "ALKEM.NS",
+    "ANTHEM.NS", "APARINDS.NS", "APOLLOTYRE.NS", "ASHOKLEY.NS",
+    "ASTRAL.NS", "AUROPHARMA.NS", "AIIL.NS", "BSE.NS",
+    "BAJAJHFL.NS", "BALKRISIND.NS", "BANKINDIA.NS", "MAHABANK.NS",
+    "BERGEPAINT.NS", "BDL.NS", "BHARATFORG.NS", "BHEL.NS",
+    "BHARTIHEXA.NS", "GROWW.NS", "BIOCON.NS", "BLUESTARCO.NS",
+    "CRISIL.NS", "COCHINSHIP.NS", "COFORGE.NS", "COLPAL.NS",
+    "CONCOR.NS", "COROMANDEL.NS", "DABUR.NS", "DALBHARAT.NS",
+    "DIXON.NS", "ENDURANCE.NS", "ESCORTS.NS", "EXIDEIND.NS",
+    "NYKAA.NS", "FEDERALBNK.NS", "FORTIS.NS", "GVT&D.NS",
+    "GMRAIRPORT.NS", "GICRE.NS", "GLAXO.NS", "GLENMARK.NS",
+    "MEDANTA.NS", "GODFRYPHLP.NS", "GODREJIND.NS", "GODREJPROP.NS",
+    "FLUOROCHEM.NS", "HDBFS.NS", "HAVELLS.NS", "HEROMOTOCO.NS",
+    "HEXT.NS", "HINDPETRO.NS", "POWERINDIA.NS", "HONAUT.NS",
+    "HUDCO.NS", "ICICIGI.NS", "ICICIAMC.NS", "ICICIPRULI.NS",
+    "IDFCFIRSTB.NS", "ITCHOTELS.NS", "INDIANB.NS", "IRCTC.NS",
+    "IREDA.NS", "INDUSTOWER.NS", "INDUSINDBK.NS", "NAUKRI.NS",
+    "IPCALAB.NS", "JKCEMENT.NS", "JSWENERGY.NS", "JSWINFRA.NS",
+    "JSL.NS", "JUBLFOOD.NS", "KPRMILL.NS", "KEI.NS",
+    "KPITTECH.NS", "KALYANKJIL.NS", "LTF.NS", "LTTS.NS",
+    "LGEINDIA.NS", "LICHSGFIN.NS", "LAURUSLABS.NS", "LENSKART.NS",
+    "LICI.NS", "LINDEINDIA.NS", "LLOYDSME.NS", "LUPIN.NS",
+    "MRF.NS", "M&MFIN.NS", "MANKIND.NS", "MARICO.NS",
+    "MFSL.NS", "MOTILALOFS.NS", "MPHASIS.NS", "MCX.NS",
+    "NHPC.NS", "NLCINDIA.NS", "NMDC.NS", "NTPCGREEN.NS",
+    "NATIONALUM.NS", "NAM-INDIA.NS", "OBEROIRLTY.NS", "OIL.NS",
+    "PAYTM.NS", "OFSS.NS", "POLICYBZR.NS", "PIIND.NS",
+    "PAGEIND.NS", "PATANJALI.NS", "PERSISTENT.NS", "PETRONET.NS",
+    "PHOENIXLTD.NS", "POLYCAB.NS", "PREMIERENE.NS", "PRESTIGE.NS",
+    "RADICO.NS", "RVNL.NS", "SBICARD.NS", "SJVN.NS",
+    "SRF.NS", "SCHAEFFLER.NS", "SAIL.NS", "SUNDARMFIN.NS",
+    "SUPREMEIND.NS", "SUZLON.NS", "SWIGGY.NS", "TATACOMM.NS",
+    "TATAELXSI.NS", "TATAINVEST.NS", "NIACL.NS", "THERMAX.NS",
+    "TORNTPOWER.NS", "TIINDIA.NS", "UNOMINDA.NS", "UPL.NS",
+    "UBL.NS", "VMM.NS", "IDEA.NS", "VOLTAS.NS",
+    "WAAREEENER.NS", "YESBANK.NS",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NIFTY SMALLCAP 250  (ranks 251–500; liquid small-caps beyond NIFTY_SMALLCAP)
+# NIFTY SMALLCAP 250  (ranks 251-500 by free-float market cap)
+# FIX UNI1 — replaced a 30-ticker sample with the full 250-ticker official
+# constituent list (NSE Indices, ind_niftysmallcap250list.csv).
 # ─────────────────────────────────────────────────────────────────────────────
 NIFTY_SMALLCAP250: List[str] = [
-    # Finance / Insurance
-    "POLICYBZR.NS", "PAYTM.NS", "SBFC.NS", "UGROCAP.NS",
-    "SPANDANA.NS", "ARMANFIN.NS", "JMFINANCIL.NS",
-    # IT
-    "DATAMATICS.NS", "SAKSOFT.NS", "OFSS.NS",
-    # Pharma
-    "IOLCP.NS", "SEQUENT.NS", "CAPLIPOINT.NS",
-    "WINDLAS.NS", "LXCHEM.NS",
-    # Consumer / Retail
-    "JUBLPHARMA.NS", "HAWKINCOOK.NS", "SAFARI.NS",
-    # Capital Goods / Defence / Infra
-    "RPOWER.NS", "PARAS.NS", "TATAMETALI.NS",
-    "WELSPUNLIV.NS",
-    # Metals / Mining
-    "SHYAMMETL.NS", "SUNFLAG.NS",
-    # Auto Ancillaries
-    "FIEM.NS", "ROLEX.NS",
-    # Real Estate
-    "IBREALEST.NS", "ELDECO.NS", "MAHINDRACIE.NS",
-    # Textiles
-    "NITIN.NS",
+    "ACMESOLAR.NS", "AADHARHFC.NS", "AARTIIND.NS", "AAVAS.NS",
+    "ACE.NS", "ACUTAAS.NS", "ABFRL.NS", "ABLBL.NS",
+    "ABREL.NS", "ABSLAMC.NS", "CPPLUS.NS", "AEGISLOG.NS",
+    "AEGISVOPAK.NS", "AFCONS.NS", "AFFLE.NS", "ABDL.NS",
+    "ARE&M.NS", "AMBER.NS", "ANANDRATHI.NS", "ANANTRAJ.NS",
+    "ANGELONE.NS", "ANURAS.NS", "APTUS.NS", "ASAHIINDIA.NS",
+    "ASTERDM.NS", "ATHERENERG.NS", "ATUL.NS", "BEML.NS",
+    "BLS.NS", "BALRAMCHIN.NS", "BANDHANBNK.NS", "BATAINDIA.NS",
+    "BAYERCROP.NS", "BELRISE.NS", "BIKAJI.NS", "BSOFT.NS",
+    "BLUEDART.NS", "BLUEJET.NS", "BBTC.NS", "FIRSTCRY.NS",
+    "BRIGADE.NS", "MAPMYINDIA.NS", "CCL.NS", "CESC.NS",
+    "CIEINDIA.NS", "CANFINHOME.NS", "CANHLIFE.NS", "CAPLIPOINT.NS",
+    "CGCL.NS", "CARBORUNIV.NS", "CARTRADE.NS", "CASTROLIND.NS",
+    "CEATLTD.NS", "CEMPRO.NS", "CENTRALBK.NS", "CDSL.NS",
+    "CHALET.NS", "CHAMBLFERT.NS", "CHENNPETRO.NS", "CHOICEIN.NS",
+    "CHOLAHLDNG.NS", "CUB.NS", "CLEAN.NS", "COHANCE.NS",
+    "CAMS.NS", "CONCORDBIO.NS", "CRAFTSMAN.NS", "CREDITACC.NS",
+    "CROMPTON.NS", "CYIENT.NS", "DCMSHRIRAM.NS", "DOMS.NS",
+    "DATAPATTNS.NS", "DEEPAKFERT.NS", "DEEPAKNTR.NS", "DELHIVERY.NS",
+    "DEVYANI.NS", "LALPATHLAB.NS", "EIDPARRY.NS", "EIHOTEL.NS",
+    "ELECON.NS", "ELGIEQUIP.NS", "EMAMILTD.NS", "EMCURE.NS",
+    "EMMVEE.NS", "ENGINERSIN.NS", "ERIS.NS", "FACT.NS",
+    "FINCABLES.NS", "FSL.NS", "FIVESTAR.NS", "FORCEMOT.NS",
+    "GABRIEL.NS", "GALLANTT.NS", "GRSE.NS", "GILLETTE.NS",
+    "GLAND.NS", "GODIGIT.NS", "GPIL.NS", "GRANULES.NS",
+    "GRAPHITE.NS", "GRAVITA.NS", "GESHIP.NS", "GMDCLTD.NS",
+    "HEG.NS", "HBLENGINE.NS", "HFCL.NS", "HSCL.NS",
+    "HINDCOPPER.NS", "HOMEFIRST.NS", "HONASA.NS", "IDBI.NS",
+    "IFCI.NS", "IIFL.NS", "IRB.NS", "IRCON.NS",
+    "ITI.NS", "INDGN.NS", "INDIACEM.NS", "INDIAMART.NS",
+    "IEX.NS", "IOB.NS", "IGL.NS", "INOXWIND.NS",
+    "INTELLECT.NS", "IGIL.NS", "IKS.NS", "JBCHEPHARM.NS",
+    "JBMA.NS", "JKTYRE.NS", "JMFINANCIL.NS", "JSWCEMENT.NS",
+    "JSWDULUX.NS", "JAINREC.NS", "JPPOWER.NS", "J&KBANK.NS",
+    "JINDALSAW.NS", "JUBLINGREA.NS", "JUBLPHARMA.NS", "JWL.NS",
+    "JYOTICNC.NS", "KAJARIACER.NS", "KPIL.NS", "KARURVYSYA.NS",
+    "KAYNES.NS", "KEC.NS", "KFINTECH.NS", "KIRLOSENG.NS",
+    "KIMS.NS", "LTFOODS.NS", "LATENTVIEW.NS", "THELEELA.NS",
+    "LEMONTREE.NS", "MMTC.NS", "MGL.NS", "MANAPPURAM.NS",
+    "MRPL.NS", "MEESHO.NS", "MINDACORP.NS", "MSUMI.NS",
+    "NATCOPHARM.NS", "NBCC.NS", "NCC.NS", "NSLNISP.NS",
+    "NH.NS", "NAVA.NS", "NAVINFLUOR.NS", "NETWEB.NS",
+    "NEULANDLAB.NS", "NEWGEN.NS", "NIVABUPA.NS", "NUVAMA.NS",
+    "NUVOCO.NS", "OLAELEC.NS", "OLECTRA.NS", "ONESOURCE.NS",
+    "PCBL.NS", "PGEL.NS", "PNBHOUSING.NS", "PTCIL.NS",
+    "PVRINOX.NS", "PARADEEP.NS", "PFIZER.NS", "PWL.NS",
+    "PINELABS.NS", "PIRAMALFIN.NS", "PPLPHARMA.NS", "POLYMED.NS",
+    "POONAWALLA.NS", "RRKABEL.NS", "RBLBANK.NS", "RHIM.NS",
+    "RITES.NS", "RAILTEL.NS", "RAINBOW.NS", "RKFORGE.NS",
+    "REDINGTON.NS", "RPOWER.NS", "SBFC.NS", "SAGILITY.NS",
+    "SAILIFE.NS", "SAMMAANCAP.NS", "SAPPHIRE.NS", "SARDAEN.NS",
+    "SAREGAMA.NS", "SCHNEIDER.NS", "SCI.NS", "SHYAMMETL.NS",
+    "SIGNATURE.NS", "SOBHA.NS", "SONACOMS.NS", "SONATSOFTW.NS",
+    "STARHEALTH.NS", "SUMICHEM.NS", "SUNTV.NS", "SPLPETRO.NS",
+    "SWANCORP.NS", "SYNGENE.NS", "SYRMA.NS", "TBOTEK.NS",
+    "TATACHEM.NS", "TATATECH.NS", "TTML.NS", "TECHNOE.NS",
+    "TEGA.NS", "TEJASNET.NS", "TENNIND.NS", "RAMCOCEM.NS",
+    "TIMKEN.NS", "TITAGARH.NS", "TARIL.NS", "TRAVELFOOD.NS",
+    "TRIDENT.NS", "TRITURBINE.NS", "UCOBANK.NS", "UTIAMC.NS",
+    "URBANCO.NS", "USHAMART.NS", "VTL.NS", "VIJAYA.NS",
+    "WELCORP.NS", "WELSPUNLIV.NS", "WHIRLPOOL.NS", "WOCKPHARMA.NS",
+    "ZFCVINDIA.NS", "ZEEL.NS", "ZENTEC.NS", "ZENSARTECH.NS",
+    "ZYDUSWELL.NS", "ECLERX.NS",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NIFTY MICROCAP 250  (ranks 501-750; the missing tier)
+# FIX UNI1 — this tier didn't exist at all before this fix. NSE's own Nifty
+# Total Market index = Nifty 500 (Nifty 100 + Midcap 150 + Smallcap 250, i.e.
+# 100+150+250=500) + Nifty Microcap 250 (ranks 501-750) = 750 stocks. Without
+# this list, get_universe("niftytotalmarket") had a hard ceiling around 400-450
+# tickers no matter how complete the other lists were, because a whole 250-stock
+# tier of the index was never represented in this file at all.
+# ─────────────────────────────────────────────────────────────────────────────
+NIFTY_MICROCAP250: List[str] = [
+    "ASKAUTOLTD.NS", "AXISCADES.NS", "AARTIDRUGS.NS", "AARTIPHARM.NS",
+    "AVL.NS", "ADVENZYMES.NS", "AEQUS.NS", "AETHER.NS",
+    "AHLUCONT.NS", "AKUMS.NS", "APLLTD.NS", "ALIVUS.NS",
+    "ALKYLAMINE.NS", "ALOKINDS.NS", "APOLLO.NS", "ACI.NS",
+    "ARVINDFASN.NS", "ARVIND.NS", "ASHAPURMIN.NS", "ASHOKA.NS",
+    "ASTRAMICRO.NS", "ATLANTAELE.NS", "AURIONPRO.NS", "AVALON.NS",
+    "AVANTIFEED.NS", "CCAVENUE.NS", "AWFIS.NS", "AZAD.NS",
+    "BAJAJELEC.NS", "BALAMINES.NS", "BALUFORGE.NS", "BANCOINDIA.NS",
+    "BIRLACORPN.NS", "BBOX.NS", "BLACKBUCK.NS", "BLUESTONE.NS",
+    "BORORENEW.NS", "CMSINFO.NS", "CORONA.NS", "CSBBANK.NS",
+    "CAMPUS.NS", "CRAMC.NS", "CAPILLARY.NS", "CELLO.NS",
+    "CENTURYPLY.NS", "CERA.NS", "CRIZAC.NS", "CUPID.NS",
+    "DCBBANK.NS", "DATAMATICS.NS", "DIACABS.NS", "DBL.NS",
+    "AGARWALEYE.NS", "DYNAMATECH.NS", "EPL.NS", "EDELWEISS.NS",
+    "EMIL.NS", "ELECTCAST.NS", "ELLEN.NS", "EMBDL.NS",
+    "ENTERO.NS", "EIEL.NS", "EQUITASBNK.NS", "ETHOSLTD.NS",
+    "EUREKAFORB.NS", "FEDFINA.NS", "FIEMIND.NS", "FINPIPE.NS",
+    "UTLSOLAR.NS", "GHCL.NS", "GMMPFAUDLR.NS", "GMRP&UI.NS",
+    "GRWRHITECH.NS", "GODREJAGRO.NS", "GOKEX.NS", "GOKULAGRO.NS",
+    "GREAVESCOT.NS", "GAEL.NS", "GNFC.NS", "GPPL.NS",
+    "GSFC.NS", "HGINFRA.NS", "HAPPSTMNDS.NS", "HCG.NS",
+    "HEMIPROP.NS", "HERITGFOOD.NS", "HCC.NS", "IFBIND.NS",
+    "IIFLCAPS.NS", "INOXINDIA.NS", "INDIAGLYCO.NS", "INDIASHLTR.NS",
+    "IMFA.NS", "INDIGOPNTS.NS", "ICIL.NS", "INOXGREEN.NS",
+    "IONEXCHANG.NS", "JKLAKSHMI.NS", "JKPAPER.NS", "JAIBALAJI.NS",
+    "JAMNAAUTO.NS", "JSFB.NS", "JAYNECOIND.NS", "JSLL.NS",
+    "JLHL.NS", "JUSTDIAL.NS", "JYOTHYLAB.NS", "KNRCON.NS",
+    "KPIGREEN.NS", "KRBL.NS", "KRN.NS", "KSB.NS",
+    "KANSAINER.NS", "KTKBANK.NS", "KSCL.NS", "KIRLOSBROS.NS",
+    "KIRLPNU.NS", "KITEX.NS", "LXCHEM.NS", "IXIGO.NS",
+    "LLOYDSENGG.NS", "LLOYDSENT.NS", "LUMAXTECH.NS", "MOIL.NS",
+    "MSTCLTD.NS", "MTARTECH.NS", "MAHSCOOTER.NS", "MAHSEAMLES.NS",
+    "MANORAMA.NS", "MARKSANS.NS", "MASTEK.NS", "MEDPLUS.NS",
+    "METROPOLIS.NS", "MIDHANI.NS", "BECTORFOOD.NS", "NEOGEN.NS",
+    "NESCO.NS", "NFL.NS", "NAZARA.NS", "NETWORK18.NS",
+    "OPTIEMUS.NS", "ORIENTCEM.NS", "ORKLAINDIA.NS", "OSWALPUMPS.NS",
+    "PNGJL.NS", "PCJEWELLER.NS", "PNCINFRA.NS", "PTC.NS",
+    "PARAS.NS", "PARKHOSPS.NS", "PGIL.NS", "PICCADIL.NS",
+    "POWERMECH.NS", "PRAJIND.NS", "PRICOLLTD.NS", "PFOCUS.NS",
+    "PRSMJOHNSN.NS", "PRIVISCL.NS", "PRUDENT.NS", "PURVA.NS",
+    "QPOWER.NS", "QUESS.NS", "RAIN.NS", "RALLIS.NS",
+    "RCF.NS", "RATEGAIN.NS", "RATNAMANI.NS", "RTNINDIA.NS",
+    "RTNPOWER.NS", "RAYMONDLSL.NS", "REDTAPE.NS", "REFEX.NS",
+    "RELAXO.NS", "RELIGARE.NS", "RBA.NS", "ROUTE.NS",
+    "RUBICON.NS", "SKFINDUS.NS", "SKFINDIA.NS", "SKYGOLD.NS",
+    "SMLMAH.NS", "SHRIPISTON.NS", "SAATVIKGL.NS", "SAFARI.NS",
+    "SAMHI.NS", "SANDUMA.NS", "SANOFICONR.NS", "SANSERA.NS",
+    "SENCO.NS", "STYL.NS", "SHAILY.NS", "SHAKTIPUMP.NS",
+    "SHARDACROP.NS", "SHAREINDIA.NS", "SFL.NS", "SHILPAMED.NS",
+    "RENUKA.NS", "SKIPPER.NS", "SMARTWORKS.NS", "SOUTHBANK.NS",
+    "LOTUSDEV.NS", "STARCEMENT.NS", "SWSOLAR.NS", "STLTECH.NS",
+    "STAR.NS", "STYRENIX.NS", "SUBROS.NS", "SUDARSCHEM.NS",
+    "SUDEEPPHRM.NS", "SPARC.NS", "SUNTECK.NS", "SUPRIYA.NS",
+    "SURYAROSNI.NS", "TARC.NS", "TDPOWERSYS.NS", "TSFINV.NS",
+    "TVSSCS.NS", "TMB.NS", "TANLA.NS", "TEXRAIL.NS",
+    "THANGAMAYL.NS", "ANUP.NS", "THOMASCOOK.NS", "THYROCARE.NS",
+    "TI.NS", "TIMETECHNO.NS", "TIPSMUSIC.NS", "TRANSRAILL.NS",
+    "TRIVENI.NS", "UJJIVANSFB.NS", "VGUARD.NS", "VMART.NS",
+    "VIPIND.NS", "V2RETAIL.NS", "WABAG.NS", "VAIBHAVGBL.NS",
+    "DBREALTY.NS", "VARROC.NS", "MANYAVAR.NS", "VIKRAMSOLR.NS",
+    "VIYASH.NS", "VOLTAMP.NS", "WAAREERTL.NS", "WAKEFIT.NS",
+    "WEWORK.NS", "WEBELSOLAR.NS", "WELENT.NS", "WESTLIFE.NS",
+    "YATHARTH.NS", "ZAGGLE.NS",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -401,8 +538,8 @@ def get_universe(level: str = "nifty50") -> List[str]:
         "nifty50"          →  50 tickers
         "nifty100"         → 100 tickers
         "nifty200"         → ~200 tickers
-        "nifty500"         → ~400 tickers
-        "niftytotalmarket" → ~750 tickers  (recommended for Market Live broad scan)
+        "nifty500"         → ~500 tickers
+        "niftytotalmarket" → ~745 tickers  (recommended for Market Live broad scan)
         "all"              → alias for niftytotalmarket
     """
     level = level.lower().strip()
@@ -425,16 +562,26 @@ def get_universe(level: str = "nifty50") -> List[str]:
         return result
 
     if level == "nifty500":
+        # FIX UNI1 — this used to be nifty200 + NIFTY_SMALLCAP only, which never
+        # included NIFTY_MIDCAP150 / NIFTY_SMALLCAP250 at all. The real Nifty 500
+        # = Nifty 100 + Nifty Midcap 150 + Nifty Smallcap 250 (100+150+250=500).
+        # NIFTY_MIDCAP / NIFTY_SMALLCAP (the older, shorter hand lists) are kept
+        # in the union too so nothing that was previously covered is dropped.
         seen, result = set(), []
-        for t in list(NIFTY50_TICKERS) + NIFTY_NEXT50 + NIFTY_MIDCAP + NIFTY_SMALLCAP:
+        for t in (list(NIFTY50_TICKERS) + NIFTY_NEXT50 + NIFTY_MIDCAP
+                  + NIFTY_SMALLCAP + NIFTY_MIDCAP150 + NIFTY_SMALLCAP250):
             if t not in seen:
                 seen.add(t); result.append(t)
         return result
 
     if level in ("niftytotalmarket", "all"):
+        # FIX UNI1 — Nifty Total Market = Nifty 500 + Nifty Microcap 250
+        # (ranks 501-750). NIFTY_MICROCAP250 previously didn't exist in this
+        # file, so this tier — and ~250 stocks — were missing entirely.
         seen, result = set(), []
         for t in (list(NIFTY50_TICKERS) + NIFTY_NEXT50 + NIFTY_MIDCAP
-                  + NIFTY_SMALLCAP + NIFTY_MIDCAP150 + NIFTY_SMALLCAP250):
+                  + NIFTY_SMALLCAP + NIFTY_MIDCAP150 + NIFTY_SMALLCAP250
+                  + NIFTY_MICROCAP250):
             if t not in seen:
                 seen.add(t); result.append(t)
         return result
