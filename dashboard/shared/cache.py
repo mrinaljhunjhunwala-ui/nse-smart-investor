@@ -436,6 +436,52 @@ def load_vix_data():
     return vix, nifty
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CC_TICKER — fast, parallel, GAINERS-ONLY snapshot for Command Centre's
+# ticker strip.
+#
+# Previously the strip mixed the user's raw watchlist (which can legitimately
+# include stocks that are down today) with a handful of Top Picks buy
+# candidates, and priced them via trade_utils._portfolio_live_prices — which
+# fetches one ticker at a time in a plain for-loop (see FIX TU4 in
+# trade_utils.py), not in parallel. Two separate bugs from one root cause:
+# (1) a "suggestions" strip that could show loss-making stocks because it was
+# never actually gainers-only, it was "whatever's on your watchlist", and
+# (2) real load-time cost from N sequential fetches instead of one batch call.
+#
+# Fixed by decoupling entirely: this scans only NIFTY 50 (fast, well-known,
+# matches "like the ticker for nifty50 stocks") via get_live_prices_batch,
+# the SAME parallel Angel-One-batch → threaded-Yahoo-fallback path Market
+# Live already uses for its ~750-stock snapshot — just a much smaller list,
+# so it's fast even on a cold cache. Sorted by today's % change and filtered
+# to positive movers only, so what's shown is honestly "today's gainers",
+# not a random mix that can include red numbers.
+@st.cache_data(ttl=60, show_spinner=False)
+def _nifty50_gainers_ticker(n: int = 12) -> list:
+    """Top N NIFTY 50 gainers today, sorted best-first. Positive movers only —
+    if the market is broadly red, this can legitimately return fewer than n
+    (or none); it does not backfill with losers to hit a count."""
+    from data.universe import get_universe as _gu
+    from utils.live_price import get_live_prices_batch as _batch
+
+    tickers = _gu("nifty50")
+    raw = _batch(tickers, max_workers=20)
+
+    rows = []
+    for _t, _d in (raw or {}).items():
+        if not _d:
+            continue
+        _price = _d.get("price")
+        _chg   = _d.get("chg_pct")
+        if _price is None or _chg is None:
+            continue
+        if _chg > 0:
+            rows.append({"ticker": _t, "price": _price, "chg_pct": _chg})
+
+    rows.sort(key=lambda r: -r["chg_pct"])
+    return rows[:n]
+
+
 @st.cache_data(ttl=600)
 def get_vix_info():
     # Route through utils.vix — has 10-min TTL and proper crumb auth
