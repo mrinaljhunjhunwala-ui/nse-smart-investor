@@ -49,26 +49,38 @@ except ImportError:
 
 
 # ── Model definition ──────────────────────────────────────────────────────────
-class LSTMClassifier(nn.Module):
-    """2-layer LSTM for binary next-day direction classification."""
+# FIX ML1 — LSTMClassifier's base class (nn.Module) and _evaluate's
+# @torch.no_grad() decorator are both evaluated at MODULE IMPORT time, not
+# when train_and_evaluate_lstm() runs. That meant the "friendly PyTorch not
+# installed" fallback below was unreachable in practice: without torch,
+# `import models.lstm` itself raised a bare `NameError: name 'nn' is not
+# defined` before TORCH_AVAILABLE was ever checked, and the try/except
+# import guard above was doing nothing useful. Gating the whole
+# torch-dependent block behind `if TORCH_AVAILABLE:` lets the module import
+# cleanly either way, so train_and_evaluate_lstm()'s existing fallback to
+# the XGBoost predictor actually gets a chance to run.
+if TORCH_AVAILABLE:
 
-    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2,
-                 dropout: float = 0.3):
-        super().__init__()
-        self.lstm = nn.LSTM(
-            input_size  = input_size,
-            hidden_size = hidden_size,
-            num_layers  = num_layers,
-            dropout     = dropout if num_layers > 1 else 0.0,
-            batch_first = True,
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.head    = nn.Linear(hidden_size, 1)   # logit output
+    class LSTMClassifier(nn.Module):
+        """2-layer LSTM for binary next-day direction classification."""
 
-    def forward(self, x):                          # x: (batch, seq_len, features)
-        out, _ = self.lstm(x)
-        out     = self.dropout(out[:, -1, :])      # last timestep
-        return self.head(out).squeeze(1)           # (batch,) logits
+        def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2,
+                     dropout: float = 0.3):
+            super().__init__()
+            self.lstm = nn.LSTM(
+                input_size  = input_size,
+                hidden_size = hidden_size,
+                num_layers  = num_layers,
+                dropout     = dropout if num_layers > 1 else 0.0,
+                batch_first = True,
+            )
+            self.dropout = nn.Dropout(dropout)
+            self.head    = nn.Linear(hidden_size, 1)   # logit output
+
+        def forward(self, x):                          # x: (batch, seq_len, features)
+            out, _ = self.lstm(x)
+            out     = self.dropout(out[:, -1, :])      # last timestep
+            return self.head(out).squeeze(1)           # (batch,) logits
 
 
 # ── Feature engineering ───────────────────────────────────────────────────────
@@ -94,34 +106,55 @@ def _make_sequences(X: np.ndarray, y: np.ndarray, seq_len: int):
     return np.array(Xs, dtype=np.float32), np.array(ys, dtype=np.float32)
 
 
-# ── Training loop ─────────────────────────────────────────────────────────────
-def _train_epoch(model, loader, criterion, optimizer, device):
-    model.train()
-    total_loss = 0.0
-    for Xb, yb in loader:
-        Xb, yb = Xb.to(device), yb.to(device)
-        optimizer.zero_grad()
-        logits = model(Xb)
-        loss   = criterion(logits, yb)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
-        total_loss += loss.item() * len(yb)
-    return total_loss / len(loader.dataset)
+if TORCH_AVAILABLE:
+
+    # ── Training loop ─────────────────────────────────────────────────────────
+    def _train_epoch(model, loader, criterion, optimizer, device):
+        model.train()
+        total_loss = 0.0
+        for Xb, yb in loader:
+            Xb, yb = Xb.to(device), yb.to(device)
+            optimizer.zero_grad()
+            logits = model(Xb)
+            loss   = criterion(logits, yb)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            total_loss += loss.item() * len(yb)
+        return total_loss / len(loader.dataset)
 
 
-@torch.no_grad()
-def _evaluate(model, loader, device):
-    model.eval()
-    all_logits, all_labels = [], []
-    for Xb, yb in loader:
-        all_logits.append(model(Xb.to(device)).cpu())
-        all_labels.append(yb)
-    logits = torch.cat(all_logits)
-    labels = torch.cat(all_labels)
-    probs  = torch.sigmoid(logits).numpy()
-    preds  = (probs >= 0.5).astype(int)
-    return preds, probs, labels.numpy().astype(int)
+    @torch.no_grad()
+    def _evaluate(model, loader, device):
+        model.eval()
+        all_logits, all_labels = [], []
+        for Xb, yb in loader:
+            all_logits.append(model(Xb.to(device)).cpu())
+            all_labels.append(yb)
+        logits = torch.cat(all_logits)
+        labels = torch.cat(all_labels)
+        probs  = torch.sigmoid(logits).numpy()
+        preds  = (probs >= 0.5).astype(int)
+        return preds, probs, labels.numpy().astype(int)
+
+
+    @torch.no_grad()
+    def _eval_loss(model, loader, criterion, device):
+        """Average criterion loss over a loader, with no gradient tracking.
+
+        FIX ML2 companion — a genuine validation-loss computation, used in
+        place of the train_loss proxy that used to stand in for it (see
+        FIX ML2 below).
+        """
+        model.eval()
+        total_loss, n = 0.0, 0
+        for Xb, yb in loader:
+            Xb, yb = Xb.to(device), yb.to(device)
+            logits = model(Xb)
+            loss   = criterion(logits, yb)
+            total_loss += loss.item() * len(yb)
+            n += len(yb)
+        return total_loss / n if n else float("nan")
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -208,10 +241,18 @@ def train_and_evaluate_lstm(
 
             for epoch in range(n_epochs):
                 train_loss = _train_epoch(model, tr_loader, criterion, optimizer, device)
-                _, _, y_val = _evaluate(model, te_loader, device)
-                # simple val loss proxy
-                with torch.no_grad():
-                    val_loss = train_loss   # use train as proxy for tiny folds
+                # FIX ML2 — this used to be `val_loss = train_loss` ("use train
+                # as proxy for tiny folds"), which meant both the LR scheduler
+                # and the best-checkpoint selection below were really just
+                # tracking training loss trending down — which it almost
+                # always does with Adam and no early-stopping signal, so this
+                # silently picked the LAST epoch's weights nearly every time
+                # regardless of whether the model had started overfitting on
+                # the held-out fold. te_loader already exists for exactly this
+                # purpose; computing the real validation loss on it costs one
+                # more no-grad forward pass and makes both the scheduler step
+                # and the checkpoint choice mean what they claim to.
+                val_loss = _eval_loss(model, te_loader, criterion, device)
                 scheduler.step(val_loss)
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
