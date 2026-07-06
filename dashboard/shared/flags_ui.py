@@ -1,0 +1,224 @@
+"""
+dashboard/shared/flags_ui.py — QF2
+
+Streamlit-facing layer for analysis/qualitative_flags.py. Two entry points:
+
+  render_flag_strip(ticker)
+      Full panel for Analyze Stock — badge summary, expandable per-flag
+      list, "refresh now" button, and a manual "add analyst note" form for
+      narrative/regulatory factors that can't be auto-detected.
+
+  get_cached_flags(ticker) -> list[QualitativeFlag]
+      Cached lookup for use in compact contexts (Tomorrow's Watchlist,
+      Top Picks cards) where you only want a small badge, not the full
+      panel. Cached at the Streamlit layer (not just nse_corp_info's own
+      24h cache) so rendering N cards in one page load doesn't trigger N
+      redundant refresh_all_flags() calls in the same session.
+
+WHY A SEPARATE MODULE FROM qualitative_flags.py:
+    qualitative_flags.py is pure logic — no Streamlit, no trade_store
+    import — testable in isolation (see tests/test_qualitative_flags.py).
+    This module is the Streamlit/UI adapter, wired to the real
+    trade_store.kv_get/kv_set here, once, in one place.
+
+IMPORTANT — refresh cost and where NOT to use this:
+    Each *first* refresh_all_flags() call for a ticker hits NSE's
+    top-corp-info endpoint (data/nse_corp_info.py), which does a session
+    bootstrap + HTTP round trip. That's fine for a handful of tickers
+    (Analyze Stock: 1 ticker; Tomorrow's Watchlist/Top Picks: the already-
+    shortlisted top ~15 per bucket) but would be far too slow AND risks
+    NSE's WAF rate-limiting/blocking the session if called for every
+    ticker in a full universe scan (100s of stocks). Do NOT call this
+    inside the wide scanning pass in dashboard/shared/cache.py's
+    _tomorrow_watchlist() / _home_top_picks() — only call it, per item,
+    on the already-filtered, already-ranked shortlist that gets rendered.
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+import streamlit as st
+
+import trade_store as _store
+from analysis.qualitative_flags import (
+    FlagCategory,
+    FlagSentiment,
+    QualitativeFlag,
+    load_flags,
+    manual_flag,
+    refresh_all_flags,
+    save_flags,
+    summarize_flags,
+)
+
+_SENTIMENT_COLOR = {
+    FlagSentiment.GREEN: "#26a69a",
+    FlagSentiment.RED:   "#ef5350",
+    FlagSentiment.AMBER: "#f9a825",
+}
+_SENTIMENT_DOT = {
+    FlagSentiment.GREEN: "🟢",
+    FlagSentiment.RED:   "🔴",
+    FlagSentiment.AMBER: "🟡",
+}
+
+_CATEGORY_LABEL = {
+    FlagCategory.REGULATORY:       "Regulatory",
+    FlagCategory.CORPORATE_ACTION: "Corporate Action",
+    FlagCategory.GOVERNANCE:       "Governance",
+    FlagCategory.NARRATIVE:        "Narrative / Brand",
+    FlagCategory.INPUT_COST:       "Input Cost",
+    FlagCategory.MACRO:            "Macro",
+    FlagCategory.ANNOUNCEMENT:     "Announcement",
+}
+
+
+@st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
+def get_cached_flags(ticker: str) -> list[dict]:
+    """Cached, Streamlit-safe lookup. Returns list[dict] (not dataclasses —
+    st.cache_data needs hashable/picklable return values across reruns).
+    Cache TTL is 6h: shorter than nse_corp_info's own 24h raw-payload cache,
+    so a stale Streamlit cache entry still gets refreshed same-day if the
+    user reopens the page later; nse_corp_info's own cache prevents that
+    refresh from re-hitting NSE if the raw payload is still fresh.
+    """
+    try:
+        flags = refresh_all_flags(ticker, _store.kv_get, _store.kv_set)
+    except Exception:
+        # Flags are a nice-to-have overlay — a failure here must never
+        # break the page that's actually trying to show the score/chart.
+        flags = load_flags(ticker, _store.kv_get)
+    return [f.to_dict() for f in flags]
+
+
+def _to_objects(raw: list[dict]) -> list[QualitativeFlag]:
+    out = []
+    for d in raw:
+        try:
+            out.append(QualitativeFlag.from_dict(d))
+        except (KeyError, ValueError):
+            continue
+    return out
+
+
+def render_flag_badge_html(ticker: str) -> str:
+    """Compact inline HTML chip for embedding inside an existing card's
+    HTML string (Tomorrow's Watchlist / Top Picks style). Returns "" if
+    there are no active flags — callers should treat that as "nothing to
+    show", not as a failure.
+    """
+    raw = get_cached_flags(ticker)
+    flags = _to_objects(raw)
+    if not flags:
+        return ""
+    counts = summarize_flags(flags)
+    parts = []
+    if counts["red"]:
+        parts.append(f'{_SENTIMENT_DOT[FlagSentiment.RED]} {counts["red"]}')
+    if counts["amber"]:
+        parts.append(f'{_SENTIMENT_DOT[FlagSentiment.AMBER]} {counts["amber"]}')
+    if counts["green"]:
+        parts.append(f'{_SENTIMENT_DOT[FlagSentiment.GREEN]} {counts["green"]}')
+    label = " · ".join(parts)
+    return (
+        f'<span style="font-size:11px;color:#ccc;margin-left:8px;'
+        f'padding:2px 6px;background:#1a1a1a;border-radius:8px" '
+        f'title="Qualitative flags — see Analyze Stock for detail">{label}</span>'
+    )
+
+
+def render_flag_strip(ticker: str) -> None:
+    """Full panel for Analyze Stock. Call this after the score hero
+    section — it is deliberately visually separate from the composite
+    score card, not blended into it.
+    """
+    raw = get_cached_flags(ticker)
+    flags = _to_objects(raw)
+    counts = summarize_flags(flags)
+
+    st.markdown("---")
+    header_col, refresh_col = st.columns([5, 1])
+    with header_col:
+        st.markdown("##### 🏳️ Qualitative Flags")
+        st.caption(
+            "Regulatory, governance, and narrative factors the score above "
+            "can't see — updated daily from NSE disclosures, plus anything "
+            "you add manually below."
+        )
+    with refresh_col:
+        if st.button("🔄 Refresh", key=f"qf_refresh_{ticker}"):
+            get_cached_flags.clear()
+            st.rerun()
+
+    if not flags:
+        st.info(
+            "No flags on record for this ticker yet — either nothing has "
+            "moved recently, or NSE didn't return corporate-info data for "
+            "it. This is not the same as \"all clear\"; add a manual note "
+            "below if you know of something the auto-scan wouldn't catch "
+            "(e.g. a brand JV, or a state excise policy change)."
+        )
+    else:
+        badge_line = "  ".join(
+            f'{_SENTIMENT_DOT[f.sentiment]}' for f in
+            sorted(flags, key=lambda x: x.sentiment.value)
+        )
+        st.markdown(
+            f"**{counts['red']} red · {counts['amber']} amber · {counts['green']} green**"
+        )
+        for f in sorted(flags, key=lambda x: (x.sentiment != FlagSentiment.RED,
+                                               x.sentiment != FlagSentiment.AMBER)):
+            color = _SENTIMENT_COLOR[f.sentiment]
+            cat_label = _CATEGORY_LABEL.get(f.category, f.category.value)
+            manual_tag = " · analyst note" if f.is_manual else ""
+            st.markdown(
+                f'<div style="border-left:3px solid {color};padding:6px 10px;'
+                f'margin:4px 0;background:#181818;border-radius:4px">'
+                f'<span style="font-size:11px;color:{color};font-weight:700">'
+                f'{cat_label}{manual_tag} · {f.date}</span><br>'
+                f'<span style="font-size:13px;color:#eee">{f.headline}</span>'
+                + (f'<br><span style="font-size:11px;color:#999">{f.detail}</span>'
+                   if f.detail else "")
+                + f'<br><span style="font-size:10px;color:#666">{f.source}</span>'
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+    with st.expander("➕ Add analyst note (manual flag)"):
+        st.caption(
+            "Use this for things the auto-scan structurally can't judge: "
+            "a celebrity/brand JV, premiumisation launch progress, or a "
+            "state excise policy development you've read about."
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            _cat = st.selectbox(
+                "Category", options=list(FlagCategory),
+                format_func=lambda c: _CATEGORY_LABEL.get(c, c.value),
+                key=f"qf_cat_{ticker}",
+            )
+        with c2:
+            _sent = st.selectbox(
+                "Sentiment", options=list(FlagSentiment),
+                format_func=lambda s: s.value.capitalize(),
+                key=f"qf_sent_{ticker}",
+            )
+        _headline = st.text_input("Headline (short)", key=f"qf_headline_{ticker}")
+        _detail = st.text_area("Detail (optional)", key=f"qf_detail_{ticker}", height=68)
+        _expiry = st.date_input(
+            "Auto-expire on (optional)", value=None, key=f"qf_expiry_{ticker}",
+            help="e.g. set to the Union Budget date for a budget-sensitivity note.",
+        )
+        if st.button("Save note", key=f"qf_save_{ticker}"):
+            if not _headline.strip():
+                st.warning("Headline can't be empty.")
+            else:
+                new_flag = manual_flag(
+                    ticker=ticker, category=_cat, sentiment=_sent,
+                    headline=_headline.strip(), detail=_detail.strip() or None,
+                    expiry=_expiry.isoformat() if _expiry else None,
+                )
+                existing = load_flags(ticker, _store.kv_get)
+                save_flags(ticker, existing + [new_flag], _store.kv_set)
+                get_cached_flags.clear()
+                st.success("Saved. Refresh above to see it in the list.")
