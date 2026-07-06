@@ -79,6 +79,7 @@ from dashboard.shared.chart_helpers import (
     build_price_chart,
     render_top_bar,
 )
+from dashboard.shared.flags_ui import render_flag_strip  # QF2: qualitative flags panel
 
 apply_design()
 render_sidebar(current="Analyze Stock")
@@ -396,6 +397,18 @@ if analyze_btn or _prefill_active or (
                     f'<span class="narrative">{cs.narrative}</span>'
                     f'</div>',
                     unsafe_allow_html=True,
+                )
+
+            # ── Qualitative flags (QF2) ─────────────────────────────────────
+            # Deliberately full-width, outside hero_col/detail_col, and
+            # deliberately AFTER the score card — this is context alongside
+            # the score, never blended into cs.score itself.
+            try:
+                render_flag_strip(ticker)
+            except Exception as _qf_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "Qualitative flags panel failed for %s: %s", ticker, _qf_e
                 )
 
             # ── Action strip ───────────────────────────────────────────────
