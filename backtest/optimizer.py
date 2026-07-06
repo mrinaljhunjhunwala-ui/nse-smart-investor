@@ -101,6 +101,15 @@ def optimize_strategy(
     print(f"{'='*60}\n")
 
     ticker_results: List[Dict] = []
+    # FIX BT1 — used to be a bare List[Dict] of successful results, then
+    # zipped back against sample[:len(ticker_results)] below to build the
+    # per_ticker report. That silently misattributes every entry once any
+    # ticker in the middle of `sample` fails or is skipped (< 100 rows):
+    # sample[:N] takes the first N *tickers*, not the N that actually
+    # succeeded, so a failed ticker B before a successful C shifts every
+    # subsequent (ticker, params) pairing by one. Track the actual ticker
+    # alongside its result so the mapping can't drift.
+    succeeded_tickers: List[str] = []
 
     for ticker in sample:
         print(f"  Optimising {ticker}...", end="  ", flush=True)
@@ -134,6 +143,7 @@ def optimize_strategy(
 
             if best:
                 ticker_results.append(best)
+                succeeded_tickers.append(ticker)
                 sh  = stats.get("Sharpe Ratio", float("nan"))
                 ret = stats.get("Return [%]",   float("nan"))
                 print(
@@ -172,7 +182,7 @@ def optimize_strategy(
         "consensus_params": consensus,
         "per_ticker": [
             {"ticker": t, "params": p}
-            for t, p in zip(sample[:len(ticker_results)], ticker_results)
+            for t, p in zip(succeeded_tickers, ticker_results)
         ],
     }
     with open(PARAMS_FILE, "w") as f:
