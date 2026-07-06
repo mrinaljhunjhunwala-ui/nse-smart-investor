@@ -73,7 +73,13 @@ def _all_text(at) -> str:
     for name in ("info", "warning", "error", "success", "markdown", "caption"):
         try:
             out += [getattr(e, "value", "") for e in getattr(at, name)]
-        except Exception:
+        except AttributeError:
+            # FIX TEST1 — this used to be a bare `except Exception: pass`, which
+            # would also swallow a genuine bug surfaced while iterating a real
+            # element collection (e.g. a TypeError from a malformed test
+            # fixture) and misattribute it to "this element type doesn't
+            # exist." AttributeError is the only expected failure here: some
+            # AppTest versions may not expose every element-type accessor.
             pass
     for e in at.expander:
         out.append(getattr(e, "label", "") or "")
