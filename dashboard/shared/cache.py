@@ -1148,4 +1148,4 @@ def warm_caches() -> dict:
         results["tomorrow_watchlist"] = {"ok": False, "error": str(_e)}
 
     _log.info("cache.warm_caches complete: %s", results)
-    return resultso
+    return results
