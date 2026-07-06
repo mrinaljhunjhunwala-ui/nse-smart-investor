@@ -19,6 +19,7 @@ from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
     _home_top_picks,
+    _nifty50_gainers_ticker,
     _score_watchlist,
     _sector_ranks_tuple,
     _sparkline_closes,
@@ -247,76 +248,85 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ── 1b. SUGGESTIONS STRIP — quick ticker tape, separate from Top Picks ─────
+# ── 1b. GAINERS TICKER — scrolling ticker tape, separate from Top Picks ────
 # ═══════════════════════════════════════════════════════════════════════════
-# A compact horizontal strip so "what's worth a glance right now" and "how
-# is it moving" are visible without waiting for or scrolling to the full
-# Top Picks scan below. It's its own @st.fragment(run_every=60) so it
-# refreshes on a live-price cadence independent of the rest of the page,
-# and clicking a chip only reruns this strip, not the whole Command Centre.
+# FIX (was "Suggestions Strip") — the old version had two real bugs:
+#   1. It mixed the user's raw watchlist (which can be down on any given day)
+#      with a few Top Picks candidates, so a strip meant to be "what's worth
+#      a look" could show loss-making stocks — it was never actually
+#      gainers-only, it was "whatever's on your watchlist".
+#   2. It priced everything via trade_utils._portfolio_live_prices, which
+#      fetches tickers one at a time in a for-loop (see FIX TU4 there), not
+#      in parallel — real, measurable load-time cost.
 #
-# No new fetches: tickers are the watchlist plus (once the Top Picks scan
-# below has landed at least once) its top few buy candidates, deduplicated
-# and capped at 8 — priced via the same 60s-cached _portfolio_live_prices
-# already used everywhere else on this page.
-
-_PICKS_KEY = "_cc_top_picks"
-_PICKS_TTL_SECONDS = 300  # matches _home_top_picks' own cache TTL
-_SUGGEST_CAP = 8
-
+# Replaced with a proper ticker tape: NIFTY 50 gainers only (today's % change
+# > 0, sorted best-first — see _nifty50_gainers_ticker in cache.py), priced
+# via ONE parallel batch call (get_live_prices_batch, the same Angel-One →
+# threaded-Yahoo path Market Live's snapshot uses) instead of N sequential
+# fetches. It's a real horizontal auto-scrolling marquee — matching "like the
+# ticker for nifty50 stocks" — in a distinct black/amber theme so it reads as
+# a ticker tape, not another card section. Still its own
+# @st.fragment(run_every=60) so it refreshes independently of the rest of the
+# page. Purely informational (no click-through) — a scrolling tape isn't a
+# natural fit for per-item buttons; the full Top Picks section below still
+# offers the "click through to Analyze Stock" workflow.
 
 @st.fragment(run_every=60)
-def _render_suggestions_strip(watchlist: tuple) -> None:
+def _render_gainers_ticker() -> None:
+    _tk_rows = _nifty50_gainers_ticker(n=12)
+
+    if not _tk_rows:
+        st.markdown(
+            "<div style='background:#0a0a0a;border-top:2px solid #ffb300;"
+            "border-bottom:2px solid #ffb300;border-radius:6px;padding:9px 16px;"
+            "font-size:12px;color:#ffb300'>📟 NIFTY 50 GAINERS — none in the "
+            "green right now.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    def _chip(_r: dict) -> str:
+        _lbl = _r["ticker"].replace(".NS", "")
+        return (
+            f'<span style="display:inline-block;margin-right:34px;white-space:nowrap">'
+            f'<span style="color:#eee;font-weight:700;font-size:13px">{_lbl}</span>'
+            f'<span style="color:#888;font-size:12px"> ₹{_r["price"]:,.1f} </span>'
+            f'<span style="color:#3ddc84;font-weight:700;font-size:13px">'
+            f'▲{_r["chg_pct"]:.2f}%</span></span>'
+        )
+
+    # Content duplicated back-to-back so the marquee loops seamlessly at the
+    # 50%-translateX halfway point (standard CSS ticker-tape technique).
+    _tape_html = "".join(_chip(r) for r in _tk_rows) * 2
+
     st.markdown(
-        "<div style='font-size:11px;font-weight:700;color:#5a6a8a;"
-        "text-transform:uppercase;letter-spacing:1.2px;margin-bottom:4px'>"
-        "📡 Suggestions Strip — live price watch</div>",
+        f"""
+        <div style="background:#0a0a0a;border-top:2px solid #ffb300;
+                    border-bottom:2px solid #ffb300;border-radius:6px;
+                    padding:9px 0;overflow:hidden;position:relative">
+            <span style="position:absolute;left:12px;top:9px;background:#0a0a0a;
+                        padding-right:10px;color:#ffb300;font-size:10px;
+                        font-weight:700;letter-spacing:1px;z-index:2">
+                📟 NIFTY 50 · TOP GAINERS
+            </span>
+            <div style="white-space:nowrap;display:inline-block;
+                        animation:cc_ticker_scroll 32s linear infinite;
+                        padding-left:220px">
+                {_tape_html}
+            </div>
+        </div>
+        <style>
+        @keyframes cc_ticker_scroll {{
+            0%   {{ transform: translateX(0%); }}
+            100% {{ transform: translateX(-50%); }}
+        }}
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
-    _sg_picks = st.session_state.get(_PICKS_KEY)
-    _sg_buy_syms = []
-    if _sg_picks:
-        _sg_buy_syms = [b["ticker"] for b in _sg_picks.get("buys", [])
-                        if b.get("tier") != "watch"][:4]
 
-    _sg_syms, _seen = [], set()
-    for _t in (*_sg_buy_syms, *watchlist):
-        if _t not in _seen:
-            _seen.add(_t)
-            _sg_syms.append(_t)
-    _sg_syms = _sg_syms[:_SUGGEST_CAP]
-
-    if not _sg_syms:
-        st.caption("Add stocks to your watchlist to see them here.")
-        return
-
-    _sg_lp = _portfolio_live_prices(tuple(_sg_syms))
-    _sg_cols = st.columns(len(_sg_syms))
-    for _sg_i, _sg_t in enumerate(_sg_syms):
-        _sg_d = _sg_lp.get(_sg_t, {})
-        _sg_p = _sg_d.get("price")
-        _sg_c = _sg_d.get("chg")
-        _sg_is_pick = _sg_t in _sg_buy_syms
-        _sg_arr = "▲" if (_sg_c or 0) >= 0 else "▼"
-        _sg_price_txt = f"₹{_sg_p:,.0f}" if _sg_p else "—"
-        _sg_chg_txt = f"{_sg_arr}{abs(_sg_c):.1f}%" if _sg_c is not None else ""
-        _sg_badge = "🔥 " if _sg_is_pick else ""
-        with _sg_cols[_sg_i]:
-            if st.button(
-                f"{_sg_badge}{_sg_t.replace('.NS','')}\n{_sg_price_txt} {_sg_chg_txt}",
-                key=f"sg_chip_{_sg_t}", use_container_width=True,
-                help="Today's Buy Candidate — see full setup in Top Picks below"
-                     if _sg_is_pick else "Open in Analyze Stock",
-            ):
-                st.session_state["analyze_ticker"] = _sg_t
-                st.session_state["_goto_page"] = "🔍 Analyze Stock"
-                st.rerun()
-    st.caption("🔥 = today's Top Pick buy candidate. Prices refresh every 60 s. "
-               "Click a chip to open it in Analyze Stock.")
-
-
-_render_suggestions_strip(tuple(st.session_state.get("watchlist", ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"])))
+_render_gainers_ticker()
 
 st.markdown("---")
 
@@ -344,6 +354,9 @@ st.markdown("---")
 # _home_top_picks — the full liquid NSE list, not a Nifty-50-only set. (Any
 # further universe widening/curation is being handled separately in
 # data/universe.py.)
+
+_PICKS_KEY = "_cc_top_picks"
+_PICKS_TTL_SECONDS = 300  # matches _home_top_picks' own cache TTL
 
 
 def _picks_background_fetch(vix_regime: str, sector_ranks: tuple) -> None:
