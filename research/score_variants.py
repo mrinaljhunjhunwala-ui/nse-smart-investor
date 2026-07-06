@@ -11,6 +11,15 @@ the production score at each observation:
   Variant B : BASE − oversold-RSI bonus           (remove the contrarian RSI credit)
   Variant C : BASE − pattern − oversold-RSI bonus (remove both)
 
+NOTE (post pattern-removal): candlestick patterns are no longer a scored
+component in production at all (PATTERN_REMOVAL_MIGRATION.md) — this
+script's own original run is what motivated that removal. BASE therefore
+already has zero pattern contribution, which makes Variant A mathematically
+identical to BASE, and Variant C identical to Variant B. They're kept in the
+variant list for continuity with the historical report in
+RESEARCH_SCORE_VARIANTS.md, but only Variant B (oversold-RSI bonus removal)
+tests a question that's still actually open.
+
 Definition of "remove the oversold-RSI bonus" (documented design decision):
 the production RSI map awards 10 pts for RSI<30 and 8 pts for RSI 30–40 —
 contrarian "bounce candidate" credit inside an otherwise trend-following
@@ -130,7 +139,19 @@ def _walk_forward_variants(ticker: str, df: pd.DataFrame,
             continue
 
         base   = float(cs.score) - float(cs.sentiment_score)
-        pat    = float(cs.pattern_score)
+        # FIX EFF1 (companion fix, same root cause as score_efficacy.py /
+        # regime_study.py) — cs.pattern_score no longer exists on
+        # CompositeScore. Unlike those two scripts, this one isn't just
+        # broken by the removal — its whole original purpose was to test
+        # "does removing the pattern component improve the score," and that
+        # question was already answered (pattern hurts) and already acted on:
+        # PATTERN_REMOVAL_MIGRATION.md confirms it's gone from production for
+        # good. So `base` (cs.score minus sentiment) is now ALREADY the
+        # "no pattern" score — pattern's point contribution is definitionally
+        # 0 in the current model. Reconstructing a nonzero synthetic value
+        # here (e.g. from patterns_detected) would misrepresent this as a
+        # still-open comparison when it's a settled, already-implemented one.
+        pat    = 0.0
         rsi    = float(rsis[i]) if np.isfinite(rsis[i]) else 50.0
         os_del = _rsi_oversold_delta(rsi)
 

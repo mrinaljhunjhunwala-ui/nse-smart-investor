@@ -38,6 +38,7 @@ from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import _tomorrow_watchlist, get_display_name, _trade_type
 from dashboard.shared.trade_utils import _paper_trade_popover
+from dashboard.shared.flags_ui import render_flag_badge_html  # QF2: shortlist-only flag badge
 
 apply_design()
 render_sidebar(current="Tomorrow's Watchlist")
@@ -210,6 +211,15 @@ def _render_cards(items, kind, key_prefix):
             _headline_full[:90] + "…" if len(_headline_full) > 90 else _headline_full
         )
 
+        # QF2: qualitative flag badge — safe to call here because this is
+        # the already-shortlisted, already-ranked list (≤15 items/bucket),
+        # NOT the wide universe scan. Never call this inside the scan pass
+        # in dashboard/shared/cache.py — see flags_ui.py docstring for why.
+        try:
+            _flag_badge = render_flag_badge_html(_it["ticker"])
+        except Exception:
+            _flag_badge = ""
+
         st.markdown(
             f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
             f'border-radius:10px;padding:11px 14px;margin-bottom:6px">'
@@ -218,6 +228,7 @@ def _render_cards(items, kind, key_prefix):
             f'<span style="font-size:13px;font-weight:700;color:{accent}">'
             f'{_it["score"]:.0f}/100 · {_it["action"]}</span>'
             f'</div>'
+            f'{_flag_badge}'
             f'<div style="font-size:11px;color:{accent};font-weight:600;margin-top:3px">'
             f'{_it["signal_type"]} · key level {_it["key_level"]}</div>'
             f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_headline_card}</div>'
