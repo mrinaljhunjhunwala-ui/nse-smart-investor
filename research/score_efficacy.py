@@ -11,9 +11,11 @@ Methodology (agreed spec):
   • Survivorship disclosure — universe is CURRENT constituents; conclusions are
     framed as ranking power *within surviving* liquid NSE names.
   • Sentiment handled separately — the primary metric is the 90-point
-    price-derived score (technical+momentum+volume+pattern). VIX regime is used
-    as a BREAKDOWN label (reconstructed from the historical ^INDIAVIX series),
-    not as a score input.
+    price-derived score (technical+momentum+volume). Candlestick patterns are
+    no longer a scored component in production (see PATTERN_REMOVAL_MIGRATION.md);
+    "pattern" here is tracked as a binary any-pattern-detected flag for factor
+    attribution, not a point value. VIX regime is used as a BREAKDOWN label
+    (reconstructed from the historical ^INDIAVIX series), not as a score input.
   • TP/SL ambiguity rule — if a single daily bar touches both TP and SL, count
     it SL-first (conservative) and tally it separately as ambiguous.
   • Baselines — 20-day momentum rank, RSI rank, SMA200-distance rank, evaluated
@@ -214,7 +216,16 @@ def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
             "technical": float(cs.technical_score),
             "momentum":  float(cs.momentum_score),
             "volume":    float(cs.volume_score),
-            "pattern":   float(cs.pattern_score),
+            # FIX EFF1 — cs.pattern_score no longer exists: analysis/score.py
+            # removed it in favor of patterns_detected: List[str] (informational
+            # only, no longer scored — see PATTERN_REMOVAL_MIGRATION.md). This
+            # line previously raised AttributeError on every single walk-forward
+            # sample, meaning this script has never actually completed a run.
+            # Track pattern presence as a binary flag (any pattern detected at
+            # this bar, y/n) so the factor-attribution question survives in a
+            # form that still makes sense post-removal, rather than mixing
+            # bullish/bearish pattern counts into one ambiguous number.
+            "pattern":   float(bool(cs.patterns_detected)),
             "grade":     cs.grade,
             "action":    cs.action,
             "entry":     round(entry, 2),

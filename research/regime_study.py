@@ -154,7 +154,13 @@ def _walk_forward_5y(ticker: str, df: pd.DataFrame, sector: str,
             "technical": float(cs.technical_score),
             "momentum":  float(cs.momentum_score),
             "volume":    float(cs.volume_score),
-            "pattern":   float(cs.pattern_score),
+            # FIX EFF1 (companion to research/score_efficacy.py) — cs.pattern_score
+            # no longer exists on CompositeScore (removed in production; see
+            # PATTERN_REMOVAL_MIGRATION.md). This raised AttributeError on every
+            # walk-forward sample, so this study has never actually completed a
+            # run either. Binary any-pattern-detected flag, same fix as the
+            # sibling script.
+            "pattern":   float(bool(cs.patterns_detected)),
             "action":    cs.action,
             # baselines
             "bl_mom20": (closes[i] / closes[i - 20] - 1.0) * 100.0 if i >= 20 else np.nan,
