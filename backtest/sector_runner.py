@@ -43,8 +43,17 @@ def run_sector_rotation_backtest(
         print("  ERROR: Sector scoring failed.")
         return pd.DataFrame()
 
+    # FIX BT3 — n_sectors is a free CLI int (main.py --n-sectors) with no
+    # upper-bound check. If it's >= the total number of scored sectors,
+    # scores.tail(len(scores) - n_sectors) evaluates to scores.tail(<=0),
+    # and pandas' negative .tail(-k) means "all but the first k rows" —
+    # NOT empty. That silently produced a "bottom_sectors" (Avoided) list
+    # that overlapped with top_sectors, printing sectors as both invested-in
+    # and avoided at once. Clamp so bottom_sectors is only ever the genuine
+    # complement of top_sectors.
+    n_sectors      = max(1, min(n_sectors, len(scores)))
     top_sectors    = scores.head(n_sectors).index.tolist()
-    bottom_sectors = scores.tail(len(scores) - n_sectors).index.tolist()
+    bottom_sectors = scores.tail(max(0, len(scores) - n_sectors)).index.tolist()
 
     # ── Step 2: Print ranking table ───────────────────────────────────────────
     print(f"\n  ── Sector Ranking  (top {n_sectors} selected for investment) ──────────────")

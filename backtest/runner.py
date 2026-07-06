@@ -1,97 +1,190 @@
 """
-backtest/sector_runner.py — Phase 3a
-Sector rotation backtest pipeline.
+backtest/runner.py
+Runs backtests across multiple tickers and generates a consolidated report.
+Uses backtesting.py for execution, plus STT/brokerage cost modeling.
 
-1. Score all 7 sectors by composite momentum (20d / 60d / 120d)
-2. Select the top-N sectors
-3. Run equal-weight portfolio backtest on their constituent tickers
-4. Compare vs. running on the bottom sectors (to validate the rotation signal)
+Optimizations applied:
+  - Parallelizes per-ticker backtest loop with ThreadPoolExecutor (8 workers)
+  - Preserves result ordering (collected by ticker, reassembled in input order)
+  - Per-ticker error handling: one failure doesn't abort the batch
+  - All failures logged at WARNING level (no silent drops)
+  - Chart generation restored: plots last-input ticker's results (if plot=True)
 """
 
 import pandas as pd
-from typing import Type, Dict, Optional, List
+import numpy as np
+from backtesting import Backtest
+from typing import Type, List, Dict, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 
-from strategies.sector_rotation import (
-    SECTORS, compute_sector_scores, get_top_sector_tickers
-)
-from backtest.portfolio import run_portfolio_backtest
+from data.fetcher import fetch_single
+from utils.indicators import add_all_indicators
+
+_log = logging.getLogger("backtest.runner")
+
+# ── Indian market cost constants ───────────��─────────────────────────────────
+STT_RATE       = 0.001   # 0.1% on sell side (equity delivery)
+BROKERAGE_RATE = 0.0003  # 0.03% per leg (Zerodha flat ₹20 per order, approx)
+EXCHANGE_FEES  = 0.00035 # NSE transaction charges + SEBI fees + GST (approx)
+TOTAL_COST     = STT_RATE + 2 * BROKERAGE_RATE + 2 * EXCHANGE_FEES  # round-trip
 
 
-def run_sector_rotation_backtest(
+def run_backtest(
+    tickers: List[str],
     strategy_cls: Type,
     period: str = "2y",
-    total_cash: float = 1_000_000,
-    n_sectors: int = 3,
-    strategy_params: Optional[Dict] = None,
+    cash: float = 1_000_000,
+    commission: float = TOTAL_COST,
+    plot: bool = True,
+    optimize: bool = False,
+    strategy_params: dict = None,
 ) -> pd.DataFrame:
     """
-    Full sector rotation + backtest pipeline.
+    Run backtest for each ticker and print a consolidated performance table.
+    Uses parallel execution (ThreadPoolExecutor, 8 workers) for per-ticker loops.
+    One ticker's failure does not prevent other results from being collected.
+    Chart generation: if plot=True, generates HTML chart for the last-input ticker (if successful).
 
     Args:
-        strategy_cls:    Trading strategy for the selected sector tickers
-        period:          Data period (used for both scoring and backtesting)
-        total_cash:      Total capital in INR
-        n_sectors:       Number of top sectors to invest in
-        strategy_params: Optimised strategy params from Phase 2a (optional)
+        tickers:         List of NSE/BSE ticker symbols
+        strategy_cls:    Strategy class (from strategies/)
+        period:          yfinance period string
+        cash:            Starting capital in INR
+        commission:      Round-trip commission rate (default: realistic Indian market costs)
+        plot:            Show backtesting.py chart for the last ticker (default True)
+        optimize:        Run parameter optimisation (slow — only for single ticker)
+        strategy_params: Dict of parameter overrides from Phase 2a optimiser
 
     Returns:
-        Portfolio results DataFrame for the top-sector tickers
+        DataFrame with per-ticker performance metrics (input ticker order preserved)
     """
-    # ── Step 1: Score and rank sectors ────────────────────────────────────────
-    scores = compute_sector_scores(period=period)
-    if scores.empty:
-        print("  ERROR: Sector scoring failed.")
+    results: Dict[str, Dict] = {}
+    last_bt: Optional[Backtest] = None  # Backtesting instance for the last-input ticker (for plotting)
+    _MAX_WORKERS = 8
+    _TICKER_TIMEOUT = 60  # per-ticker wall-clock timeout in backtest execution
+    
+    def _backtest_one(ticker: str) -> Tuple[str, Optional[Dict], Optional[Backtest]]:
+        """
+        Run a single ticker's backtest.
+        Returns (ticker, result_dict or None on failure, bt_instance_or_none).
+        bt_instance is only populated for tickers[-1] (the last-input ticker);
+        None for all others to avoid holding unnecessary Backtest objects in memory.
+        """
+        try:
+            print(f"  Backtesting {ticker}...", end=" ", flush=True)
+            df = fetch_single(ticker, period=period)
+            df = add_all_indicators(df)
+            # Only require OHLCV present — dropping rows with ANY indicator NaN can punch
+            # mid-series gaps and distort bar timing. OHLCV is never NaN so bars stay
+            # contiguous; the strategy handles its own indicator warm-up.
+            df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+
+            if len(df) < 60:
+                print(f"SKIP (only {len(df)} rows after indicator warmup)")
+                return ticker, None, None
+
+            bt = Backtest(
+                df,
+                strategy_cls,
+                cash=cash,
+                commission=commission,
+                exclusive_orders=True,
+            )
+
+            if optimize and len(tickers) == 1:
+                stats = bt.optimize(
+                    rsi_oversold=range(25, 45, 5),
+                    rsi_overbought=range(55, 75, 5),
+                    maximize="Sharpe Ratio",
+                    constraint=lambda p: p.rsi_oversold < p.rsi_overbought,
+                )
+            else:
+                stats = bt.run(**(strategy_params or {}))
+
+            result = {
+                "Ticker":          ticker,
+                "Return (%)":      round(stats["Return [%]"], 2),
+                "Buy & Hold (%)":  round(stats["Buy & Hold Return [%]"], 2),
+                "Sharpe":          round(stats["Sharpe Ratio"], 2),
+                "Max Drawdown (%)":round(stats["Max. Drawdown [%]"], 2),
+                "Win Rate (%)":    round(stats["Win Rate [%]"], 2),
+                "# Trades":        int(stats["# Trades"]),
+                "Profit Factor":   round(stats.get("Profit Factor", 0), 2),
+            }
+            print(f"✓  Return: {stats['Return [%]']:.1f}%  Sharpe: {stats['Sharpe Ratio']:.2f}")
+            
+            # Retain Backtest instance only for the last-input ticker (for plotting)
+            bt_to_return = bt if ticker == tickers[-1] else None
+            return ticker, result, bt_to_return
+
+        except Exception as e:
+            _log.warning("backtest failed for ticker=%s: %s: %s",
+                        ticker, type(e).__name__, e)
+            print(f"ERROR — {e}")
+            return ticker, None, None
+
+    print(f"  Backtesting {len(tickers)} ticker(s) in parallel ({_MAX_WORKERS} workers)...")
+
+    # Parallelize backtest execution per ticker (not within a single ticker)
+    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+        futs = {pool.submit(_backtest_one, t): t for t in tickers}
+        for fut in as_completed(futs, timeout=_TICKER_TIMEOUT * len(tickers)):
+            try:
+                ticker, result, bt = fut.result(timeout=_TICKER_TIMEOUT)
+                if result is not None:
+                    results[ticker] = result
+                # Retain Backtest instance for the last-input ticker (for plotting after loop)
+                if bt is not None:
+                    last_bt = bt
+            except Exception as e:
+                ticker_name = futs.get(fut, "unknown")
+                _log.warning("backtest future failed for ticker=%s: %s: %s",
+                            ticker_name, type(e).__name__, e)
+
+    if not results:
+        print("\n  No results to display.")
         return pd.DataFrame()
 
-    # FIX BT3 — n_sectors is a free CLI int (main.py --n-sectors) with no
-    # upper-bound check. If it's >= the total number of scored sectors,
-    # scores.tail(len(scores) - n_sectors) evaluates to scores.tail(<=0),
-    # and pandas' negative .tail(-k) means "all but the first k rows" —
-    # NOT empty. That silently produced a "bottom_sectors" (Avoided) list
-    # that overlapped with top_sectors, printing sectors as both invested-in
-    # and avoided at once. Clamp so bottom_sectors is only ever the genuine
-    # complement of top_sectors.
-    n_sectors      = max(1, min(n_sectors, len(scores)))
-    top_sectors    = scores.head(n_sectors).index.tolist()
-    bottom_sectors = scores.tail(max(0, len(scores) - n_sectors)).index.tolist()
+    # Reassemble results in input ticker order (preserve user's ordering)
+    ordered_results = []
+    for ticker in tickers:
+        if ticker in results:
+            ordered_results.append(results[ticker])
 
-    # ── Step 2: Print ranking table ───────────────────────────────────────────
-    print(f"\n  ── Sector Ranking  (top {n_sectors} selected for investment) ──────────────")
-    print(f"  {'#':<4} {'Sector':<12} {'20d':>8} {'60d':>8} {'120d':>9} {'Score':>8}  Decision")
-    print(f"  {'─'*65}")
+    report = pd.DataFrame(ordered_results).set_index("Ticker")
 
-    for _, row in scores.iterrows():
-        sector   = row.name
-        decision = "  ✅ INVEST" if sector in top_sectors else "  ⛔ skip"
-        print(
-            f"  {int(row['Rank']):<4} {sector:<12} "
-            f"{row['mom_20d']:>+7.2f}%  "
-            f"{row['mom_60d']:>+7.2f}%  "
-            f"{row['mom_120d']:>+8.2f}%  "
-            f"{row['composite_score']:>+7.2f}{decision}"
-        )
+    # ── Summary table ────────────────────────────────────────────────────────
+    print(f"\n{'─'*80}")
+    print("  BACKTEST SUMMARY")
+    print(f"{'─'*80}")
+    print(report.to_string())
+    print(f"{'─'*80}")
+    print(f"\n  Average Return:   {report['Return (%)'].mean():.2f}%")
+    print(f"  Average Sharpe:   {report['Sharpe'].mean():.2f}")
+    print(f"  Average Drawdown: {report['Max Drawdown (%)'].mean():.2f}%")
+    print(f"  Average Win Rate: {report['Win Rate (%)'].mean():.2f}%")
+    print(f"  Total Tickers:    {len(report)}")
 
-    # ── Step 3: Collect tickers for top sectors ───────────────────────────────
-    seen: set         = set()
-    selected_tickers: List[str] = []
-    for s in top_sectors:
-        for t in SECTORS.get(s, []):
-            if t not in seen:
-                seen.add(t)
-                selected_tickers.append(t)
+    # ── Chart generation for last-input ticker (if plot=True and backtest succeeded) ──
+    if plot and last_bt is not None:
+        try:
+            last_ticker = tickers[-1]
+            filename = f"backtest_{last_ticker.replace('.', '_')}.html"
+            last_bt.plot(filename=filename, open_browser=False)
+            print(f"\n  📊 Chart saved: {filename}")
+        except Exception as e:
+            _log.warning("plot generation failed for last ticker %s: %s: %s",
+                        tickers[-1], type(e).__name__, e)
+            print(f"\n  ⚠️  Chart generation failed for {tickers[-1]}: {e}")
+    elif plot and last_bt is None:
+        _log.warning("plot requested but last-input ticker %s failed or was skipped",
+                    tickers[-1])
+        print(f"\n  ⚠️  No chart generated — last ticker ({tickers[-1]}) backtest did not complete successfully")
 
-    print(f"\n  Top sectors   : {', '.join(top_sectors)}")
-    print(f"  Avoided       : {', '.join(bottom_sectors)}")
-    print(f"  Total tickers : {len(selected_tickers)}  →  {', '.join(selected_tickers)}")
+    # ── Save to CSV ──────────────────────────────────────────────────────────
+    out_path = "backtest_results.csv"
+    report.to_csv(out_path)
+    print(f"\n  Results saved to: {out_path}")
 
-    # ── Step 4: Portfolio backtest on selected tickers ────────────────────────
-    results = run_portfolio_backtest(
-        tickers         = selected_tickers,
-        strategy_cls    = strategy_cls,
-        period          = period,
-        total_cash      = total_cash,
-        strategy_params = strategy_params,
-        save_chart      = True,
-    )
-
-    return results
+    return report
