@@ -103,7 +103,7 @@ def run_portfolio_backtest(
                 "Return (%)":   round(ret, 2),
                 "B&H (%)":      round(bhr, 2),
                 "Alpha (%)":    round(ret - bhr, 2),
-                "Sharpe":       round(sh, 2)  if not np.isnan(sh) else 0.0,
+                "Sharpe":       round(sh, 2)  if not np.isnan(sh) else np.nan,
                 "Max DD (%)":   round(dd, 2),
                 "Win Rate (%)": round(wr, 2)  if not np.isnan(wr) else 0.0,
                 "# Trades":     nt,
@@ -137,7 +137,15 @@ def run_portfolio_backtest(
     port_return = (total_final / total_alloc - 1) * 100
     port_bh     = report["B&H (%)"].mean()
     port_alpha  = port_return - port_bh
-    avg_sharpe  = report["Sharpe"].replace(0, np.nan).mean()
+    # FIX BT2 — used to be report["Sharpe"].replace(0, np.nan).mean(), which
+    # silently excluded any ticker whose Sharpe was stored as 0.0. But 0.0 was
+    # being used to mean BOTH "no valid Sharpe" (NaN, e.g. zero trades) AND
+    # any real Sharpe that rounds to 0.00 — so genuinely flat-but-valid
+    # results got dropped from the average right alongside actual no-data
+    # placeholders, silently inflating the reported average. "Sharpe" is now
+    # stored as a real NaN for the placeholder case, so a plain .mean() (which
+    # already skips NaN) is both correct and simpler.
+    avg_sharpe  = report["Sharpe"].mean()
     worst_dd    = report["Max DD (%)"].min()
     avg_wr      = active["Win Rate (%)"].mean() if len(active) > 0 else 0.0
     total_trades= int(report["# Trades"].sum())
