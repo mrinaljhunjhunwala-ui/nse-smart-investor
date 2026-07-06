@@ -112,47 +112,56 @@ if not st.session_state["tw_running"]:
             _wl = _EMPTY_WL
 
 # ── If a background scan is in progress, show stale data + progress ───────
+# FIX W3 (perf) — this used to poll with a blocking time.sleep(3) followed by
+# st.rerun(), which restarts the ENTIRE page (sidebar, design, every import)
+# every 3 seconds for the full ~2 min of a cold scan — the same anti-pattern
+# Command Centre's Top Picks section used to have. Replaced with the same fix:
+# an @st.fragment(run_every=3s). Streamlit reruns just this fragment on its
+# own timer — no blocking sleep on the main thread, no re-executing the rest
+# of the page each tick. When the background scan actually finishes, the
+# fragment calls a plain st.rerun() (full-app scope by default, even from
+# inside a fragment) exactly once, to escape the fragment and render the
+# final cards below with the fresh data.
 if st.session_state["tw_running"]:
-    _holder  = st.session_state.get("tw_bg_holder", [])
-    _thread  = st.session_state.get("tw_bg_thread")
-    _started = st.session_state.get("tw_scan_started", time.time())
-    _elapsed = time.time() - _started
 
-    if _holder:
-        # Background scan finished
-        _status, _payload = _holder[0]
-        st.session_state["tw_running"] = False
-        if _status == "ok":
-            st.session_state["tw_result"] = _payload
-            st.session_state["tw_stale"]  = False
-            _wl = _payload
+    @st.fragment(run_every=3)
+    def _tw_poll_fragment():
+        _holder  = st.session_state.get("tw_bg_holder", [])
+        _started = st.session_state.get("tw_scan_started", time.time())
+        _elapsed = time.time() - _started
+
+        if _holder:
+            # Background scan finished
+            _status, _payload = _holder[0]
+            st.session_state["tw_running"] = False
+            if _status == "ok":
+                st.session_state["tw_result"] = _payload
+                st.session_state["tw_stale"]  = False
+            else:
+                st.error(f"Watchlist scan unavailable: {_payload}")
+                st.session_state["tw_stale"] = st.session_state["tw_result"] is not None
+            st.rerun()
         else:
-            st.error(f"Watchlist scan unavailable: {_payload}")
-            _wl = st.session_state.get("tw_result") or _EMPTY_WL
-            st.session_state["tw_stale"] = st.session_state["tw_result"] is not None
-        st.rerun()
-    else:
-        # Still running — show what we have (stale or empty) plus a live banner
-        _prior = st.session_state.get("tw_result")
-        if _prior is not None:
-            st.info(
-                f"🔄 Refreshing today's scan in the background "
-                f"({_elapsed:.0f}s elapsed) — showing the **previous session's** "
-                "results below until the new scan completes."
-            )
-            st.session_state["tw_stale"] = True
-            _wl = _prior
-        else:
-            st.warning(
-                f"🔄 **First run** — scanning the full NSE universe for the first "
-                f"time ({_elapsed:.0f}s elapsed, typically ~2 min). This only "
-                "happens once; subsequent visits use the cache. You can leave this "
-                "tab open or come back shortly."
-            )
-            _wl = _EMPTY_WL
-        # Auto-refresh every 3s to check on the background thread
-        time.sleep(3)
-        st.rerun()
+            # Still running — show what we have (stale or empty) plus a live
+            # banner. No sleep needed: run_every=3 handles the next check.
+            _prior = st.session_state.get("tw_result")
+            if _prior is not None:
+                st.info(
+                    f"🔄 Refreshing today's scan in the background "
+                    f"({_elapsed:.0f}s elapsed) — showing the **previous session's** "
+                    "results below until the new scan completes."
+                )
+                st.session_state["tw_stale"] = True
+            else:
+                st.warning(
+                    f"🔄 **First run** — scanning the full NSE universe for the first "
+                    f"time ({_elapsed:.0f}s elapsed, typically ~2 min). This only "
+                    "happens once; subsequent visits use the cache. You can leave this "
+                    "tab open or come back shortly."
+                )
+
+    _tw_poll_fragment()
+    _wl = st.session_state.get("tw_result") or _EMPTY_WL
 
 # Fallback safety net
 if _wl is None:
