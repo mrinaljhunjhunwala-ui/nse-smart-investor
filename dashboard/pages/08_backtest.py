@@ -276,55 +276,67 @@ if _bt_run and not st.session_state.get("bt_running", False):
         st.error(f"Backtest failed to start: {_bt_err}")
 
 # ── Live progress display (shown while bt_running is True) ────────────────
+# FIX B5 (perf) — this used to poll with a blocking time.sleep(3) followed by
+# st.rerun(), which re-executes the ENTIRE page (imports, sidebar, design,
+# everything above) every 3 seconds for the whole duration of a backtest run.
+# Same anti-pattern already fixed in Command Centre's Top Picks and
+# Tomorrow's Watchlist — applying the same @st.fragment(run_every=3) fix
+# here: Streamlit reruns just this fragment on its own timer, no blocking
+# sleep on the main thread. st.rerun() (full-app scope by default, even
+# inside a fragment) is still used once, to escape the fragment when the
+# backtest actually finishes and render the final results below.
 if st.session_state.get("bt_running", False):
-    _prog   = st.session_state["bt_progress"]
-    _done   = _prog[0]
-    _total  = max(_prog[1], 1)
-    _ticker = _prog[2]
-    _partial = st.session_state.get("bt_partial", [])
 
-    # Cancel button
-    if st.button("🛑 Cancel backtest", key="bt_cancel_btn"):
-        st.session_state["bt_cancel"].set()
-        st.session_state["bt_running"] = False
-        st.warning("Backtest cancelled — partial results shown below.")
-        st.rerun()
+    @st.fragment(run_every=3)
+    def _bt_poll_fragment():
+        _prog   = st.session_state["bt_progress"]
+        _done   = _prog[0]
+        _total  = max(_prog[1], 1)
+        _ticker = _prog[2]
+        _partial = st.session_state.get("bt_partial", [])
 
-    _pct = _done / _total
-    st.progress(_pct, text=f"Running {_ticker} ({_done}/{_total})")
+        # Cancel button
+        if st.button("🛑 Cancel backtest", key="bt_cancel_btn"):
+            st.session_state["bt_cancel"].set()
+            st.session_state["bt_running"] = False
+            st.warning("Backtest cancelled — partial results shown below.")
+            st.rerun()
 
-    # Check if worker finished
-    _executor = st.session_state.get("bt_executor")
-    _finished = _done >= _total or (
-        _executor is not None
-        and all(f.done() for f in getattr(_executor, "_futures", []))
-    )
-    # Simpler finish check — worker sets _done == _total when done
-    if _done >= _total:
-        _finished = True
+        _pct = _done / _total
+        st.progress(_pct, text=f"Running {_ticker} ({_done}/{_total})")
 
-    if _finished:
-        st.session_state["bt_running"] = False
-        _bt_rows = [r for r in _partial if r.get("Return (%)") is not None]
-        if _bt_rows:
-            _bt_res = pd.DataFrame(_bt_rows).set_index("Ticker")
-            st.session_state["bt_result"] = _bt_res
-            # FIX B4: write to portfolio_results.csv so the top table refreshes
-            try:
-                _bt_res.to_csv("portfolio_results.csv")
-            except Exception as _csv_e:
-                import logging; logging.getLogger("dashboard.backtest").warning("Could not write portfolio_results.csv: %s", _csv_e)
-            st.success(
-                f"✅ Backtested {len(_bt_res)} stocks "
-                f"({st.session_state.get('bt_result_label','')})."
-            )
-        else:
-            st.warning("No results — data may be unavailable. Try again.")
-        st.rerun()
-    else:
-        # Page is still running — auto-rerun every 3 s to refresh progress
-        time.sleep(3)
-        st.rerun()
+        # Check if worker finished
+        _executor = st.session_state.get("bt_executor")
+        _finished = _done >= _total or (
+            _executor is not None
+            and all(f.done() for f in getattr(_executor, "_futures", []))
+        )
+        # Simpler finish check — worker sets _done == _total when done
+        if _done >= _total:
+            _finished = True
+
+        if _finished:
+            st.session_state["bt_running"] = False
+            _bt_rows = [r for r in _partial if r.get("Return (%)") is not None]
+            if _bt_rows:
+                _bt_res = pd.DataFrame(_bt_rows).set_index("Ticker")
+                st.session_state["bt_result"] = _bt_res
+                # FIX B4: write to portfolio_results.csv so the top table refreshes
+                try:
+                    _bt_res.to_csv("portfolio_results.csv")
+                except Exception as _csv_e:
+                    import logging; logging.getLogger("dashboard.backtest").warning("Could not write portfolio_results.csv: %s", _csv_e)
+                st.success(
+                    f"✅ Backtested {len(_bt_res)} stocks "
+                    f"({st.session_state.get('bt_result_label','')})."
+                )
+            else:
+                st.warning("No results — data may be unavailable. Try again.")
+            st.rerun()
+        # else: still running — no sleep needed, run_every=3 handles the
+        # next check on its own timer.
+
+    _bt_poll_fragment()
 
 # ── Show last in-app / file backtest result ───────────────────────────────
 if "bt_result" in st.session_state and not st.session_state.get("bt_running", False):
