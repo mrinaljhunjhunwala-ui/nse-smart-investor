@@ -339,16 +339,16 @@ else:
                 for _rs in _explain_mover(_dt_full, _dchg, 1.0):
                     st.markdown(f"• {_rs}")
             _da, _db, _dc = st.columns(3)
-            if _da.button("📊 Analyze", key=f"ml_an_{_dt_full}", use_container_width=True):
+            if _da.button("📊 Analyze", key=f"ml_an_{_dt_full}", width="stretch"):
                 st.session_state["_goto_page"] ="🔍 Analyze Stock"
                 st.session_state["manual_ticker_input"] = _dt_label
                 st.session_state["last_analyzed"] = _dt_full
                 st.rerun()
-            if _db.button("📝 Paper Trade", key=f"ml_pt_{_dt_full}", use_container_width=True):
+            if _db.button("📝 Paper Trade", key=f"ml_pt_{_dt_full}", width="stretch"):
                 st.session_state["_goto_page"] ="📂 Paper Trades"
                 st.session_state["pt_prefill_ticker"] = _dt_full
                 st.rerun()
-            if _dc.button("＋ Watchlist", key=f"ml_wl_{_dt_full}", use_container_width=True):
+            if _dc.button("＋ Watchlist", key=f"ml_wl_{_dt_full}", width="stretch"):
                 if _dt_full not in st.session_state.get("watchlist", []):
                     st.session_state.setdefault("watchlist", []).append(_dt_full)
                 st.toast(f"{_dt_label} added to watchlist ✓")
@@ -361,7 +361,7 @@ else:
         disp["Ticker"]    = disp["Ticker"].str.replace(".NS", "")
         disp["Price (₹)"] = disp["Price (₹)"].map("₹{:,.2f}".format)
         disp["Change %"]  = disp["Change %"].map("{:+.2f}%".format)
-        st.dataframe(disp, hide_index=True, use_container_width=True, height=400)
+        st.dataframe(disp, hide_index=True, width="stretch", height=400)
 
 # ── Market News (multi-source, with source badges) ─────────────────────────
 st.markdown("---")
