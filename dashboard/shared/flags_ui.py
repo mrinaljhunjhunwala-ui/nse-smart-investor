@@ -50,6 +50,7 @@ from analysis.qualitative_flags import (
     save_flags,
     summarize_flags,
 )
+from data.nse_corp_info import get_last_diagnostic  # QF3: surface fetch diagnostics
 
 _SENTIMENT_COLOR = {
     FlagSentiment.GREEN: "#26a69a",
@@ -74,16 +75,22 @@ _CATEGORY_LABEL = {
 
 
 @st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
-def get_cached_flags(ticker: str) -> list[dict]:
+def get_cached_flags(ticker: str, company_name: Optional[str] = None) -> list[dict]:
     """Cached, Streamlit-safe lookup. Returns list[dict] (not dataclasses —
     st.cache_data needs hashable/picklable return values across reruns).
     Cache TTL is 6h: shorter than nse_corp_info's own 24h raw-payload cache,
     so a stale Streamlit cache entry still gets refreshed same-day if the
     user reopens the page later; nse_corp_info's own cache prevents that
     refresh from re-hitting NSE if the raw payload is still fresh.
+
+    company_name improves news-search accuracy (data/news_feed.py) — pass
+    it when available (e.g. cs.company_name from the score/fundamentals
+    result); falls back to the bare ticker symbol if not given.
     """
     try:
-        flags = refresh_all_flags(ticker, _store.kv_get, _store.kv_set)
+        flags = refresh_all_flags(
+            ticker, _store.kv_get, _store.kv_set, company_name=company_name
+        )
     except Exception:
         # Flags are a nice-to-have overlay — a failure here must never
         # break the page that's actually trying to show the score/chart.
@@ -101,13 +108,13 @@ def _to_objects(raw: list[dict]) -> list[QualitativeFlag]:
     return out
 
 
-def render_flag_badge_html(ticker: str) -> str:
+def render_flag_badge_html(ticker: str, company_name: Optional[str] = None) -> str:
     """Compact inline HTML chip for embedding inside an existing card's
     HTML string (Tomorrow's Watchlist / Top Picks style). Returns "" if
     there are no active flags — callers should treat that as "nothing to
     show", not as a failure.
     """
-    raw = get_cached_flags(ticker)
+    raw = get_cached_flags(ticker, company_name)
     flags = _to_objects(raw)
     if not flags:
         return ""
@@ -127,12 +134,12 @@ def render_flag_badge_html(ticker: str) -> str:
     )
 
 
-def render_flag_strip(ticker: str) -> None:
+def render_flag_strip(ticker: str, company_name: Optional[str] = None) -> None:
     """Full panel for Analyze Stock. Call this after the score hero
     section — it is deliberately visually separate from the composite
     score card, not blended into it.
     """
-    raw = get_cached_flags(ticker)
+    raw = get_cached_flags(ticker, company_name)
     flags = _to_objects(raw)
     counts = summarize_flags(flags)
 
@@ -142,8 +149,8 @@ def render_flag_strip(ticker: str) -> None:
         st.markdown("##### 🏳️ Qualitative Flags")
         st.caption(
             "Regulatory, governance, and narrative factors the score above "
-            "can't see — updated daily from NSE disclosures, plus anything "
-            "you add manually below."
+            "can't see — from NSE filings + recent news, updated daily, "
+            "plus anything you add manually below."
         )
     with refresh_col:
         if st.button("🔄 Refresh", key=f"qf_refresh_{ticker}"):
@@ -151,13 +158,40 @@ def render_flag_strip(ticker: str) -> None:
             st.rerun()
 
     if not flags:
-        st.info(
-            "No flags on record for this ticker yet — either nothing has "
-            "moved recently, or NSE didn't return corporate-info data for "
-            "it. This is not the same as \"all clear\"; add a manual note "
-            "below if you know of something the auto-scan wouldn't catch "
-            "(e.g. a brand JV, or a state excise policy change)."
-        )
+        nse_diag, news_diag = None, None
+        try:
+            nse_diag = get_last_diagnostic(ticker)
+        except Exception:
+            pass
+        try:
+            from data.news_feed import get_last_diagnostic as _news_diag
+            news_diag = _news_diag(ticker)
+        except Exception:
+            pass
+
+        nse_blocked = nse_diag and not nse_diag.get("ok")
+        news_blocked = news_diag and not news_diag.get("ok")
+        if nse_blocked or news_blocked:
+            lines = []
+            if nse_blocked:
+                lines.append(f"**NSE fetch:** {nse_diag.get('reason', 'unknown error')}")
+            if news_blocked:
+                lines.append(f"**News fetch:** {news_diag.get('reason', 'unknown error')}")
+            st.warning(
+                "⚠️ Auto-fetch had trouble for this ticker:\n\n" + "\n\n".join(lines) +
+                "\n\nThis is a fetch problem, not necessarily an absence of "
+                "real flags — add a manual note below if you know of "
+                "something relevant in the meantime."
+            )
+        else:
+            st.info(
+                "No flags on record for this ticker yet — either nothing has "
+                "moved recently, or neither NSE nor recent news turned up "
+                "anything. This is not the same as \"all clear\"; add a "
+                "manual note below if you know of something the auto-scan "
+                "wouldn't catch (e.g. a brand JV, or a state excise policy "
+                "change)."
+            )
     else:
         badge_line = "  ".join(
             f'{_SENTIMENT_DOT[f.sentiment]}' for f in
