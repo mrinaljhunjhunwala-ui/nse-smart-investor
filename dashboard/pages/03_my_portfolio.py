@@ -193,7 +193,7 @@ with st.expander("➕ Add a holding", expanded=(len(_holdings) == 0)):
         with _f4:
             _mh_date = st.date_input("Date bought", value=_dt.date.today())
         _mh_submit = st.form_submit_button(
-            "Add holding", type="primary", use_container_width=True
+            "Add holding", type="primary", width="stretch"
         )
 
     if _mh_submit:
@@ -298,7 +298,7 @@ if _holdings:
                 "Date", value=_cur_date, key=f"mh_date_{_i}",
                 label_visibility="collapsed",
             )
-            if _mc5.button("🗑️", key=f"mh_del_{_i}", use_container_width=True):
+            if _mc5.button("🗑️", key=f"mh_del_{_i}", width="stretch"):
                 _holdings.pop(_i)
                 save_manual_holdings(_holdings)
                 clear_price_caches()
@@ -595,7 +595,7 @@ if _csv_source is not None:
                     _hb1, _hb2, _hb3 = st.columns(3)
                     with _hb1:
                         if st.button(f"📊 Analyze", key=f"ph_an_{h.ticker}",
-                                     use_container_width=True):
+                                     width="stretch"):
                             # FIX MH3
                             st.session_state["analyze_ticker"] = h.ticker
                             st.session_state["_goto_page"]     = "🔍 Analyze Stock"
@@ -610,7 +610,7 @@ if _csv_source is not None:
                     with _hb3:
                         # DC3 — the full narrative was always computed, just
                         # never shown. One click, no extra fetch.
-                        with st.popover("❓ Why?", use_container_width=True):
+                        with st.popover("❓ Why?", width="stretch"):
                             st.caption(h.narrative or h.headline)
                     if h.error:
                         st.caption(f"⚠️ {h.error}")
@@ -690,7 +690,7 @@ if _csv_source is not None:
                         margin=dict(l=0, r=0, t=10, b=0),
                         coloraxis_showscale=False,
                     )
-                    st.plotly_chart(_fig_hm, use_container_width=True)
+                    st.plotly_chart(_fig_hm, width="stretch")
 
             # ── Portfolio Risk & Performance ───────────────────────────
             st.markdown("---")
