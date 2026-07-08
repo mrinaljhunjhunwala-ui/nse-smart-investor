@@ -97,7 +97,7 @@ with tab_scan:
     with col2:
         period = st.selectbox("Period", ["1y", "2y", "5y"], index=0, key="scan_period")
         min_tqs = st.slider("Min TQS filter", 0, 90, 0, step=5)
-        run_scan = st.button("▶ Run Scan", use_container_width=True, type="primary")
+        run_scan = st.button("▶ Run Scan", width="stretch", type="primary")
 
     if run_scan:
         tickers = [t.strip().upper() for t in raw_input.replace("\n", ",").split(",") if t.strip()]
@@ -195,7 +195,7 @@ with tab_scan:
                     "RSI": "{:.1f}", "Sharpe20": "{:.2f}", "OBV-Z": "{:.2f}",
                 }, na_rep="-")
             )
-            st.dataframe(styled, use_container_width=True, height=500)
+            st.dataframe(styled, width="stretch", height=500)
 
             # ── Pillar breakdown — top 10 ─────────────────────────────────────
             st.subheader("Pillar breakdown — top 10")
@@ -225,7 +225,7 @@ with tab_scan:
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             # ── Download ──────────────────────────────────────────────────────
             st.download_button(
@@ -233,7 +233,7 @@ with tab_scan:
                 data=df_scan.to_csv(index=False),
                 file_name="tqs_scan.csv",
                 mime="text/csv",
-                use_container_width=False
+                width="content"
             )
     else:
         st.info("Input your universe parameters and select 'Run Scan' above to process trend scores.")
@@ -271,7 +271,7 @@ with tab_deep:
     with col3:
         st.write("")
         st.write("")
-        run_deep = st.button("▶ Analyse", use_container_width=True, type="primary")
+        run_deep = st.button("▶ Analyse", width="stretch", type="primary")
 
     if run_deep and dd_ticker:
         with st.spinner(f"Scoring {dd_ticker}…"):
@@ -328,7 +328,7 @@ with tab_deep:
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)"
             )
-            col.plotly_chart(fig_g, use_container_width=True)
+            col.plotly_chart(fig_g, width="stretch")
 
         # ── TQS time-series chart ─────────────────────────────────────────────
         st.markdown("**TQS over time**")
@@ -362,7 +362,7 @@ with tab_deep:
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)"
         )
-        st.plotly_chart(fig_ts, use_container_width=True)
+        st.plotly_chart(fig_ts, width="stretch")
 
         # ── Pillar time-series ────────────────────────────────────────────────
         st.markdown("**Pillar scores over time**")
@@ -387,7 +387,7 @@ with tab_deep:
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)"
         )
-        st.plotly_chart(fig_p, use_container_width=True)
+        st.plotly_chart(fig_p, width="stretch")
 
         # ── Key indicator table ───────────────────────────────────────────────
         st.markdown("**Latest indicator values**")
@@ -414,7 +414,7 @@ with tab_deep:
                 else "Distribution (<-1)" if obv_val < -1 else "Neutral",
             ],
         }
-        st.dataframe(pd.DataFrame(ind_data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(ind_data), width="stretch", hide_index=True)
 
         # ── Download ──────────────────────────────────────────────────────────
         st.download_button(
