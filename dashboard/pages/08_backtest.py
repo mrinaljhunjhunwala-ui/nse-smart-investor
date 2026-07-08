@@ -76,18 +76,61 @@ def load_backtest_csv(path: str = "portfolio_results.csv") -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _load_backtest_meta(path: str = "portfolio_results.meta.json") -> dict:
+    """FIX B6 — read the sidecar metadata written alongside a fresh in-app
+    run (see the .to_csv() call below). If it's missing, we genuinely don't
+    know when portfolio_results.csv was generated or by what code — this is
+    exactly the case for the sample portfolio_results.csv/backtest_results.csv
+    files that have been committed to the repo since its very first commit,
+    predating every backtest fix made since. Rather than silently displaying
+    those numbers as if they were a real, current result (all the label used
+    to say was "Loaded from portfolio_results.csv" — no date, no way to tell
+    it apart from a run you just did), we show an explicit "age unknown"
+    warning so nobody mistakes 6-week-old sample data for a live result.
+    """
+    import json
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception as e:
+            _log.warning("_load_backtest_meta: %s exists but failed to parse: %s", path, e)
+    return {}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX B2: unified display — always load file result into session_state so
 # the detailed table renders whether data came from file or in-app run.
 # ─────────────────────────────────────────────────────────────────────────────
 _file_df = load_backtest_csv()
 if not _file_df.empty and "bt_result" not in st.session_state:
-    st.session_state["bt_result"]       = _file_df
-    st.session_state["bt_result_label"] = "Loaded from portfolio_results.csv"
+    st.session_state["bt_result"] = _file_df
+    _meta = _load_backtest_meta()
+    if _meta.get("generated_at"):
+        st.session_state["bt_result_label"] = (
+            f"{_meta.get('strategy', '?')} · {_meta.get('universe', '?')} · "
+            f"{_meta.get('period', '?')} · run at {_meta['generated_at']}"
+        )
+        st.session_state["bt_result_stale_unknown"] = False
+    else:
+        # No sidecar metadata — this is very likely the sample
+        # portfolio_results.csv committed to the repo since its first
+        # commit, not a result from a real run on the current code.
+        st.session_state["bt_result_label"] = "portfolio_results.csv (age/source unknown)"
+        st.session_state["bt_result_stale_unknown"] = True
 
 df = st.session_state.get("bt_result", pd.DataFrame())
 
 if not df.empty:
+    if st.session_state.get("bt_result_stale_unknown"):
+        st.warning(
+            "⚠️ These results have no run-date metadata attached — they were "
+            "not produced by an in-app run on this session. This can happen "
+            "if `portfolio_results.csv` is old sample data rather than a "
+            "fresh result. Click **Run a Backtest** below to get current "
+            "numbers you can trust.",
+            icon="⚠️",
+        )
     r_col = next((c for c in ["Return (%)", "Return(%)"]   if c in df.columns), None)
     s_col = next((c for c in ["Sharpe", "Sharpe Ratio"]    if c in df.columns), None)
     t_col = next((c for c in ["# Trades", "Trades"]        if c in df.columns), None)
@@ -101,7 +144,7 @@ if not df.empty:
     grad_cols = [r_col] if r_col else []
     st.dataframe(
         df.style.background_gradient(subset=grad_cols, cmap="RdYlGn").format("{:.2f}"),
-        width="stretch",
+        use_container_width=True,
     )
 
     if r_col:
@@ -115,7 +158,7 @@ if not df.empty:
             template="nse_pro", height=400,
             margin=dict(l=0, r=0, t=40, b=0),
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 else:
     st.info(
         "No backtest results found.  \n\n"
@@ -149,7 +192,7 @@ with _bt_c3:
 with _bt_c4:
     st.write("")
     _bt_run = st.button(
-        "🚀 Run", type="primary", key="bt_run", width="stretch"
+        "🚀 Run", type="primary", key="bt_run", use_container_width=True
     )
 
 _uni_map = {
@@ -261,6 +304,13 @@ if _bt_run and not st.session_state.get("bt_running", False):
         st.session_state["bt_result_label"] = (
             f"{_bt_strat} · {_bt_uni} · {_bt_period}"
         )
+        # FIX B6: stash the run config explicitly in session_state (rather
+        # than relying on the fragment closing over these local variables
+        # from outside its own scope) so the metadata sidecar written on
+        # completion, below, has reliable values to read back.
+        st.session_state["bt_strat_used"]  = _bt_strat
+        st.session_state["bt_uni_used"]    = _bt_uni
+        st.session_state["bt_period_used"] = _bt_period
 
         # Launch background thread
         _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -321,9 +371,23 @@ if st.session_state.get("bt_running", False):
             if _bt_rows:
                 _bt_res = pd.DataFrame(_bt_rows).set_index("Ticker")
                 st.session_state["bt_result"] = _bt_res
+                st.session_state["bt_result_stale_unknown"] = False
                 # FIX B4: write to portfolio_results.csv so the top table refreshes
+                # FIX B6: also write a metadata sidecar with a real timestamp,
+                # so a genuine fresh run is honestly distinguishable from the
+                # sample CSV that ships in the repo (see _load_backtest_meta
+                # above) — this is what lets the "age unknown" warning there
+                # only ever fire for data that truly has no known run date.
                 try:
+                    import datetime as _dt, json as _json
                     _bt_res.to_csv("portfolio_results.csv")
+                    with open("portfolio_results.meta.json", "w") as _mf:
+                        _json.dump({
+                            "generated_at": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "strategy": st.session_state.get("bt_strat_used", "?"),
+                            "universe": st.session_state.get("bt_uni_used", "?"),
+                            "period":   st.session_state.get("bt_period_used", "?"),
+                        }, _mf)
                 except Exception as _csv_e:
                     import logging; logging.getLogger("dashboard.backtest").warning("Could not write portfolio_results.csv: %s", _csv_e)
                 st.success(
@@ -379,7 +443,7 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
             _bt_sorted.style.background_gradient(
                 subset=_grad_cols2, cmap="RdYlGn"
             ),
-            width="stretch", height=380,
+            use_container_width=True, height=380,
         )
         st.caption(
             "Sorted by return. Green = better. "
@@ -460,7 +524,7 @@ if st.button("📊 Show Normalised Performance", key="compare_btn"):
                     yaxis_title="% of Start Price",
                     margin=dict(l=0, r=0, t=50, b=0),
                 )
-                st.plotly_chart(fig_comp, width="stretch")
+                st.plotly_chart(fig_comp, use_container_width=True)
                 st.caption(
                     f"All lines indexed to 100 at **{_common_start.strftime('%d %b %Y')}** "
                     f"(the latest common start date across all tickers) so the comparison "
