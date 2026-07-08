@@ -237,7 +237,7 @@ st.markdown(
 )
 
 _cc_ref_c = st.columns([6, 1])[1]
-if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=True):
+if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
     # BUGFIX: this only needs to bust the VIX cache — the previous blanket
     # st.cache_data.clear() also wiped Top Picks (2-min cold scan), watchlist
     # scores, and sparklines, forcing expensive re-fetches the user never
@@ -300,21 +300,28 @@ def _render_gainers_ticker() -> None:
     _tape_html = "".join(_chip(r) for r in _tk_rows) * 2
 
     st.markdown(
-        f'<div style="background:#0a0a0a;border-top:2px solid #ffb300;'
-        f'border-bottom:2px solid #ffb300;border-radius:6px;'
-        f'display:flex;align-items:center;overflow:hidden">'
-        f'<span style="flex-shrink:0;padding:9px 14px;color:#ffb300;'
-        f'font-size:10px;font-weight:700;letter-spacing:1px;'
-        f'border-right:1px solid #4a3a00;white-space:nowrap">'
-        f'📟 NIFTY 50<br>TOP GAINERS</span>'
-        f'<div style="flex:1;overflow:hidden;position:relative;padding:9px 0">'
-        f'<div style="white-space:nowrap;width:max-content;'
-        f'animation:cc_ticker_scroll 32s linear infinite">'
-        f'{_tape_html}'
-        f'</div></div></div>'
-        f'<style>@keyframes cc_ticker_scroll {{'
-        f'0% {{ transform:translateX(0%); }} '
-        f'100% {{ transform:translateX(-50%); }} }}</style>',
+        f"""
+        <div style="background:#0a0a0a;border-top:2px solid #ffb300;
+                    border-bottom:2px solid #ffb300;border-radius:6px;
+                    padding:9px 0;overflow:hidden;position:relative">
+            <span style="position:absolute;left:12px;top:9px;background:#0a0a0a;
+                        padding-right:10px;color:#ffb300;font-size:10px;
+                        font-weight:700;letter-spacing:1px;z-index:2">
+                📟 NIFTY 50 · TOP GAINERS
+            </span>
+            <div style="white-space:nowrap;display:inline-block;
+                        animation:cc_ticker_scroll 32s linear infinite;
+                        padding-left:220px">
+                {_tape_html}
+            </div>
+        </div>
+        <style>
+        @keyframes cc_ticker_scroll {{
+            0%   {{ transform: translateX(0%); }}
+            100% {{ transform: translateX(-50%); }}
+        }}
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -394,7 +401,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                    "stay on screen while a refresh runs in the background.")
     with _tp_h2:
         st.write("")
-        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
 
     _scan_univ = get_universe("nifty500")
     with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
@@ -730,7 +737,7 @@ def _render_open_positions_section():
             with _pc2:
                 if _pos["status"] in ("target_hit", "sl_hit"):
                     if st.button("Close Now", key=f"cc_cl_{_pos['id']}",
-                                 use_container_width=True, type="primary"):
+                                 width="stretch", type="primary"):
                         paper_close_trade(_pos["id"], _pos["cur"],
                                           "Closed via Command Centre")
                         # BUGFIX: closing one position only needs fresh live
@@ -754,7 +761,7 @@ def _render_watchlist_section(vix_regime: str):
         st.caption("Scores update every 5 min. First load takes ~20-40 s while data is fetched.")
     with _wh2:
         st.write("")
-        if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
+        if st.button("🔄 Re-score All", key="cc_rescore", width="stretch"):
             # BUGFIX: was a blanket st.cache_data.clear() — only the watchlist
             # scoring cache needs busting for a re-score; Top Picks and VIX info
             # don't need to be thrown away too.
@@ -764,11 +771,6 @@ def _render_watchlist_section(vix_regime: str):
     _wl_sector = st.session_state.get("_sec_ranks_cache", ())
     with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 5 min)…"):
         _cc_scores = _score_watchlist(tuple(_cc_wl), vix_regime, sector_ranks=_wl_sector)
-
-    # Today's live % change per stock — the score above is based on the last
-    # daily close, so it never carried a "how is it moving today" figure.
-    # Reuses the same 60s-cached live-price source Open Positions already uses.
-    _cc_wl_lp = _portfolio_live_prices(tuple(_cc_wl)) if _cc_wl else {}
     
     _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
                 "HOLD": 3, "CAUTION": 4, "EXIT": 5, "UNAVAILABLE": 9}
@@ -812,16 +814,6 @@ def _render_watchlist_section(vix_regime: str):
             )
     
         _spark = _sparkline_svg(_sparkline_closes(_cct))   # 30-day mini chart
-
-        _chg = _cc_wl_lp.get(_cct, {}).get("chg")
-        if _chg is not None:
-            _chg_c = "#26a69a" if _chg >= 0 else "#ef5350"
-            _chg_arrow = "▲" if _chg >= 0 else "▼"
-            _chg_block = (f'<div style="font-size:13px;font-weight:700;color:{_chg_c};'
-                          f'margin-top:2px">{_chg_arrow}{abs(_chg):.2f}% today</div>')
-        else:
-            _chg_block = ""
-
         _cc1, _cc2 = st.columns([5, 1])
         with _cc1:
             st.markdown(
@@ -841,7 +833,6 @@ def _render_watchlist_section(vix_regime: str):
                 f'</div>'
                 f'<div style="text-align:right;min-width:124px">'
                 f'<div style="font-size:14px;color:#aaa">{"₹" + f"{_price:,.2f}" if _price else ""}</div>'
-                f'{_chg_block}'
                 f'<div style="margin-top:4px">{_spark}</div>'
                 f'</div>'
                 f'</div></div>',
@@ -856,7 +847,7 @@ def _render_watchlist_section(vix_regime: str):
                 )
             else:
                 if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
-                             use_container_width=True):
+                             width="stretch"):
                     st.session_state["analyze_ticker"] = _cct
                     st.session_state["_goto_page"] ="🔍 Analyze Stock"
                     st.rerun()
@@ -883,7 +874,7 @@ with st.expander("🔔 Background Alerts (Telegram) — fire even when this app 
             if not _act_df.empty:
                 _al_show = _act_df[["ticker", "condition", "level", "note"]].copy()
                 _al_show.columns = ["Stock", "When price goes", "Level (₹)", "Note"]
-                st.dataframe(_al_show, hide_index=True, use_container_width=True)
+                st.dataframe(_al_show, hide_index=True, width="stretch")
             else:
                 st.info("No active price alerts. All rows are examples (enabled=0). "
                         "Set `enabled=1` on a row in data/alerts.csv to activate it.")

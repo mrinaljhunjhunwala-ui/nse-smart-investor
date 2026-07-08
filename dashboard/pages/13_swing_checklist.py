@@ -251,4 +251,4 @@ st.dataframe(pd.DataFrame([
     {"Factor": "MTF Alignment",     "Pass When": "Daily + Weekly both bullish", "Why It Matters": "Same direction on multiple timeframes = higher conviction"},
     {"Factor": "Sector Rank",       "Pass When": "Sector in Top 3",             "Why It Matters": "Rising sectors carry stocks — fighting sector momentum rarely works"},
     {"Factor": "Volume Confirm",    "Pass When": "Volume Ratio ≥ 1.2×",        "Why It Matters": "Above-average volume validates the move; low volume = weak conviction"},
-]), hide_index=True, use_container_width=True)
+]), hide_index=True, width="stretch")

@@ -143,7 +143,7 @@ else:
         })
 
     _wl_display_df = pd.DataFrame(_merged)
-    st.dataframe(_wl_display_df, hide_index=True, use_container_width=True, height=420)
+    st.dataframe(_wl_display_df, hide_index=True, width="stretch", height=420)
 
     # Remove ticker
     st.markdown("---")

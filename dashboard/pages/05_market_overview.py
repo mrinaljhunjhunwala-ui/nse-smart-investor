@@ -233,18 +233,18 @@ with st.spinner("Fetching NSE broad movers (~750 stocks)…"):
             )
             btn_a, btn_b, btn_c = st.columns([1, 1, 1])
             if btn_a.button("📊 Analyze", key=f"mover_analyze_{tick}",
-                            use_container_width=True):
+                            width="stretch"):
                 st.session_state["_goto_page"] = "🔍 Analyze Stock"
                 st.session_state["manual_ticker_input"] = short
                 st.session_state["last_analyzed"] = tick
                 st.rerun()
             if btn_b.button("📝 Paper Trade", key=f"mover_trade_{tick}",
-                            use_container_width=True):
+                            width="stretch"):
                 st.session_state["_goto_page"] = "📂 Paper Trades"
                 st.session_state["pt_prefill_ticker"] = tick
                 st.rerun()
             if btn_c.button("＋ Watchlist", key=f"mover_wl_{tick}",
-                            use_container_width=True):
+                            width="stretch"):
                 if tick not in st.session_state.get("watchlist", []):
                     st.session_state.setdefault("watchlist", []).append(tick)
                 st.toast(f"{short} added to watchlist ✓")
