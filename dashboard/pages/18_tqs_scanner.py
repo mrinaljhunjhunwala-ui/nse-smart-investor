@@ -87,17 +87,54 @@ tab_scan, tab_deep = st.tabs(["🔍 Scanner", "🔬 Deep Dive"])
 with tab_scan:
     st.subheader("Universe Scanner")
 
+    # FIX TQS1 — this page previously had no way to scan a real universe at
+    # all: the only options were a hardcoded 20-ticker blue-chip sample
+    # (DEFAULT_TICKERS) or manually typing out hundreds of symbols by hand
+    # into a text box, unlike every other scanning page in the app (Market
+    # Live, Screener, Top Picks), which all offer a one-click Nifty
+    # 50/100/500/Total Market selector via data.universe.get_universe(). That
+    # made TQS feel much more limited in scope than the rest of the platform
+    # for no real reason — the scoring engine itself has nothing 20-ticker
+    # specific about it.
+    _tqs_universe_choice = st.selectbox(
+        "Universe",
+        ["Nifty 50", "Nifty 100", "Nifty 500", "Nifty Total Market (~745)", "Custom (paste below)"],
+        index=0,
+        key="tqs_universe_choice",
+        help="Pick a preset to auto-fill the ticker list, or choose Custom to paste your own.",
+    )
+    _TQS_UNIVERSE_MAP = {
+        "Nifty 50": "nifty50", "Nifty 100": "nifty100",
+        "Nifty 500": "nifty500", "Nifty Total Market (~745)": "niftytotalmarket",
+    }
+    if _tqs_universe_choice in _TQS_UNIVERSE_MAP:
+        from data.universe import get_universe as _tqs_get_universe
+        _tqs_preset_tickers = _tqs_get_universe(_TQS_UNIVERSE_MAP[_tqs_universe_choice])
+        st.caption(f"{len(_tqs_preset_tickers)} tickers in this universe.")
+    else:
+        _tqs_preset_tickers = DEFAULT_TICKERS
+
     col1, col2 = st.columns([3, 1])
     with col1:
-        raw_input = st.text_area(
-            "Tickers (comma or newline separated)",
-            value=", ".join(DEFAULT_TICKERS),
-            height=100,
-        )
+        if _tqs_universe_choice == "Custom (paste below)":
+            raw_input = st.text_area(
+                "Tickers (comma or newline separated)",
+                value=", ".join(DEFAULT_TICKERS),
+                height=100,
+            )
+        else:
+            raw_input = ", ".join(_tqs_preset_tickers)
+            with st.expander(f"Preview tickers ({len(_tqs_preset_tickers)})"):
+                st.caption(raw_input)
     with col2:
         period = st.selectbox("Period", ["1y", "2y", "5y"], index=0, key="scan_period")
         min_tqs = st.slider("Min TQS filter", 0, 90, 0, step=5)
-        run_scan = st.button("▶ Run Scan", use_container_width=True, type="primary")
+        if _tqs_universe_choice != "Custom (paste below)" and len(_tqs_preset_tickers) > 100:
+            st.caption(
+                f"⚠️ Scanning {len(_tqs_preset_tickers)} tickers takes a few "
+                f"minutes even parallelised. Grab a coffee ☕"
+            )
+        run_scan = st.button("▶ Run Scan", width="stretch", type="primary")
 
     if run_scan:
         tickers = [t.strip().upper() for t in raw_input.replace("\n", ",").split(",") if t.strip()]
@@ -107,13 +144,29 @@ with tab_scan:
             rows = []
             prog = st.progress(0, text="Scanning…")
             import logging as _tqs_log
-            for i, t in enumerate(tickers):
-                try:
-                    r = score_ticker(t, period=period)
-                    rows.append(r.as_dict())
-                except Exception as _tqs_e:
-                    _tqs_log.getLogger("dashboard.tqs_scanner").debug("score_ticker(%s) failed: %s — skipped", t, _tqs_e)
-                prog.progress((i + 1) / len(tickers), text=f"Scored {t}")
+            import concurrent.futures as _tqs_cf
+            _tqs_done = 0
+
+            # FIX TQS1 (companion) — score_ticker/scan_universe are both a
+            # plain serial for-loop with no parallelisation, fine for a
+            # 20-ticker sample but impractical for a real universe (500+
+            # tickers would take many minutes one at a time). Parallelising
+            # here matches the pattern already used elsewhere in the app
+            # (Command Centre's Top Picks, backtest/runner.py) so a broader
+            # universe is actually practical to scan, not just selectable.
+            with _tqs_cf.ThreadPoolExecutor(max_workers=16) as _tqs_ex:
+                _tqs_futures = {_tqs_ex.submit(score_ticker, t, period=period): t for t in tickers}
+                for _tqs_fut in _tqs_cf.as_completed(_tqs_futures):
+                    t = _tqs_futures[_tqs_fut]
+                    try:
+                        r = _tqs_fut.result()
+                        rows.append(r.as_dict())
+                    except Exception as _tqs_e:
+                        _tqs_log.getLogger("dashboard.tqs_scanner").debug(
+                            "score_ticker(%s) failed: %s — skipped", t, _tqs_e
+                        )
+                    _tqs_done += 1
+                    prog.progress(_tqs_done / len(tickers), text=f"Scored {_tqs_done}/{len(tickers)}")
             prog.empty()
 
             if not rows:
@@ -249,10 +302,23 @@ with tab_deep:
     with col1:
         # Retrieve the user's active watchlist from session state
         watchlist_tickers = st.session_state.get("watchlist", [])
-        
-        # Combine the watchlist and DEFAULT_TICKERS, removing duplicates
-        available_tickers = list(dict.fromkeys(watchlist_tickers + DEFAULT_TICKERS))
-        
+
+        # FIX TQS1 (companion) — previously only ever offered the watchlist
+        # + the same 20 hardcoded DEFAULT_TICKERS, regardless of what
+        # universe was scanned in the Scanner tab. If a scan has been run,
+        # surface those tickers here too (there's already a manual
+        # custom-ticker override below for anything not listed, so this
+        # dropdown is a convenience, not a hard restriction — but matching
+        # it to the last scan makes the two tabs feel connected instead of
+        # the Scanner supporting hundreds of tickers while Deep Dive's
+        # dropdown still only ever offers the same 20).
+        _scanned_tickers = (
+            list(st.session_state["tqs_scan"]["ticker"])
+            if "tqs_scan" in st.session_state and not st.session_state["tqs_scan"].empty
+            else []
+        )
+        available_tickers = list(dict.fromkeys(watchlist_tickers + _scanned_tickers + DEFAULT_TICKERS))
+
         # 1. Dropdown Selector
         dd_ticker_selected = st.selectbox("Select Ticker", options=available_tickers, index=0)
         
