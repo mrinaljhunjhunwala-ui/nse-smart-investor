@@ -111,7 +111,7 @@ with tab_gap:
                 return ""
 
             styled = _disp.style.map(_color_gap, subset=["Gap %","Day Chg %"])
-            st.dataframe(styled, hide_index=True, use_container_width=True, height=400)
+            st.dataframe(styled, hide_index=True, width="stretch", height=400)
 
             # Gap distribution bar chart
             _gap_chart_df = _gap_df.sort_values("gap_pct")
@@ -132,7 +132,7 @@ with tab_gap:
                 showlegend=False,
                 yaxis=dict(zeroline=True, zerolinecolor="#666", zerolinewidth=2),
             )
-            st.plotly_chart(fig_gap, use_container_width=True)
+            st.plotly_chart(fig_gap, width="stretch")
     else:
         st.info("Click **🔍 Scan Gaps** to load today's gap data.")
 
@@ -321,7 +321,7 @@ with tab_chart:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02),
                     margin=dict(l=0, r=80, t=60, b=0),
                 )
-                st.plotly_chart(fig_ic, use_container_width=True)
+                st.plotly_chart(fig_ic, width="stretch")
 
                 # CPR summary cards
                 if _pivot and _cpr_tc and _cpr_bc:
@@ -417,7 +417,7 @@ with tab_orb:
             _orb_prog.progress((_oi+1)/len(_orb_tickers))
         _orb_prog.empty()
         if _orb_rows:
-            st.dataframe(pd.DataFrame(_orb_rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(_orb_rows), hide_index=True, width="stretch")
 
 # ── TAB 4: LIVE INTRADAY SIGNALS ─────────────────────────────────────────
 with tab_sigs:
@@ -447,7 +447,7 @@ with tab_sigs:
     with _ls_c2:
         _ls_interval = st.selectbox("Interval", ["5m", "15m"], key="ls_interval")
         _ls_btn = st.button("🎯 Scan All", type="primary", key="ls_scan_all",
-                            use_container_width=True)
+                            width="stretch")
 
     if _ls_btn:
         _ls_tickers = [t.strip().upper() for t in _ls_list_raw.split("\n") if t.strip()]
@@ -508,7 +508,7 @@ with tab_sigs:
         # ── Full scan table ────────────────────────────────────────────────
         st.markdown("#### 📋 Full scan")
         if _rows:
-            st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
     else:
         st.info("Add stocks (one per line) and click **🎯 Scan All**.")
 
