@@ -57,7 +57,7 @@ with _ps_tab1:
     with _ps_pc2:
         st.write("")
         st.write("")
-        if st.button("⚡ Use live price", key="ps_fetch", use_container_width=True):
+        if st.button("⚡ Use live price", key="ps_fetch", width="stretch"):
             if _ps_pick != "— none —":
                 _psym = _ps_pick.rsplit("(", 1)[-1].rstrip(")")
                 _psym = _psym if _psym.endswith(".NS") else _psym + ".NS"
