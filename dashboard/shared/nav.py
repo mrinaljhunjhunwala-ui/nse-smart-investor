@@ -286,7 +286,7 @@ def render_sidebar(current: str = None) -> None:
                 _is_cur_page = _is_cur_grp and (_p == current)
                 _label = (f"**{_PAGE_EMOJI[_p]} {_p}**" if _is_cur_page else f"{_PAGE_EMOJI[_p]} {_p}")
                 if st.button(
-                    _label, key=f"navbtn_{_p}", use_container_width=True,
+                    _label, key=f"navbtn_{_p}", width="stretch",
                     disabled=_is_cur_page,
                 ):
                     _nav_to(_p)
@@ -349,7 +349,7 @@ def render_sidebar(current: str = None) -> None:
                     _q_rows.sort(key=lambda x: -x[1])
                     _best, _worst = _q_rows[0], _q_rows[-1]
                     st.caption(f"🏆 {_best[0]} {_best[1]:+.1f}%  ·  🔻 {_worst[0]} {_worst[1]:+.1f}%")
-                if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", use_container_width=True):
+                if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", width="stretch"):
                     st.session_state["_goto_page"] = "🏠 My Portfolio"
                     st.rerun()
             else:
@@ -385,7 +385,7 @@ def render_sidebar(current: str = None) -> None:
             )
             if not _pt_n:
                 st.caption("No open paper positions.")
-            if st.button("📂 Open Paper Trades", key="sb_open_papertrades", use_container_width=True):
+            if st.button("📂 Open Paper Trades", key="sb_open_papertrades", width="stretch"):
                 st.session_state["_goto_page"] = "📂 Paper Trades"
                 st.rerun()
         except Exception as _pte:
@@ -506,7 +506,7 @@ def render_sidebar(current: str = None) -> None:
         ).strip().upper()
     with _wl_btn_col:
         st.write("")
-        _wl_add_clicked = st.button("＋", key="wl_add_btn", use_container_width=True)
+        _wl_add_clicked = st.button("＋", key="wl_add_btn", width="stretch")
 
     if _wl_add_clicked and _wl_input:
         _sym = _wl_input if _wl_input.endswith(".NS") else f"{_wl_input}.NS"
@@ -541,7 +541,7 @@ def render_sidebar(current: str = None) -> None:
         else:
             _wl_c2.markdown('<span style="font-size:11px;color:#777">—</span>',
                             unsafe_allow_html=True)
-        if _wl_c3.button("✕", key=f"wl_rm_{_wl_sym}", use_container_width=True):
+        if _wl_c3.button("✕", key=f"wl_rm_{_wl_sym}", width="stretch"):
             _wl_to_remove = _wl_sym
 
     if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
@@ -591,7 +591,7 @@ def render_sidebar(current: str = None) -> None:
                     f'<div style="border-left:3px solid {_col};background:rgba(255,255,255,.02);'
                     f'border-radius:6px;padding:7px 11px;margin:4px 0;font-size:12px;color:#d0d0d0">'
                     f'{_ic} {_msg}</div>', unsafe_allow_html=True)
-            if st.button("🎯 Go to Command Centre", key="nb_goto_cc", use_container_width=True):
+            if st.button("🎯 Go to Command Centre", key="nb_goto_cc", width="stretch"):
                 st.session_state["_goto_page"] = "🎯 Command Centre"
                 st.rerun()
         else:
