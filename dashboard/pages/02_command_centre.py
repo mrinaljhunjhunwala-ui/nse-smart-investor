@@ -19,6 +19,7 @@ from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
     _home_top_picks,
+    _nifty50_gainers_ticker,
     _score_watchlist,
     _sector_ranks_tuple,
     _sparkline_closes,
@@ -236,13 +237,96 @@ st.markdown(
 )
 
 _cc_ref_c = st.columns([6, 1])[1]
-if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", use_container_width=True):
+if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
     # BUGFIX: this only needs to bust the VIX cache — the previous blanket
     # st.cache_data.clear() also wiped Top Picks (2-min cold scan), watchlist
     # scores, and sparklines, forcing expensive re-fetches the user never
     # asked for just to refresh the VIX/Nifty pulse panel.
     get_vix_info.clear()
     st.rerun()
+
+st.markdown("---")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ── 1b. GAINERS TICKER — scrolling ticker tape, separate from Top Picks ────
+# ═══════════════════════════════════════════════════════════════════════════
+# FIX (was "Suggestions Strip") — the old version had two real bugs:
+#   1. It mixed the user's raw watchlist (which can be down on any given day)
+#      with a few Top Picks candidates, so a strip meant to be "what's worth
+#      a look" could show loss-making stocks — it was never actually
+#      gainers-only, it was "whatever's on your watchlist".
+#   2. It priced everything via trade_utils._portfolio_live_prices, which
+#      fetches tickers one at a time in a for-loop (see FIX TU4 there), not
+#      in parallel — real, measurable load-time cost.
+#
+# Replaced with a proper ticker tape: NIFTY 50 gainers only (today's % change
+# > 0, sorted best-first — see _nifty50_gainers_ticker in cache.py), priced
+# via ONE parallel batch call (get_live_prices_batch, the same Angel-One →
+# threaded-Yahoo path Market Live's snapshot uses) instead of N sequential
+# fetches. It's a real horizontal auto-scrolling marquee — matching "like the
+# ticker for nifty50 stocks" — in a distinct black/amber theme so it reads as
+# a ticker tape, not another card section. Still its own
+# @st.fragment(run_every=60) so it refreshes independently of the rest of the
+# page. Purely informational (no click-through) — a scrolling tape isn't a
+# natural fit for per-item buttons; the full Top Picks section below still
+# offers the "click through to Analyze Stock" workflow.
+
+@st.fragment(run_every=60)
+def _render_gainers_ticker() -> None:
+    _tk_rows = _nifty50_gainers_ticker(n=12)
+
+    if not _tk_rows:
+        st.markdown(
+            "<div style='background:#0a0a0a;border-top:2px solid #ffb300;"
+            "border-bottom:2px solid #ffb300;border-radius:6px;padding:9px 16px;"
+            "font-size:12px;color:#ffb300'>📟 NIFTY 50 GAINERS — none in the "
+            "green right now.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    def _chip(_r: dict) -> str:
+        _lbl = _r["ticker"].replace(".NS", "")
+        return (
+            f'<span style="display:inline-block;margin-right:34px;white-space:nowrap">'
+            f'<span style="color:#eee;font-weight:700;font-size:13px">{_lbl}</span>'
+            f'<span style="color:#888;font-size:12px"> ₹{_r["price"]:,.1f} </span>'
+            f'<span style="color:#3ddc84;font-weight:700;font-size:13px">'
+            f'▲{_r["chg_pct"]:.2f}%</span></span>'
+        )
+
+    # Content duplicated back-to-back so the marquee loops seamlessly at the
+    # 50%-translateX halfway point (standard CSS ticker-tape technique).
+    _tape_html = "".join(_chip(r) for r in _tk_rows) * 2
+
+    st.markdown(
+        f"""
+        <div style="background:#0a0a0a;border-top:2px solid #ffb300;
+                    border-bottom:2px solid #ffb300;border-radius:6px;
+                    padding:9px 0;overflow:hidden;position:relative">
+            <span style="position:absolute;left:12px;top:9px;background:#0a0a0a;
+                        padding-right:10px;color:#ffb300;font-size:10px;
+                        font-weight:700;letter-spacing:1px;z-index:2">
+                📟 NIFTY 50 · TOP GAINERS
+            </span>
+            <div style="white-space:nowrap;display:inline-block;
+                        animation:cc_ticker_scroll 32s linear infinite;
+                        padding-left:220px">
+                {_tape_html}
+            </div>
+        </div>
+        <style>
+        @keyframes cc_ticker_scroll {{
+            0%   {{ transform: translateX(0%); }}
+            100% {{ transform: translateX(-50%); }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_render_gainers_ticker()
 
 st.markdown("---")
 
@@ -317,7 +401,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                    "stay on screen while a refresh runs in the background.")
     with _tp_h2:
         st.write("")
-        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", use_container_width=True)
+        _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
 
     _scan_univ = get_universe("nifty500")
     with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
@@ -546,219 +630,231 @@ _render_top_picks_section(_cc_vix_r, _sec_tuple)
 
 st.markdown("---")
 
-# ── 3. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
-_cc_h1, _cc_h2 = st.columns([5, 2])
-_cc_h1.markdown("### 📌 Open Positions")
-with _cc_h2:
-    _cc_autoclose = st.toggle(
-        "🤖 Auto-close CNC on SL/TP",
-        value=st.session_state.get("auto_close_on", False),
-        key="cc_autoclose_toggle",
-        help="When ON, CNC (delivery) paper trades that hit their target or stop-loss are "
-             "closed automatically on page load (during market hours only, on live prices). "
-             "MIS (intraday) positions are ALWAYS squared off at 15:15 regardless of this toggle. "
-             "Real broker holdings are never auto-traded — only alerted.",
-    )
-    st.session_state["auto_close_on"] = _cc_autoclose
+@st.fragment
+def _render_open_positions_section():
+    """Own fragment so Close Now / autoclose-toggle clicks only rerun this section, not the whole Command Centre page."""
+    # ── 3. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
+    _cc_h1, _cc_h2 = st.columns([5, 2])
+    _cc_h1.markdown("### 📌 Open Positions")
+    with _cc_h2:
+        _cc_autoclose = st.toggle(
+            "🤖 Auto-close CNC on SL/TP",
+            value=st.session_state.get("auto_close_on", False),
+            key="cc_autoclose_toggle",
+            help="When ON, CNC (delivery) paper trades that hit their target or stop-loss are "
+                 "closed automatically on page load (during market hours only, on live prices). "
+                 "MIS (intraday) positions are ALWAYS squared off at 15:15 regardless of this toggle. "
+                 "Real broker holdings are never auto-traded — only alerted.",
+        )
+        st.session_state["auto_close_on"] = _cc_autoclose
+    
+    _cc_sq_banner_shown = False
+    if _is_squareoff_time():
+        _sq_all_closed = _auto_close_breached()
+        _sq_mis_closed = [c for c in _sq_all_closed if c["type"] == "squareoff"]
+        if _sq_mis_closed:
+            _render_autoclose_banner(_sq_mis_closed)
+            # BUGFIX: only live prices need to be re-fetched after an auto-close —
+            # a blanket st.cache_data.clear() here also nuked Top Picks, watchlist
+            # scores, and VIX info on every squareoff event.
+            _portfolio_live_prices.clear()
+            _cc_sq_banner_shown = True
+    
+    if _cc_autoclose:
+        _cc_all_closed = _auto_close_breached()
+        _cc_sltp_closed = [c for c in _cc_all_closed if c["type"] in ("target", "stop")]
+        if _cc_sltp_closed:
+            _render_autoclose_banner(_cc_sltp_closed)
+            _portfolio_live_prices.clear()
+    
+    _cc_open_df = pd.DataFrame()
+    try:
+        _cc_open_df = _store.fetch_open()
+    except Exception as _e:
+        st.caption(f"⚠️ Couldn't load open paper positions ({_e}).")
+    
+    if _cc_open_df.empty:
+        st.info("No open paper positions. Use **Paper Trades** or click **Paper Trade** on any BUY signal below.")
+    else:
+        _cc_syms = tuple(_cc_open_df["ticker"].tolist())
+        _cc_lp   = _portfolio_live_prices(_cc_syms)
+    
+        _cc_alerts, _cc_normal_pos = [], []
+        for _, _ccr in _cc_open_df.iterrows():
+            _ck  = _ccr["ticker"]
+            _cep = float(_ccr.get("price", 0) or 0)
+            _cqt = int(  _ccr.get("quantity", 0) or 0)
+            _csl = float(_ccr.get("sl", 0) or 0) or None
+            _ctp = float(_ccr.get("tp", 0) or 0) or None
+            _clp_d = _cc_lp.get(_ck, {})
+            _ccur  = _clp_d.get("price", _cep)
+            _cunr  = (_ccur - _cep) * _cqt
+            _cunr_pct = (_ccur / _cep - 1) * 100 if _cep > 0 else 0
+    
+            _cst = "normal"
+            if _ctp and _ccur >= _ctp:       _cst = "target_hit"
+            elif _csl and _ccur <= _csl:     _cst = "sl_hit"
+            elif abs(_cunr_pct) >= 5:        _cst = "big_move"
+    
+            _entry_d = dict(id=int(_ccr["id"]), ticker=_ck,
+                            account=str(_ccr.get("account","My Account")),
+                            ep=_cep, cur=_ccur, qty=_cqt, sl=_csl, tp=_ctp,
+                            unr=_cunr, unr_pct=_cunr_pct, status=_cst)
+            (_cc_alerts if _cst != "normal" else _cc_normal_pos).append(_entry_d)
+    
+        if _cc_alerts:
+            st.markdown("**⚠️ These positions need your attention:**")
+    
+        for _pos in _cc_alerts + _cc_normal_pos:
+            _pbdr = {"target_hit": "#26a69a", "sl_hit": "#ef5350", "big_move": "#FF9800",
+                     "normal": "#2196F3"}.get(_pos["status"], "#2196F3")
+            _pbg  = {"target_hit": "#0a2a1a", "sl_hit": "#2a0a0a",  "big_move": "#1a1200",
+                     "normal": "#0d1f3c"}.get(_pos["status"], "#0d1f3c")
+            _purc = "#26a69a" if _pos["unr"] >= 0 else "#ef5350"
+            _palert = {
+                "target_hit": f"🎯 Target hit — close to lock in profit",
+                "sl_hit":     f"🚨 Stop-loss breached — consider exiting to limit loss",
+                "big_move":   f"{'📈' if _pos['unr_pct']>0 else '📉'} Large move — review your stop and target",
+            }.get(_pos["status"], "")
+    
+            _pc1, _pc2 = st.columns([5, 1])
+            with _pc1:
+                st.markdown(
+                    f'<div style="background:{_pbg};border-left:5px solid {_pbdr};'
+                    f'border-radius:10px;padding:11px 15px;margin-bottom:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<div><span style="font-size:16px;font-weight:700;color:#fff">'
+                    f'{_pos["ticker"].replace(".NS","")}</span>'
+                    f'<span style="font-size:11px;color:#888;margin-left:8px">📂 {_pos["account"]}</span>'
+                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
+                    f'Entry ₹{_pos["ep"]:,.2f} → Now ₹{_pos["cur"]:,.2f}</span></div>'
+                    f'<div style="font-size:16px;font-weight:700;color:{_purc}">'
+                    f'₹{_pos["unr"]:+,.0f} ({_pos["unr_pct"]:+.1f}%)</div></div>'
+                    + (f'<div style="font-size:13px;color:#ddd;margin-top:4px">{_palert}</div>' if _palert else '')
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+            with _pc2:
+                if _pos["status"] in ("target_hit", "sl_hit"):
+                    if st.button("Close Now", key=f"cc_cl_{_pos['id']}",
+                                 width="stretch", type="primary"):
+                        paper_close_trade(_pos["id"], _pos["cur"],
+                                          "Closed via Command Centre")
+                        # BUGFIX: closing one position only needs fresh live
+                        # prices for the remaining open positions — it doesn't
+                        # need to invalidate Top Picks or watchlist scores too.
+                        _portfolio_live_prices.clear()
+                        st.rerun()
+    
 
-_cc_sq_banner_shown = False
-if _is_squareoff_time():
-    _sq_all_closed = _auto_close_breached()
-    _sq_mis_closed = [c for c in _sq_all_closed if c["type"] == "squareoff"]
-    if _sq_mis_closed:
-        _render_autoclose_banner(_sq_mis_closed)
-        # BUGFIX: only live prices need to be re-fetched after an auto-close —
-        # a blanket st.cache_data.clear() here also nuked Top Picks, watchlist
-        # scores, and VIX info on every squareoff event.
-        _portfolio_live_prices.clear()
-        _cc_sq_banner_shown = True
-
-if _cc_autoclose:
-    _cc_all_closed = _auto_close_breached()
-    _cc_sltp_closed = [c for c in _cc_all_closed if c["type"] in ("target", "stop")]
-    if _cc_sltp_closed:
-        _render_autoclose_banner(_cc_sltp_closed)
-        _portfolio_live_prices.clear()
-
-_cc_open_df = pd.DataFrame()
-try:
-    _cc_open_df = _store.fetch_open()
-except Exception as _e:
-    st.caption(f"⚠️ Couldn't load open paper positions ({_e}).")
-
-if _cc_open_df.empty:
-    st.info("No open paper positions. Use **Paper Trades** or click **Paper Trade** on any BUY signal below.")
-else:
-    _cc_syms = tuple(_cc_open_df["ticker"].tolist())
-    _cc_lp   = _portfolio_live_prices(_cc_syms)
-
-    _cc_alerts, _cc_normal_pos = [], []
-    for _, _ccr in _cc_open_df.iterrows():
-        _ck  = _ccr["ticker"]
-        _cep = float(_ccr.get("price", 0) or 0)
-        _cqt = int(  _ccr.get("quantity", 0) or 0)
-        _csl = float(_ccr.get("sl", 0) or 0) or None
-        _ctp = float(_ccr.get("tp", 0) or 0) or None
-        _clp_d = _cc_lp.get(_ck, {})
-        _ccur  = _clp_d.get("price", _cep)
-        _cunr  = (_ccur - _cep) * _cqt
-        _cunr_pct = (_ccur / _cep - 1) * 100 if _cep > 0 else 0
-
-        _cst = "normal"
-        if _ctp and _ccur >= _ctp:       _cst = "target_hit"
-        elif _csl and _ccur <= _csl:     _cst = "sl_hit"
-        elif abs(_cunr_pct) >= 5:        _cst = "big_move"
-
-        _entry_d = dict(id=int(_ccr["id"]), ticker=_ck,
-                        account=str(_ccr.get("account","My Account")),
-                        ep=_cep, cur=_ccur, qty=_cqt, sl=_csl, tp=_ctp,
-                        unr=_cunr, unr_pct=_cunr_pct, status=_cst)
-        (_cc_alerts if _cst != "normal" else _cc_normal_pos).append(_entry_d)
-
-    if _cc_alerts:
-        st.markdown("**⚠️ These positions need your attention:**")
-
-    for _pos in _cc_alerts + _cc_normal_pos:
-        _pbdr = {"target_hit": "#26a69a", "sl_hit": "#ef5350", "big_move": "#FF9800",
-                 "normal": "#2196F3"}.get(_pos["status"], "#2196F3")
-        _pbg  = {"target_hit": "#0a2a1a", "sl_hit": "#2a0a0a",  "big_move": "#1a1200",
-                 "normal": "#0d1f3c"}.get(_pos["status"], "#0d1f3c")
-        _purc = "#26a69a" if _pos["unr"] >= 0 else "#ef5350"
-        _palert = {
-            "target_hit": f"🎯 Target hit — close to lock in profit",
-            "sl_hit":     f"🚨 Stop-loss breached — consider exiting to limit loss",
-            "big_move":   f"{'📈' if _pos['unr_pct']>0 else '📉'} Large move — review your stop and target",
-        }.get(_pos["status"], "")
-
-        _pc1, _pc2 = st.columns([5, 1])
-        with _pc1:
-            st.markdown(
-                f'<div style="background:{_pbg};border-left:5px solid {_pbdr};'
-                f'border-radius:10px;padding:11px 15px;margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<div><span style="font-size:16px;font-weight:700;color:#fff">'
-                f'{_pos["ticker"].replace(".NS","")}</span>'
-                f'<span style="font-size:11px;color:#888;margin-left:8px">📂 {_pos["account"]}</span>'
-                f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
-                f'Entry ₹{_pos["ep"]:,.2f} → Now ₹{_pos["cur"]:,.2f}</span></div>'
-                f'<div style="font-size:16px;font-weight:700;color:{_purc}">'
-                f'₹{_pos["unr"]:+,.0f} ({_pos["unr_pct"]:+.1f}%)</div></div>'
-                + (f'<div style="font-size:13px;color:#ddd;margin-top:4px">{_palert}</div>' if _palert else '')
-                + '</div>',
-                unsafe_allow_html=True,
-            )
-        with _pc2:
-            if _pos["status"] in ("target_hit", "sl_hit"):
-                if st.button("Close Now", key=f"cc_cl_{_pos['id']}",
-                             use_container_width=True, type="primary"):
-                    paper_close_trade(_pos["id"], _pos["cur"],
-                                      "Closed via Command Centre")
-                    # BUGFIX: closing one position only needs fresh live
-                    # prices for the remaining open positions — it doesn't
-                    # need to invalidate Top Picks or watchlist scores too.
-                    _portfolio_live_prices.clear()
-                    st.rerun()
-
+_render_open_positions_section()
 st.markdown("---")
 
-# ── 4. WATCHLIST DECISIONS ─────────────────────────────────────────────────
-_cc_wl = st.session_state.get("watchlist", ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"])
-_wh1, _wh2 = st.columns([5, 2])
-with _wh1:
-    st.markdown("### ⭐ Watchlist — What to Do Today")
-    st.caption("Scores update every 5 min. First load takes ~20-40 s while data is fetched.")
-with _wh2:
-    st.write("")
-    if st.button("🔄 Re-score All", key="cc_rescore", use_container_width=True):
-        # BUGFIX: was a blanket st.cache_data.clear() — only the watchlist
-        # scoring cache needs busting for a re-score; Top Picks and VIX info
-        # don't need to be thrown away too.
-        _score_watchlist.clear()
-        st.rerun()
-
-_wl_sector = st.session_state.get("_sec_ranks_cache", ())
-with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 5 min)…"):
-    _cc_scores = _score_watchlist(tuple(_cc_wl), _cc_vix_r, sector_ranks=_wl_sector)
-
-_A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
-            "HOLD": 3, "CAUTION": 4, "EXIT": 5, "UNAVAILABLE": 9}
-_cc_sorted = sorted(_cc_wl, key=lambda t: _A_ORDER.get(
-    _cc_scores.get(t, {}).get("action", "HOLD"), 3))
-
-_ACT_STYLE = {
-    "STRONG BUY": ("#26a69a", "🚀", "#0a2a1a"),
-    "BUY":        ("#4CAF50", "🟢", "#0d2510"),
-    "WATCHLIST":  ("#2196F3", "👀", "#0d1f3c"),
-    "HOLD":       ("#9E9E9E", "🟡", "#1a1a1a"),
-    "CAUTION":    ("#FF9800", "⚠️", "#1a1200"),
-    "EXIT":       ("#ef5350", "🔴", "#2a0a0a"),
-    "UNAVAILABLE":("#555555", "❓", "#111111"),
-}
-
-for _cct in _cc_sorted:
-    _s     = _cc_scores.get(_cct, {})
-    _act   = _s.get("action", "HOLD")
-    _score = float(_s.get("score", 0))
-    _hl    = _s.get("headline", "")
-    _entry = float(_s.get("entry", 0))
-    _sl    = float(_s.get("sl",    0))
-    _tp    = float(_s.get("tp",    0))
-    _rr    = float(_s.get("rr",    0))
-    _price = float(_s.get("price", 0))
-
-    _ac, _ai, _abg = _ACT_STYLE.get(_act, _ACT_STYLE["HOLD"])
-    _lbl   = _cct.replace(".NS", "")
-    _bar_w = min(int(_score), 100)
-
-    _price_block = ""
-    if _act in ("STRONG BUY", "BUY", "EXIT", "WATCHLIST", "CAUTION") and _entry > 0:
-        _sl_str = f'<span style="color:#ef5350">SL ₹{_sl:,.2f}</span>' if _sl else ""
-        _tp_str = f'<span style="color:#26a69a">Target ₹{_tp:,.2f}</span>' if _tp else ""
-        _price_block = (
-            f'<div style="font-size:12px;color:#aaa;margin-top:6px">'
-            f'Entry ₹{_entry:,.2f} &nbsp;·&nbsp; {_sl_str} &nbsp;·&nbsp; {_tp_str}'
-            + (f' &nbsp;·&nbsp; <span style="color:#fff">R:R {_rr:.1f}:1</span>' if _rr > 0 else "")
-            + '</div>'
-        )
-
-    _spark = _sparkline_svg(_sparkline_closes(_cct))   # 30-day mini chart
-    _cc1, _cc2 = st.columns([5, 1])
-    with _cc1:
-        st.markdown(
-            f'<div style="background:{_abg};border-left:5px solid {_ac};'
-            f'border-radius:10px;padding:13px 16px;margin-bottom:6px">'
-            f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-            f'<div style="flex:1">'
-            f'<span style="font-size:18px;font-weight:700;color:#fff">{_lbl}</span>'
-            f'&nbsp;&nbsp;<span style="font-size:14px;font-weight:700;color:{_ac}">{_ai} {_display_label(_act)}</span>'
-            f'<div style="margin:5px 0 3px 0;display:flex;align-items:center;gap:8px">'
-            f'<span style="font-size:12px;font-weight:700;color:{_ac}">{_score:.0f}/100</span>'
-            f'<div style="width:120px;height:6px;background:#333;border-radius:3px">'
-            f'<div style="width:{_bar_w}%;height:100%;background:{_ac};border-radius:3px"></div></div>'
-            f'</div>'
-            f'<div style="font-size:13px;color:#ccc">{_hl}</div>'
-            f'{_price_block}'
-            f'</div>'
-            f'<div style="text-align:right;min-width:124px">'
-            f'<div style="font-size:14px;color:#aaa">{"₹" + f"{_price:,.2f}" if _price else ""}</div>'
-            f'<div style="margin-top:4px">{_spark}</div>'
-            f'</div>'
-            f'</div></div>',
-            unsafe_allow_html=True,
-        )
-    with _cc2:
-        if _act in ("STRONG BUY", "BUY") and _entry > 0:
-            _paper_trade_popover(
-                _cct, _entry, _sl, _tp,
-                reason=f"Command Centre: {_hl[:60]}",
-                key=f"cc_wl_{_cct}",
+@st.fragment
+def _render_watchlist_section(vix_regime: str):
+    """Own fragment so Deep Dive / paper-trade-popover clicks in the watchlist only rerun this section, not the whole Command Centre page. vix_regime is passed explicitly (not closed over) so a fragment-only rerun always scores with the regime value from the last full page load, matching the Top Picks fragment convention above."""
+    # ── 4. WATCHLIST DECISIONS ─────────────────────────────────────────────────
+    _cc_wl = st.session_state.get("watchlist", ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"])
+    _wh1, _wh2 = st.columns([5, 2])
+    with _wh1:
+        st.markdown("### ⭐ Watchlist — What to Do Today")
+        st.caption("Scores update every 5 min. First load takes ~20-40 s while data is fetched.")
+    with _wh2:
+        st.write("")
+        if st.button("🔄 Re-score All", key="cc_rescore", width="stretch"):
+            # BUGFIX: was a blanket st.cache_data.clear() — only the watchlist
+            # scoring cache needs busting for a re-score; Top Picks and VIX info
+            # don't need to be thrown away too.
+            _score_watchlist.clear()
+            st.rerun()
+    
+    _wl_sector = st.session_state.get("_sec_ranks_cache", ())
+    with st.spinner(f"Scoring your {len(_cc_wl)} watchlist stocks (parallel, cached 5 min)…"):
+        _cc_scores = _score_watchlist(tuple(_cc_wl), vix_regime, sector_ranks=_wl_sector)
+    
+    _A_ORDER = {"STRONG BUY": 0, "BUY": 1, "WATCHLIST": 2,
+                "HOLD": 3, "CAUTION": 4, "EXIT": 5, "UNAVAILABLE": 9}
+    _cc_sorted = sorted(_cc_wl, key=lambda t: _A_ORDER.get(
+        _cc_scores.get(t, {}).get("action", "HOLD"), 3))
+    
+    _ACT_STYLE = {
+        "STRONG BUY": ("#26a69a", "🚀", "#0a2a1a"),
+        "BUY":        ("#4CAF50", "🟢", "#0d2510"),
+        "WATCHLIST":  ("#2196F3", "👀", "#0d1f3c"),
+        "HOLD":       ("#9E9E9E", "🟡", "#1a1a1a"),
+        "CAUTION":    ("#FF9800", "⚠️", "#1a1200"),
+        "EXIT":       ("#ef5350", "🔴", "#2a0a0a"),
+        "UNAVAILABLE":("#555555", "❓", "#111111"),
+    }
+    
+    for _cct in _cc_sorted:
+        _s     = _cc_scores.get(_cct, {})
+        _act   = _s.get("action", "HOLD")
+        _score = float(_s.get("score", 0))
+        _hl    = _s.get("headline", "")
+        _entry = float(_s.get("entry", 0))
+        _sl    = float(_s.get("sl",    0))
+        _tp    = float(_s.get("tp",    0))
+        _rr    = float(_s.get("rr",    0))
+        _price = float(_s.get("price", 0))
+    
+        _ac, _ai, _abg = _ACT_STYLE.get(_act, _ACT_STYLE["HOLD"])
+        _lbl   = _cct.replace(".NS", "")
+        _bar_w = min(int(_score), 100)
+    
+        _price_block = ""
+        if _act in ("STRONG BUY", "BUY", "EXIT", "WATCHLIST", "CAUTION") and _entry > 0:
+            _sl_str = f'<span style="color:#ef5350">SL ₹{_sl:,.2f}</span>' if _sl else ""
+            _tp_str = f'<span style="color:#26a69a">Target ₹{_tp:,.2f}</span>' if _tp else ""
+            _price_block = (
+                f'<div style="font-size:12px;color:#aaa;margin-top:6px">'
+                f'Entry ₹{_entry:,.2f} &nbsp;·&nbsp; {_sl_str} &nbsp;·&nbsp; {_tp_str}'
+                + (f' &nbsp;·&nbsp; <span style="color:#fff">R:R {_rr:.1f}:1</span>' if _rr > 0 else "")
+                + '</div>'
             )
-        else:
-            if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
-                         use_container_width=True):
-                st.session_state["analyze_ticker"] = _cct
-                st.session_state["_goto_page"] ="🔍 Analyze Stock"
-                st.rerun()
+    
+        _spark = _sparkline_svg(_sparkline_closes(_cct))   # 30-day mini chart
+        _cc1, _cc2 = st.columns([5, 1])
+        with _cc1:
+            st.markdown(
+                f'<div style="background:{_abg};border-left:5px solid {_ac};'
+                f'border-radius:10px;padding:13px 16px;margin-bottom:6px">'
+                f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+                f'<div style="flex:1">'
+                f'<span style="font-size:18px;font-weight:700;color:#fff">{_lbl}</span>'
+                f'&nbsp;&nbsp;<span style="font-size:14px;font-weight:700;color:{_ac}">{_ai} {_display_label(_act)}</span>'
+                f'<div style="margin:5px 0 3px 0;display:flex;align-items:center;gap:8px">'
+                f'<span style="font-size:12px;font-weight:700;color:{_ac}">{_score:.0f}/100</span>'
+                f'<div style="width:120px;height:6px;background:#333;border-radius:3px">'
+                f'<div style="width:{_bar_w}%;height:100%;background:{_ac};border-radius:3px"></div></div>'
+                f'</div>'
+                f'<div style="font-size:13px;color:#ccc">{_hl}</div>'
+                f'{_price_block}'
+                f'</div>'
+                f'<div style="text-align:right;min-width:124px">'
+                f'<div style="font-size:14px;color:#aaa">{"₹" + f"{_price:,.2f}" if _price else ""}</div>'
+                f'<div style="margin-top:4px">{_spark}</div>'
+                f'</div>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+        with _cc2:
+            if _act in ("STRONG BUY", "BUY") and _entry > 0:
+                _paper_trade_popover(
+                    _cct, _entry, _sl, _tp,
+                    reason=f"Command Centre: {_hl[:60]}",
+                    key=f"cc_wl_{_cct}",
+                )
+            else:
+                if st.button("🔍 Deep Dive", key=f"cc_dd_{_cct}",
+                             width="stretch"):
+                    st.session_state["analyze_ticker"] = _cct
+                    st.session_state["_goto_page"] ="🔍 Analyze Stock"
+                    st.rerun()
+    
+
+
+_render_watchlist_section(_cc_vix_r)
 
 # ── 5. BACKGROUND TELEGRAM ALERTS (viewer) ─────────────────────────────────
 st.markdown("---")
@@ -778,7 +874,7 @@ with st.expander("🔔 Background Alerts (Telegram) — fire even when this app 
             if not _act_df.empty:
                 _al_show = _act_df[["ticker", "condition", "level", "note"]].copy()
                 _al_show.columns = ["Stock", "When price goes", "Level (₹)", "Note"]
-                st.dataframe(_al_show, hide_index=True, use_container_width=True)
+                st.dataframe(_al_show, hide_index=True, width="stretch")
             else:
                 st.info("No active price alerts. All rows are examples (enabled=0). "
                         "Set `enabled=1` on a row in data/alerts.csv to activate it.")
