@@ -660,11 +660,11 @@ def _paper_trade_popover(
     _last_msg = st.session_state.get(_msg_key)
     if _last_msg:
         st.success(_last_msg, icon="✅")
-        if st.button("Dismiss", key=f"{key}_dismiss", use_container_width=True):
+        if st.button("Dismiss", key=f"{key}_dismiss", width="stretch"):
             st.session_state.pop(_msg_key, None)
             st.rerun()
 
-    with st.popover(label, use_container_width=True):
+    with st.popover(label, width="stretch"):
         st.markdown(f"**{_tlbl}** — open paper trade")
 
         # Account selector inside the popover
@@ -740,7 +740,7 @@ def _paper_trade_popover(
             )
         if st.button(
             "✅ Confirm & Open", key=f"{key}_confirm",
-            type="primary", use_container_width=True,
+            type="primary", width="stretch",
         ):
             _id = paper_open_trade(
                 ticker, float(entry_use), int(qty),

@@ -195,7 +195,7 @@ with tab_ao2:
             })
             .map(_color_pnl, subset=["P&L (Rs)", "P&L %"])
         )
-        st.dataframe(_hdf_styled, hide_index=True, use_container_width=True)
+        st.dataframe(_hdf_styled, hide_index=True, width="stretch")
 
         # Export
         _holdings_csv = _hdf.to_csv(index=False).encode("utf-8")
@@ -244,7 +244,7 @@ with tab_ao3:
                      else ("color:#ef5350;font-weight:600" if isinstance(v, (int,float)) else ""),
                      subset=["P&L"]),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
 
 # ── TAB 4: ORDERS & TRADES ─────────────────────────────────────────────────
@@ -279,7 +279,7 @@ with tab_ao4:
             st.dataframe(
                 _odf.style.map(_status_color, subset=["Status"]),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
 
             # Cancel pending order
@@ -314,7 +314,7 @@ with tab_ao4:
                 if isinstance(t.get("qty"), (int, float)) and isinstance(t.get("price"), (int, float))
             )
             st.metric("Total Turnover Today", f"Rs {_total_traded:,.0f}")
-            st.dataframe(_tdf, hide_index=True, use_container_width=True)
+            st.dataframe(_tdf, hide_index=True, width="stretch")
 
     with ord_t3:
         with st.spinner("Fetching GTT rules…"):
@@ -328,7 +328,7 @@ with tab_ao4:
                 ["rule_id", "symbol", "side", "qty", "trigger", "limit_price", "status"]
             ]
             _gdf.columns = ["Rule ID", "Symbol", "Side", "Qty", "Trigger", "Limit", "Status"]
-            st.dataframe(_gdf, hide_index=True, use_container_width=True)
+            st.dataframe(_gdf, hide_index=True, width="stretch")
 
             _active_gtts = [g for g in _gtts if g["status"].lower() in ("new", "active")]
             if _active_gtts:

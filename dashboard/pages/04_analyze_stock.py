@@ -167,7 +167,7 @@ with col_manual:
 with col_clear:
     st.write("")
     st.write("")
-    if st.button("✖ Clear", key="as_clear_search", use_container_width=True):
+    if st.button("✖ Clear", key="as_clear_search", width="stretch"):
         st.session_state["_as_clear_pending"] = True
         st.rerun()
 with col_btn:
@@ -584,16 +584,16 @@ if analyze_btn or _prefill_active or (
                         )
 
             _as_c1, _as_c2, _as_c3, _as_c4 = st.columns([1, 1, 1, 3])
-            if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", use_container_width=True):
+            if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", width="stretch"):
                 _wl = st.session_state.setdefault("watchlist", [])
                 if ticker not in _wl:
                     _wl.append(ticker)
                 st.toast(f"{ticker.replace('.NS','')} added to watchlist ✓")
-            if _as_c2.button("📝 Paper Trade", key=f"as_pt_{ticker}", use_container_width=True):
+            if _as_c2.button("📝 Paper Trade", key=f"as_pt_{ticker}", width="stretch"):
                 st.session_state["_goto_page"]        = "📂 Paper Trades"
                 st.session_state["pt_prefill_ticker"] = ticker
                 st.rerun()
-            if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", use_container_width=True):
+            if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", width="stretch"):
                 # FIX MKT3: was a blanket st.cache_data.clear() — wiped every
                 # other page's cached data too (Top Picks, watchlist scans,
                 # etc.), not just this ticker's analysis. load_ticker_df is

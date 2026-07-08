@@ -124,5 +124,57 @@ def test_close_nonexistent_trade_is_safe(tmp_path, monkeypatch):
     trade_store.close_trade(999999, exit_price=50.0)
 
 
+def test_warm_caches_runs_and_returns_expected_shape(monkeypatch):
+    """FIX GAP2 — dashboard/shared/cache.py's warm_caches() is a scheduled-job
+    entry point (intended for a cron/APScheduler hook before market open) with
+    NO caller anywhere in the codebase: no cron wiring, no page, no test. That
+    meant a typo in its own `return` statement (`return resultso` instead of
+    `return results`) shipped to `main` and sat there undetected until it was
+    caught by hand — nothing in CI ever actually called this function. Mock
+    out the two expensive underlying scans so this runs fast and offline, and
+    assert the actual returned shape, so a NameError/AttributeError/wrong-key
+    regression here fails a real test instead of waiting for a human to
+    notice.
+    """
+    import dashboard.shared.cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "get_vix_info", lambda: {"regime": "normal", "vix": 14.0})
+    monkeypatch.setattr(cache_mod, "_sector_ranks_tuple", lambda: ())
+    monkeypatch.setattr(cache_mod, "_home_top_picks",
+                         lambda vix_regime="normal", n=10, sector_ranks=(): {"buys": [], "sells": []})
+    monkeypatch.setattr(cache_mod, "_tomorrow_watchlist", lambda n=15: {"picks": []})
+
+    result = cache_mod.warm_caches()
+
+    assert set(result.keys()) == {"home_top_picks", "tomorrow_watchlist"}
+    for key in ("home_top_picks", "tomorrow_watchlist"):
+        assert result[key]["ok"] is True
+        assert "seconds" in result[key]
+
+
+def test_warm_caches_degrades_gracefully_on_failure(monkeypatch):
+    """Companion to the above: if one of the two warm-up scans raises, the
+    other must still run, and the failure must be captured in the return
+    value (not raised) — warm_caches() is meant to be safe for an unattended
+    scheduled job to call.
+    """
+    import dashboard.shared.cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "get_vix_info", lambda: {"regime": "normal", "vix": 14.0})
+    monkeypatch.setattr(cache_mod, "_sector_ranks_tuple", lambda: ())
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated scan failure")
+
+    monkeypatch.setattr(cache_mod, "_home_top_picks", _boom)
+    monkeypatch.setattr(cache_mod, "_tomorrow_watchlist", lambda n=15: {"picks": []})
+
+    result = cache_mod.warm_caches()
+
+    assert result["home_top_picks"]["ok"] is False
+    assert "simulated scan failure" in result["home_top_picks"]["error"]
+    assert result["tomorrow_watchlist"]["ok"] is True
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
