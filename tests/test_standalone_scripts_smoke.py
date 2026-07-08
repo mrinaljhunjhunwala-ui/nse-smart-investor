@@ -49,6 +49,7 @@ _STANDALONE_SCRIPTS = [
     ("research.fundamental_quality",        "research/fundamental_quality.py", ["main"]),
     ("research.score_variants",             "research/score_variants.py", ["main"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
+    ("tools.refresh_flags_batch",           "tools/refresh_flags_batch.py", ["main"]),
 ]
 _IDS = [mod for mod, _, _ in _STANDALONE_SCRIPTS]
 
