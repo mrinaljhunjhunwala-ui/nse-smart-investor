@@ -75,7 +75,7 @@ def render_pick_analysis(pick: dict, key_prefix: str):
             st.progress(min(1.0, val / cap if cap else 0.0))
 
         if st.button(f"📊 Open full analysis for {tkr}", key=f"{key_prefix}_full",
-                     use_container_width=True):
+                     width="stretch"):
             st.session_state["analyze_ticker"] = pick["ticker"]
             st.session_state["_goto_page"] = "🔍 Analyze Stock"
             st.rerun()
