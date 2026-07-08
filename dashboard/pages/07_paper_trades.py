@@ -215,7 +215,7 @@ with st.container():
 
     with _acc_c3:
         st.write("")
-        if st.button("➕ Create", key="pt_create_acc", use_container_width=True):
+        if st.button("➕ Create", key="pt_create_acc", width="stretch"):
             if _new_acc_name and _new_acc_name not in _all_accounts:
                 set_paper_account_type(
                     _new_acc_name,
@@ -236,7 +236,7 @@ with st.container():
 
     with _acc_c5:
         st.write("")
-        if st.button("✏️ Rename", key="pt_rename_acc", use_container_width=True):
+        if st.button("✏️ Rename", key="pt_rename_acc", width="stretch"):
             if not _rename_to:
                 st.warning("Enter a new name first.")
             elif _rename_to == _selected_account:
@@ -493,7 +493,7 @@ with st.expander("➕ Open a New Paper Trade", expanded=True):
         # pt_manual_tk directly here, which would raise "cannot be modified
         # after the widget ... is instantiated" since both already rendered
         # above in this same run.
-        if st.button("✖ Clear", key="pt_clear_search", use_container_width=True):
+        if st.button("✖ Clear", key="pt_clear_search", width="stretch"):
             st.session_state["_pt_reset_form"] = True
             st.rerun()
 
@@ -873,13 +873,13 @@ else:
 
             # Action buttons
             _cb1, _cb2, _cb3 = st.columns(3)
-            if _cb1.button(f"❌ Close @ ₹{_cur:,.2f}", key=f"cl_live_{_tid}", use_container_width=True):
+            if _cb1.button(f"❌ Close @ ₹{_cur:,.2f}", key=f"cl_live_{_tid}", width="stretch"):
                 paper_close_trade(_tid, _cur, "Closed at live price")
                 _paper_trade_suggestions.clear(); st.rerun()
-            if _cb2.button(f"🔴 Close @ SL ₹{_sl:,.2f}", key=f"cl_sl_{_tid}", use_container_width=True):
+            if _cb2.button(f"🔴 Close @ SL ₹{_sl:,.2f}", key=f"cl_sl_{_tid}", width="stretch"):
                 paper_close_trade(_tid, _sl, "Stop-loss triggered")
                 _paper_trade_suggestions.clear(); st.rerun()
-            if _cb3.button(f"🎯 Close @ Target ₹{_tp:,.2f}", key=f"cl_tp_{_tid}", use_container_width=True):
+            if _cb3.button(f"🎯 Close @ Target ₹{_tp:,.2f}", key=f"cl_tp_{_tid}", width="stretch"):
                 paper_close_trade(_tid, _tp, "Target reached")
                 _paper_trade_suggestions.clear(); st.rerun()
 
@@ -903,7 +903,7 @@ else:
                     f"Entry ₹{_ep:,.2f} — set SL below and target above entry."
                 )
                 if st.button("💾 Save changes", key=f"esv_{_tid}",
-                             type="primary", use_container_width=True):
+                             type="primary", width="stretch"):
                     paper_edit_trade(_tid, sl=_nsl, tp=_ntp)
                     st.toast(f"Updated SL ₹{_nsl:,.2f} · TP ₹{_ntp:,.2f}", icon="✅")
                     _paper_trade_suggestions.clear(); st.rerun()
