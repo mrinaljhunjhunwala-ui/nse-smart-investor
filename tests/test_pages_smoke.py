@@ -38,6 +38,10 @@ def test_all_pages_present():
     # Guard: the universe of pages the smoke covers (catches an accidentally-dropped page).
     # 17 after merging Macro Dashboard + Market Breadth → Market Internals.
     # 18 after adding 18_tqs_scanner.py.
+    # Still 18 after: merging Market Overview + Market Internals → Overview
+    # (net -1: 09_market_internals.py deleted) and adding 19_quality_watch.py
+    # (net +1) — the two changes cancel out in the page COUNT, but _IDS below
+    # will differ (09_market_internals.py gone, 19_quality_watch.py present).
     assert len(_PAGES) == 18, f"expected 18 pages, found {len(_PAGES)}: {_IDS}"
 
 
