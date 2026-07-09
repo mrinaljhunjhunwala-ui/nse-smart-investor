@@ -13,7 +13,7 @@ import trade_store as _store
 
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
-    "Markets":   ["Market Live", "Market Overview", "Market Internals"],
+    "Markets":   ["Market Live", "Overview", "Quality Watch"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
     "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score"], # <-- Registered under Analysis
@@ -23,8 +23,8 @@ _NAV_GROUPS: dict = {
 _PAGE_EMOJI: dict = {
     "Command Centre":  "🎯",
     "Market Live":     "📡",
-    "Market Overview": "📊",
-    "Market Internals": "🌍",
+    "Overview":        "📊",
+    "Quality Watch":   "🏆",
     "Intraday Trader": "⚡",
     "Smart Screener":  "🔎",
     "OI & Options":    "🏦",
@@ -44,8 +44,8 @@ _PAGE_EMOJI: dict = {
 _PAGE_FULL_NAME: dict = {
     "Command Centre":  "🎯 Command Centre",
     "Market Live":     "📡 Market Live",
-    "Market Overview": "📊 Market Overview",
-    "Market Internals": "🌍 Market Internals",
+    "Overview":        "📊 Overview",
+    "Quality Watch":   "🏆 Quality Watch",
     "Intraday Trader": "⚡ Intraday Trader",
     "Smart Screener":  "🔎 Smart Screener",
     "OI & Options":    "🏦 OI & Options Setup",
@@ -74,11 +74,13 @@ _PAGE_FILE = {
     "Command Centre":  "pages/02_command_centre.py",
     "My Portfolio":    "pages/03_my_portfolio.py",
     "Analyze Stock":   "pages/04_analyze_stock.py",
-    "Market Overview": "pages/05_market_overview.py",
+    "Overview":        "pages/05_market_overview.py",  # MERGE: file kept, content replaced with tabbed Overview
     "Smart Screener":  "pages/06_smart_screener.py",
     "Paper Trades":    "pages/07_paper_trades.py",
     "Backtest":        "pages/08_backtest.py",
-    "Market Internals": "pages/09_market_internals.py",
+    # "Market Internals" removed — merged into "Overview" above.
+    # dashboard/pages/09_market_internals.py should be DELETED from the repo;
+    # its content now lives in Overview's "🌍 Macro" / "📈 Breadth" tabs.
     "OI & Options":    "pages/10_oi_options.py",
     "Intraday Trader": "pages/11_intraday_trader.py",
     "Position Sizer":  "pages/12_position_sizer.py",
@@ -88,6 +90,7 @@ _PAGE_FILE = {
     "Angel One":       "pages/16_angel_one.py",
     "Tomorrow's Watchlist": "pages/17_tomorrow_watchlist.py",
     "Trend Quality Score": "pages/18_tqs_scanner.py", # <-- Added File Route Mapping
+    "Quality Watch":   "pages/19_quality_watch.py",  # NEW: Long-Term Holds + Quality Watch
 }
 
 
@@ -286,7 +289,7 @@ def render_sidebar(current: str = None) -> None:
                 _is_cur_page = _is_cur_grp and (_p == current)
                 _label = (f"**{_PAGE_EMOJI[_p]} {_p}**" if _is_cur_page else f"{_PAGE_EMOJI[_p]} {_p}")
                 if st.button(
-                    _label, key=f"navbtn_{_p}", width="stretch",
+                    _label, key=f"navbtn_{_p}", use_container_width=True,
                     disabled=_is_cur_page,
                 ):
                     _nav_to(_p)
@@ -349,7 +352,7 @@ def render_sidebar(current: str = None) -> None:
                     _q_rows.sort(key=lambda x: -x[1])
                     _best, _worst = _q_rows[0], _q_rows[-1]
                     st.caption(f"🏆 {_best[0]} {_best[1]:+.1f}%  ·  🔻 {_worst[0]} {_worst[1]:+.1f}%")
-                if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", width="stretch"):
+                if st.button("📂 Open Full Portfolio", key="sb_open_portfolio", use_container_width=True):
                     st.session_state["_goto_page"] = "🏠 My Portfolio"
                     st.rerun()
             else:
@@ -385,7 +388,7 @@ def render_sidebar(current: str = None) -> None:
             )
             if not _pt_n:
                 st.caption("No open paper positions.")
-            if st.button("📂 Open Paper Trades", key="sb_open_papertrades", width="stretch"):
+            if st.button("📂 Open Paper Trades", key="sb_open_papertrades", use_container_width=True):
                 st.session_state["_goto_page"] = "📂 Paper Trades"
                 st.rerun()
         except Exception as _pte:
@@ -506,7 +509,7 @@ def render_sidebar(current: str = None) -> None:
         ).strip().upper()
     with _wl_btn_col:
         st.write("")
-        _wl_add_clicked = st.button("＋", key="wl_add_btn", width="stretch")
+        _wl_add_clicked = st.button("＋", key="wl_add_btn", use_container_width=True)
 
     if _wl_add_clicked and _wl_input:
         _sym = _wl_input if _wl_input.endswith(".NS") else f"{_wl_input}.NS"
@@ -541,7 +544,7 @@ def render_sidebar(current: str = None) -> None:
         else:
             _wl_c2.markdown('<span style="font-size:11px;color:#777">—</span>',
                             unsafe_allow_html=True)
-        if _wl_c3.button("✕", key=f"wl_rm_{_wl_sym}", width="stretch"):
+        if _wl_c3.button("✕", key=f"wl_rm_{_wl_sym}", use_container_width=True):
             _wl_to_remove = _wl_sym
 
     if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
@@ -591,7 +594,7 @@ def render_sidebar(current: str = None) -> None:
                     f'<div style="border-left:3px solid {_col};background:rgba(255,255,255,.02);'
                     f'border-radius:6px;padding:7px 11px;margin:4px 0;font-size:12px;color:#d0d0d0">'
                     f'{_ic} {_msg}</div>', unsafe_allow_html=True)
-            if st.button("🎯 Go to Command Centre", key="nb_goto_cc", width="stretch"):
+            if st.button("🎯 Go to Command Centre", key="nb_goto_cc", use_container_width=True):
                 st.session_state["_goto_page"] = "🎯 Command Centre"
                 st.rerun()
         else:
