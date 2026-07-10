@@ -312,14 +312,117 @@ def parse_shareholding_flags(ticker: str, corp_info: dict) -> list[QualitativeFl
     return flags
 
 
-def build_auto_flags(ticker: str, corp_info: dict) -> list[QualitativeFlag]:
-    """Run all auto-detectors against one fetched corp_info payload."""
-    if not corp_info:
-        return []
+def parse_news_flags(
+    ticker: str, news_items: list[dict], max_items: int = 8
+) -> list[QualitativeFlag]:
+    """Turn Google News headlines (data/news_feed.py) into flags. Same
+    conservative keyword classification as parse_announcement_flags — an
+    unmatched headline stays AMBER, not a confident guess. Tagged with a
+    distinct source string so the UI can show these came from news, not
+    an NSE filing (a headline is a weaker signal than a structured filing
+    and should read that way).
+    """
     flags: list[QualitativeFlag] = []
-    flags.extend(parse_shareholding_flags(ticker, corp_info))
-    flags.extend(parse_corporate_action_flags(ticker, corp_info))
-    flags.extend(parse_announcement_flags(ticker, corp_info))
+    now = _dt.datetime.now().isoformat()
+    for item in (news_items or [])[:max_items]:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        source = item.get("source") or "Google News"
+        pub_date = str(item.get("pub_date") or "")[:16] or now[:10]
+        flags.append(QualitativeFlag(
+            ticker=ticker,
+            category=FlagCategory.ANNOUNCEMENT,
+            sentiment=_classify_keyword_sentiment(title),
+            headline=title[:180],
+            source=f"News: {source}",
+            date=pub_date,
+            detected_at=now,
+            detail=item.get("link") or None,
+        ))
+    return flags
+
+
+def parse_rss_flags(ticker: str, rss_items_by_category: dict) -> list[QualitativeFlag]:
+    """Turn NSE's official RSS feed matches (data/nse_rss_feeds.py) into
+    flags. Sentiment defaults are category-aware but still conservative —
+    these are regulator-mandated disclosures, not proof of wrongdoing, so
+    most default to AMBER ("worth a human read") rather than an automatic
+    RED/GREEN judgment call this app isn't positioned to make.
+    """
+    flags: list[QualitativeFlag] = []
+    now = _dt.datetime.now().isoformat()
+
+    # Reason For Encumbrance is the one category treated as RED by default —
+    # a share pledge being newly disclosed is itself the signal, regardless
+    # of the stated reason (the reason is useful context, shown in `detail`,
+    # but doesn't change the fact that a pledge exists).
+    _category_defaults = {
+        "related_party_transactions": (FlagCategory.GOVERNANCE, FlagSentiment.AMBER,
+                                        "NSE RSS: Related Party Transactions"),
+        "reason_for_encumbrance": (FlagCategory.GOVERNANCE, FlagSentiment.RED,
+                                    "NSE RSS: Reason For Encumbrance (pledge)"),
+        "sast_regulation_29": (FlagCategory.GOVERNANCE, FlagSentiment.AMBER,
+                                "NSE RSS: SAST Regulation 29 (substantial acquisition)"),
+        "sast_regulation_31": (FlagCategory.GOVERNANCE, FlagSentiment.AMBER,
+                                "NSE RSS: SAST Regulation 31 (continuing disclosure)"),
+        "corporate_governance": (FlagCategory.GOVERNANCE, FlagSentiment.AMBER,
+                                  "NSE RSS: Corporate Governance filing"),
+        "insider_trading": (FlagCategory.GOVERNANCE, FlagSentiment.AMBER,
+                             "NSE RSS: Insider Trading disclosure"),
+    }
+
+    for category, items in (rss_items_by_category or {}).items():
+        category_cfg = _category_defaults.get(category)
+        if not category_cfg:
+            continue
+        cat, default_sentiment, source_label = category_cfg
+        for item in items:
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            # Still run the keyword classifier over the title — an
+            # unambiguous negative keyword (e.g. "default", "resignation"
+            # showing up inside a governance filing title) should override
+            # the category default, same discipline as announcement/news
+            # parsing. Otherwise fall back to the category's default.
+            keyword_sentiment = _classify_keyword_sentiment(title)
+            sentiment = (keyword_sentiment if keyword_sentiment == FlagSentiment.RED
+                        else default_sentiment)
+            pub_date = str(item.get("pub_date") or "")[:16] or now[:10]
+            flags.append(QualitativeFlag(
+                ticker=ticker,
+                category=cat,
+                sentiment=sentiment,
+                headline=title[:180],
+                source=source_label,
+                date=pub_date,
+                detected_at=now,
+                detail=item.get("description") or None,
+            ))
+    return flags
+
+
+def build_auto_flags(
+    ticker: str, corp_info: dict, news_items: Optional[list] = None,
+    rss_items_by_category: Optional[dict] = None,
+) -> list[QualitativeFlag]:
+    """Run all auto-detectors against fetched data. Three independent
+    sources, each may be {}/[]/None on its own failure without suppressing
+    the others: corp_info (data/nse_corp_info.py — WAF-prone JSON API),
+    news_items (data/news_feed.py — Google News RSS), rss_items_by_category
+    (data/nse_rss_feeds.py — NSE's own official syndication feeds, a
+    different NSE subdomain with a much lighter WAF profile than corp_info).
+    """
+    flags: list[QualitativeFlag] = []
+    if corp_info:
+        flags.extend(parse_shareholding_flags(ticker, corp_info))
+        flags.extend(parse_corporate_action_flags(ticker, corp_info))
+        flags.extend(parse_announcement_flags(ticker, corp_info))
+    if news_items:
+        flags.extend(parse_news_flags(ticker, news_items))
+    if rss_items_by_category:
+        flags.extend(parse_rss_flags(ticker, rss_items_by_category))
     return flags
 
 
@@ -353,15 +456,24 @@ def load_flags(ticker: str, kv_get: KvGet, as_of: Optional[_dt.date] = None,
 
 def refresh_all_flags(
     ticker: str, kv_get: KvGet, kv_set: KvSet,
-    corp_info: Optional[dict] = None, user_id: str = "default",
+    corp_info: Optional[dict] = None,
+    news_items: Optional[list] = None,
+    rss_items_by_category: Optional[dict] = None,
+    company_name: Optional[str] = None,
+    user_id: str = "default",
 ) -> list[QualitativeFlag]:
-    """Rebuild the flag set for a ticker: fetch fresh auto-flags, merge with
-    any existing manual flags (manual flags are preserved, not overwritten —
-    they're analyst judgment calls, not something a refresh should clobber).
+    """Rebuild the flag set for a ticker: fetch fresh auto-flags from THREE
+    independent sources — NSE's JSON API (data/nse_corp_info.py), Google
+    News (data/news_feed.py), and NSE's official RSS syndication feeds
+    (data/nse_rss_feeds.py) — merge with any existing manual flags (manual
+    flags are preserved, not overwritten — they're analyst judgment calls,
+    not something a refresh should clobber).
 
-    If corp_info is not passed in, fetches it via data/nse_corp_info.py.
-    Fetch failures degrade to [] auto-flags rather than raising — a flag
-    refresh failing should never block the rest of the analysis page.
+    All three sources are fetched independently and each degrades to empty
+    on its own failure — if the JSON API is blocked (common on cloud hosts)
+    this still returns news- and RSS-derived flags, and so on for any
+    combination. No fetch failure raises; a flag refresh failing should
+    never block the rest of the page.
     """
     existing = load_flags(ticker, kv_get, user_id=user_id)
     manual = [f for f in existing if f.is_manual]
@@ -374,9 +486,25 @@ def refresh_all_flags(
             _log.warning("refresh_all_flags(%s): nse_corp_info fetch failed: %s", ticker, e)
             corp_info = {}
 
+    if news_items is None:
+        try:
+            from data.news_feed import fetch_news
+            news_items = fetch_news(ticker, company_name=company_name)
+        except Exception as e:
+            _log.warning("refresh_all_flags(%s): news_feed fetch failed: %s", ticker, e)
+            news_items = []
+
+    if rss_items_by_category is None:
+        try:
+            from data.nse_rss_feeds import get_all_relevant_items
+            rss_items_by_category = get_all_relevant_items(ticker, company_name=company_name)
+        except Exception as e:
+            _log.warning("refresh_all_flags(%s): nse_rss_feeds fetch failed: %s", ticker, e)
+            rss_items_by_category = {}
+
     fresh: list[QualitativeFlag] = []
     fresh.extend(build_regulatory_flags(ticker))
-    fresh.extend(build_auto_flags(ticker, corp_info))
+    fresh.extend(build_auto_flags(ticker, corp_info, news_items, rss_items_by_category))
 
     merged = manual + fresh
     save_flags(ticker, merged, kv_set, user_id=user_id)
