@@ -22,6 +22,25 @@ from analysis.qualitative_flags import (              # noqa: E402
     parse_news_flags, parse_rss_flags, parse_shareholding_flags,
     refresh_all_flags, save_flags, summarize_flags,
 )
+import data.news_feed as _news_feed_mod              # noqa: E402
+import data.nse_rss_feeds as _nse_rss_feeds_mod       # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_level_caches():
+    """nse_rss_feeds._feed_cache and news_feed._news_cache are process-global
+    TTLCache singletons (12h / 2h TTL) with no reset hook. Any test in this
+    file that calls fetch_feed()/fetch_news() with the default use_cache=True
+    leaves state behind that can silently bypass a later test's requests.get
+    mock (a cache HIT never reaches the mocked function). Clearing both
+    before every test makes each test's mock authoritative regardless of
+    execution order — cheap insurance against exactly the kind of flake this
+    module's tests are meant to prevent."""
+    _nse_rss_feeds_mod._feed_cache.clear()
+    _news_feed_mod._news_cache.clear()
+    yield
+    _nse_rss_feeds_mod._feed_cache.clear()
+    _news_feed_mod._news_cache.clear()
 
 
 # ── fake kv store (mirrors trade_store.kv_get/kv_set signatures exactly) ──
@@ -240,8 +259,13 @@ def test_refresh_all_flags_preserves_manual_and_merges_fresh():
 
 
 def test_refresh_all_flags_degrades_gracefully_on_fetch_failure(monkeypatch):
-    """If the NSE fetcher raises, refresh should not blow up the caller —
-    it should fall back to an empty auto-flag set and keep manual flags."""
+    """If the NSE corp_info fetcher raises, refresh should not blow up the
+    caller — it should fall back to an empty auto-flag set and keep manual
+    flags. Isolated to the corp_info path only (news/RSS are passed as
+    already-empty, not left as None) so this doesn't depend on live network
+    for the other two independent sources — see
+    test_refresh_all_flags_degrades_gracefully_when_news_fetch_fails and
+    ..._when_rss_fetch_fails for those paths individually."""
     kv = _FakeKv()
     manual = manual_flag("ABDL.NS", FlagCategory.NARRATIVE, FlagSentiment.GREEN, "JV")
     save_flags("ABDL.NS", [manual], kv.set)
@@ -252,7 +276,10 @@ def test_refresh_all_flags_degrades_gracefully_on_fetch_failure(monkeypatch):
     import data.nse_corp_info as nci
     monkeypatch.setattr(nci, "get_corp_info", _boom)
 
-    merged = refresh_all_flags("ABDL.NS", kv.get, kv.set, corp_info=None)
+    merged = refresh_all_flags(
+        "ABDL.NS", kv.get, kv.set, corp_info=None,
+        news_items=[], rss_items_by_category={},
+    )
     assert len(merged) == 1
     assert merged[0].headline == "JV"
 
