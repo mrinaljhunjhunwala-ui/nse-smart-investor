@@ -19,7 +19,8 @@ from analysis.qualitative_flags import (              # noqa: E402
     FlagCategory, FlagSentiment, QualitativeFlag,
     build_auto_flags, load_flags, manual_flag,
     parse_announcement_flags, parse_corporate_action_flags,
-    parse_shareholding_flags, refresh_all_flags, save_flags, summarize_flags,
+    parse_news_flags, parse_rss_flags, parse_shareholding_flags,
+    refresh_all_flags, save_flags, summarize_flags,
 )
 
 
@@ -267,3 +268,330 @@ def test_summarize_flags_counts_by_sentiment():
     ]
     counts = summarize_flags(flags)
     assert counts == {"green": 2, "red": 1, "amber": 1}
+
+
+# ── news-based flags (QF4) ─────────────────────────────────────────────────
+
+def test_news_flags_negative_keyword_flags_red():
+    news_items = [
+        {"title": "Company faces show cause notice from regulator",
+         "link": "http://x", "pub_date": "2026-07-01", "source": "Moneycontrol"},
+    ]
+    flags = parse_news_flags("ABDL.NS", news_items)
+    assert len(flags) == 1
+    assert flags[0].sentiment == FlagSentiment.RED
+    assert flags[0].source == "News: Moneycontrol"
+
+
+def test_news_flags_positive_keyword_flags_green():
+    news_items = [
+        {"title": "Company announces buyback of shares", "source": "ET"},
+    ]
+    flags = parse_news_flags("ABDL.NS", news_items)
+    assert flags[0].sentiment == FlagSentiment.GREEN
+
+
+def test_news_flags_unmatched_defaults_amber():
+    news_items = [{"title": "Company opens new office in Pune", "source": "ET"}]
+    flags = parse_news_flags("ABDL.NS", news_items)
+    assert flags[0].sentiment == FlagSentiment.AMBER
+
+
+def test_news_flags_empty_title_skipped():
+    assert parse_news_flags("ABDL.NS", [{"title": "", "source": "ET"}]) == []
+
+
+def test_news_flags_respects_max_items():
+    items = [{"title": f"Update {i}", "source": "ET"} for i in range(20)]
+    flags = parse_news_flags("ABDL.NS", items, max_items=5)
+    assert len(flags) == 5
+
+
+def test_news_flags_missing_source_defaults_google_news():
+    flags = parse_news_flags("ABDL.NS", [{"title": "Some headline"}])
+    assert flags[0].source == "News: Google News"
+
+
+def test_build_auto_flags_combines_nse_and_news_independently():
+    corp_info = {"corporate_actions": {"data": [
+        {"symbol": "ABDL", "exdate": "2026-07-01", "purpose": "Buyback of Shares"}
+    ]}}
+    news_items = [{"title": "Resignation of CFO", "source": "ET"}]
+    flags = build_auto_flags("ABDL.NS", corp_info, news_items)
+    sentiments = {f.sentiment for f in flags}
+    assert FlagSentiment.GREEN in sentiments   # from corp action
+    assert FlagSentiment.RED in sentiments     # from news
+
+
+def test_build_auto_flags_news_works_when_nse_empty():
+    """The key resilience property: NSE returning {} (e.g. blocked) must
+    not suppress news-derived flags."""
+    news_items = [{"title": "Company announces dividend", "source": "ET"}]
+    flags = build_auto_flags("ABDL.NS", {}, news_items)
+    assert len(flags) == 1
+    assert flags[0].sentiment == FlagSentiment.GREEN
+
+
+def test_build_auto_flags_nse_works_when_news_empty():
+    corp_info = {"corporate_actions": {"data": [
+        {"symbol": "ABDL", "exdate": "2026-07-01", "purpose": "Buyback of Shares"}
+    ]}}
+    flags = build_auto_flags("ABDL.NS", corp_info, news_items=None)
+    assert len(flags) == 1
+
+
+def test_refresh_all_flags_uses_passed_news_items():
+    kv = _FakeKv()
+    news_items = [{"title": "Promoter pledge increased sharply", "source": "ET"}]
+    merged = refresh_all_flags(
+        "ABDL.NS", kv.get, kv.set, corp_info={}, news_items=news_items,
+    )
+    assert any("pledge" in f.headline.lower() for f in merged)
+
+
+def test_refresh_all_flags_fetches_news_when_not_provided(monkeypatch):
+    """When news_items isn't passed explicitly, refresh_all_flags should
+    call data.news_feed.fetch_news itself."""
+    kv = _FakeKv()
+
+    def _fake_fetch_news(ticker, company_name=None):
+        return [{"title": "Company announces buyback of shares", "source": "ET"}]
+
+    import data.news_feed as nf
+    monkeypatch.setattr(nf, "fetch_news", _fake_fetch_news)
+
+    merged = refresh_all_flags("ABDL.NS", kv.get, kv.set, corp_info={})
+    assert any(f.sentiment == FlagSentiment.GREEN for f in merged)
+
+
+def test_refresh_all_flags_degrades_gracefully_when_news_fetch_fails(monkeypatch):
+    kv = _FakeKv()
+    manual = manual_flag("ABDL.NS", FlagCategory.NARRATIVE, FlagSentiment.GREEN, "JV")
+    save_flags("ABDL.NS", [manual], kv.set)
+
+    def _boom(ticker, company_name=None):
+        raise ConnectionError("news feed unreachable")
+
+    import data.news_feed as nf
+    monkeypatch.setattr(nf, "fetch_news", _boom)
+
+    merged = refresh_all_flags("ABDL.NS", kv.get, kv.set, corp_info={})
+    assert len(merged) == 1
+    assert merged[0].headline == "JV"
+
+
+# ── data/news_feed.py RSS parsing (no live network) ─────────────────────────
+
+_SAMPLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>Google News</title>
+<item>
+<title>Allied Blenders announces buyback of shares - Moneycontrol</title>
+<link>https://news.google.com/rss/articles/xyz1</link>
+<pubDate>Mon, 01 Jul 2026 10:00:00 GMT</pubDate>
+<source url="https://moneycontrol.com">Moneycontrol</source>
+</item>
+<item>
+<title>Allied Blenders Q1 results announced - Economic Times</title>
+<link>https://news.google.com/rss/articles/xyz2</link>
+<pubDate>Sun, 30 Jun 2026 08:00:00 GMT</pubDate>
+<source url="https://economictimes.com">Economic Times</source>
+</item>
+</channel>
+</rss>"""
+
+
+def test_news_feed_fetch_parses_rss_items(monkeypatch):
+    import data.news_feed as nf
+
+    class _FakeResp:
+        content = _SAMPLE_RSS.encode("utf-8")
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(nf.requests, "get", lambda *a, **k: _FakeResp())
+    items = nf.fetch_news("ABDL.NS", company_name="Allied Blenders", use_cache=False)
+    assert len(items) == 2
+    assert "buyback" in items[0]["title"].lower()
+    assert items[0]["source"] == "Moneycontrol"
+    diag = nf.get_last_diagnostic("ABDL.NS")
+    assert diag["ok"] is True
+
+
+def test_news_feed_fetch_handles_request_failure(monkeypatch):
+    import data.news_feed as nf
+    import requests as _requests
+
+    def _boom(*a, **k):
+        raise _requests.ConnectionError("no route to host")
+
+    monkeypatch.setattr(nf.requests, "get", _boom)
+    items = nf.fetch_news("ABDL.NS", use_cache=False)
+    assert items == []
+    diag = nf.get_last_diagnostic("ABDL.NS")
+    assert diag["ok"] is False
+
+
+def test_news_feed_build_query_prefers_company_name():
+    import data.news_feed as nf
+    q = nf._build_query("Allied Blenders and Distillers", "ABDL.NS")
+    assert "Allied Blenders" in q
+    assert "NSE" in q
+
+
+def test_news_feed_build_query_falls_back_to_symbol():
+    import data.news_feed as nf
+    q = nf._build_query(None, "ABDL.NS")
+    assert "ABDL" in q
+
+
+# ── RSS feed flags (QF5) ─────────────────────────────────────────────────
+
+def test_rss_flags_encumbrance_defaults_red():
+    items = {"reason_for_encumbrance": [
+        {"title": "ABDL - Reason for encumbrance disclosed", "description": "Loan against shares"}
+    ]}
+    flags = parse_rss_flags("ABDL.NS", items)
+    assert len(flags) == 1
+    assert flags[0].sentiment == FlagSentiment.RED
+    assert flags[0].category == FlagCategory.GOVERNANCE
+    assert "NSE RSS" in flags[0].source
+
+
+def test_rss_flags_related_party_defaults_amber():
+    items = {"related_party_transactions": [
+        {"title": "ABDL - Related party transaction disclosure", "description": ""}
+    ]}
+    flags = parse_rss_flags("ABDL.NS", items)
+    assert flags[0].sentiment == FlagSentiment.AMBER
+
+
+def test_rss_flags_keyword_override_forces_red():
+    """Even a category that defaults AMBER should escalate to RED if the
+    title itself contains an unambiguous negative keyword."""
+    items = {"corporate_governance": [
+        {"title": "ABDL - Resignation of Independent Director", "description": ""}
+    ]}
+    flags = parse_rss_flags("ABDL.NS", items)
+    assert flags[0].sentiment == FlagSentiment.RED
+
+
+def test_rss_flags_unknown_category_ignored():
+    items = {"not_a_real_category": [{"title": "Something", "description": ""}]}
+    assert parse_rss_flags("ABDL.NS", items) == []
+
+
+def test_rss_flags_empty_dict_returns_empty():
+    assert parse_rss_flags("ABDL.NS", {}) == []
+
+
+def test_build_auto_flags_combines_all_three_sources():
+    corp_info = {"corporate_actions": {"data": [
+        {"symbol": "ABDL", "exdate": "2026-07-01", "purpose": "Buyback of Shares"}
+    ]}}
+    news_items = [{"title": "Resignation of CFO", "source": "ET"}]
+    rss_items = {"reason_for_encumbrance": [
+        {"title": "ABDL - Promoter pledge disclosed", "description": ""}
+    ]}
+    flags = build_auto_flags("ABDL.NS", corp_info, news_items, rss_items)
+    sources = {f.source.split(":")[0].strip() for f in flags}
+    assert len(flags) == 3
+
+
+def test_refresh_all_flags_uses_passed_rss_items():
+    kv = _FakeKv()
+    rss_items = {"reason_for_encumbrance": [
+        {"title": "ABDL - encumbrance notice", "description": ""}
+    ]}
+    merged = refresh_all_flags(
+        "ABDL.NS", kv.get, kv.set, corp_info={}, news_items=[],
+        rss_items_by_category=rss_items,
+    )
+    assert any(f.sentiment == FlagSentiment.RED for f in merged)
+
+
+def test_refresh_all_flags_degrades_gracefully_when_rss_fetch_fails(monkeypatch):
+    kv = _FakeKv()
+    manual = manual_flag("ABDL.NS", FlagCategory.NARRATIVE, FlagSentiment.GREEN, "JV")
+    save_flags("ABDL.NS", [manual], kv.set)
+
+    def _boom(ticker, company_name=None):
+        raise ConnectionError("rss feed host unreachable")
+
+    import data.nse_rss_feeds as rf
+    monkeypatch.setattr(rf, "get_all_relevant_items", _boom)
+
+    merged = refresh_all_flags("ABDL.NS", kv.get, kv.set, corp_info={}, news_items=[])
+    assert len(merged) == 1
+    assert merged[0].headline == "JV"
+
+
+# ── data/nse_rss_feeds.py parsing (no live network) ─────────────────────────
+
+_SAMPLE_FEED_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>NSE Related Party Transactions</title>
+<item>
+<title>Allied Blenders and Distillers Limited - Related Party Transaction</title>
+<link>https://nseindia.com/some/link</link>
+<description>Disclosure under Regulation 23</description>
+<pubDate>Mon, 01 Jul 2026 10:00:00 GMT</pubDate>
+</item>
+<item>
+<title>Reliance Industries Limited - Related Party Transaction</title>
+<link>https://nseindia.com/other/link</link>
+<description>Disclosure under Regulation 23</description>
+<pubDate>Sun, 30 Jun 2026 08:00:00 GMT</pubDate>
+</item>
+</channel>
+</rss>"""
+
+
+def test_nse_rss_feeds_fetch_parses_items(monkeypatch):
+    import data.nse_rss_feeds as rf
+
+    class _FakeResp:
+        content = _SAMPLE_FEED_XML.encode("utf-8")
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(rf.requests, "get", lambda *a, **k: _FakeResp())
+    items = rf.fetch_feed("related_party_transactions", use_cache=False)
+    assert len(items) == 2
+    diag = rf.get_last_diagnostic("related_party_transactions")
+    assert diag["ok"] is True
+
+
+def test_nse_rss_feeds_filters_by_company(monkeypatch):
+    import data.nse_rss_feeds as rf
+
+    class _FakeResp:
+        content = _SAMPLE_FEED_XML.encode("utf-8")
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(rf.requests, "get", lambda *a, **k: _FakeResp())
+    matched = rf.get_items_for_company(
+        "related_party_transactions", "ABDL.NS",
+        company_name="Allied Blenders and Distillers",
+    )
+    assert len(matched) == 1
+    assert "Allied Blenders" in matched[0]["title"]
+
+
+def test_nse_rss_feeds_handles_request_failure(monkeypatch):
+    import data.nse_rss_feeds as rf
+    import requests as _requests
+
+    def _boom(*a, **k):
+        raise _requests.ConnectionError("no route to host")
+
+    monkeypatch.setattr(rf.requests, "get", _boom)
+    items = rf.fetch_feed("related_party_transactions", use_cache=False)
+    assert items == []
+    diag = rf.get_last_diagnostic("related_party_transactions")
+    assert diag["ok"] is False
+
+
+def test_nse_rss_feeds_unknown_category_returns_empty():
+    import data.nse_rss_feeds as rf
+    assert rf.fetch_feed("not_a_real_category") == []
