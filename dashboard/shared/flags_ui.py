@@ -83,9 +83,14 @@ def get_cached_flags(ticker: str, company_name: Optional[str] = None) -> list[di
     user reopens the page later; nse_corp_info's own cache prevents that
     refresh from re-hitting NSE if the raw payload is still fresh.
 
-    company_name improves news-search accuracy (data/news_feed.py) — pass
-    it when available (e.g. cs.company_name from the score/fundamentals
-    result); falls back to the bare ticker symbol if not given.
+    Pulls from THREE independent sources under the hood (see
+    analysis/qualitative_flags.refresh_all_flags): NSE's JSON API, Google
+    News, and NSE's official RSS syndication feeds — each degrades on its
+    own failure without suppressing the others.
+
+    company_name improves news/RSS-search accuracy — pass it when
+    available (e.g. cs.company_name from the score/fundamentals result);
+    falls back to the bare ticker symbol if not given.
     """
     try:
         flags = refresh_all_flags(
@@ -174,23 +179,25 @@ def render_flag_strip(ticker: str, company_name: Optional[str] = None) -> None:
         if nse_blocked or news_blocked:
             lines = []
             if nse_blocked:
-                lines.append(f"**NSE fetch:** {nse_diag.get('reason', 'unknown error')}")
+                lines.append(f"**NSE API fetch:** {nse_diag.get('reason', 'unknown error')}")
             if news_blocked:
                 lines.append(f"**News fetch:** {news_diag.get('reason', 'unknown error')}")
             st.warning(
                 "⚠️ Auto-fetch had trouble for this ticker:\n\n" + "\n\n".join(lines) +
-                "\n\nThis is a fetch problem, not necessarily an absence of "
-                "real flags — add a manual note below if you know of "
-                "something relevant in the meantime."
+                "\n\nNSE's official RSS feeds (a separate, usually more "
+                "reliable channel) are checked automatically too — this "
+                "warning means the other source(s) had trouble, not "
+                "necessarily everything. This is a fetch problem, not "
+                "necessarily an absence of real flags — add a manual note "
+                "below if you know of something relevant in the meantime."
             )
         else:
             st.info(
-                "No flags on record for this ticker yet — either nothing has "
-                "moved recently, or neither NSE nor recent news turned up "
-                "anything. This is not the same as \"all clear\"; add a "
-                "manual note below if you know of something the auto-scan "
-                "wouldn't catch (e.g. a brand JV, or a state excise policy "
-                "change)."
+                "No flags on record for this ticker yet — nothing turned up "
+                "across NSE's API, NSE's RSS feeds, or recent news. This is "
+                "not the same as \"all clear\"; add a manual note below if "
+                "you know of something the auto-scan wouldn't catch (e.g. "
+                "a brand JV, or a state excise policy change)."
             )
     else:
         badge_line = "  ".join(
