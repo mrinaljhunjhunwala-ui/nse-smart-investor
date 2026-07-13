@@ -33,13 +33,41 @@ _sc_search_options = sorted(
     f"{name}  ({sym.replace('.NS', '')})"
     for name, sym in STOCK_SEARCH_MAP.items()
 )
-_sc_c1, _sc_c2, _sc_c3 = st.columns([3, 2, 1])
+_SC_PLACEHOLDER = "— type to search —"
+
+# FIX SC1: the dropdown and the manual ticker box were independent widgets
+# with no relationship — picking a dropdown stock left old text sitting in
+# the manual box, which silently took priority in the "Resolve final
+# symbol" logic below. That meant picking a NEW stock from the dropdown
+# had no visible effect at all if the manual box still held something from
+# an earlier search — the checklist kept running against the old ticker.
+# Neither field cleared on its own. Same on_change + clear-pending pattern
+# already used (and verified) in dashboard/pages/04_analyze_stock.py's
+# search boxes: using one field clears the other, and "✖ Clear" resets both.
+# The clear-pending flag (rather than writing session_state directly in the
+# button block) is required because Streamlit raises "cannot be modified
+# after the widget ... is instantiated" if a widget's key is written to
+# after that widget has already rendered in the same script run.
+if st.session_state.pop("_sc_clear_pending", False):
+    st.session_state["sc_search_select"] = _SC_PLACEHOLDER
+    st.session_state["sc_manual_input"] = ""
+
+def _sc_on_dropdown_change():
+    if st.session_state.get("sc_search_select", _SC_PLACEHOLDER) != _SC_PLACEHOLDER:
+        st.session_state["sc_manual_input"] = ""
+
+def _sc_on_manual_change():
+    if st.session_state.get("sc_manual_input", "").strip():
+        st.session_state["sc_search_select"] = _SC_PLACEHOLDER
+
+_sc_c1, _sc_c2, _sc_c3, _sc_c4 = st.columns([3, 2, 1, 1])
 with _sc_c1:
     _sc_selected = st.selectbox(
         "Search by company name or symbol",
-        options=["— type to search —"] + _sc_search_options,
+        options=[_SC_PLACEHOLDER] + _sc_search_options,
         index=0,
         key="sc_search_select",
+        on_change=_sc_on_dropdown_change,
     )
 with _sc_c2:
     _sc_manual = st.text_input(
@@ -47,8 +75,15 @@ with _sc_c2:
         value="",
         placeholder="e.g. INFY or INFY.NS",
         key="sc_manual_input",
+        on_change=_sc_on_manual_change,
     ).strip().upper()
 with _sc_c3:
+    st.write("")
+    st.write("")
+    if st.button("✖ Clear", key="sc_clear_search", use_container_width=True):
+        st.session_state["_sc_clear_pending"] = True
+        st.rerun()
+with _sc_c4:
     st.write("")
     st.write("")
     _sc_btn = st.button("✅ Run Checklist", type="primary", key="sc_btn")
@@ -57,7 +92,7 @@ with _sc_c3:
 _sc_sym = ""
 if _sc_manual:
     _sc_sym = _sc_manual if _sc_manual.endswith(".NS") else _sc_manual + ".NS"
-elif _sc_selected != "— type to search —":
+elif _sc_selected != _SC_PLACEHOLDER:
     _sc_raw = _sc_selected.rsplit("(", 1)[-1].rstrip(")")
     _sc_sym = _sc_raw if _sc_raw.endswith(".NS") else _sc_raw + ".NS"
 _sc_ticker = _sc_sym.replace(".NS", "")
