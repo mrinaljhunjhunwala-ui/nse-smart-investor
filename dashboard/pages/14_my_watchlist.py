@@ -74,6 +74,23 @@ def _wl_get_all():
     return pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", _wl_con)
 
 # Add to watchlist form
+# FIX WL2 — none of these four fields cleared after a successful add.
+# st.rerun() alone doesn't reset session_state: the widgets are keyed
+# ("wl_new_tkr" etc.), so on the next run Streamlit re-displays whatever's
+# already in session_state[key] rather than an empty default. Directly
+# clearing session_state for these keys inside the button's own block
+# would raise "cannot be modified after the widget ... is instantiated"
+# since the widgets have already rendered earlier in this same run. Fixed
+# with the same deferred-flag pattern used in dashboard/shared/nav.py's
+# Add-ticker box and dashboard/pages/04_analyze_stock.py's search boxes:
+# set a flag before the existing st.rerun(), consume it up here before any
+# of the four widgets are instantiated on the next run.
+if st.session_state.pop("_wl_page_add_clear_pending", False):
+    st.session_state["wl_new_tkr"] = ""
+    st.session_state["wl_new_notes"] = ""
+    st.session_state["wl_target"] = 0.0
+    st.session_state["wl_sl"] = 0.0
+
 with st.expander("➕ Add Stock to Watchlist", expanded=False):
     _wl_f1, _wl_f2, _wl_f3, _wl_f4 = st.columns([2, 2, 1, 1])
     with _wl_f1:
@@ -88,6 +105,7 @@ with st.expander("➕ Add Stock to Watchlist", expanded=False):
         _sym = _new_tkr if _new_tkr.endswith(".NS") else _new_tkr + ".NS"
         if _wl_add(_sym, _new_notes, _new_target, _new_sl):
             st.success(f"Added {_sym} to watchlist!")
+            st.session_state["_wl_page_add_clear_pending"] = True
             st.rerun()
 
 # Display watchlist with live scores
