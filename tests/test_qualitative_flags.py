@@ -28,8 +28,8 @@ import data.nse_rss_feeds as _nse_rss_feeds_mod       # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _reset_module_level_caches():
-    """nse_rss_feeds._feed_cache and news_feed._news_cache are process-global
-    TTLCache singletons (12h / 2h TTL) with no reset hook. Any test in this
+    """nse_rss_feeds._feed_cache and news_feed._cache are process-global
+    TTLCache singletons (12h / 6h TTL) with no reset hook. Any test in this
     file that calls fetch_feed()/fetch_news() with the default use_cache=True
     leaves state behind that can silently bypass a later test's requests.get
     mock (a cache HIT never reaches the mocked function). Clearing both
@@ -37,10 +37,10 @@ def _reset_module_level_caches():
     execution order — cheap insurance against exactly the kind of flake this
     module's tests are meant to prevent."""
     _nse_rss_feeds_mod._feed_cache.clear()
-    _news_feed_mod._news_cache.clear()
+    _news_feed_mod._cache.clear()
     yield
     _nse_rss_feeds_mod._feed_cache.clear()
-    _news_feed_mod._news_cache.clear()
+    _news_feed_mod._cache.clear()
 
 
 # ── fake kv store (mirrors trade_store.kv_get/kv_set signatures exactly) ──
