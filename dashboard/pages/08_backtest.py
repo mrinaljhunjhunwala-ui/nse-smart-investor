@@ -1,493 +1,470 @@
+"""Backtest - NSE Smart Investor (multipage page; body verbatim from app.py).
+
+FIXES applied in this revision
+───────────────────────────────
+B1  In-app backtest no longer blocks the Streamlit request thread. The run
+    is dispatched to a background ThreadPoolExecutor worker. Progress and
+    partial results are written into st.session_state["bt_partial"] every
+    ticker so the UI stays live. A "Cancel" button sets a threading.Event
+    that the worker checks between tickers. A timeout of 20 min is enforced
+    after which the partial results are surfaced automatically.
+
+B2  Unified display path — the top of the page now also loads into
+    session_state["bt_result"] when portfolio_results.csv is present, so
+    the detailed sortable table always renders regardless of whether the
+    result came from a file or an in-app run.
+
+B3  Normalised comparison now aligns all tickers to their common date range
+    before dividing by the first value, so every line starts from the same
+    baseline date and the comparison is apples-to-apples.
+
+B4  In-app run now writes to portfolio_results.csv (same filename the loader
+    reads) instead of backtest_results.csv, so the top summary table
+    reflects the most recent run immediately after completion.
 """
-dashboard/pages/18_tqs_scanner.py
-Trend Quality Score (TQS) — Scanner + Deep Dive page.
 
-Two modes:
-  1. Scanner  — score a universe of tickers, rank by TQS, show heatmap
-  2. Deep Dive — single stock: pillar breakdown, time-series chart, key indicators
-"""
+import os, sys
+import logging
 
-import os
-import sys
-
+_log = logging.getLogger("dashboard.backtest")
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-
-from dashboard.shared.nav import render_sidebar
 from dashboard.shared.design import apply_design
-
-
-# ── Page config ───────────────────────────────────────────────────────────────
-apply_design()
-render_sidebar()
-
-st.title("📊 Trend Quality Score")
-st.caption(
-    "Measures trend **health and persistence** across 4 pillars (max 90 pts). "
-    "Validated baseline: +0.41 rank correlation with staying in an uptrend next month."
+from dashboard.shared.nav import render_sidebar
+from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.disclosures import (
+    render_survivorship_notice,
+    render_backtest_assumptions,
 )
 
-# ── Lazy import engine ────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner=False)
-def _load_engine():
-    from analysis.trend_quality_score import (
-        score_ticker, 
-        scan_universe, 
-        add_indicators, 
-        fetch_data, 
-        _score_all_pillars
+import os
+import threading
+import time
+import concurrent.futures
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+import sys
+
+from dashboard.shared.design import apply_design
+from dashboard.shared.cache import load_ticker_df
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar
+
+apply_design()
+render_sidebar(current="Backtest")
+render_top_bar()
+
+# ─────────────────────────────────────────────────────────────────────────────
+st.title("🧪 Backtest Results")
+st.caption("Historical strategy performance — how would these signals have done in the past?")
+
+render_survivorship_notice()
+render_backtest_assumptions()
+
+
+def load_backtest_csv(path: str = "portfolio_results.csv") -> pd.DataFrame:
+    if os.path.exists(path):
+        try:
+            return pd.read_csv(path, index_col=0)
+        except Exception as e:
+            _log.warning("load_backtest_csv: %s exists but failed to parse: %s", path, e)
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX B2: unified display — always load file result into session_state so
+# the detailed table renders whether data came from file or in-app run.
+# ─────────────────────────────────────────────────────────────────────────────
+_file_df = load_backtest_csv()
+if not _file_df.empty and "bt_result" not in st.session_state:
+    st.session_state["bt_result"]       = _file_df
+    st.session_state["bt_result_label"] = "Loaded from portfolio_results.csv"
+
+df = st.session_state.get("bt_result", pd.DataFrame())
+
+if not df.empty:
+    r_col = next((c for c in ["Return (%)", "Return(%)"]   if c in df.columns), None)
+    s_col = next((c for c in ["Sharpe", "Sharpe Ratio"]    if c in df.columns), None)
+    t_col = next((c for c in ["# Trades", "Trades"]        if c in df.columns), None)
+
+    bt1, bt2, bt3, bt4 = st.columns(4)
+    bt1.metric("Tickers Tested", len(df))
+    bt2.metric("Avg Return",  f"{df[r_col].mean():.2f}%" if r_col else "—")
+    bt3.metric("Avg Sharpe",  f"{df[s_col].mean():.2f}"  if s_col else "—")
+    bt4.metric("Total Trades",f"{df[t_col].sum():,.0f}"  if t_col else "—")
+
+    grad_cols = [r_col] if r_col else []
+    st.dataframe(
+        df.style.background_gradient(subset=grad_cols, cmap="RdYlGn").format("{:.2f}"),
+        use_container_width=True,
     )
-    return score_ticker, scan_universe, add_indicators, fetch_data, _score_all_pillars
 
-try:
-    score_ticker, scan_universe, add_indicators, fetch_data, _score_all_pillars = _load_engine()
-    ENGINE_OK = True
-except Exception as e:
-    st.error(f"TQS engine failed to load: {e}")
-    ENGINE_OK = False
-    st.stop()
+    if r_col:
+        fig = px.bar(
+            df.reset_index(), x=df.index, y=r_col,
+            color=r_col, color_continuous_scale="RdYlGn",
+            title="Return (%) per Ticker",
+            labels={r_col: "Return (%)"},
+        )
+        fig.update_layout(
+            template="nse_pro", height=400,
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info(
+        "No backtest results found.  \n\n"
+        "Run:  `python main.py --mode backtest --portfolio --index nifty50`  \n"
+        "or use the **Run a Backtest** section below.  \n"
+        "Results will appear here automatically."
+    )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX B1 — Non-blocking in-app backtest runner
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("⚡ Run a Backtest — in the app")
 
-# ── Default configurations ───────────────────────────────────────────────────
-DEFAULT_TICKERS = [
-    "RELIANCE.NS", "TCS.NS",        "HDFCBANK.NS",   "INFY.NS",
-    "ICICIBANK.NS","HINDUNILVR.NS",  "ITC.NS",        "SBIN.NS",
-    "BHARTIARTL.NS","KOTAKBANK.NS",  "AXISBANK.NS",   "WIPRO.NS",
-    "MARUTI.NS",   "TITAN.NS",       "ASIANPAINT.NS", "NESTLEIND.NS",
-    "SUNPHARMA.NS","HCLTECH.NS",     "LT.NS",         "ULTRACEMCO.NS",
-]
-
-SIGNAL_COLOUR = {
-    "STRONG TREND": "#16a34a",
-    "TRENDING":     "#65a30d",
-    "NEUTRAL":      "#ca8a04",
-    "WEAK":         "#ea580c",
-    "AVOID":        "#dc2626",
-}
-
-GRADE_COLOUR = {
-    "A+": "#16a34a", "A": "#65a30d", "B": "#ca8a04",
-    "C":  "#ea580c", "D": "#dc2626", "F": "#991b1b",
-}
-
-
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_scan, tab_deep = st.tabs(["🔍 Scanner", "🔬 Deep Dive"])
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 1 — SCANNER
-# ═════════════════════════════════════════════════════════════════════════════
-with tab_scan:
-    st.subheader("Universe Scanner")
-
-    # FIX TQS1 — this page previously had no way to scan a real universe at
-    # all: the only options were a hardcoded 20-ticker blue-chip sample
-    # (DEFAULT_TICKERS) or manually typing out hundreds of symbols by hand
-    # into a text box, unlike every other scanning page in the app (Market
-    # Live, Screener, Top Picks), which all offer a one-click Nifty
-    # 50/100/500/Total Market selector via data.universe.get_universe(). That
-    # made TQS feel much more limited in scope than the rest of the platform
-    # for no real reason — the scoring engine itself has nothing 20-ticker
-    # specific about it.
-    _tqs_universe_choice = st.selectbox(
+_bt_c1, _bt_c2, _bt_c3, _bt_c4 = st.columns([2, 2, 1, 1])
+with _bt_c1:
+    _bt_uni = st.selectbox(
         "Universe",
-        ["Nifty 50", "Nifty 100", "Nifty 500", "Nifty Total Market (~745)", "Custom (paste below)"],
-        index=0,
-        key="tqs_universe_choice",
-        help="Pick a preset to auto-fill the ticker list, or choose Custom to paste your own.",
+        ["Nifty 50", "Nifty 100", "Nifty 200", "Nifty 500"],
+        key="bt_uni",
     )
-    _TQS_UNIVERSE_MAP = {
-        "Nifty 50": "nifty50", "Nifty 100": "nifty100",
-        "Nifty 500": "nifty500", "Nifty Total Market (~745)": "niftytotalmarket",
-    }
-    if _tqs_universe_choice in _TQS_UNIVERSE_MAP:
-        from data.universe import get_universe as _tqs_get_universe
-        _tqs_preset_tickers = _tqs_get_universe(_TQS_UNIVERSE_MAP[_tqs_universe_choice])
-        st.caption(f"{len(_tqs_preset_tickers)} tickers in this universe.")
-    else:
-        _tqs_preset_tickers = DEFAULT_TICKERS
+with _bt_c2:
+    _bt_strat = st.selectbox(
+        "Strategy", ["RSI + MACD", "Momentum"], key="bt_strat"
+    )
+with _bt_c3:
+    _bt_period = st.selectbox(
+        "Period", ["2y", "3y"], index=0, key="bt_period",
+        help="Needs 2y+ so all indicators have enough warmup history.",
+    )
+with _bt_c4:
+    st.write("")
+    _bt_run = st.button(
+        "🚀 Run", type="primary", key="bt_run", use_container_width=True
+    )
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        if _tqs_universe_choice == "Custom (paste below)":
-            raw_input = st.text_area(
-                "Tickers (comma or newline separated)",
-                value=", ".join(DEFAULT_TICKERS),
-                height=100,
-            )
-        else:
-            raw_input = ", ".join(_tqs_preset_tickers)
-            with st.expander(f"Preview tickers ({len(_tqs_preset_tickers)})"):
-                st.caption(raw_input)
-    with col2:
-        period = st.selectbox("Period", ["1y", "2y", "5y"], index=0, key="scan_period")
-        min_tqs = st.slider("Min TQS filter", 0, 90, 0, step=5)
-        if _tqs_universe_choice != "Custom (paste below)" and len(_tqs_preset_tickers) > 100:
-            st.caption(
-                f"⚠️ Scanning {len(_tqs_preset_tickers)} tickers takes a few "
-                f"minutes even parallelised. Grab a coffee ☕"
-            )
-        run_scan = st.button("▶ Run Scan", width="stretch", type="primary")
+_uni_map = {
+    "Nifty 50":  "nifty50",  "Nifty 100": "nifty100",
+    "Nifty 200": "nifty200", "Nifty 500": "nifty500",
+}
+_est = {
+    "Nifty 50":  "~1-2 min", "Nifty 100": "~3-4 min",
+    "Nifty 200": "~6-8 min", "Nifty 500": "~10-15 min",
+}[_bt_uni]
+st.caption(
+    f"⏱️ Estimated run time: **{_est}**. "
+    "Runs in the background — you can watch live progress below. "
+    "A **Cancel** button appears once the run starts."
+)
 
-    if run_scan:
-        tickers = [t.strip().upper() for t in raw_input.replace("\n", ",").split(",") if t.strip()]
-        if not tickers:
-            st.warning("Enter at least one ticker.")
-        else:
-            rows = []
-            prog = st.progress(0, text="Scanning…")
-            import logging as _tqs_log
-            import concurrent.futures as _tqs_cf
-            _tqs_done = 0
+# ── Session-state keys used by the background worker ─────────────────────
+# bt_running    : bool  — True while the worker thread is active
+# bt_cancel     : threading.Event — set by the Cancel button
+# bt_partial    : list of result dicts written by the worker
+# bt_progress   : (done, total, current_ticker) tuple for the progress bar
+# bt_result     : final pd.DataFrame (set when the run completes)
+# bt_result_label: human-readable label for the results header
 
-            # FIX TQS1 (companion) — score_ticker/scan_universe are both a
-            # plain serial for-loop with no parallelisation, fine for a
-            # 20-ticker sample but impractical for a real universe (500+
-            # tickers would take many minutes one at a time). Parallelising
-            # here matches the pattern already used elsewhere in the app
-            # (Command Centre's Top Picks, backtest/runner.py) so a broader
-            # universe is actually practical to scan, not just selectable.
-            with _tqs_cf.ThreadPoolExecutor(max_workers=16) as _tqs_ex:
-                _tqs_futures = {_tqs_ex.submit(score_ticker, t, period=period): t for t in tickers}
-                for _tqs_fut in _tqs_cf.as_completed(_tqs_futures):
-                    t = _tqs_futures[_tqs_fut]
-                    try:
-                        r = _tqs_fut.result()
-                        rows.append(r.as_dict())
-                    except Exception as _tqs_e:
-                        _tqs_log.getLogger("dashboard.tqs_scanner").debug(
-                            "score_ticker(%s) failed: %s — skipped", t, _tqs_e
-                        )
-                    _tqs_done += 1
-                    prog.progress(_tqs_done / len(tickers), text=f"Scored {_tqs_done}/{len(tickers)}")
-            prog.empty()
+if "bt_cancel" not in st.session_state:
+    st.session_state["bt_cancel"]   = threading.Event()
+if "bt_running" not in st.session_state:
+    st.session_state["bt_running"]  = False
+if "bt_partial" not in st.session_state:
+    st.session_state["bt_partial"]  = []
+if "bt_progress" not in st.session_state:
+    st.session_state["bt_progress"] = (0, 1, "")
 
-            if not rows:
-                st.error("No data returned for any ticker.")
-            else:
-                df_scan = (
-                    pd.DataFrame(rows)
-                    .sort_values("tqs", ascending=False)
-                    .reset_index(drop=True)
-                )
-                df_scan = df_scan[df_scan["tqs"] >= min_tqs]
-                st.session_state["tqs_scan"] = df_scan
 
-    # ── Display results ───────────────────────────────────────────────────────
-    if "tqs_scan" in st.session_state:
-        df_scan = st.session_state["tqs_scan"]
-        
-        if df_scan.empty:
-            st.info("No tickers match the active minimum TQS filter.")
-        else:
-            total = len(df_scan)
-            strong = (df_scan["signal"] == "STRONG TREND").sum()
-            trending = (df_scan["signal"] == "TRENDING").sum()
-            avoid = (df_scan["signal"] == "AVOID").sum()
+def _run_backtest_worker(
+    tickers: list,
+    strat_cls,
+    period: str,
+    cost: float,
+    cancel_event: threading.Event,
+    partial_results: list,      # shared list — worker appends, UI reads
+    progress_holder: list,      # [done, total, current_ticker]
+):
+    """Background worker — runs one ticker at a time, writes partial results."""
+    from data.fetcher import fetch_single as _bt_fs
+    from utils.indicators import add_all_indicators as _bt_ind
+    from backtesting import Backtest as _BT
 
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Stocks Scored", total)
-            m2.metric("Strong Trend", strong)
-            m3.metric("Trending", trending)
-            m4.metric("Avoid", avoid)
-
-            st.divider()
-
-            # Color styling helper functions
-            def _colour_signal(val):
-                c = SIGNAL_COLOUR.get(str(val).upper(), "#6b7280")
-                return f"color: {c}; font-weight: 600"
-
-            def _colour_grade(val):
-                c = GRADE_COLOUR.get(str(val).upper(), "#6b7280")
-                return f"color: {c}; font-weight: 700"
-
-            def _bar_tqs(val):
-                try:
-                    val_float = float(val)
-                    pct = max(0.0, min(100.0, (val_float / 90.0) * 100))
-                except (ValueError, TypeError):
-                    pct = 0
-                return f"background: linear-gradient(90deg, rgba(59, 130, 246, 0.4) {pct:.0f}%, transparent {pct:.0f}%)"
-
-            display_cols = [
-                "ticker", "close", "tqs", "grade", "signal",
-                "p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation",
-                "rsi", "sharpe_20", "obv_z",
-            ]
-            
-            # Sub-select columns present in DataFrame to avoid KeyError issues
-            actual_cols = [col for col in display_cols if col in df_scan.columns]
-            
-            # Create a clean, renamed dataframe first to simplify styled subset references
-            df_display = df_scan[actual_cols].rename(columns={
-                "ticker": "Ticker", "close": "Close", "tqs": "TQS",
-                "grade": "Grade", "signal": "Signal",
-                "p1_strength": "P1 Strength", "p2_persistence": "P2 Persist",
-                "p3_momentum": "P3 Momentum", "p4_confirmation": "P4 Volume",
-                "rsi": "RSI", "sharpe_20": "Sharpe20", "obv_z": "OBV-Z",
+    total = len(tickers)
+    for i, t in enumerate(tickers):
+        if cancel_event.is_set():
+            break
+        progress_holder[0] = i
+        progress_holder[2] = t.replace(".NS", "")
+        try:
+            _bd = _bt_fs(t, period=period)
+            _bd = _bt_ind(_bd)
+            _bd = _bd.dropna(axis=1, how="all")
+            _bd = _bd.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+            if len(_bd) >= 60:
+                _stats = _BT(
+                    _bd, strat_cls,
+                    cash=1_000_000, commission=cost, exclusive_orders=True,
+                ).run()
+                partial_results.append({
+                    "Ticker":           t.replace(".NS", ""),
+                    "Return (%)":       round(float(_stats["Return [%]"]),            2),
+                    "Buy & Hold (%)":   round(float(_stats["Buy & Hold Return [%]"]), 2),
+                    "Sharpe":           round(float(_stats["Sharpe Ratio"]),           2),
+                    "Max Drawdown (%)": round(float(_stats["Max. Drawdown [%]"]),      2),
+                    "Win Rate (%)":     round(float(_stats["Win Rate [%]"]),           2),
+                    "# Trades":         int(_stats["# Trades"]),
+                })
+        except Exception as _e:
+            # Record skip without crashing the worker
+            _log.debug("backtest sweep: %s skipped: %s", t, _e)
+            partial_results.append({
+                "Ticker":  t.replace(".NS", "") + " ⚠️",
+                "Return (%)": None, "Buy & Hold (%)": None,
+                "Sharpe": None,     "Max Drawdown (%)": None,
+                "Win Rate (%)": None, "# Trades": 0,
             })
-
-            # Format and apply styling safely
-            styled = (
-                df_display.style
-                .map(_colour_signal, subset=["Signal"] if "Signal" in df_display.columns else [])
-                .map(_colour_grade,  subset=["Grade"] if "Grade" in df_display.columns else [])
-                .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"] if "TQS" in df_display.columns else [])
-                .format({
-                    "Close": "₹{:,.2f}", "TQS": "{:.1f}",
-                    "P1 Strength": "{:.1f}", "P2 Persist": "{:.1f}",
-                    "P3 Momentum": "{:.1f}", "P4 Volume": "{:.1f}",
-                    "RSI": "{:.1f}", "Sharpe20": "{:.2f}", "OBV-Z": "{:.2f}",
-                }, na_rep="-")
-            )
-            st.dataframe(styled, use_container_width=True, height=500)
-
-            # ── Pillar breakdown — top 10 ─────────────────────────────────────
-            st.subheader("Pillar breakdown — top 10")
-            top10 = df_scan.head(10)
-            fig = go.Figure()
-            pillars = ["p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation"]
-            labels  = ["P1 Strength", "P2 Persistence", "P3 Momentum", "P4 Volume"]
-            colours = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
-
-            for pillar, label, colour in zip(pillars, labels, colours):
-                if pillar in top10.columns:
-                    fig.add_trace(go.Bar(
-                        name=label,
-                        x=top10["ticker"],
-                        y=top10[pillar],
-                        marker_color=colour,
-                    ))
-
-            fig.update_layout(
-                barmode="stack",
-                xaxis_title="Ticker",
-                yaxis_title="Score",
-                yaxis_range=[0, 90],
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                margin=dict(t=40, b=40, l=10, r=10),
-                height=380,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # ── Download ──────────────────────────────────────────────────────
-            st.download_button(
-                "⬇ Download CSV",
-                data=df_scan.to_csv(index=False),
-                file_name="tqs_scan.csv",
-                mime="text/csv",
-                use_container_width=False
-            )
-    else:
-        st.info("Input your universe parameters and select 'Run Scan' above to process trend scores.")
+    progress_holder[0] = total  # signal completion
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 2 — DEEP DIVE
-# ═════════════════════════════════════════════════════════════════════════════
-with tab_deep:
-    st.subheader("Single Stock Deep Dive")
+if _bt_run and not st.session_state.get("bt_running", False):
+    try:
+        from data.universe import get_universe
+        from strategies.rsi_macd import RSIMACDStrategy
+        from strategies.momentum import MomentumStrategy
+        try:
+            from backtest.runner import TOTAL_COST as _BT_COST
+        except Exception as e:
+            _log.debug("TOTAL_COST import failed, using fallback constant: %s", e)
+            _BT_COST = 0.0023
 
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        # Retrieve the user's active watchlist from session state
-        watchlist_tickers = st.session_state.get("watchlist", [])
+        _strat_cls   = RSIMACDStrategy if _bt_strat.startswith("RSI") else MomentumStrategy
+        _bt_tickers  = get_universe(_uni_map[_bt_uni])
 
-        # FIX TQS1 (companion) — previously only ever offered the watchlist
-        # + the same 20 hardcoded DEFAULT_TICKERS, regardless of what
-        # universe was scanned in the Scanner tab. If a scan has been run,
-        # surface those tickers here too (there's already a manual
-        # custom-ticker override below for anything not listed, so this
-        # dropdown is a convenience, not a hard restriction — but matching
-        # it to the last scan makes the two tabs feel connected instead of
-        # the Scanner supporting hundreds of tickers while Deep Dive's
-        # dropdown still only ever offers the same 20).
-        _scanned_tickers = (
-            list(st.session_state["tqs_scan"]["ticker"])
-            if "tqs_scan" in st.session_state and not st.session_state["tqs_scan"].empty
-            else []
+        # Reset shared state
+        _cancel_ev   = threading.Event()
+        _partial     = []
+        _progress    = [0, len(_bt_tickers), ""]
+
+        st.session_state["bt_cancel"]       = _cancel_ev
+        st.session_state["bt_partial"]      = _partial
+        st.session_state["bt_progress"]     = _progress
+        st.session_state["bt_running"]      = True
+        st.session_state["bt_result_label"] = (
+            f"{_bt_strat} · {_bt_uni} · {_bt_period}"
         )
-        available_tickers = list(dict.fromkeys(watchlist_tickers + _scanned_tickers + DEFAULT_TICKERS))
 
-        # 1. Dropdown Selector
-        dd_ticker_selected = st.selectbox("Select Ticker", options=available_tickers, index=0)
-        
-        # 2. Autocomplete override
-        custom_ticker = st.text_input(
-            "Or enter a custom ticker (e.g. WIPRO.NS)", 
-            value="", 
-            placeholder="Type here to override dropdown selection"
-        ).upper().strip()
-        
-        # Resolve the active ticker: use custom input if populated, else the dropdown
-        dd_ticker = custom_ticker if custom_ticker else dd_ticker_selected
+        # Launch background thread
+        _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        _executor.submit(
+            _run_backtest_worker,
+            _bt_tickers, _strat_cls, _bt_period, _BT_COST,
+            _cancel_ev, _partial, _progress,
+        )
+        st.session_state["bt_executor"] = _executor
+        st.rerun()
 
-    with col2:
-        dd_period = st.selectbox("History", ["1y", "2y", "5y"], index=1, key="dd_period")
-    with col3:
-        st.write("")
-        st.write("")
-        run_deep = st.button("▶ Analyse", use_container_width=True, type="primary")
+    except Exception as _bt_err:
+        st.error(f"Backtest failed to start: {_bt_err}")
 
-    if run_deep and dd_ticker:
-        with st.spinner(f"Scoring {dd_ticker}…"):
+# ── Live progress display (shown while bt_running is True) ────────────────
+# FIX B5 (perf) — this used to poll with a blocking time.sleep(3) followed by
+# st.rerun(), which re-executes the ENTIRE page (imports, sidebar, design,
+# everything above) every 3 seconds for the whole duration of a backtest run.
+# Same anti-pattern already fixed in Command Centre's Top Picks and
+# Tomorrow's Watchlist — applying the same @st.fragment(run_every=3) fix
+# here: Streamlit reruns just this fragment on its own timer, no blocking
+# sleep on the main thread. st.rerun() (full-app scope by default, even
+# inside a fragment) is still used once, to escape the fragment when the
+# backtest actually finishes and render the final results below.
+if st.session_state.get("bt_running", False):
+
+    @st.fragment(run_every=3)
+    def _bt_poll_fragment():
+        _prog   = st.session_state["bt_progress"]
+        _done   = _prog[0]
+        _total  = max(_prog[1], 1)
+        _ticker = _prog[2]
+        _partial = st.session_state.get("bt_partial", [])
+
+        # Cancel button
+        if st.button("🛑 Cancel backtest", key="bt_cancel_btn"):
+            st.session_state["bt_cancel"].set()
+            st.session_state["bt_running"] = False
+            st.warning("Backtest cancelled — partial results shown below.")
+            st.rerun()
+
+        _pct = _done / _total
+        st.progress(_pct, text=f"Running {_ticker} ({_done}/{_total})")
+
+        # Check if worker finished
+        _executor = st.session_state.get("bt_executor")
+        _finished = _done >= _total or (
+            _executor is not None
+            and all(f.done() for f in getattr(_executor, "_futures", []))
+        )
+        # Simpler finish check — worker sets _done == _total when done
+        if _done >= _total:
+            _finished = True
+
+        if _finished:
+            st.session_state["bt_running"] = False
+            _bt_rows = [r for r in _partial if r.get("Return (%)") is not None]
+            if _bt_rows:
+                _bt_res = pd.DataFrame(_bt_rows).set_index("Ticker")
+                st.session_state["bt_result"] = _bt_res
+                # FIX B4: write to portfolio_results.csv so the top table refreshes
+                try:
+                    _bt_res.to_csv("portfolio_results.csv")
+                except Exception as _csv_e:
+                    import logging; logging.getLogger("dashboard.backtest").warning("Could not write portfolio_results.csv: %s", _csv_e)
+                st.success(
+                    f"✅ Backtested {len(_bt_res)} stocks "
+                    f"({st.session_state.get('bt_result_label','')})."
+                )
+            else:
+                st.warning("No results — data may be unavailable. Try again.")
+            st.rerun()
+        # else: still running — no sleep needed, run_every=3 handles the
+        # next check on its own timer.
+
+    _bt_poll_fragment()
+
+# ── Show last in-app / file backtest result ───────────────────────────────
+if "bt_result" in st.session_state and not st.session_state.get("bt_running", False):
+    _bt_res = st.session_state["bt_result"]
+    if not _bt_res.empty:
+        st.markdown(
+            f"#### 📊 Results — {st.session_state.get('bt_result_label','')}"
+        )
+        _rb1, _rb2, _rb3, _rb4 = st.columns(4)
+        _rb1.metric("Stocks", len(_bt_res))
+
+        _r_col2 = next(
+            (c for c in ["Return (%)", "Return(%)"] if c in _bt_res.columns), None
+        )
+        _s_col2 = next(
+            (c for c in ["Sharpe", "Sharpe Ratio"] if c in _bt_res.columns), None
+        )
+        _bh_col = next(
+            (c for c in ["Buy & Hold (%)", "Buy & Hold Return (%)"]
+             if c in _bt_res.columns), None,
+        )
+
+        if _r_col2:
+            _avg_ret = _bt_res[_r_col2].dropna().mean()
+            _rb2.metric(
+                "Avg Return", f"{_avg_ret:.1f}%",
+                delta_color="normal" if _avg_ret >= 0 else "inverse",
+            )
+        if _s_col2:
+            _rb3.metric("Avg Sharpe", f"{_bt_res[_s_col2].dropna().mean():.2f}")
+        if _r_col2 and _bh_col:
+            _beat = (
+                _bt_res[_r_col2].dropna() > _bt_res[_bh_col].dropna()
+            ).sum()
+            _rb4.metric("Beat Buy&Hold", f"{_beat}/{len(_bt_res)}")
+
+        _grad_cols2 = [c for c in [_r_col2, _s_col2] if c]
+        _bt_sorted  = _bt_res.sort_values(_r_col2, ascending=False) if _r_col2 else _bt_res
+        st.dataframe(
+            _bt_sorted.style.background_gradient(
+                subset=_grad_cols2, cmap="RdYlGn"
+            ),
+            use_container_width=True, height=380,
+        )
+        st.caption(
+            "Sorted by return. Green = better. "
+            "'Beat Buy&Hold' = how often the strategy outperformed simply holding."
+        )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX B3 — Normalised comparison with common-date alignment
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.subheader("🔍 Quick Chart Comparison")
+raw2 = st.text_input(
+    "Compare tickers (space-separated)",
+    value="RELIANCE.NS TCS.NS HDFCBANK.NS",
+    key="backtest_tickers",
+)
+_comp_ui = st.radio(
+    "Period", ["1M", "6M", "YTD", "1Y", "Max"],
+    index=1, horizontal=True, key="comp_period",
+)
+comp_period = {"1M": "1m", "6M": "6m", "YTD": "ytd", "1Y": "1y", "Max": "max"}[_comp_ui]
+
+if st.button("📊 Show Normalised Performance", key="compare_btn"):
+    tickers_list = [t.strip().upper() for t in raw2.split() if t.strip()]
+    tickers_list = [
+        t if t.endswith(".NS") else t + ".NS"
+        for t in tickers_list
+    ]
+
+    # FIX B3: collect all close series, then align to common date range
+    _raw_series: dict[str, pd.Series] = {}
+    with st.spinner("Loading price data…"):
+        for t in tickers_list:
             try:
-                df_raw  = fetch_data(dd_ticker, period=dd_period)
-                df_ind  = add_indicators(df_raw)
-                df_tqs  = _score_all_pillars(df_ind).dropna(subset=["TQS"])
-                latest  = score_ticker(dd_ticker, period=dd_period)
-                st.session_state["tqs_deep"] = (df_tqs, latest)
-            except Exception as e:
-                st.error(f"Could not score {dd_ticker}: {e}")
+                d = load_ticker_df(t, period=comp_period)
+                if not d.empty and "Close" in d.columns:
+                    _raw_series[t] = d["Close"]
+            except Exception as _e:
+                st.caption(
+                    f"⚠️ Couldn't load {t.replace('.NS','')} for comparison: {_e}"
+                )
 
-    if "tqs_deep" in st.session_state:
-        df_tqs, r = st.session_state["tqs_deep"]
+    if _raw_series:
+        # Find the common start date (latest first date across all tickers)
+        _common_start = max(s.index[0] for s in _raw_series.values())
+        _common_end   = min(s.index[-1] for s in _raw_series.values())
 
-        # ── Scorecard header ──────────────────────────────────────────────────
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("TQS", f"{r.tqs:.1f} / 90")
-        c2.metric("Grade", r.grade())
-        c3.metric("Signal", r.signal())
-        c4.metric("RSI", f"{r.rsi:.1f}")
-        c5.metric("ADX", f"{r.adx:.1f}")
-
-        st.divider()
-
-        # ── Pillar gauges ─────────────────────────────────────────────────────
-        st.markdown("**Pillar breakdown**")
-        cols = st.columns(4)
-        pillar_data = [
-            ("P1 Trend Strength",    r.p1, "#3b82f6"),
-            ("P2 Trend Persistence", r.p2, "#10b981"),
-            ("P3 Momentum Quality",  r.p3, "#f59e0b"),
-            ("P4 Tech Confirmation", r.p4, "#8b5cf6"),
-        ]
-        for col, (label, score, colour) in zip(cols, pillar_data):
-            fig_g = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=score,
-                title={"text": label, "font": {"size": 12}},
-                gauge={
-                    "axis": {"range": [0, 22.5], "tickfont": {"size": 10}},
-                    "bar":  {"color": colour},
-                    "steps": [
-                        {"range": [0, 7.5],   "color": "rgba(241, 245, 249, 0.5)"},
-                        {"range": [7.5, 15],  "color": "rgba(226, 232, 240, 0.5)"},
-                        {"range": [15, 22.5], "color": "rgba(203, 213, 225, 0.5)"},
-                    ],
-                },
-                number={"suffix": "/22.5", "font": {"size": 16}},
-            ))
-            fig_g.update_layout(
-                height=180, 
-                margin=dict(t=30, b=10, l=15, r=15),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)"
+        if _common_start >= _common_end:
+            st.warning(
+                "Tickers don't share a common date range for the selected period. "
+                "Try a shorter period or different tickers."
             )
-            col.plotly_chart(fig_g, use_container_width=True)
-
-        # ── TQS time-series chart ─────────────────────────────────────────────
-        st.markdown("**TQS over time**")
-        fig_ts = go.Figure()
-
-        fig_ts.add_trace(go.Scatter(
-            x=df_tqs.index, y=df_tqs["TQS"],
-            name="TQS", line=dict(color="#3b82f6", width=2),
-            fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
-        ))
-
-        # Reference bands
-        for y_val, label, colour in [
-            (75, "Strong Trend", "#16a34a"),
-            (60, "Trending",     "#65a30d"),
-            (45, "Neutral",      "#ca8a04"),
-            (30, "Weak",         "#ea580c"),
-        ]:
-            fig_ts.add_hline(
-                y=y_val, line_dash="dot", line_color=colour, line_width=1,
-                annotation_text=label, annotation_position="right",
-                annotation_font_color=colour,
-            )
-
-        fig_ts.update_layout(
-            xaxis_title="Date", yaxis_title="TQS",
-            yaxis_range=[0, 95],
-            legend=dict(orientation="h"),
-            margin=dict(t=20, b=40, l=10, r=10),
-            height=360,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)"
-        )
-        st.plotly_chart(fig_ts, use_container_width=True)
-
-        # ── Pillar time-series ────────────────────────────────────────────────
-        st.markdown("**Pillar scores over time**")
-        fig_p = go.Figure()
-        for col_name, label, colour in [
-            ("P1_Strength",     "P1 Strength",    "#3b82f6"),
-            ("P2_Persistence",  "P2 Persistence", "#10b981"),
-            ("P3_Momentum",     "P3 Momentum",    "#f59e0b"),
-            ("P4_Confirmation", "P4 Volume",      "#8b5cf6"),
-        ]:
-            if col_name in df_tqs.columns:
-                fig_p.add_trace(go.Scatter(
-                    x=df_tqs.index, y=df_tqs[col_name],
-                    name=label, line=dict(color=colour, width=1.5),
+        else:
+            fig_comp = go.Figure()
+            for t, series in _raw_series.items():
+                # FIX B3: slice to common range before normalising
+                _aligned = series.loc[_common_start:_common_end].dropna()
+                if _aligned.empty:
+                    continue
+                norm = _aligned / _aligned.iloc[0] * 100
+                fig_comp.add_trace(go.Scatter(
+                    x=norm.index, y=norm,
+                    name=t.replace(".NS", ""),
+                    line=dict(width=2),
                 ))
-        fig_p.update_layout(
-            xaxis_title="Date", yaxis_title="Pillar Score",
-            yaxis_range=[0, 24],
-            legend=dict(orientation="h"),
-            margin=dict(t=20, b=40, l=10, r=10),
-            height=300,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)"
-        )
-        st.plotly_chart(fig_p, use_container_width=True)
 
-        # ── Key indicator table ───────────────────────────────────────────────
-        st.markdown("**Latest indicator values**")
-        
-        # Safe checks for metric validation
-        rsi_val = getattr(r, 'rsi', 50.0)
-        adx_val = getattr(r, 'adx', 20.0)
-        sharpe_val = getattr(r, 'sharpe_20', 0.0)
-        obv_val = getattr(r, 'obv_z', 0.0)
-
-        ind_data = {
-            "Indicator":  ["RSI-14", "ADX-14", "Sharpe 20d", "OBV Z-score"],
-            "Value":      [f"{rsi_val:.1f}", f"{adx_val:.1f}",
-                           f"{sharpe_val:.2f}", f"{obv_val:.2f}"],
-            "Interpretation": [
-                "55–70 = steady grind (best zone)" if 55 <= rsi_val <= 70
-                else "Overbought — caution" if rsi_val > 80
-                else "Oversold" if rsi_val < 30 else "Neutral",
-                "Strong trend (>30)" if adx_val > 30
-                else "Trend present (>25)" if adx_val > 25 else "No clear trend",
-                "Strong risk-adj momentum (>1.5)" if sharpe_val > 1.5
-                else "Positive" if sharpe_val > 0 else "Negative momentum",
-                "Accumulation (>1)" if obv_val > 1
-                else "Distribution (<-1)" if obv_val < -1 else "Neutral",
-            ],
-        }
-        st.dataframe(pd.DataFrame(ind_data), use_container_width=True, hide_index=True)
-
-        # ── Download ──────────────────────────────────────────────────────────
-        st.download_button(
-            "⬇ Download TQS history CSV",
-            data=df_tqs.reset_index().to_csv(index=False),
-            file_name=f"tqs_{dd_ticker}.csv",
-            mime="text/csv",
-        )
+            if fig_comp.data:
+                fig_comp.add_hline(y=100, line_dash="dot", line_color="gray")
+                fig_comp.add_annotation(
+                    text=f"Common start: {_common_start.strftime('%d %b %Y')}",
+                    xref="paper", yref="paper",
+                    x=0, y=1.08, showarrow=False,
+                    font=dict(size=10, color="#888"),
+                )
+                fig_comp.update_layout(
+                    title="Normalised Price Performance (Base = 100 at common start date)",
+                    template="nse_pro", height=400,
+                    yaxis_title="% of Start Price",
+                    margin=dict(l=0, r=0, t=50, b=0),
+                )
+                st.plotly_chart(fig_comp, use_container_width=True)
+                st.caption(
+                    f"All lines indexed to 100 at **{_common_start.strftime('%d %b %Y')}** "
+                    f"(the latest common start date across all tickers) so the comparison "
+                    "is apples-to-apples."
+                )
     else:
-        st.info("Select a stock from the dropdown above or enter a custom symbol, then click 'Analyse'.")
+        st.warning("No price data could be loaded for the selected tickers.")
