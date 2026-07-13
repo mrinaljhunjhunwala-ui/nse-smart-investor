@@ -246,6 +246,7 @@ def get_live_quote(symbol: str) -> Optional[dict]:
 def get_live_prices_batch(
     symbols: List[str],
     max_workers: int = 8,
+    max_wait_seconds: Optional[float] = None,
 ) -> Dict[str, Optional[dict]]:
     """
     Fetch live quotes for multiple symbols.
@@ -267,6 +268,26 @@ def get_live_prices_batch(
     (each fetch_fn already self-bounds to 6-10s per call, ~24s worst case per
     symbol across all 3 tiers) instead of a flat 20s that silently truncated
     anything past the first round of max_workers symbols. See module docstring.
+
+    FIX LP2 — max_wait_seconds: LP1's scaled wait (rounds * 26 + 4, capped at
+    120s) is appropriate for a background scan page (Smart Screener, Tomorrow's
+    Watchlist) where the person expects a scan to take a while and the page
+    has nothing else competing for that time. It is NOT appropriate for
+    dashboard/shared/nav.py's sidebar, which calls this on every single page
+    load — with Angel One not configured (is_configured() fails instantly,
+    with no network call, so EVERY symbol falls into this fallback path) and
+    Yahoo/NSE/Stooq degraded (as commonly happens on Streamlit Cloud's shared
+    IPs — see live_price.py's own module docstring on cloud-IP blocking), a
+    12-ticker watchlist alone could block the sidebar — and therefore every
+    page in the app — for up to 56 seconds, and a 20-ticker list up to 82s.
+    max_wait_seconds lets latency-sensitive callers opt into a hard, low
+    ceiling instead. It only ever shortens the wait (via min()), never
+    lengthens it, so passing nothing at all preserves the exact previous
+    behavior for existing callers (e.g. scanner pages) — nothing changes for
+    them. Symbols still outstanding when the (shorter) wait ends are logged
+    and returned as None, same graceful-degradation path as before; the
+    person just sees "price unavailable, refresh to retry" instead of a
+    frozen page for the better part of a minute.
     """
     if not symbols:
         return {}
@@ -321,8 +342,13 @@ def get_live_prices_batch(
     # pool. Capped at 120s so one pathological batch can't hang the page
     # indefinitely — anything still outstanding past that is logged
     # (not silently dropped) and returns None, same as a genuine failure.
+    #
+    # FIX LP2: max_wait_seconds (when passed) tightens this further — see
+    # the docstring above. min() means it can only shorten the wait.
     rounds       = math.ceil(len(remaining) / max_workers)
     wait_timeout = min(120, rounds * 26 + 4)
+    if max_wait_seconds is not None:
+        wait_timeout = min(wait_timeout, max_wait_seconds)
 
     pool = ThreadPoolExecutor(max_workers=max_workers)
     try:
