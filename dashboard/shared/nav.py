@@ -100,10 +100,22 @@ _log = _logging.getLogger("dashboard.nav")
 @st.cache_data(ttl=60, show_spinner=False)
 
 def _qv_prices(tickers: tuple) -> dict:
-    """Live prices for the sidebar quick-view."""
+    """Live prices for the sidebar quick-view.
+
+    FIX NAV2 — max_wait_seconds=10: this is called from render_sidebar(),
+    which runs on EVERY page. Without this cap, get_live_prices_batch's own
+    wait scales with ticker-list size and can reach 30-82+ seconds when
+    Angel One isn't configured (a fast, instant "not configured" check —
+    see live_price.py's FIX LP2 docstring) and Yahoo/NSE/Stooq are degraded
+    (which happens routinely on Streamlit Cloud's shared IPs). That meant
+    the ENTIRE APP could freeze for the better part of a minute on any page,
+    any time this 60s cache went cold. 10s is enough for Angel One's fast
+    batch path or a quick Yahoo/NSE hit; anything slower now degrades to
+    "price unavailable" for that ticker instead of freezing the sidebar.
+    """
     try:
         from utils.live_price import get_live_prices_batch
-        raw = get_live_prices_batch(list(tickers))
+        raw = get_live_prices_batch(list(tickers), max_wait_seconds=10)
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "_qv_prices", _e)
         raw = {}
@@ -214,8 +226,11 @@ def _persist_user_state():
 @st.cache_data(ttl=60, show_spinner=False)
 
 def _watchlist_prices(tickers_tuple: tuple) -> dict:
+    # FIX NAV2 — max_wait_seconds=10: same reasoning as _qv_prices above.
+    # This is the third of three separate sidebar price fetches that all
+    # used to be able to block up to 30-82+ seconds each with no cap.
     from utils.live_price import get_live_prices_batch
-    raw = get_live_prices_batch(list(tickers_tuple))
+    raw = get_live_prices_batch(list(tickers_tuple), max_wait_seconds=10)
     out = {}
     for t in tickers_tuple:
         q = raw.get(t)
@@ -500,6 +515,23 @@ def render_sidebar(current: str = None) -> None:
             "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"
         ]
 
+    # FIX NAV3 — the "Add ticker" box never cleared after adding a symbol:
+    # st.text_input's value="" argument only seeds the initial value the
+    # first time a key is created. Once "wl_add_input" exists in
+    # session_state (which it does after the very first render), Streamlit
+    # displays whatever's in session_state[key] on every subsequent rerun,
+    # ignoring the value="" argument entirely — so the typed ticker just
+    # sat there after clicking "＋". Directly assigning
+    # st.session_state["wl_add_input"] = "" right after the button click
+    # isn't allowed either — Streamlit raises "cannot be modified after the
+    # widget ... is instantiated" because the text_input has already been
+    # created earlier in this same script run. The fix (same deferred-flag
+    # + st.rerun() pattern already used for the search boxes in
+    # dashboard/pages/04_analyze_stock.py's "_as_clear_pending" flag): set
+    # a plain flag when "＋" is clicked, then consume it up here, before the
+    # widget is instantiated on the *next* run.
+    if st.session_state.pop("_wl_add_clear_pending", False):
+        st.session_state["wl_add_input"] = ""
 
     _wl_add_col, _wl_btn_col = st.sidebar.columns([3, 1])
     with _wl_add_col:
@@ -515,6 +547,12 @@ def render_sidebar(current: str = None) -> None:
         _sym = _wl_input if _wl_input.endswith(".NS") else f"{_wl_input}.NS"
         if _sym not in st.session_state["watchlist"] and len(st.session_state["watchlist"]) < 12:
             st.session_state["watchlist"].append(_sym)
+        # Clear the box regardless of whether the add actually happened
+        # (duplicate ticker / list already at its 12-symbol cap) — the
+        # person is done with this input either way once they've clicked
+        # the button, same as the analyze-stock search boxes.
+        st.session_state["_wl_add_clear_pending"] = True
+        st.rerun()
 
     # Fetch live prices for watchlist tickers
     _wl_tickers = tuple(st.session_state["watchlist"])
