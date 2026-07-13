@@ -144,18 +144,52 @@ with tab_chart:
         f"{name}  ({sym.replace('.NS', '')})"
         for name, sym in STOCK_SEARCH_MAP.items()
     )
-    _ic_c1, _ic_c1b, _ic_c2, _ic_c3 = st.columns([3, 2, 1, 1])
+    _IC_PLACEHOLDER = "— type to search —"
+
+    # FIX IC1: the dropdown and the manual ticker box were independent
+    # widgets with no relationship — picking a dropdown stock left old text
+    # sitting in the manual box, which silently took priority in the
+    # "Resolve ticker" logic below, so a new dropdown pick had no visible
+    # effect if the manual box still held something from an earlier search.
+    # Same on_change + clear-pending pattern already used (and verified) in
+    # dashboard/pages/04_analyze_stock.py's search boxes. The clear-pending
+    # flag (rather than writing session_state directly in the button block)
+    # is required because Streamlit raises "cannot be modified after the
+    # widget ... is instantiated" once a widget has already rendered in the
+    # current script run.
+    if st.session_state.pop("_ic_clear_pending", False):
+        st.session_state["ic_search_select"] = _IC_PLACEHOLDER
+        st.session_state["ic_manual"] = ""
+
+    def _ic_on_dropdown_change():
+        if st.session_state.get("ic_search_select", _IC_PLACEHOLDER) != _IC_PLACEHOLDER:
+            st.session_state["ic_manual"] = ""
+
+    def _ic_on_manual_change():
+        if st.session_state.get("ic_manual", "").strip():
+            st.session_state["ic_search_select"] = _IC_PLACEHOLDER
+
+    _ic_c1, _ic_c1b, _ic_c1c, _ic_c2, _ic_c3 = st.columns([3, 2, 1, 1, 1])
     with _ic_c1:
         _ic_sel = st.selectbox(
             "Search stock",
-            options=["— type to search —"] + _ic_search_opts,
+            options=[_IC_PLACEHOLDER] + _ic_search_opts,
             index=0, key="ic_search_select",
+            on_change=_ic_on_dropdown_change,
         )
     with _ic_c1b:
         _ic_manual = st.text_input(
             "Or type ticker", value="", placeholder="e.g. TCS",
             key="ic_manual",
+            on_change=_ic_on_manual_change,
         ).strip().upper()
+    with _ic_c1c:
+        st.write("")
+        st.write("")
+        if st.button("✖", key="ic_clear_search", use_container_width=True,
+                      help="Clear search"):
+            st.session_state["_ic_clear_pending"] = True
+            st.rerun()
     with _ic_c2:
         _ic_interval = st.selectbox("Interval", ["5m","15m","30m"], key="ic_interval")
     with _ic_c3:
@@ -166,7 +200,7 @@ with tab_chart:
     # Resolve ticker — manual entry wins, else dropdown selection, else default
     if _ic_manual:
         _ic_ticker = _ic_manual
-    elif _ic_sel != "— type to search —":
+    elif _ic_sel != _IC_PLACEHOLDER:
         _ic_ticker = _ic_sel.rsplit("(", 1)[-1].rstrip(")")
     else:
         _ic_ticker = "RELIANCE"
