@@ -203,13 +203,37 @@ elif selected_option != _AS_PLACEHOLDER:
     ticker  = raw_sym + ".NS" if not raw_sym.endswith(".NS") else raw_sym
 
 if not ticker:
-    ticker = "RELIANCE.NS"
+    # FIX A9: fall back to whatever was last analyzed, instead of jumping
+    # straight to the RELIANCE.NS default. This is required once the search
+    # boxes auto-clear right after a successful Analyze (see FIX A9 below)
+    # — without this fallback, the very next rerun after that (e.g. just
+    # changing the chart period) would find both search widgets empty,
+    # resolve to RELIANCE.NS, and silently swap away from the stock the
+    # person just looked up.
+    ticker = st.session_state.get("last_analyzed") or "RELIANCE.NS"
 
 if analyze_btn or _prefill_active or (
     "last_analyzed" in st.session_state
     and st.session_state.last_analyzed == ticker
 ):
     st.session_state.last_analyzed = ticker
+
+    if analyze_btn:
+        # FIX A9: the search boxes only ever cleared when explicitly
+        # switching fields or clicking "✖ Clear" — never after actually
+        # using them. Every time someone finished analyzing one stock,
+        # the manual box still held the old ticker, so typing the next
+        # search meant deleting the old text first. Clearing here, right
+        # when Analyze is clicked, fixes that. get_composite_score is
+        # cached, so recomputing for the same ticker on the next rerun
+        # (see the FIX A9 fallback above) is cheap — the immediate
+        # st.rerun() is required because the search widgets were already
+        # instantiated earlier in *this* run, so they can't be blanked
+        # until the top of the *next* run (the "_as_clear_pending" block
+        # near the top of this file consumes the flag right before the
+        # widgets are created).
+        st.session_state["_as_clear_pending"] = True
+        st.rerun()
 
     with st.spinner(f"Scoring {ticker}…"):
         try:
