@@ -592,6 +592,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
                    f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
                    if _b["entry"] else "")
+                + (f'<div style="font-size:11px;color:#6a8caf;margin-top:2px">'
+                   f'⏱ {_b.get("horizon")}'
+                   + (f' · stale after {_b["valid_until"]}' if _b.get("valid_until") else '')
+                   + '</div>'
+                   if _b.get("horizon") else "")
                 + '</div>',
                 unsafe_allow_html=True,
             )
