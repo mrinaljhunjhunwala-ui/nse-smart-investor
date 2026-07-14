@@ -308,12 +308,15 @@ if _bt_run and not st.session_state.get("bt_running", False):
 
         # Launch background thread
         _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        _executor.submit(
+        # FIX B7: capture the real Future — see the fix at the finish-check
+        # below for why this matters.
+        _future = _executor.submit(
             _run_backtest_worker,
             _bt_tickers, _strat_cls, _bt_period, _BT_COST,
             _cancel_ev, _partial, _progress,
         )
         st.session_state["bt_executor"] = _executor
+        st.session_state["bt_future"]   = _future
         st.rerun()
 
     except Exception as _bt_err:
@@ -349,15 +352,29 @@ if st.session_state.get("bt_running", False):
         _pct = _done / _total
         st.progress(_pct, text=f"Running {_ticker} ({_done}/{_total})")
 
-        # Check if worker finished
-        _executor = st.session_state.get("bt_executor")
-        _finished = _done >= _total or (
-            _executor is not None
-            and all(f.done() for f in getattr(_executor, "_futures", []))
-        )
-        # Simpler finish check — worker sets _done == _total when done
-        if _done >= _total:
-            _finished = True
+        # FIX B7 — CRITICAL: this used to check
+        # `all(f.done() for f in getattr(_executor, "_futures", []))`.
+        # concurrent.futures.ThreadPoolExecutor has NO "_futures" attribute
+        # at all (verified directly: hasattr(ThreadPoolExecutor(), "_futures")
+        # is False) — so getattr(...)  ALWAYS silently fell through to its
+        # [] default, and all(... for f in []) is vacuously True on an empty
+        # iterable in Python. That made "_executor is not None and all(...)"
+        # unconditionally True the instant a run started, so _finished was
+        # True on literally the FIRST poll of this fragment — about 3
+        # seconds in — regardless of how many tickers had actually been
+        # processed. The run then got marked finished, bt_running was set
+        # False, and this fragment (guarded by "if bt_running") never polled
+        # again — silently freezing the displayed results at whatever tiny
+        # handful of tickers (2-4, given per-ticker latency) had completed
+        # in that first ~3 seconds, while the real background thread kept
+        # running to completion with nothing left to ever read or display
+        # its results. This is what was actually causing "only 3-5 stocks"
+        # regardless of universe size — not a data-availability problem.
+        # Fixed by checking the real Future object returned by submit()
+        # (captured in bt_future, see where the worker is launched above)
+        # instead of introspecting nonexistent executor internals.
+        _future = st.session_state.get("bt_future")
+        _finished = _done >= _total or (_future is not None and _future.done())
 
         if _finished:
             st.session_state["bt_running"] = False
