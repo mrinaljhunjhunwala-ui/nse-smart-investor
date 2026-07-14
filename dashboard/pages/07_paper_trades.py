@@ -203,6 +203,16 @@ with st.container():
             unsafe_allow_html=True,
         )
 
+    # FIX P13: "New account name" and "Rename to" never cleared after a
+    # successful Create/Rename — st.rerun() alone doesn't reset
+    # session_state, so the just-used text sat there afterward, same bug
+    # already fixed for this page's stock search boxes above (see the
+    # _pt_reset_form / _reset_form block near "NEW TRADE FORM"). Consumed
+    # here, before either widget is instantiated below.
+    if st.session_state.pop("_pt_acct_clear_pending", False):
+        st.session_state["pt_new_acc_input"] = ""
+        st.session_state["pt_rename_input"] = ""
+
     with _acc_c2:
         _new_acc_name = st.text_input(
             "New account name", value="", placeholder="New account…",
@@ -223,6 +233,7 @@ with st.container():
                 )
                 st.session_state["pt_account"] = _new_acc_name
                 st.success(f"**{_new_acc_name}** ({_new_acc_type}) created.")
+                st.session_state["_pt_acct_clear_pending"] = True
                 st.rerun()
             elif _new_acc_name in _all_accounts:
                 st.warning("Account already exists.")
@@ -251,7 +262,9 @@ with st.container():
                 paper_rename_account(_selected_account, _rename_to)
                 st.session_state["pt_account"] = _rename_to
                 st.success(f"Renamed to **{_rename_to}**")
+                st.session_state["_pt_acct_clear_pending"] = True
                 st.rerun()
+
 
 # Delete account — separate row
 # FIX P5: count open positions before allowing deletion
