@@ -1,0 +1,55 @@
+name: Warm Top Picks
+
+# FIX SPEED1. Runs the Top Picks scan on a schedule and persists it to
+# trade_store (Postgres) so the deployed app can read it instantly instead
+# of paying the ~2-minute cold-scan cost on whichever visit happens to hit
+# an expired in-app cache. Requires DATABASE_URL to point at the SAME
+# Postgres instance configured in the Streamlit Cloud app's secrets — see
+# dashboard/DB_SETUP.md. If DATABASE_URL isn't set, trade_store falls back
+# to a local SQLite file that only this ephemeral runner can see, which
+# would make this workflow a no-op for the deployed app (it still won't
+# fail the job — see scripts/warm_top_picks.py).
+#
+# NSE hours 09:15–15:30 IST = 03:45–10:00 UTC. GitHub cron is UTC-only and
+# can't express :45, so we run 03–10 UTC (matches market-alerts.yml).
+
+on:
+  schedule:
+    - cron: "*/15 3-10 * * 1-5"   # every 15 min, 03:00–10:59 UTC, Mon–Fri
+  workflow_dispatch:               # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: warm-top-picks
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # This job (unlike market-alerts.yml) needs the fuller dependency set
+      # because it imports dashboard.shared.cache, which pulls in streamlit
+      # and plotly at module import time even though this job never renders
+      # a UI. Kept as its own requirements file so a future trim of the main
+      # requirements.txt doesn't silently break this job.
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Run Top Picks warm-up
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional — set these only if you want the scan to use real-time
+          # Angel One prices instead of the free Stooq/Yahoo fallback chain:
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python scripts/warm_top_picks.py
