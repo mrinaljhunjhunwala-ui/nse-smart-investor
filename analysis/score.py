@@ -143,6 +143,8 @@ class CompositeScore:
     momentum_fallback:  bool         = False   # True when < 25 bars of history
     horizon:            str          = ""      # FIX HZ1: e.g. "Swing (3–10 trading days)"
     valid_until:        str          = ""      # FIX HZ1: ISO date — pick considered stale after this
+    rsi:                float        = 50.0    # FIX WL1: raw RSI(14), already computed — just unsurfaced
+    return_1d:          float        = 0.0     # FIX WL1: 1-day % change, already available from df
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -157,6 +159,7 @@ class CompositeScore:
             "sector": self.sector, "vix_regime": self.vix_regime,
             "momentum_fallback": self.momentum_fallback,
             "horizon": self.horizon, "valid_until": self.valid_until,
+            "rsi": self.rsi, "return_1d": self.return_1d,
         }
 
 
@@ -699,6 +702,17 @@ def score_dataframe(
     horizon_label, horizon_days = _pick_horizon(tech_pts, mom_pts)
     valid_until = (datetime.now() + timedelta(days=horizon_days)).date().isoformat()
 
+    # FIX WL1: RSI/1-day-return were never exposed on CompositeScore, even
+    # though RSI is already computed inside _score_technical() and both are
+    # cheap to derive from the df already in scope here — no extra fetch.
+    _cur = df.iloc[-1]
+    rsi_val = float(_cur.get("RSI", 50))
+    _closes_1d = df["Close"].tail(2)
+    return_1d_val = (
+        float(_closes_1d.pct_change().iloc[-1]) * 100
+        if len(_closes_1d) == 2 else 0.0
+    )
+
     headline, narrative = _build_narrative(
         ticker=ticker, df=df, score=total, grade=grade, action=action,
         tech_pts=tech_detail, mom_pts=mom_detail, vol_pts=vol_detail,
@@ -723,6 +737,8 @@ def score_dataframe(
         momentum_fallback = momentum_fallback,
         horizon           = horizon_label,
         valid_until       = valid_until,
+        rsi               = rsi_val,
+        return_1d         = return_1d_val,
         entry             = entry,
         stop_loss         = sl,
         target            = tp,
