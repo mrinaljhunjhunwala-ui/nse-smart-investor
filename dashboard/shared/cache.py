@@ -530,6 +530,8 @@ def _score_to_dict(s, extended: bool = False) -> dict:
             "momentum":  getattr(s, "momentum_score", 0),
             "volume":    getattr(s, "volume_score", 0),
             "sentiment": getattr(s, "sentiment_score", 0),
+            "horizon":     getattr(s, "horizon", ""),      # FIX HZ1
+            "valid_until": getattr(s, "valid_until", ""),  # FIX HZ1
         })
     return base
 
@@ -546,6 +548,7 @@ def _unavailable_dict(ticker: str, reason: str = "", extended: bool = False) -> 
         base.update({
             "narrative": "", "sector": "",
             "technical": 0, "momentum": 0, "volume": 0, "sentiment": 0,
+            "horizon": "", "valid_until": "",  # FIX HZ1
         })
     return base
 
@@ -1032,6 +1035,8 @@ def get_composite_score(ticker: str):
             self.volume_score     = 0.0
             self.sentiment_score  = 0.0
             self.company_name     = None
+            self.horizon          = ""    # FIX HZ1
+            self.valid_until      = ""    # FIX HZ1
 
     try:
         vix_info = get_vix_info()
