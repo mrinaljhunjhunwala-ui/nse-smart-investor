@@ -143,8 +143,13 @@ with _bt_c2:
     )
 with _bt_c3:
     _bt_period = st.selectbox(
-        "Period", ["2y", "3y"], index=0, key="bt_period",
-        help="Needs 2y+ so all indicators have enough warmup history.",
+        "Period", ["6mo", "1y", "2y", "3y"], index=2, key="bt_period",
+        help=(
+            "How much price history to backtest over. Shorter periods run "
+            "faster but give indicators like the 200-day SMA less warmup "
+            "room, so the earliest trades in the window may be less "
+            "reliable. 2y+ is the safest choice if you're unsure."
+        ),
     )
 with _bt_c4:
     st.write("")
@@ -193,7 +198,31 @@ def _run_backtest_worker(
     partial_results: list,      # shared list — worker appends, UI reads
     progress_holder: list,      # [done, total, current_ticker]
 ):
-    """Background worker — runs one ticker at a time, writes partial results."""
+    """Background worker — runs one ticker at a time, writes partial results.
+
+    FIX B6 — throttling + failure visibility. This loop used to hammer
+    fetch_single() for every ticker back-to-back with zero delay between
+    requests. Yahoo's undocumented chart API and Stooq's CSV export both
+    rate-limit/block abusive request patterns, and a cloud-hosted app
+    sharing an IP range with many other users (Streamlit Community Cloud)
+    is already more exposed to that than a residential IP — see
+    data/fetcher.py's own module docs on Stooq's cloud-IP blocking. Scanning
+    a 500-ticker universe with no delay at all is exactly the kind of
+    pattern that trips it partway through, which matches the previously-
+    observed failure logs (HTML-not-CSV from Stooq, connection-refused and
+    handshake-timeout errors from both Stooq and Yahoo) for the majority of
+    a run. A small per-ticker delay costs a modest amount of wall-clock
+    time but meaningfully reduces how often that happens.
+
+    Previously, ANY failed ticker (fetch failure OR insufficient history)
+    was silently dropped from the final results with zero indication to
+    the person of how many tickers failed or why — a 500-ticker Nifty 500
+    run that only fetched 5 tickers successfully looked identical, from the
+    results table alone, to a run that had genuinely only found 5 valid
+    setups. Each failure now records a short, categorized reason so the UI
+    can show "487/500 failed: data unavailable" instead of just a small,
+    unexplained table.
+    """
     from data.fetcher import fetch_single as _bt_fs
     from utils.indicators import add_all_indicators as _bt_ind
     from backtesting import Backtest as _BT
@@ -222,6 +251,17 @@ def _run_backtest_worker(
                     "Max Drawdown (%)": round(float(_stats["Max. Drawdown [%]"]),      2),
                     "Win Rate (%)":     round(float(_stats["Win Rate [%]"]),           2),
                     "# Trades":         int(_stats["# Trades"]),
+                    "_fail_reason":     None,
+                })
+            else:
+                # FIX B6: distinct from a fetch failure — data was fetched
+                # but too short a history to backtest reliably.
+                partial_results.append({
+                    "Ticker":  t.replace(".NS", "") + " ⚠️",
+                    "Return (%)": None, "Buy & Hold (%)": None,
+                    "Sharpe": None,     "Max Drawdown (%)": None,
+                    "Win Rate (%)": None, "# Trades": 0,
+                    "_fail_reason": "insufficient history (<60 bars)",
                 })
         except Exception as _e:
             # Record skip without crashing the worker
@@ -231,7 +271,11 @@ def _run_backtest_worker(
                 "Return (%)": None, "Buy & Hold (%)": None,
                 "Sharpe": None,     "Max Drawdown (%)": None,
                 "Win Rate (%)": None, "# Trades": 0,
+                "_fail_reason": f"fetch/data error: {type(_e).__name__}",
             })
+        # FIX B6: brief pause between tickers — see docstring above.
+        if not cancel_event.is_set() and i < total - 1:
+            time.sleep(0.35)
     progress_holder[0] = total  # signal completion
 
 
@@ -318,20 +362,47 @@ if st.session_state.get("bt_running", False):
         if _finished:
             st.session_state["bt_running"] = False
             _bt_rows = [r for r in _partial if r.get("Return (%)") is not None]
+            _bt_fails = [r for r in _partial if r.get("Return (%)") is None]
+            # FIX B6: store the failure breakdown so it survives this
+            # fragment's own rerun below and can be shown in the main page
+            # body (fragments render in an isolated container, so anything
+            # meant to persist on the page after the fragment finishes
+            # needs to go through session_state, same as bt_result itself).
+            st.session_state["bt_fail_count"] = len(_bt_fails)
+            st.session_state["bt_fail_total"] = len(_partial)
+            _reason_counts: dict = {}
+            for r in _bt_fails:
+                _reason = r.get("_fail_reason") or "unknown"
+                _reason_counts[_reason] = _reason_counts.get(_reason, 0) + 1
+            st.session_state["bt_fail_reasons"] = _reason_counts
+
             if _bt_rows:
-                _bt_res = pd.DataFrame(_bt_rows).set_index("Ticker")
+                _bt_res = pd.DataFrame(_bt_rows).drop(
+                    columns=["_fail_reason"], errors="ignore"
+                ).set_index("Ticker")
                 st.session_state["bt_result"] = _bt_res
                 # FIX B4: write to portfolio_results.csv so the top table refreshes
                 try:
                     _bt_res.to_csv("portfolio_results.csv")
                 except Exception as _csv_e:
                     import logging; logging.getLogger("dashboard.backtest").warning("Could not write portfolio_results.csv: %s", _csv_e)
-                st.success(
-                    f"✅ Backtested {len(_bt_res)} stocks "
-                    f"({st.session_state.get('bt_result_label','')})."
-                )
+                if _bt_fails:
+                    st.warning(
+                        f"✅ Backtested {len(_bt_res)}/{len(_partial)} stocks "
+                        f"({st.session_state.get('bt_result_label','')}) — "
+                        f"**{len(_bt_fails)} couldn't be backtested**, see the "
+                        "breakdown below the results."
+                    )
+                else:
+                    st.success(
+                        f"✅ Backtested {len(_bt_res)} stocks "
+                        f"({st.session_state.get('bt_result_label','')})."
+                    )
             else:
-                st.warning("No results — data may be unavailable. Try again.")
+                st.warning(
+                    f"No results — all {len(_partial)} tickers failed. "
+                    "See the breakdown below for why."
+                )
             st.rerun()
         # else: still running — no sleep needed, run_every=3 handles the
         # next check on its own timer.
@@ -385,6 +456,33 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
             "Sorted by return. Green = better. "
             "'Beat Buy&Hold' = how often the strategy outperformed simply holding."
         )
+
+    # FIX B6 — failure breakdown. Previously any ticker that failed (data
+    # fetch failure, or fetched but too little history) was silently
+    # dropped from the table above with zero indication of how many or
+    # why — a run that only found 5 valid results out of 500 requested
+    # looked identical, from the table alone, to a run that had genuinely
+    # only found 5 valid setups. This surfaces the count and the reason
+    # breakdown recorded by the worker (see FIX B6 in _run_backtest_worker
+    # above) so it's clear when the gap is a data-availability problem
+    # rather than a real result.
+    _fail_n     = st.session_state.get("bt_fail_count", 0)
+    _fail_total = st.session_state.get("bt_fail_total", 0)
+    if _fail_n:
+        with st.expander(
+            f"⚠️ {_fail_n}/{_fail_total} tickers couldn't be backtested — why?",
+            expanded=_bt_res.empty,
+        ):
+            _reasons = st.session_state.get("bt_fail_reasons", {})
+            for _reason, _count in sorted(_reasons.items(), key=lambda kv: -kv[1]):
+                st.markdown(f"- **{_count}** — {_reason}")
+            st.caption(
+                "\"fetch/data error\" means every configured data source "
+                "(Angel One, Stooq, Yahoo) failed for that ticker in this "
+                "run — often a temporary provider block rather than the "
+                "stock itself being unavailable. Re-running later, or with "
+                "a smaller universe, sometimes recovers more of these."
+            )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX B3 — Normalised comparison with common-date alignment
