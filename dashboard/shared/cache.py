@@ -741,6 +741,61 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
     return {"buys": buys, "sells": sells[:n], "meta": meta}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX SPEED1 — persisted Top Picks (killing the 2-min cold-scan wait)
+# ─────────────────────────────────────────────────────────────────────────────
+_TOP_PICKS_KV_KEY  = "top_picks_snapshot"
+_TOP_PICKS_KV_USER = "_system"          # not per-user — one shared scan result
+_TOP_PICKS_MAX_AGE_SECONDS = 1200       # 20 min — tolerates one missed 15-min cron tick
+
+def get_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
+    """
+    Fast-path wrapper around _home_top_picks().
+
+    FIX SPEED1: _home_top_picks() itself is unchanged (still the correct thing
+    to call for an in-process live scan). The problem this fixes is upstream —
+    the ~2-min cold scan was being paid by whichever real user's browser
+    session happened to hit an expired/empty st.cache_data entry (first visit
+    after a deploy, or after any 5-min gap with no traffic). st.cache_data is
+    process-wide, not shared across Streamlit Cloud restarts, so that cost
+    recurred constantly for a low-traffic single-user app.
+
+    scripts/warm_top_picks.py now runs on a schedule (GitHub Actions, every
+    15 min in market hours — see .github/workflows/warm-top-picks.yml) and
+    writes a fresh scan result to trade_store (shared Postgres — reachable
+    from both the Action and the deployed app, unlike st.cache_data or
+    SQLite). This function reads that snapshot first; only if it's missing or
+    older than _TOP_PICKS_MAX_AGE_SECONDS does it fall back to a live scan,
+    so a missed/late cron run still degrades gracefully instead of breaking.
+    """
+    try:
+        snap = _store.kv_get(_TOP_PICKS_KV_KEY, user_id=_TOP_PICKS_KV_USER)
+        if snap and isinstance(snap, dict):
+            _gen_at = snap.get("generated_at")
+            _age = None
+            if _gen_at:
+                try:
+                    _age = (datetime.datetime.now() -
+                            datetime.datetime.fromisoformat(_gen_at)).total_seconds()
+                except Exception as _parse_e:
+                    _log.debug("cache.get_top_picks: bad generated_at %r: %s", _gen_at, _parse_e)
+            if _age is not None and _age <= _TOP_PICKS_MAX_AGE_SECONDS:
+                data = snap.get("data")
+                if isinstance(data, dict) and "buys" in data:
+                    data = dict(data)
+                    data["source"] = "persisted"
+                    data["generated_at"] = _gen_at
+                    return data
+    except Exception as _e:
+        _log.warning("cache.get_top_picks: persisted snapshot read failed, falling back "
+                     "to live scan: %s", _e)
+
+    result = _home_top_picks(vix_regime=vix_regime, n=n, sector_ranks=sector_ranks)
+    result = dict(result)
+    result["source"] = "live_scan"
+    return result
+
+
 @st.cache_data(ttl=3600, show_spinner=False)   # 1hr cache — EOD signal, not intraday
 def _tomorrow_watchlist(n: int = 15) -> dict:
     """
