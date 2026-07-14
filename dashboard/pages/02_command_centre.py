@@ -18,7 +18,7 @@ from dashboard.shared.nav import render_sidebar
 from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
-    _home_top_picks,
+    get_top_picks,
     _nifty50_gainers_ticker,
     _score_watchlist,
     _sector_ranks_tuple,
@@ -369,7 +369,11 @@ def _picks_background_fetch(vix_regime: str, sector_ranks: tuple) -> None:
     session_state writes work normally.
     """
     try:
-        result = _home_top_picks(vix_regime=vix_regime, sector_ranks=sector_ranks)
+        # FIX SPEED1: get_top_picks() reads a scheduled scan snapshot from
+        # trade_store first (written every 15 min by scripts/warm_top_picks.py
+        # via GitHub Actions) and only falls back to a live ~2-min scan
+        # (_home_top_picks, unchanged) if that snapshot is missing or stale.
+        result = get_top_picks(vix_regime=vix_regime, sector_ranks=sector_ranks)
         st.session_state[_PICKS_KEY] = result
         st.session_state[f"{_PICKS_KEY}_ts"] = datetime.datetime.now()
         st.session_state[f"{_PICKS_KEY}_error"] = None
@@ -402,9 +406,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
             "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
             "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
-            "surfaced (10 each — buys and sells). The first-ever scan after a deploy/redeploy "
-            "takes ~2 min and runs in the background without blocking the page; every scan "
-            "after that is served instantly from cache and refreshed automatically every 5 min.")
+            "surfaced (10 each — buys and sells). A scheduled scan runs every 15 min during "
+            "market hours, so this normally loads instantly from that snapshot. If the "
+            "scheduled scan hasn't run recently (e.g. right after a config change), it falls "
+            "back to a live scan here, which takes ~2 min and runs in the background without "
+            "blocking the page.")
 
     from dashboard.shared.disclosures import (
         render_regime_reliability_note as _cc_regime_note,
