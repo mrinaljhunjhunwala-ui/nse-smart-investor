@@ -415,6 +415,15 @@ if analyze_btn or _prefill_active or (
                 )
                 tc4.metric("Risk : Reward", f"{cs.risk_reward:.1f} : 1")
 
+                # FIX HZ1: holding period this setup was scored for — was
+                # missing entirely, making the action label ("BUY" etc.) an
+                # open-ended idea with no sense of when to reassess.
+                if getattr(cs, "horizon", ""):
+                    st.caption(
+                        f"⏱ **Horizon:** {cs.horizon}"
+                        + (f" — reassess after **{cs.valid_until}**" if getattr(cs, "valid_until", "") else "")
+                    )
+
                 st.markdown(
                     f'<div class="{_action_color(cs.action)}">'
                     f'<b style="font-size:16px">{cs.headline}</b><br><br>'
