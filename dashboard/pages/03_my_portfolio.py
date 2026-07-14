@@ -505,6 +505,59 @@ if _csv_source is not None:
                 import logging; logging.getLogger("dashboard.my_portfolio").debug("Holdings sort failed (%s): %s — using default order", _h_sort, _sort_e)
                 _hold_sorted = list(summary.holdings)
 
+            # FIX MH7 — bring back the missing per-stock table. DC2 (see
+            # this file's header comment) removed the old live-price table
+            # entirely on the reasoning that it duplicated the cards below
+            # and the two could silently drift apart (different code paths
+            # for "today's change"). That's still true, so this table is
+            # built from the EXACT SAME _hold_sorted / HoldingResult objects
+            # already computed for the cards — not a second live-price
+            # fetch — so it's mechanically the same numbers, just also
+            # available at a glance across every holding at once, which the
+            # cards' one-stock-at-a-time layout doesn't give you.
+            st.markdown("##### 📋 Holdings Table")
+            _tbl_rows = []
+            for _th in _hold_sorted:
+                _th_today = getattr(_th, "today_chg_pct", None)
+                _th_today_pnl = (
+                    _th.current_price * _th.quantity * (_th_today / 100.0)
+                    if _th_today is not None else None
+                )
+                _tbl_rows.append({
+                    "Ticker": _th.ticker.replace(".NS", ""),
+                    "Price (₹)": _th.current_price,
+                    "Today %": _th_today,
+                    "Today ₹": _th_today_pnl,
+                    "Qty": _th.quantity,
+                    "Invested (₹)": _th.avg_buy_price * _th.quantity,
+                    "Value (₹)": _th.current_price * _th.quantity,
+                    "P&L (₹)": _th.pnl,
+                    "P&L %": _th.pnl_pct,
+                    "Action": _display_label(_th.action),
+                    "Score": _th.score,
+                })
+            st.dataframe(
+                pd.DataFrame(_tbl_rows),
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Price (₹)":    st.column_config.NumberColumn(format="₹%.2f"),
+                    "Today %":      st.column_config.NumberColumn(format="%.2f%%"),
+                    "Today ₹":      st.column_config.NumberColumn(format="₹%.0f"),
+                    "Qty":          st.column_config.NumberColumn(format="%.0f"),
+                    "Invested (₹)": st.column_config.NumberColumn(format="₹%.0f"),
+                    "Value (₹)":    st.column_config.NumberColumn(format="₹%.0f"),
+                    "P&L (₹)":      st.column_config.NumberColumn(format="₹%.0f"),
+                    "P&L %":        st.column_config.NumberColumn(format="%.2f%%"),
+                    "Score":        st.column_config.NumberColumn(format="%.0f/100"),
+                },
+            )
+            st.caption(
+                "Same numbers as the cards below, sourced from the same "
+                "scoring pass — just laid out for a quick scan across every "
+                "holding at once."
+            )
+
             # Aligned to design.py's "Dealing Room v2" tokens (bull #16c784 /
             # bear #ff4d4d / caution #f2a93b / accent #2fd1e0) instead of the
             # pre-redesign teal/material-green/blue set, so this page matches
