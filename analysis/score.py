@@ -35,11 +35,12 @@ import os
 import sys
 import logging
 import warnings
+import math
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 
 warnings.filterwarnings("ignore")
 
@@ -140,6 +141,8 @@ class CompositeScore:
     sector_rank:        int
     patterns_detected:  List[str]    = field(default_factory=list)   # informational only
     momentum_fallback:  bool         = False   # True when < 25 bars of history
+    horizon:            str          = ""      # FIX HZ1: e.g. "Swing (3–10 trading days)"
+    valid_until:        str          = ""      # FIX HZ1: ISO date — pick considered stale after this
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -153,6 +156,7 @@ class CompositeScore:
             "rr": self.risk_reward, "headline": self.headline,
             "sector": self.sector, "vix_regime": self.vix_regime,
             "momentum_fallback": self.momentum_fallback,
+            "horizon": self.horizon, "valid_until": self.valid_until,
         }
 
 
@@ -380,8 +384,21 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15) -> T
 
 def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float, float, float]:
     """
-    Structure-aware stop + conviction-scaled target.
+    Structure-aware stop + volatility-calibrated target.
     Entry = current close (live price injected later in score_stock if Angel One connected).
+
+    FIX RR1: the target used to come from a fixed 4-bucket score ladder
+    (score>=72 -> 3.0x risk, >=60 -> 2.5x, >=48 -> 2.0x, else 1.5x) — the
+    same multiplier for every stock in a band regardless of how that stock
+    actually moves. The stop was already stock-specific (ATR + swing-low);
+    the target wasn't, which is the "fixed, not genuine" feeling flagged
+    against this page. The target multiplier is now anchored to THIS
+    stock's own realized volatility — a ~10-trading-day expected move,
+    scaled from its trailing daily-return std-dev via sqrt-time scaling —
+    expressed in ATR units. Score still nudges the target (higher
+    conviction reaches a bit further), but it no longer overrides what's
+    realistic for that specific stock: a calm large-cap and a choppy
+    small-cap in the same score band no longer get an identical target.
     """
     cur   = df.iloc[-1]
     price = float(cur["Close"])
@@ -402,14 +419,65 @@ def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float,
 
     risk = max(price - sl, 0.01)
 
-    if   score >= 72: rr_mult = 3.0
-    elif score >= 60: rr_mult = 2.5
-    elif score >= 48: rr_mult = 2.0
-    else:             rr_mult = 1.5
+    # ── FIX RR1: stock-specific expected move, in ATR units ──
+    # 10 trading days ≈ 2 calendar weeks — matches the "Swing" horizon
+    # bucket in _pick_horizon() below, so the target and the holding-period
+    # label describe the same window rather than two unrelated numbers.
+    _HOLD_DAYS = 10
+    closes = df["Close"].tail(120).dropna()
+    expected_move_atr = None
+    if len(closes) >= 20:
+        daily_ret = closes.pct_change().dropna()
+        daily_vol = float(daily_ret.std())
+        if daily_vol > 0 and not pd.isna(daily_vol):
+            expected_move_price = price * daily_vol * math.sqrt(_HOLD_DAYS)
+            expected_move_atr = expected_move_price / atr
+
+    if   score >= 72: conviction = 1.25
+    elif score >= 60: conviction = 1.10
+    elif score >= 48: conviction = 0.95
+    else:             conviction = 0.80
+
+    if expected_move_atr is not None and expected_move_atr > 0:
+        rr_mult = expected_move_atr * conviction
+        # Bounds keep targets sane at either extreme — under 1.2x risk isn't
+        # a real trade idea, and past 4x risk the volatility estimate is
+        # more noise than signal (short history, thin trading, a recent gap).
+        rr_mult = max(1.2, min(rr_mult, 4.0))
+    else:
+        # FIX RR1 fallback: not enough price history for a volatility
+        # estimate (e.g. a recent listing) — use the old fixed ladder
+        # rather than guessing off too little data.
+        if   score >= 72: rr_mult = 3.0
+        elif score >= 60: rr_mult = 2.5
+        elif score >= 48: rr_mult = 2.0
+        else:             rr_mult = 1.5
 
     tp = price + rr_mult * risk
     rr = round((tp - price) / risk, 2)
     return round(price, 2), round(sl, 2), round(tp, 2), rr
+
+
+def _pick_horizon(tech_pts: float, mom_pts: float) -> Tuple[str, int]:
+    """
+    FIX HZ1: every score-driven page (Top Picks, Analyze Stock, Watchlist,
+    Quality Watch) handed back an action label (STRONG BUY / BUY / etc.)
+    with no sense of how long that setup is actually good for — flagged as
+    "too vague" when deciding when to book or walk away. A momentum-heavy
+    score describes a shorter-lived push that tends to mean-revert; a
+    technical/trend-heavy score (higher structural weight, less reliance on
+    the momentum sub-score) describes a more durable setup. This doesn't
+    invent new signals — it just labels which of the two the composite
+    score is already leaning on, using the same tech_pts/mom_pts already
+    computed for this ticker.
+
+    Returns (label, calendar_days_until_stale) — the latter feeds
+    CompositeScore.valid_until so a pick can visibly go stale instead of
+    sitting on screen looking current indefinitely.
+    """
+    if mom_pts >= tech_pts:
+        return "Swing (3–10 trading days)", 14
+    return "Positional (2–6 weeks)", 42
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -628,6 +696,8 @@ def score_dataframe(
     action = _action(total)
 
     entry, sl, tp, rr = _compute_entry_levels(df, total)
+    horizon_label, horizon_days = _pick_horizon(tech_pts, mom_pts)
+    valid_until = (datetime.now() + timedelta(days=horizon_days)).date().isoformat()
 
     headline, narrative = _build_narrative(
         ticker=ticker, df=df, score=total, grade=grade, action=action,
@@ -651,6 +721,8 @@ def score_dataframe(
         sentiment_score   = sent_pts,
         patterns_detected = patterns,
         momentum_fallback = momentum_fallback,
+        horizon           = horizon_label,
+        valid_until       = valid_until,
         entry             = entry,
         stop_loss         = sl,
         target            = tp,
