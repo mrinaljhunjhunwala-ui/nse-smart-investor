@@ -121,16 +121,23 @@ else:
         for tkr in tickers_tuple:
             try:
                 cs = get_composite_score(tkr)
+                # FIX WL1: these field names never matched CompositeScore
+                # (current_price/composite_score/overall_signal/
+                # technical_indicators don't exist — real fields are price/
+                # score/action, and RSI/1d-change weren't exposed at all
+                # until FIX WL1 added cs.rsi/cs.return_1d). Every call hit
+                # the except below and silently showed "Error" for every
+                # ticker — Refresh Scores has never actually worked.
                 rows.append({
                     "ticker":    tkr,
-                    "price":     cs.current_price,
-                    "score":     cs.composite_score,
-                    "signal":    cs.overall_signal,
-                    "rsi":       round(cs.technical_indicators.get("rsi", 0), 1),
-                    "change_1d": round(cs.technical_indicators.get("return_1d", 0) * 100, 2),
+                    "price":     cs.price,
+                    "score":     cs.score,
+                    "signal":    cs.action,
+                    "rsi":       round(cs.rsi, 1),
+                    "change_1d": round(cs.return_1d, 2),
                 })
             except Exception as e:
-                _log.debug("watchlist scoring failed for %s: %s", tkr, e)
+                _log.warning("watchlist scoring failed for %s: %s", tkr, e)
                 rows.append({"ticker": tkr, "price": None, "score": None,
                              "signal": "Error", "rsi": None, "change_1d": None})
         return rows
