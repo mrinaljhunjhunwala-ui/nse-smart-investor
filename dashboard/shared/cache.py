@@ -1037,6 +1037,8 @@ def get_composite_score(ticker: str):
             self.company_name     = None
             self.horizon          = ""    # FIX HZ1
             self.valid_until      = ""    # FIX HZ1
+            self.rsi              = 50.0  # FIX WL1
+            self.return_1d        = 0.0   # FIX WL1
 
     try:
         vix_info = get_vix_info()
