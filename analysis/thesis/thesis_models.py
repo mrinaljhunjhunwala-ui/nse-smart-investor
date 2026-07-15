@@ -69,7 +69,6 @@ class ThesisInputs:
     technical_score: Optional[float] = None       # /40
     momentum_score: Optional[float] = None        # /25
     volume_score: Optional[float] = None          # /15
-    pattern_score: Optional[float] = None         # /10
     sentiment_score: Optional[float] = None       # /10
     risk_reward: Optional[float] = None
 
