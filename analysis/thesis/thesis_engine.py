@@ -82,7 +82,6 @@ def _from_composite(inp: ThesisInputs, cs: Any) -> None:
     inp.technical_score = g("technical", "technical_score")
     inp.momentum_score = g("momentum", "momentum_score")
     inp.volume_score = g("volume", "volume_score")
-    inp.pattern_score = g("pattern", "pattern_score")
     inp.sentiment_score = g("sentiment", "sentiment_score")
     inp.risk_reward = g("rr", "risk_reward")
     inp.sector = inp.sector or g("sector", "sector")
