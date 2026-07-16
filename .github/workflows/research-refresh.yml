@@ -1,5 +1,4 @@
 name: Research Refresh (score efficacy + regime study)
-
 # Manually-triggered only — this is an occasional, deliberate re-run of the
 # two read-only research scripts, not part of every push/PR.
 #
@@ -14,52 +13,51 @@ name: Research Refresh (score efficacy + regime study)
 # happen here, where that network access already exists (see
 # market-alerts.yml, which hits the same providers on a schedule).
 #
+# Also runs research/score_variants_volume.py — a follow-up variant study
+# (same discipline as RESEARCH_SCORE_VARIANTS.md's pattern/oversold-RSI
+# tests) checking whether the volume component (15/90 pts) is dead weight,
+# after the real score_efficacy/regime_study runs above found it near-zero-
+# to-negative in every regime breakdown in both studies.
+#
 # This job does NOT rewrite the .md reports automatically — it only produces
 # the raw CSVs + console output as a downloadable artifact. Turning those
 # numbers into report prose/conclusions is a separate, deliberate step.
-
 on:
   workflow_dispatch:
-
 concurrency:
   group: research-refresh
   cancel-in-progress: false
-
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install --quiet -r requirements.txt
-
       # tee needs research/output/ to exist before either script's own
       # os.makedirs() call runs (that happens after arg-parsing, inside
       # main() — too late for tee's own file-open).
       - name: Create output directory
         run: mkdir -p research/output
-
       # Full universe (no --limit) for both — docstrings estimate a few
       # minutes and ~4-6 min respectively; timeout-minutes above gives a
       # wide margin for Yahoo/Stooq retries and rate-limit backoff, which
       # this repo's own test logs show can be substantial some days.
       - name: Run score efficacy study
         run: python -m research.score_efficacy 2>&1 | tee research/output/score_efficacy_console.log
-
       - name: Run regime study
         run: python -m research.regime_study 2>&1 | tee research/output/regime_study_console.log
-
+      - name: Run volume variant study
+        run: python -m research.score_variants_volume 2>&1 | tee research/output/score_variants_volume_console.log
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
