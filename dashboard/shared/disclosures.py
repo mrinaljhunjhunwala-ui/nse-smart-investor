@@ -76,7 +76,8 @@ def render_score_methodology(expanded: bool = False) -> None:
     """'What this score measures' — reusable methodology transparency component.
 
     Shown wherever the trend-quality (composite) score is a primary element.
-    Grounded in the 5-year regime study (REGIME_STUDY_REPORT.md, 40,667 obs).
+    Grounded in the 5-year regime study (REGIME_STUDY_REPORT.md, re-run July
+    2026 after FIX EFF1, 86,589 obs).
     """
     with st.expander("ℹ️ What this score measures", expanded=expanded):
         st.markdown(
@@ -89,10 +90,10 @@ def render_score_methodology(expanded: bool = False) -> None:
             "distribution). Candlestick patterns are shown for context but are "
             "not scored — a 5-year study found they added no ranking power.\n\n"
             "**What a high score means:** the stock is in a strong uptrend that has "
-            "historically tended to *persist* (5-year validation: +0.41 rank correlation "
+            "historically tended to *persist* (5-year validation: +0.40 rank correlation "
             "with staying in an uptrend over the following month).\n\n"
             "**What it does not mean:** the score is **not a direct forecast of future "
-            "returns** (the same validation found only ≈ +0.04 correlation with next-month "
+            "returns** (the same validation found only ≈ +0.02 correlation with next-month "
             "returns). A strong trend can drift sideways; a weak one can rebound. Use the "
             "score to assess trend health, then apply your own entry, risk and position "
             "rules. Not SEBI-registered investment advice."
@@ -102,10 +103,15 @@ def render_score_methodology(expanded: bool = False) -> None:
 def render_regime_reliability_note() -> None:
     """VIX-regime reliability note for score surfaces.
 
-    The 5-year regime study found score rankings work mildly in calm/normal
-    regimes but degrade and even invert during elevated-fear/high-VIX periods
-    (Spearman vs 60-day forward return: complacency +0.12 → fear −0.11).
-    This renderer surfaces that finding next to live scores, using the existing
+    The 5-year regime study (research/regime_study.py, re-run July 2026 after
+    FIX EFF1 — see REGIME_STUDY_REPORT.md) found score rankings work in
+    complacency-VIX regimes but degrade and invert as VIX rises (Spearman vs
+    60-day forward return): complacency +0.15, normal −0.03, elevated −0.01,
+    fear −0.06. "Normal" VIX is NOT reliably informative despite sitting
+    between the two calm-sounding regimes — it's near-zero, not positive —
+    so it deliberately gets neither the reassurance nor the warning message
+    below; a claim either way would overstate what the data shows. This
+    renderer surfaces that finding next to live scores, using the existing
     VIX plumbing. Read-only; degrades silently if VIX is unavailable.
     """
     try:
@@ -121,19 +127,20 @@ def render_regime_reliability_note() -> None:
     if regime in ("elevated", "fear", "panic"):
         st.warning(
             f"⚠️ **Reduced reliability in the current market regime{vix_txt}.** "
-            "Historical testing (5-year study, 40,667 observations) shows trend-quality "
-            "rankings become **less reliable — and can invert — during elevated-fear "
-            "regimes**, when beaten-down stocks often rebound harder than trending ones. "
+            "Historical testing (5-year study, 86,589 observations) shows trend-quality "
+            "rankings become **less reliable — and can invert — as VIX rises**, "
+            "when beaten-down stocks often rebound harder than trending ones. "
             "Interpret scores with additional caution and rely more on position sizing "
             "and stops.",
             icon="🌪️",
         )
-    elif regime in ("normal", "complacency"):
+    elif regime == "complacency":
         st.caption(
             f"🟢 Calm market regime{vix_txt} — historically the conditions where "
             "trend-quality rankings have been most informative (see Investor Guide → "
             "scores)."
         )
+    # "normal" VIX deliberately gets no message here — see docstring above.
 
 
 def render_revenue_growth_evidence() -> None:
