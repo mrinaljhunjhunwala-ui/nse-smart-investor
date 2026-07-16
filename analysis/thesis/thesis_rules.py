@@ -33,7 +33,6 @@ MOM_STRONG = 18.0          # /25
 MOM_WEAK = 8.0             # /25   (bear-grade weakness)
 MOM_RISK = 10.0            # /25   (risk-grade weakness)
 VOL_STRONG = 10.0          # /15
-PAT_BULL = 5.0             # /10
 SENT_WEAK = 3.0            # /10   (unfavourable market backdrop)
 
 BETA_HIGH = 1.2            # x  — amplifies market moves
@@ -115,9 +114,6 @@ def bull_factors(inp: ThesisInputs) -> List[Factor]:
     if inp.volume_score is not None and inp.volume_score >= VOL_STRONG:
         out.append(Factor("Above-average volume support", SRC_TECHNICAL,
                           f"Volume score {inp.volume_score:.0f}/15", BULL))
-    if inp.pattern_score is not None and inp.pattern_score >= PAT_BULL:
-        out.append(Factor("Bullish chart pattern present", SRC_TECHNICAL,
-                          f"Pattern score {inp.pattern_score:.0f}/10", BULL))
 
     # Deep confirmation
     if inp.weekly_trend == "uptrend":
