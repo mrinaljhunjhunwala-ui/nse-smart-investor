@@ -1,5 +1,10 @@
 # Decision Memo — Fundamentals Data Source for NSE Smart Investor
 
+> **Superseded:** the EODHD recommendation below was revisited in `EODHD_DECISION_AUDIT.md`,
+> which reached a **NO-GO** on any paid provider. Production stays on the free
+> Yahoo-backed `YahooFundamentalProvider`. This memo is kept for its evaluation-matrix
+> research, not as the current decision.
+
 **Question:** which data source should be the production foundation for fundamental analytics
 (ROE, ROCE, Revenue CAGR, EPS CAGR, Debt/Equity, Free-Cash-Flow trends) on NSE/BSE stocks?
 
