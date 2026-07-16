@@ -52,12 +52,13 @@ with tab_g1:
     )
     st.info(
         "📐 **What this score is — and isn't.** A 5-year validation study "
-        "(40,667 observations across bull, bear and sideways markets) found the score "
-        "is a strong gauge of **trend persistence** — high-score stocks reliably stay "
-        "in uptrends (+0.41 rank correlation). It is **not a forecast of future "
-        "returns** (only ≈ +0.04 correlation with next-month returns), and its "
-        "rankings become unreliable in elevated-fear / high-VIX regimes. Read the "
-        "signals below as *trend health*, then apply your own entry and risk rules.",
+        "(86,589 observations across bull, bear and sideways markets, re-run July "
+        "2026) found the score is a strong gauge of **trend persistence** — "
+        "high-score stocks reliably stay in uptrends (+0.40 rank correlation). "
+        "It is **not a forecast of future returns** (only ≈ +0.02 correlation "
+        "with next-month returns), and its rankings become unreliable — and can "
+        "invert — as VIX rises. Read the signals below as *trend health*, then "
+        "apply your own entry and risk rules.",
         icon="🔬",
     )
     st.dataframe(pd.DataFrame([
