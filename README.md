@@ -13,7 +13,7 @@ intraday tools, and optional live broker integration via Angel One SmartAPI.
 
 ## ✨ Features
 
-A 17-page platform, grouped into five workspaces:
+An 18-page platform, grouped into six workspaces:
 
 | Workspace | Pages |
 |---|---|
@@ -21,10 +21,14 @@ A 17-page platform, grouped into five workspaces:
 | **Trading** | Intraday Trader (CPR / ORB / Supertrend / VWAP) · Smart Screener · OI & Options |
 | **Portfolio** | My Portfolio · Paper Trades · My Watchlist · Tomorrow's Watchlist |
 | **Analysis** | Analyze Stock · Backtest · Swing Checklist |
+| **Scanners** | TQS Scanner (Trend Quality Score) · Quality Watch (long-term holds) |
 | **Tools** | Position Sizer · Angel One · Investor Guide · Command Centre (home) |
 
 **Highlights**
 - **Composite Score (0–100):** technical · momentum · volume · candlestick pattern · news sentiment.
+- **Trend Quality Score (TQS):** a 90-point, four-pillar scanner across Nifty 50/100/500/Total Market.
+- **Qualitative flags:** governance/regulatory red-amber-green flags from NSE corporate actions,
+  Google News, and NSE RSS feeds — surfaced on Quality Watch and Analyze Stock.
 - **Sector-aware fundamentals:** banks/NBFCs/insurers are assessed on the right metrics (P/B + ROE),
   not penalised for "leverage" that is really deposits.
 - **Valuation Decision Layer (E1-v2):** regime-neutral, guard-first engine that outputs a *descriptive
@@ -75,17 +79,22 @@ SQLite for storage.
 ```
 dashboard/
   app.py                 thin entry point (page config + theme + redirect to Command Centre)
-  pages/01..17_*.py      one file per page (explicit imports — no global injection)
+  pages/01..19_*.py      one file per page (explicit imports — no global injection), incl.
+                         18_tqs_scanner.py and 19_quality_watch.py
   shared/                design.py (NSE Pro theme) · nav.py · cache.py · chart_helpers.py · trade_utils.py
 analysis/                PURE engine, no Streamlit — heavily unit-tested
   score.py · hedging.py · portfolio_risk.py · portfolio_manager.py · liquidity.py
+  trend_quality_score.py Trend Quality Score (TQS) — 90-pt, four-pillar scoring
+  qualitative_flags.py   governance/regulatory red-amber-green flags (corp actions + news + RSS)
   sector_classification.py   single source of truth for metric applicability
   fundamentals/          Yahoo-backed models, analytics (ROE/ROCE/CAGR/FCF), valuation engine
   thesis/                rules-based Bull/Bear/Risk/Verdict + portfolio fit
 data/
   fetcher.py             tiered price fetch: Angel One → Stooq → Yahoo (cached)
   angel_fetcher.py       Angel One SmartAPI client
-  universe.py            ticker → sector map
+  universe.py            ticker → sector map (~745 Nifty Total Market tickers)
+  nse_corp_info.py · news_feed.py · nse_rss_feeds.py   corporate actions, Google News, NSE RSS
+                         feeds — inputs to qualitative_flags.py
 trade_store.py           persistence: SQLite by default, Postgres when DATABASE_URL is set
 ```
 
@@ -100,7 +109,7 @@ py -m pytest -m "not slow" -q      # default suite (what CI runs)
 py -m pytest -m slow -q            # gated end-to-end backtest smoke (needs network)
 ```
 
-- **Page smoke** (`tests/test_pages_smoke.py`) loads all 17 pages headlessly with network blocked,
+- **Page smoke** (`tests/test_pages_smoke.py`) loads all 18 pages headlessly with network blocked,
   so they take the graceful degraded path → deterministic.
 - **Valuation regression** (`tests/test_valuation_golden_snapshot.py`) replays captured inputs through
   the pure engine and fails on posture/confidence drift.
