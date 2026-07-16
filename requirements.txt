@@ -14,15 +14,8 @@ plotly>=5.17.0
 # ── HTTP / news (stdlib urllib used for RSS; requests kept for any API calls) ─
 requests>=2.31.0
 
-# ── Technical indicators ─────────────────────────────────────────────────────
-ta>=0.11.0
-
 # ── Backtesting ──────────────────────────────────────────────────────────────
 backtesting>=0.3.3
-
-# ── Visualisation (local use / Jupyter) ─────────────────────────────────────
-matplotlib>=3.7.0
-seaborn>=0.12.0
 
 # ── ML — XGBoost baseline ────────────────────────────────────────────────────
 # Comment these out for a lighter Streamlit Cloud deploy (dashboard works without them):
