@@ -30,7 +30,7 @@ def _has_evidence(factors, substr):
 def _strong_bull_inputs():
     return ThesisInputs(
         ticker="TESTBULL", composite_score=82, action="STRONG BUY", grade="A",
-        technical_score=34, momentum_score=21, volume_score=12, pattern_score=7,
+        technical_score=34, momentum_score=21, volume_score=12,
         sentiment_score=7, weekly_trend="uptrend", rel_strength="outperforming",
         rs_pct=6.2, earnings_days=40, signal_bull=8, signal_total=9,
         revenue_cagr=18.4, eps_cagr=22.0, roe=21.0, debt_to_equity=0.30,
@@ -41,7 +41,7 @@ def _strong_bull_inputs():
 def _strong_bear_inputs():
     return ThesisInputs(
         ticker="TESTBEAR", composite_score=22, action="EXIT", grade="F",
-        technical_score=8, momentum_score=5, volume_score=3, pattern_score=0,
+        technical_score=8, momentum_score=5, volume_score=3,
         sentiment_score=2, weekly_trend="downtrend", rel_strength="underperforming",
         rs_pct=-9.0, earnings_days=3, signal_bull=1, signal_total=9,
         revenue_cagr=-6.0, eps_cagr=-12.0, roe=4.0, debt_to_equity=2.4,
@@ -268,7 +268,7 @@ def test_build_inputs_uses_injected_pieces_without_network():
     class _CS:  # mimics CompositeScore duck-type
         score = 80; action = "BUY"; grade = "A"
         technical_score = 33; momentum_score = 20; volume_score = 11
-        pattern_score = 6; sentiment_score = 7; risk_reward = 2.1; sector = "IT"
+        sentiment_score = 7; risk_reward = 2.1; sector = "IT"
     deep = {"weekly": "uptrend", "rel_strength": "outperforming", "rs_pct": 5.0,
             "earnings_days": 30, "bull": 7, "total": 9}
 
