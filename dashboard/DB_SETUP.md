@@ -10,6 +10,9 @@ Postgres database. The app auto-detects it — no code changes needed.
 The sidebar shows which backend is active:
 - 🟡 *local (resets on redeploy)* — SQLite (default)
 - 🟢 *cloud DB (persistent)* — Postgres connected ✅
+- 🔴 *storage unreachable* — a `DATABASE_URL` is set but the app can't reach it or the
+  schema is invalid (bad URL, wrong password, missing `sslmode=require`, etc.) — data will
+  NOT be saved until this is fixed. See `DEPLOYMENT_CHECKLIST.md` / `PERSISTENCE_ACCEPTANCE.md`.
 
 ---
 
@@ -27,6 +30,8 @@ The sidebar shows which backend is active:
      [database]
      url = "postgresql://user:password@ep-xxx.aws.neon.tech/neondb?sslmode=require"
      ```
+   - A flat `DATABASE_URL = "postgresql://..."` key (no `[database]` section) works too —
+     the app checks both forms.
    - **Locally:** put the same block in `.streamlit/secrets.toml`
      (this file is gitignored — never commit it).
 4. Reboot the app. The sidebar should now read **🟢 cloud DB (persistent)**.
