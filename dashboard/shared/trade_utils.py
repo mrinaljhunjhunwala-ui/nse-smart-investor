@@ -337,17 +337,26 @@ def set_paper_account_type(name: str, atype: str) -> None:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _fetch_single_live_price(ticker: str) -> dict:
-    """Fetch live price for one ticker. Failures return {} without poisoning others."""
+    """Fetch live price for one ticker. Failures return {} without poisoning others.
+
+    FIX VOL1: also carries through "volume" (qty traded) when the resolving
+    tier provided one — real-time from Angel One, best-effort daily volume
+    from Yahoo/NSE/Stooq otherwise. Absent (not 0) when no tier had it, so
+    callers should always use .get("volume") rather than assume it's set.
+    """
     try:
         from utils.live_price import get_live_prices_batch
         raw = get_live_prices_batch([ticker])
         q   = raw.get(ticker)
         if isinstance(q, dict) and q.get("price"):
-            return {
+            out = {
                 "price": q["price"],
                 "prev":  q["prev_close"],
                 "chg":   q["chg_pct"],
             }
+            if q.get("volume"):
+                out["volume"] = q["volume"]
+            return out
     except Exception as _e:
         _log.debug("trade_utils._fetch_single_live_price(%s) degraded: %s", ticker, _e)
     return {}
