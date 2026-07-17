@@ -89,12 +89,16 @@ def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
         meta = data["chart"]["result"][0]["meta"]
         price      = meta.get("regularMarketPrice")
         prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+        volume     = meta.get("regularMarketVolume")
 
         if price and float(price) > 0 and not math.isnan(float(price)):
-            return {
+            out = {
                 "price":      float(price),
                 "prev_close": float(prev_close) if prev_close else float(price),
             }
+            if volume:
+                out["volume"] = int(volume)
+            return out
     except Exception as e:
         _log.debug("yahoo JSON quote failed for %s: %s", ticker_ns, e)
     return None
@@ -141,7 +145,14 @@ def _nse_live_price(symbol: str) -> Optional[dict]:
         price = pi.get("lastPrice") or pi.get("close")
         prev  = pi.get("previousClose") or pi.get("close")
         if price:
-            return {"price": float(price), "prev_close": float(prev or price)}
+            out = {"price": float(price), "prev_close": float(prev or price)}
+            try:
+                vol = data.get("marketDeptOrderBook", {}).get("tradeInfo", {}).get("totalTradedVolume")
+                if vol:
+                    out["volume"] = int(vol)
+            except Exception:
+                pass
+            return out
     except Exception as e:
         _log.debug("NSE live price failed for %s: %s", symbol, e)
     return None
@@ -171,7 +182,15 @@ def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
         df = df.sort_values("Date")
         price = float(df["Close"].iloc[-1])
         prev  = float(df["Close"].iloc[-2]) if len(df) > 1 else price
-        return {"price": price, "prev_close": prev}
+        out = {"price": price, "prev_close": prev}
+        if "Volume" in df.columns:
+            try:
+                vol = df["Volume"].iloc[-1]
+                if vol == vol:  # not NaN
+                    out["volume"] = int(vol)
+            except Exception:
+                pass
+        return out
     except Exception as e:
         _log.debug("Stooq EOD price failed for %s: %s", ticker_ns, e)
         return None
@@ -180,14 +199,25 @@ def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
 # ─── Internal: build a normalised quote dict ─────────────────────────────────
 
 def _normalise(q: dict) -> dict:
-    """Add chg_pct to a raw {price, prev_close} dict."""
+    """Add chg_pct to a raw {price, prev_close[, volume]} dict.
+
+    FIX VOL1: passes through an optional "volume" key from whichever tier
+    supplied it (Yahoo's regularMarketVolume, NSE's totalTradedVolume, or
+    Stooq's daily Volume column) so callers get best-effort qty-traded data
+    even when Angel One (the only tier with guaranteed real-time volume)
+    isn't the source. Omitted entirely if no tier provided one — callers
+    must .get("volume") defensively, never index it directly.
+    """
     p  = float(q["price"])
     pc = float(q.get("prev_close") or p)
-    return {
+    out = {
         "price":      p,
         "prev_close": pc,
         "chg_pct":    (p / pc - 1) * 100 if pc > 0 else 0.0,
     }
+    if q.get("volume"):
+        out["volume"] = int(q["volume"])
+    return out
 
 
 # ─── Public interface ────────────────────────────────────────────────────────
@@ -220,12 +250,22 @@ def get_live_quote(symbol: str) -> Optional[dict]:
 
     # Tier 0: Angel One (real-time, true LTP)
     try:
-        from data.angel_fetcher import get_live_quote as _ao_quote, is_configured as _ao_ok
+        from data.angel_fetcher import get_full_quote as _ao_full_quote, is_configured as _ao_ok
         if _ao_ok():
-            q = _ao_quote(clean_ns)
+            q = _ao_full_quote(clean_ns)
             if q:
-                # angel_fetcher already returns chg_pct — pass through directly
-                return q
+                # FIX VOL1: get_full_quote (not the stripped get_live_quote
+                # wrapper) so this single-symbol path carries "volume"
+                # through just like get_live_prices_batch's Angel One tier
+                # already does — previously this path silently dropped it.
+                out = {
+                    "price":      q["price"],
+                    "prev_close": q["prev_close"],
+                    "chg_pct":    q["chg_pct"],
+                }
+                if q.get("volume"):
+                    out["volume"] = q["volume"]
+                return out
     except Exception as e:
         _log.debug("Angel One live quote failed for %s: %s", clean_ns, e)
 

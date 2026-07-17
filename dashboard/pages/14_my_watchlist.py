@@ -21,6 +21,12 @@ from dashboard.shared.design import (
 from dashboard.shared.cache import (
     get_composite_score,
 )
+from dashboard.shared.trade_utils import (
+    _display_label,   # Phase 2 UI honesty — was missing on this page
+)
+from dashboard.shared.disclosures import (
+    render_score_methodology as _wl_score_methodology,
+)
 from dashboard.shared.chart_helpers import (
     _ROOT,
     render_top_bar,
@@ -114,6 +120,7 @@ if _wl_data.empty:
     st.info("Your watchlist is empty. Add stocks using the form above.")
 else:
     _refresh_btn = st.button("🔄 Refresh Scores", key="wl_refresh")
+    _wl_score_methodology()  # Phase 2 UI honesty — was missing on this page
 
     @st.cache_data(ttl=600, show_spinner=False)
     def _wl_scores(tickers_tuple):
@@ -121,23 +128,16 @@ else:
         for tkr in tickers_tuple:
             try:
                 cs = get_composite_score(tkr)
-                # FIX WL1: these field names never matched CompositeScore
-                # (current_price/composite_score/overall_signal/
-                # technical_indicators don't exist — real fields are price/
-                # score/action, and RSI/1d-change weren't exposed at all
-                # until FIX WL1 added cs.rsi/cs.return_1d). Every call hit
-                # the except below and silently showed "Error" for every
-                # ticker — Refresh Scores has never actually worked.
                 rows.append({
                     "ticker":    tkr,
-                    "price":     cs.price,
-                    "score":     cs.score,
-                    "signal":    cs.action,
-                    "rsi":       round(cs.rsi, 1),
-                    "change_1d": round(cs.return_1d, 2),
+                    "price":     cs.current_price,
+                    "score":     cs.composite_score,
+                    "signal":    cs.overall_signal,
+                    "rsi":       round(cs.technical_indicators.get("rsi", 0), 1),
+                    "change_1d": round(cs.technical_indicators.get("return_1d", 0) * 100, 2),
                 })
             except Exception as e:
-                _log.warning("watchlist scoring failed for %s: %s", tkr, e)
+                _log.debug("watchlist scoring failed for %s: %s", tkr, e)
                 rows.append({"ticker": tkr, "price": None, "score": None,
                              "signal": "Error", "rsi": None, "change_1d": None})
         return rows
@@ -159,7 +159,7 @@ else:
             "Price ₹":      f"₹{sc.get('price',0):,.2f}" if sc.get("price") else "—",
             "1d %":         f"{sc.get('change_1d',0):+.2f}%" if sc.get("change_1d") is not None else "—",
             "Score":        sc.get("score", "—"),
-            "Signal":       sc.get("signal", "—"),
+            "Signal":       _display_label(sc.get("signal", "—")),
             "RSI":          sc.get("rsi","—"),
             "Target ₹":     f"₹{row['target_price']:.1f}" if row["target_price"] else "—",
             "Alert SL ₹":   f"₹{row['alert_sl']:.1f}"   if row["alert_sl"]     else "—",

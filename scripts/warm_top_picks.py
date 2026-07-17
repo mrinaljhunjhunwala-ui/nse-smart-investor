@@ -81,7 +81,7 @@ def main() -> int:
               vix_regime, len(sector_tuple))
     _t0 = datetime.datetime.now()
     try:
-        result = _home_top_picks(vix_regime=vix_regime, n=10, sector_ranks=sector_tuple)
+        result = _home_top_picks(vix_regime=vix_regime, n=20, sector_ranks=sector_tuple)
     except Exception as e:
         _log.error("warm_top_picks: scan failed, nothing persisted this run: %s", e)
         return 0
