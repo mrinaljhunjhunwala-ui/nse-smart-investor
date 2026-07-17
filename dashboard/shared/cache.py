@@ -482,6 +482,53 @@ def _nifty50_gainers_ticker(n: int = 12) -> list:
     return rows[:n]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX TP3 — Top Picks ticker strip (replaces the NIFTY 50 gainers strip above)
+#
+# _nifty50_gainers_ticker (above) showed generic NIFTY 50 gainers — informative,
+# but disconnected from the app's own analysis. This scans the same Top Picks
+# buy list shown in the Buy Candidates cards further down Command Centre
+# (get_top_picks(), already fast-path cached from the 15-min scheduled scan —
+# see FIX SPEED1), then prices those specific tickers with ONE parallel batch
+# call, same pattern as _nifty50_gainers_ticker. Buys only, in the same
+# score-ranked order get_top_picks() returns — no sells mixed in. Unlike the
+# gainers strip this is NOT filtered to positive movers: a Top Pick can be a
+# genuine buy setup on a day it's flat or slightly red (e.g. pulled back to a
+# support level), so the strip shows its real live % change, colour-coded.
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _top_picks_ticker(n: int = 12) -> list:
+    """Top N Top-Picks BUY candidates for Command Centre's ticker strip,
+    each priced live via one parallel batch call. Score-ranked order (same
+    as get_top_picks()), not re-sorted by today's % change."""
+    from utils.live_price import get_live_prices_batch as _batch
+
+    try:
+        picks = get_top_picks()
+    except Exception as _e:
+        _log.debug("cache._top_picks_ticker: get_top_picks failed: %s", _e)
+        return []
+
+    buys = ((picks or {}).get("buys") or [])[:n]
+    if not buys:
+        return []
+
+    tickers = [b["ticker"] for b in buys]
+    raw = _batch(tickers, max_workers=20)
+
+    rows = []
+    for b in buys:
+        d = (raw or {}).get(b["ticker"])
+        if not d:
+            continue
+        price = d.get("price")
+        chg   = d.get("chg_pct")
+        if price is None or chg is None:
+            continue
+        rows.append({"ticker": b["ticker"], "price": price, "chg_pct": chg, "score": b.get("score")})
+    return rows
+
+
 @st.cache_data(ttl=600)
 def get_vix_info():
     # Route through utils.vix — has 10-min TTL and proper crumb auth
@@ -660,10 +707,11 @@ def _sector_df_from_tuple(sector_ranks: tuple):
 # FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
 # the cached result to be wrapped in an extra layer and never properly invalidated).
 @st.cache_data(ttl=300, show_spinner=False)
-def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
+def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple = ()) -> dict:
     """
-    Scan the FULL NSE universe (~200+ liquid large/mid/small-caps) and return the
-    strongest long candidates and the clearest SELL/EXIT candidates for the day.
+    Scan the FULL NSE universe (~745 liquid large/mid/small/micro-caps) and
+    return the strongest long candidates and the clearest SELL/EXIT
+    candidates for the day.
 
     Each stock's CompositeScore folds in trend, momentum, RSI, volume, VIX
     sentiment AND sector strength (via sector_ranks) — "self-analysis +
@@ -676,12 +724,23 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple
     FIX C2: see warm_caches() below for a hook intended to be invoked by a
     scheduled job before market open, so this 2-min cold-scan cost is paid
     by a background job rather than the first real user of the day.
+
+    FIX TP2 (universe widen + count raise): previously scanned only
+    get_universe("nifty500") (~504 tickers, matching NSE's real Nifty 500
+    index) and capped results at n=10 buys / 10 sells. Now scans
+    get_universe("niftytotalmarket") (~745 tickers — nifty500 + the
+    NIFTY_MICROCAP250 band added in the universe-expansion work) and
+    defaults to n=20 each, so the section actually reflects the wider
+    universe data/universe.py already built. Scan time scales with universe
+    size (still parallelised, still covered by the 15-min scheduled
+    pre-warm job in scripts/warm_top_picks.py — see that file's matching
+    n=20 update).
     """
     import concurrent.futures as _cf
     import sys, os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from data.universe import get_universe
-    _UNIV = get_universe("nifty500")        # the repo's full liquid NSE universe
+    _UNIV = get_universe("niftytotalmarket")  # the repo's full liquid NSE universe (~745)
     buys, sells = [], []
 
     _vix = {"regime": vix_regime, "vix": None,
@@ -751,7 +810,7 @@ _TOP_PICKS_KV_KEY  = "top_picks_snapshot"
 _TOP_PICKS_KV_USER = "_system"          # not per-user — one shared scan result
 _TOP_PICKS_MAX_AGE_SECONDS = 1200       # 20 min — tolerates one missed 15-min cron tick
 
-def get_top_picks(vix_regime: str = "normal", n: int = 10, sector_ranks: tuple = ()) -> dict:
+def get_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple = ()) -> dict:
     """
     Fast-path wrapper around _home_top_picks().
 
