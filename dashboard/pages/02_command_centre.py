@@ -19,7 +19,7 @@ from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
     get_top_picks,
-    _nifty50_gainers_ticker,
+    _top_picks_ticker,
     _score_watchlist,
     _sector_ranks_tuple,
     _sparkline_closes,
@@ -248,7 +248,7 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ── 1b. GAINERS TICKER — scrolling ticker tape, separate from Top Picks ────
+# ── 1b. TOP PICKS TICKER — scrolling ticker tape, separate from the cards ──
 # ═══════════════════════════════════════════════════════════════════════════
 # FIX (was "Suggestions Strip") — the old version had two real bugs:
 #   1. It mixed the user's raw watchlist (which can be down on any given day)
@@ -259,40 +259,47 @@ st.markdown("---")
 #      fetches tickers one at a time in a for-loop (see FIX TU4 there), not
 #      in parallel — real, measurable load-time cost.
 #
-# Replaced with a proper ticker tape: NIFTY 50 gainers only (today's % change
-# > 0, sorted best-first — see _nifty50_gainers_ticker in cache.py), priced
-# via ONE parallel batch call (get_live_prices_batch, the same Angel-One →
-# threaded-Yahoo path Market Live's snapshot uses) instead of N sequential
-# fetches. It's a real horizontal auto-scrolling marquee — matching "like the
-# ticker for nifty50 stocks" — in a distinct black/amber theme so it reads as
-# a ticker tape, not another card section. Still its own
-# @st.fragment(run_every=60) so it refreshes independently of the rest of the
-# page. Purely informational (no click-through) — a scrolling tape isn't a
-# natural fit for per-item buttons; the full Top Picks section below still
-# offers the "click through to Analyze Stock" workflow.
+# Replaced first with a NIFTY 50 gainers tape, then with FIX TP3: this strip
+# now shows the app's own Top Picks BUY candidates (see _top_picks_ticker in
+# cache.py) instead of a generic NIFTY 50 gainers feed — the same
+# score-ranked list as the Buy Candidates cards below, priced live via ONE
+# parallel batch call. Buys only, not filtered to today's gainers — a Top
+# Pick can legitimately be flat or red today, so each chip is colour-coded
+# red/green on its own live % change rather than assumed green. It's a real
+# horizontal auto-scrolling marquee in a distinct black/teal theme (teal to
+# match the Buy Candidates card accent, distinguishing it from the old
+# black/amber NIFTY 50 theme) so it reads as a ticker tape, not another card
+# section. Still its own @st.fragment(run_every=60) so it refreshes
+# independently of the rest of the page. Purely informational (no
+# click-through) — a scrolling tape isn't a natural fit for per-item
+# buttons; the full Top Picks section below still offers the "click through
+# to Analyze Stock" workflow.
 
 @st.fragment(run_every=60)
-def _render_gainers_ticker() -> None:
-    _tk_rows = _nifty50_gainers_ticker(n=12)
+def _render_top_picks_ticker() -> None:
+    _tk_rows = _top_picks_ticker(n=12)
 
     if not _tk_rows:
         st.markdown(
-            "<div style='background:#0a0a0a;border-top:2px solid #ffb300;"
-            "border-bottom:2px solid #ffb300;border-radius:6px;padding:9px 16px;"
-            "font-size:12px;color:#ffb300'>📟 NIFTY 50 GAINERS — none in the "
-            "green right now.</div>",
+            "<div style='background:#0a0a0a;border-top:2px solid #26a69a;"
+            "border-bottom:2px solid #26a69a;border-radius:6px;padding:9px 16px;"
+            "font-size:12px;color:#26a69a'>🎯 TOP PICKS — no buy candidates "
+            "right now.</div>",
             unsafe_allow_html=True,
         )
         return
 
     def _chip(_r: dict) -> str:
         _lbl = _r["ticker"].replace(".NS", "")
+        _up  = (_r["chg_pct"] or 0) >= 0
+        _cc  = "#3ddc84" if _up else "#ef5350"
+        _arr = "▲" if _up else "▼"
         return (
             f'<span style="display:inline-block;margin-right:34px;white-space:nowrap">'
             f'<span style="color:#eee;font-weight:700;font-size:13px">{_lbl}</span>'
             f'<span style="color:#888;font-size:12px"> ₹{_r["price"]:,.1f} </span>'
-            f'<span style="color:#3ddc84;font-weight:700;font-size:13px">'
-            f'▲{_r["chg_pct"]:.2f}%</span></span>'
+            f'<span style="color:{_cc};font-weight:700;font-size:13px">'
+            f'{_arr}{abs(_r["chg_pct"]):.2f}%</span></span>'
         )
 
     # Content duplicated back-to-back so the marquee loops seamlessly at the
@@ -300,13 +307,13 @@ def _render_gainers_ticker() -> None:
     _tape_html = "".join(_chip(r) for r in _tk_rows) * 2
 
     st.markdown(
-        f'<div style="background:#0a0a0a;border-top:2px solid #ffb300;'
-        f'border-bottom:2px solid #ffb300;border-radius:6px;'
+        f'<div style="background:#0a0a0a;border-top:2px solid #26a69a;'
+        f'border-bottom:2px solid #26a69a;border-radius:6px;'
         f'display:flex;align-items:center;overflow:hidden">'
-        f'<span style="flex-shrink:0;padding:9px 14px;color:#ffb300;'
+        f'<span style="flex-shrink:0;padding:9px 14px;color:#26a69a;'
         f'font-size:10px;font-weight:700;letter-spacing:1px;'
-        f'border-right:1px solid #4a3a00;white-space:nowrap">'
-        f'📟 NIFTY 50<br>TOP GAINERS</span>'
+        f'border-right:1px solid #143a34;white-space:nowrap">'
+        f'🎯 TOP PICKS<br>BUY CANDIDATES</span>'
         f'<div style="flex:1;overflow:hidden;position:relative;padding:9px 0">'
         f'<div style="white-space:nowrap;width:max-content;'
         f'animation:cc_ticker_scroll 32s linear infinite">'
@@ -319,7 +326,7 @@ def _render_gainers_ticker() -> None:
     )
 
 
-_render_gainers_ticker()
+_render_top_picks_ticker()
 
 st.markdown("---")
 
@@ -343,10 +350,11 @@ st.markdown("---")
 # are (with a small "refreshing…" note) until the new scan lands, at which
 # point the next fragment tick swaps them in. Nothing ever goes blank.
 #
-# Universe: this already scans get_universe("nifty500") inside
-# _home_top_picks — the full liquid NSE list, not a Nifty-50-only set. (Any
-# further universe widening/curation is being handled separately in
-# data/universe.py.)
+# Universe: this scans get_universe("niftytotalmarket") inside
+# _home_top_picks — the full ~745-ticker liquid NSE list (Nifty 500 +
+# Microcap 250), not a Nifty-50-only set. FIX TP2: previously scanned only
+# the narrower "nifty500" (~504 tickers) set, which under-used the wider
+# universe already built in data/universe.py.
 
 _PICKS_KEY = "_cc_top_picks"
 _PICKS_TTL_SECONDS = 300  # matches _home_top_picks' own cache TTL
@@ -400,17 +408,17 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         st.write("")
         _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
 
-    _scan_univ = get_universe("nifty500")
+    _scan_univ = get_universe("niftytotalmarket")
     with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
         st.caption(
             f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
-            "small-caps** (Nifty 500 set) — scoring each on trend + momentum + RSI + volume "
-            "+ sector strength + VIX. The strongest longs and the clearest SELL/EXITs are "
-            "surfaced (10 each — buys and sells). A scheduled scan runs every 15 min during "
-            "market hours, so this normally loads instantly from that snapshot. If the "
-            "scheduled scan hasn't run recently (e.g. right after a config change), it falls "
-            "back to a live scan here, which takes ~2 min and runs in the background without "
-            "blocking the page.")
+            "small/micro-caps** (Nifty Total Market set) — scoring each on trend + momentum "
+            "+ RSI + volume + sector strength + VIX. The strongest longs and the clearest "
+            "SELL/EXITs are surfaced (20 each — buys and sells). A scheduled scan runs every "
+            "15 min during market hours, so this normally loads instantly from that snapshot. "
+            "If the scheduled scan hasn't run recently (e.g. right after a config change), it "
+            "falls back to a live scan here, which takes longer with the wider universe and "
+            "runs in the background without blocking the page.")
 
     from dashboard.shared.disclosures import (
         render_regime_reliability_note as _cc_regime_note,
@@ -549,14 +557,22 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _blq = _pk_lp.get(_b["ticker"], {})
             _blive = _blq.get("price")
             _bchg  = _blq.get("chg")
+            _bvol  = _blq.get("volume")
             _blive_html = ""
             if _blive:
                 _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
                 _barr = "▲" if (_bchg or 0) >= 0 else "▼"
+                # FIX VOL1: qty-traded, when the resolving tier provided one
+                # (guaranteed real-time on Angel One; best-effort daily
+                # volume from Yahoo/NSE/Stooq otherwise — omitted, not
+                # zeroed, when no tier had it).
+                _bvol_html = (f' <span style="color:#888;font-size:10px">· Vol {_bvol:,.0f}</span>'
+                              if _bvol else "")
                 _blive_html = (
                     f'<div style="font-size:12px;color:#fff;margin-top:3px">'
                     f'🔴 Live <b>₹{_blive:,.2f}</b> '
-                    f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span></div>'
+                    f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span>'
+                    f'{_bvol_html}</div>'
                 )
             _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
             _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
@@ -614,6 +630,27 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             st.caption("No clear sell signals — nothing flashing red in the scan.")
         for _sv in _picks["sells"]:
             _svl = _sv["ticker"].replace(".NS", "")
+            # FIX SELL1: _pk_lp already has live price/chg/volume for BOTH
+            # buys and sells (see _pk_all_syms above) — the Buy Candidates
+            # loop used it, this loop never did, so Sell/Avoid cards showed
+            # no live price at all. Now mirrors the Buy card's live-price
+            # block exactly.
+            _svq    = _pk_lp.get(_sv["ticker"], {})
+            _svlive = _svq.get("price")
+            _svchg  = _svq.get("chg")
+            _svvol  = _svq.get("volume")
+            _svlive_html = ""
+            if _svlive:
+                _svcc  = "#26a69a" if (_svchg or 0) >= 0 else "#ef5350"
+                _svarr = "▲" if (_svchg or 0) >= 0 else "▼"
+                _svvol_html = (f' <span style="color:#888;font-size:10px">· Vol {_svvol:,.0f}</span>'
+                               if _svvol else "")
+                _svlive_html = (
+                    f'<div style="font-size:12px;color:#fff;margin-top:3px">'
+                    f'🔴 Live <b>₹{_svlive:,.2f}</b> '
+                    f'<span style="color:{_svcc};font-size:11px">{_svarr}{abs(_svchg or 0):.2f}%</span>'
+                    f'{_svvol_html}</div>'
+                )
             st.markdown(
                 f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
                 f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
@@ -622,7 +659,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
-                f'</div>',
+                + _svlive_html
+                + '</div>',
                 unsafe_allow_html=True,
             )
             render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
