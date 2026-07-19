@@ -104,7 +104,9 @@ from dashboard.shared.chart_helpers import _ROOT, render_top_bar
 from dashboard.shared.squareoff_monitor import render_squareoff_monitor
 from dashboard.shared.cache import STOCK_SEARCH_MAP  # FIX MH6
 from analysis.portfolio_concentration import analyze_concentration, concentration_grade
-from analysis.portfolio_fundamentals import batch_fetch_fundamentals, compute_quality_score
+from analysis.portfolio_fundamentals import (
+    batch_fetch_fundamentals, compute_quality_score, quality_score_coverage,
+)
 
 apply_design()
 render_sidebar(current="My Portfolio")
@@ -922,13 +924,20 @@ if _csv_source is not None:
                     for _f in batch_fetch_fundamentals(list(tickers_tuple)):
                         try:
                             _q = compute_quality_score(_f)
+                            _cov_n, _cov_total = quality_score_coverage(_f)
                         except Exception as _qs_e:
                             import logging; logging.getLogger("dashboard.my_portfolio").debug("compute_quality_score failed for %s: %s", _f.get("ticker"), _qs_e)
                             _q = None
+                            _cov_n, _cov_total = 0, 4
                         rows.append({
                             "Stock":      str(_f.get("ticker", "")).replace(".NS", ""),
                             # QualityFix: 0 means no data — render as "—" not "0"
                             "Quality":    round(_q, 0) if (_q is not None and _q > 0) else None,
+                            # Coverage — how many of the 4 weighted metrics
+                            # actually fed the Quality score above, so a
+                            # score based on 1 metric doesn't look as
+                            # confident as one based on all 4.
+                            "Coverage":   f"{_cov_n}/{_cov_total}",
                             "ROE %":      _f.get("roe"),
                             "ROCE %":     _f.get("roce"),
                             "Rev CAGR %": _f.get("revenue_cagr_5y") or _f.get("revenue_cagr_3y"),
@@ -954,6 +963,11 @@ if _csv_source is not None:
                     if pd.notna(_avg_q):
                         st.caption(f"Average portfolio quality: **{_avg_q:.0f}/100** "
                                    f"across {_fdf['Quality'].notna().sum()} scored holdings.")
+                    st.caption("**Coverage** = how many of the 4 metrics behind the Quality "
+                               "score (ROE, ROCE, Revenue CAGR, EPS CAGR) were actually "
+                               "available — Yahoo's fundamentals coverage is patchy for "
+                               "small/mid-caps, so a score based on fewer metrics is a less "
+                               "reliable read than one based on all 4.")
                 else:
                     st.info("No fundamental data could be retrieved (source may be rate-limited).")
 
