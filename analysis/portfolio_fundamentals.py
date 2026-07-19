@@ -124,3 +124,35 @@ def compute_quality_score(fund: Dict) -> int:
     if weight_used == 0:
         return 0
     return round(score * 100.0 / weight_used)
+
+
+def quality_score_coverage(fund: Dict) -> tuple:
+    """How many of the 4 metrics compute_quality_score() uses (ROE, ROCE,
+    Revenue CAGR, EPS CAGR) are actually available for this ticker, out of 4.
+
+    compute_quality_score() correctly rescales by whichever metrics are
+    present, so it's never unfairly penalized for missing data — but a
+    score of 85 based on 1 of 4 metrics is a much less reliable read than
+    85 based on all 4, and the score alone doesn't disclose that. This is
+    an additive helper (kept separate rather than changing
+    compute_quality_score()'s return type, since tests/test_portfolio_
+    analytics.py asserts plain-int equality on it) so a caller can show
+    e.g. "Quality 85 (1/4 metrics)" instead of a bare, equally-confident-
+    looking number regardless of how much data backs it.
+    """
+    available = 0
+    if fund.get("roe") is not None:
+        available += 1
+    if fund.get("roce") is not None:
+        available += 1
+    rev_cagr = fund.get("revenue_cagr_5y")
+    if rev_cagr is None:
+        rev_cagr = fund.get("revenue_cagr_3y")
+    if rev_cagr is not None:
+        available += 1
+    eps_cagr = fund.get("eps_cagr_5y")
+    if eps_cagr is None:
+        eps_cagr = fund.get("eps_cagr_3y")
+    if eps_cagr is not None:
+        available += 1
+    return available, 4
