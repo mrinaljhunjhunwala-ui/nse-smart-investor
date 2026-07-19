@@ -15,8 +15,8 @@ _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
     "Markets":   ["Market Live", "Overview", "Quality Watch"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
-    "Trading":   ["Intraday Trader", "Smart Screener", "OI & Options"],
-    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score"], # <-- Registered under Analysis
+    "Trading":   ["Intraday Trader", "Smart Screener"],
+    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score", "Deep Dive Analysis"],
     "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
 }
 
@@ -27,7 +27,6 @@ _PAGE_EMOJI: dict = {
     "Quality Watch":   "🏆",
     "Intraday Trader": "⚡",
     "Smart Screener":  "🔎",
-    "OI & Options":    "🏦",
     "My Portfolio":    "🏠",
     "Paper Trades":    "📂",
     "My Watchlist":    "⭐",
@@ -39,6 +38,7 @@ _PAGE_EMOJI: dict = {
     "Angel One":       "🔗",
     "Investor Guide":  "📖",
     "Trend Quality Score": "📊", # <-- Added Page Emoji
+    "Deep Dive Analysis": "📑",
 }
 
 _PAGE_FULL_NAME: dict = {
@@ -48,7 +48,6 @@ _PAGE_FULL_NAME: dict = {
     "Quality Watch":   "🏆 Quality Watch",
     "Intraday Trader": "⚡ Intraday Trader",
     "Smart Screener":  "🔎 Smart Screener",
-    "OI & Options":    "🏦 OI & Options Setup",
     "My Portfolio":    "🏠 My Portfolio",
     "Paper Trades":    "📂 Paper Trades",
     "My Watchlist":    "⭐ My Watchlist",
@@ -60,6 +59,7 @@ _PAGE_FULL_NAME: dict = {
     "Angel One":       "🔗 Angel One",
     "Investor Guide":  "📖 Investor Guide",
     "Trend Quality Score": "📊 Trend Quality Score", # <-- Added Full Display Name
+    "Deep Dive Analysis": "📑 Deep Dive Analysis",
 }
 
 _group_icons: dict = {
@@ -81,7 +81,10 @@ _PAGE_FILE = {
     # "Market Internals" removed — merged into "Overview" above.
     # dashboard/pages/09_market_internals.py should be DELETED from the repo;
     # its content now lives in Overview's "🌍 Macro" / "📈 Breadth" tabs.
-    "OI & Options":    "pages/10_oi_options.py",
+    # "OI & Options" removed — merged into "Intraday Trader" above (FIX MERGE1).
+    # dashboard/pages/10_oi_options.py should be DELETED from the repo;
+    # its content now lives in Intraday Trader's "Options Strategy" /
+    # "Max Pain Calculator" / "PCR Zone Reference" tabs.
     "Intraday Trader": "pages/11_intraday_trader.py",
     "Position Sizer":  "pages/12_position_sizer.py",
     "Swing Checklist": "pages/13_swing_checklist.py",
@@ -91,6 +94,7 @@ _PAGE_FILE = {
     "Tomorrow's Watchlist": "pages/17_tomorrow_watchlist.py",
     "Trend Quality Score": "pages/18_tqs_scanner.py", # <-- Added File Route Mapping
     "Quality Watch":   "pages/19_quality_watch.py",  # NEW: Long-Term Holds + Quality Watch
+    "Deep Dive Analysis": "pages/20_deep_dive.py",
 }
 
 

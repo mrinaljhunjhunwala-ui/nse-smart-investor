@@ -42,6 +42,11 @@ def test_all_pages_present():
     # (net -1: 09_market_internals.py deleted) and adding 19_quality_watch.py
     # (net +1) — the two changes cancel out in the page COUNT, but _IDS below
     # will differ (09_market_internals.py gone, 19_quality_watch.py present).
+    # Still 18 after: merging OI & Options → Intraday Trader (net -1:
+    # 10_oi_options.py deleted, its 3 tabs now live in Intraday Trader) and
+    # adding 20_deep_dive.py (net +1) — same cancel-out pattern as above.
+    # This assertion will read 19 (not 18) until 10_oi_options.py is manually
+    # deleted from the repo — Claude cannot delete files from GitHub directly.
     assert len(_PAGES) == 18, f"expected 18 pages, found {len(_PAGES)}: {_IDS}"
 
 

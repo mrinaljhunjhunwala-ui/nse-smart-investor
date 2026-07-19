@@ -103,7 +103,9 @@ _CONFIDENCE_POINTS = {"high": 15, "medium": 10, "low": 5, "none": 0}
 def _compute_quality_score(posture, confidence, red_flags, amber_flags,
                            roe, roce, debt_to_equity) -> tuple:
     """Returns (score_0_to_100, breakdown_dict). Never raises — missing
-    inputs just score 0 for that component rather than blowing up the page.
+    inputs are rescaled by the weight of what IS available (or given a
+    neutral-low default if nothing is), never penalized as if they were
+    the worst possible reading. See FIX QW1 below.
     """
     breakdown = {}
 
@@ -115,15 +117,38 @@ def _compute_quality_score(posture, confidence, red_flags, amber_flags,
     gov = 25 - (red_flags * 8) - (amber_flags * 3)
     breakdown["governance_safety"] = max(0, gov)
 
-    # Quality ratios: ROE + ROCE + Debt/Equity, ~6-7pts each up to 20.
-    q = 0
+    # Quality ratios: ROE + ROCE + Debt/Equity, weighted up to 20 total.
+    #
+    # FIX QW1 — this used to add 0 for any metric that was None (Yahoo
+    # coverage is patchy for small/mid-caps — see
+    # analysis/fundamentals/providers/yahoo_fundamentals.py), so a stock
+    # missing e.g. ROCE and D/E silently lost up to 13 of these 20 points
+    # for a data-availability reason, not a quality reason — and this
+    # score drives the Ranked Results sort order directly, with no
+    # indication in that list of why. Missing data should reduce
+    # confidence, not distort the ranking (same principle already applied
+    # to `posture` below via INSUFFICIENT_EVIDENCE=10, and already
+    # correctly done for the equivalent Portfolio quality score — see
+    # analysis/portfolio_fundamentals.py compute_quality_score).
+    #
+    # Now rescaled by the weight of whichever metrics are actually present,
+    # same technique as compute_quality_score. If none are available, use
+    # a neutral-low default (10/20) rather than 0 — "unknown" isn't "bad".
+    q = 0.0
+    weight_used = 0.0
     if roe is not None:
         q += 7 if roe > 0.15 else (4 if roe > 0.10 else 1)
+        weight_used += 7
     if roce is not None:
         q += 7 if roce > 0.15 else (4 if roce > 0.10 else 1)
+        weight_used += 7
     if debt_to_equity is not None:
         q += 6 if debt_to_equity < 0.5 else (3 if debt_to_equity < 1.0 else 0)
-    breakdown["quality_ratios"] = min(20, q)
+        weight_used += 6
+    if weight_used > 0:
+        breakdown["quality_ratios"] = round(min(20.0, q * 20.0 / weight_used))
+    else:
+        breakdown["quality_ratios"] = 10
 
     total = sum(breakdown.values())
     return round(total), breakdown
