@@ -21,7 +21,7 @@ from analysis.portfolio_concentration import (
     concentration_grade,
     ConcentrationResult,
 )
-from analysis.portfolio_fundamentals import compute_quality_score
+from analysis.portfolio_fundamentals import compute_quality_score, quality_score_coverage
 import alerts.check_alerts_v2 as cav
 
 
@@ -127,6 +127,34 @@ def test_quality_negative_cagr_clamped_not_negative():
     s = compute_quality_score({"eps_cagr_5y": -50.0})
     assert s == 0
     assert s >= 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section B2 — quality_score_coverage (additive; does not change
+# compute_quality_score's return type, since the assertions above depend
+# on it staying a plain int)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_coverage_nothing_available():
+    assert quality_score_coverage({}) == (0, 4)
+
+
+def test_coverage_one_metric():
+    assert quality_score_coverage({"roe": 15.0}) == (1, 4)
+
+
+def test_coverage_all_four():
+    assert quality_score_coverage({
+        "roe": 15.0, "roce": 15.0, "revenue_cagr_5y": 20.0, "eps_cagr_5y": 20.0,
+    }) == (4, 4)
+
+
+def test_coverage_prefers_5y_falls_back_to_3y_without_double_counting():
+    # Only the 3y variants present — should count as 1 metric each, not 0
+    # (falling back) and not 2 (double-counting 5y+3y as separate signals).
+    assert quality_score_coverage({
+        "revenue_cagr_3y": 10.0, "eps_cagr_3y": 8.0,
+    }) == (2, 4)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
