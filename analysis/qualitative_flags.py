@@ -170,6 +170,59 @@ _POSITIVE_KEYWORDS = (
     "amalgamation approved",
 )
 
+# FIX STALE1 — news/RSS items previously had no recency filtering or sort at
+# all: parse_news_flags / parse_rss_flags just took the first N items in
+# whatever order the fetchers returned them, with no date shown downstream
+# (dashboard/pages/20_deep_dive.py) and no expiry set (QualitativeFlag.
+# is_active() is a no-op for these — expiry is never populated for news/RSS
+# flags), so a stale headline could sit there indefinitely with zero
+# recency signal. Fix: drop anything older than NEWS_MAX_AGE_DAYS and sort
+# what's left newest-first, before any max_items cap is applied.
+NEWS_MAX_AGE_DAYS = 30
+
+# Date formats this module actually needs to parse: RSS pubDate truncated to
+# 16 chars ("Thu, 03 Jul 2026" — see parse_news_flags/parse_rss_flags below),
+# ISO ("2026-07-01"), and the NSE-style formats already handled in
+# parse_shareholding_flags.
+_FLAG_DATE_FORMATS = ("%a, %d %b %Y", "%Y-%m-%d", "%d-%m-%Y", "%d-%b-%Y")
+
+
+def _parse_flag_date(raw: str) -> Optional[_dt.date]:
+    """Best-effort parse. Returns None (never raises) on anything
+    unrecognized — callers must treat that as "unknown age", not "old",
+    since a parsing gap here should never silently drop real news."""
+    raw = (raw or "").strip()[:16]
+    for fmt in _FLAG_DATE_FORMATS:
+        try:
+            return _dt.datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _drop_stale_and_sort(
+    items: list[dict], date_field: str = "pub_date",
+    max_age_days: int = NEWS_MAX_AGE_DAYS,
+) -> list[dict]:
+    """Drop items positively older than max_age_days and sort the rest
+    newest-first. Items with a missing/unparseable date are KEPT (never
+    dropped on our own parsing failure) but placed after the dated ones,
+    since we can't vouch for their recency either way — same discipline as
+    the AMBER-not-guessing rule for sentiment classification above."""
+    today = _dt.date.today()
+    dated: list[tuple[_dt.date, dict]] = []
+    undated: list[dict] = []
+    for item in items or []:
+        d = _parse_flag_date(str((item or {}).get(date_field) or ""))
+        if d is None:
+            undated.append(item)
+            continue
+        if (today - d).days > max_age_days:
+            continue
+        dated.append((d, item))
+    dated.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in dated] + undated
+
 
 def _classify_keyword_sentiment(text: str) -> FlagSentiment:
     low = text.lower()
@@ -324,7 +377,8 @@ def parse_news_flags(
     """
     flags: list[QualitativeFlag] = []
     now = _dt.datetime.now().isoformat()
-    for item in (news_items or [])[:max_items]:
+    recent_items = _drop_stale_and_sort(news_items, date_field="pub_date")
+    for item in recent_items[:max_items]:
         title = str(item.get("title") or "").strip()
         if not title:
             continue
@@ -377,7 +431,7 @@ def parse_rss_flags(ticker: str, rss_items_by_category: dict) -> list[Qualitativ
         if not category_cfg:
             continue
         cat, default_sentiment, source_label = category_cfg
-        for item in items:
+        for item in _drop_stale_and_sort(items, date_field="pub_date"):
             title = str(item.get("title") or "").strip()
             if not title:
                 continue
