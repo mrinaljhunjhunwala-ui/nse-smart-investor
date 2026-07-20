@@ -38,6 +38,7 @@ def test_fallback_logs_failed_provider_and_served(monkeypatch, caplog):
     monkeypatch.setattr(fetcher, "_fetch_yahoo_direct",
                         lambda t, period, interval: _good_df())          # Tier 2 serves
     fetcher._FETCH_CACHE.clear()
+    fetcher._reset_stooq_breaker()  # isolate from other tests' Stooq failures
 
     with caplog.at_level(logging.DEBUG, logger="data.fetcher"):
         df = fetcher.fetch_single("FAKE1.NS", period="1y")
@@ -59,6 +60,7 @@ def test_fallback_all_providers_fail_raises_and_logs(monkeypatch, caplog):
     monkeypatch.setattr(fetcher, "_fetch_stooq", _boom)
     monkeypatch.setattr(fetcher, "_fetch_yahoo_direct", _boom)
     fetcher._FETCH_CACHE.clear()
+    fetcher._reset_stooq_breaker()  # isolate from other tests' Stooq failures
 
     with caplog.at_level(logging.ERROR, logger="data.fetcher"):
         with pytest.raises(ValueError):
