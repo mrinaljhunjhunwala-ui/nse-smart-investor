@@ -213,7 +213,8 @@ def _context_to_prompt_text(ctx: dict) -> str:
         lines.append("Governance/news flags (pledge, RPT, insider trading, shareholding "
                      "changes, SAST filings — from NSE's own disclosures):")
         for f in flags[:15]:
-            lines.append(f"  - [{f.get('sentiment', '?')}] {f.get('headline', f)}")
+            lines.append(f"  - [{f.get('sentiment', '?')}, {f.get('date', 'n/a')}] "
+                         f"{f.get('headline', f)}")
     else:
         lines.append("Governance/news flags: none surfaced (either genuinely clean, or "
                      "the underlying NSE feed was unavailable when last checked — "
