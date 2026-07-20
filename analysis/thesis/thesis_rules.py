@@ -38,8 +38,8 @@ SENT_WEAK = 3.0            # /10   (unfavourable market backdrop)
 BETA_HIGH = 1.2            # x  — amplifies market moves
 SIGNAL_AGREE = 0.70        # fraction of deep-confirmation checks bullish
 EARNINGS_SOON = 7          # days — event/gap risk window
-COMPOSITE_STRONG = 70.0    # /100
-COMPOSITE_WEAK = 40.0      # /100
+COMPOSITE_STRONG = 70.0    # /90 — FIX THESIS1: was mislabeled /100 (score.py caps at 90)
+COMPOSITE_WEAK = 40.0      # /90
 ROCE_STRONG = 15.0         # %  — efficient use of capital (quality compounder)
 ROCE_WEAK = 8.0            # %  — poor capital efficiency
 
@@ -131,7 +131,7 @@ def bull_factors(inp: ThesisInputs) -> List[Factor]:
     # Composite
     if inp.composite_score is not None and inp.composite_score >= COMPOSITE_STRONG:
         out.append(Factor("Composite model score is strongly positive", SRC_COMPOSITE,
-                          f"Score {inp.composite_score:.0f}/100", BULL))
+                          f"Score {inp.composite_score:.0f}/90", BULL))
 
     # News
     if inp.news_sentiment == "positive":
@@ -190,7 +190,7 @@ def bear_factors(inp: ThesisInputs) -> List[Factor]:
     # Composite
     if inp.composite_score is not None and inp.composite_score < COMPOSITE_WEAK:
         out.append(Factor("Composite model score is negative", SRC_COMPOSITE,
-                          f"Score {inp.composite_score:.0f}/100", BEAR))
+                          f"Score {inp.composite_score:.0f}/90", BEAR))
 
     # News
     if inp.news_sentiment == "negative":
@@ -280,7 +280,8 @@ def sector_notes(inp: ThesisInputs) -> List[str]:
 
 # ────────────────────────────────── VERDICT ─────────────────────────────────────
 def _score_band(score) -> int:
-    """Map the 0–100 composite score to a -2…+2 lean."""
+    """Map the 0–90 composite score (analysis/score.py's Trend Quality
+    Score) to a -2…+2 lean."""
     if score is None:
         return 0
     if score >= 75:
@@ -318,7 +319,12 @@ def compute_verdict(inp: ThesisInputs,
     verdict = VERDICT_BY_SCORE[final]
 
     if inp.composite_score is not None:
-        rationale = (f"Composite {inp.composite_score:.0f}/100 → band {band:+d}; "
+        # FIX THESIS1 — composite_score is the 0-90 Trend Quality Score
+        # (analysis/score.py caps it at 90, not 100 — see that module's
+        # changelog: "Score cap corrected to 90"). This label previously
+        # read "/100", understating how strong a given score actually is
+        # (e.g. 74 is 82% of max on the real 0-90 scale, not 74%).
+        rationale = (f"Composite {inp.composite_score:.0f}/90 → band {band:+d}; "
                      f"{nb} bull vs {nbe} bear, {nr} risk(s) → nudge {nudge:+d}; "
                      f"net {final:+d} ⇒ {verdict}.")
     else:
