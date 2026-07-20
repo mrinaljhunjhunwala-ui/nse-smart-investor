@@ -6,6 +6,7 @@ trade_store.kv_get/kv_set.
 
 Run:  py -m pytest tests/test_qualitative_flags.py -q
 """
+import datetime as _dt
 import os
 import sys
 
@@ -300,9 +301,10 @@ def test_summarize_flags_counts_by_sentiment():
 # ── news-based flags (QF4) ─────────────────────────────────────────────────
 
 def test_news_flags_negative_keyword_flags_red():
+    recent = (_dt.date.today() - _dt.timedelta(days=3)).isoformat()
     news_items = [
         {"title": "Company faces show cause notice from regulator",
-         "link": "http://x", "pub_date": "2026-07-01", "source": "Moneycontrol"},
+         "link": "http://x", "pub_date": recent, "source": "Moneycontrol"},
     ]
     flags = parse_news_flags("ABDL.NS", news_items)
     assert len(flags) == 1
@@ -337,6 +339,52 @@ def test_news_flags_respects_max_items():
 def test_news_flags_missing_source_defaults_google_news():
     flags = parse_news_flags("ABDL.NS", [{"title": "Some headline"}])
     assert flags[0].source == "News: Google News"
+
+
+# ── FIX STALE1 — recency filtering/sorting for news + RSS flags ───────────
+
+def test_news_flags_drops_items_older_than_30_days():
+    stale = (_dt.date.today() - _dt.timedelta(days=45)).strftime("%a, %d %b %Y")
+    fresh = (_dt.date.today() - _dt.timedelta(days=2)).strftime("%a, %d %b %Y")
+    news_items = [
+        {"title": "Old news nobody should see", "pub_date": stale, "source": "ET"},
+        {"title": "Recent relevant update", "pub_date": fresh, "source": "ET"},
+    ]
+    flags = parse_news_flags("ABDL.NS", news_items)
+    assert len(flags) == 1
+    assert flags[0].headline == "Recent relevant update"
+
+
+def test_news_flags_sorts_newest_first():
+    older = (_dt.date.today() - _dt.timedelta(days=10)).strftime("%a, %d %b %Y")
+    newer = (_dt.date.today() - _dt.timedelta(days=1)).strftime("%a, %d %b %Y")
+    news_items = [
+        {"title": "Older item", "pub_date": older, "source": "ET"},
+        {"title": "Newer item", "pub_date": newer, "source": "ET"},
+    ]
+    flags = parse_news_flags("ABDL.NS", news_items)
+    assert [f.headline for f in flags] == ["Newer item", "Older item"]
+
+
+def test_news_flags_undated_items_kept_not_dropped():
+    """An item with no/unparseable pub_date must never be silently dropped —
+    only positively-confirmed-old items get dropped."""
+    news_items = [{"title": "No date given", "source": "ET"}]
+    flags = parse_news_flags("ABDL.NS", news_items)
+    assert len(flags) == 1
+    assert flags[0].headline == "No date given"
+
+
+def test_rss_flags_drops_items_older_than_30_days():
+    stale = (_dt.date.today() - _dt.timedelta(days=60)).strftime("%a, %d %b %Y")
+    fresh = (_dt.date.today() - _dt.timedelta(days=1)).strftime("%a, %d %b %Y")
+    items = {"related_party_transactions": [
+        {"title": "Old RPT disclosure", "description": "", "pub_date": stale},
+        {"title": "Recent RPT disclosure", "description": "", "pub_date": fresh},
+    ]}
+    flags = parse_rss_flags("ABDL.NS", items)
+    assert len(flags) == 1
+    assert flags[0].headline == "Recent RPT disclosure"
 
 
 def test_build_auto_flags_combines_nse_and_news_independently():
