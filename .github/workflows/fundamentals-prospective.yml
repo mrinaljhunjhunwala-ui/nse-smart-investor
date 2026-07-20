@@ -1,0 +1,66 @@
+name: Fundamentals Prospective Tracker
+
+# Option A of the fundamentals scoring study (see research/
+# fundamentals_prospective_collect.py's module docstring). Runs ONCE a day
+# (fundamentals don't move intraday the way price does, unlike
+# warm-top-picks.yml's 5-min cadence) — snapshots today's quantitative
+# fundamentals (real assess_valuation(), no reconstruction needed since
+# it's genuinely today) + technical score for the full universe, qualitative
+# flags for a smaller focus subset, and evaluates any previously-recorded
+# snapshots that are now old enough to check.
+#
+# Reuses the SAME DATABASE_URL secret already configured for
+# warm-top-picks.yml (same Neon instance, currently used for paper trades —
+# this adds its own table, doesn't touch the trades/user_kv tables). Without
+# it, this falls back to a fresh local SQLite file every run and the study
+# will never accumulate anything across runs — see
+# analysis/fundamentals/prospective_tracker.py's module docstring.
+#
+# Scheduled for 03:15 UTC (08:45 IST) — after warm-top-picks.yml's first
+# run of the day, before market open, so fundamentals reflect the latest
+# overnight filings/news without competing for API rate limits during the
+# most active 09:15-10:00 IST warm-top-picks window.
+
+on:
+  schedule:
+    - cron: "15 3 * * 1-5"     # 03:15 UTC = 08:45 IST, Mon-Fri, once daily
+  workflow_dispatch:            # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: fundamentals-prospective
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60          # full-universe Yahoo fundamentals fetch + qualitative-flags subset + evaluation pass
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Create output directory
+        run: mkdir -p research/output
+
+      - name: Run prospective collector + evaluator
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m research.fundamentals_prospective_collect 2>&1 | tee research/output/fundamentals_prospective_console.log
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fundamentals-prospective-${{ github.run_id }}
+          path: |
+            research/output/fundamentals_prospective_export.csv
+            research/output/fundamentals_prospective_console.log
+          retention-days: 90
