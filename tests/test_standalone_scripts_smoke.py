@@ -49,6 +49,9 @@ _STANDALONE_SCRIPTS = [
     ("research.fundamental_quality",        "research/fundamental_quality.py", ["main"]),
     ("research.score_variants",             "research/score_variants.py", ["main"]),
     ("research.score_variants_volume",       "research/score_variants_volume.py", ["main"]),
+    ("research.score_variants_regime",       "research/score_variants_regime.py", ["main"]),
+    ("research.fundamentals_historical_variant", "research/fundamentals_historical_variant.py", ["main"]),
+    ("research.fundamentals_prospective_collect", "research/fundamentals_prospective_collect.py", ["main"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
     ("tools.refresh_flags_batch",           "tools/refresh_flags_batch.py", ["main"]),
 ]
