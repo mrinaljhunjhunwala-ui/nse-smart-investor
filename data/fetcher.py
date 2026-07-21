@@ -210,6 +210,14 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
 
     # Stooq sometimes returns an HTML page instead of CSV (maintenance / geo-block)
     if raw.lstrip().startswith("<") or "<!DOCTYPE" in raw[:200] or "<html" in raw[:200].lower():
+        # FIX STOOQ-DIAG — previously this only logged "returned HTML", which
+        # looks identical whether Stooq sent a rate-limit page, a Cloudflare
+        # challenge, or a geo-block notice. Log a snippet of the actual body
+        # so the next run's logs show which one it actually is, instead of
+        # leaving the cause a guess every time this fires.
+        _snippet = " ".join(raw[:300].split())
+        _log.warning("Stooq returned HTML (not CSV) for %s — body starts: %r",
+                     ticker, _snippet)
         raise ValueError(f"Stooq returned HTML (not CSV) for {ticker}")
 
     try:

@@ -82,9 +82,19 @@ synthetic OHLC data with controlled ATR.
   trend exists yet to "flip" from).
 """
 
+import logging
 import pandas as pd
 import numpy as np
 from typing import Optional, Iterable, List
+
+# FIX IND-LOG — add_avwap() and add_relative_strength() both call
+# _log.debug(...) in their except blocks (graceful NaN-column fallback on
+# calculation failure), but this module never defined _log. That meant any
+# real failure inside those try blocks didn't degrade gracefully as
+# intended — it raised NameError: name '_log' is not defined instead,
+# masking the original exception and turning a soft, recoverable failure
+# into a hard crash for the caller at exactly the moment robustness matters.
+_log = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
