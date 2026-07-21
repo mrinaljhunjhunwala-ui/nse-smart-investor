@@ -11,11 +11,19 @@ Source priority (fastest / most reliable first):
 In-memory cache: each (ticker, period, interval) fetched once per TTL window (5 min).
   - Caches (dataframe, timestamp) tuples to enable TTL expiry across Streamlit sessions.
   - Batch operations use 16 workers with per-ticker timeout (6s) + 1 retry on timeout/connection errors.
+
+Stooq circuit breaker (FIX SPEED2): after 5 consecutive Stooq failures in this
+process, Stooq is skipped entirely for 300s and every ticker goes straight to
+Yahoo — see _stooq_breaker_* below. Without this, a fully-degraded Stooq (geo-
+block/rate-limit/maintenance) made every single ticker in a full-universe scan
+pay a ~4s Stooq timeout tax before falling through, which is what blew the
+Warm Top Picks GitHub Actions job's time budget in production.
 """
 
 import http.cookiejar
 import io
 import logging
+import threading
 import time
 import datetime
 import urllib.parse
@@ -36,6 +44,50 @@ _FETCH_CACHE_TTL = 300  # 5 minutes — consistent with VIX cache TTL
 
 # ── Yahoo Finance session cache (cookie jar + crumb token) ───────────────────
 _YF_SESSION: dict = {"opener": None, "crumb": "", "ts": 0.0}
+
+
+# ── Stooq circuit breaker ─────────────────────────────────────────────────────
+# FIX SPEED2 — fetch_single() previously tried Stooq for EVERY ticker no matter
+# how many times it had already failed in this same process. When Stooq
+# degrades for a whole run (geo-block, rate-limit, maintenance — all observed
+# in production: fast "returned HTML" rejects escalating to full urlopen
+# timeouts partway through a run), every remaining ticker still pays its ~4s
+# Stooq timeout before falling through to Yahoo. On a ~1,400+ ticker universe
+# scan that's what blew the Warm Top Picks GitHub Actions job's 8-minute
+# budget (see .github/workflows/warm-top-picks.yml). Same discipline as the
+# existing Angel One login circuit breaker (_LOGIN_BREAKER_* in
+# angel_fetcher.py) — after enough consecutive failures, stop paying the tax
+# and go straight to Yahoo for the rest of this cooldown window.
+_STOOQ_BREAKER_THRESHOLD = 5      # consecutive failures before tripping
+_STOOQ_BREAKER_COOLDOWN  = 300    # seconds — matches _FETCH_CACHE_TTL
+_STOOQ_BREAKER: dict = {"consecutive_failures": 0, "tripped_until": 0.0}
+_STOOQ_BREAKER_LOCK = threading.Lock()  # batch fetches hit this from 16 workers
+
+
+def _stooq_breaker_is_tripped() -> bool:
+    return time.time() < _STOOQ_BREAKER["tripped_until"]
+
+
+def _stooq_breaker_record(success: bool) -> None:
+    with _STOOQ_BREAKER_LOCK:
+        if success:
+            _STOOQ_BREAKER["consecutive_failures"] = 0
+            _STOOQ_BREAKER["tripped_until"] = 0.0
+            return
+        _STOOQ_BREAKER["consecutive_failures"] += 1
+        if _STOOQ_BREAKER["consecutive_failures"] >= _STOOQ_BREAKER_THRESHOLD:
+            _STOOQ_BREAKER["tripped_until"] = time.time() + _STOOQ_BREAKER_COOLDOWN
+            _log.warning(
+                "Stooq circuit breaker TRIPPED after %d consecutive failures — "
+                "skipping Stooq for %ds, going straight to Yahoo",
+                _STOOQ_BREAKER["consecutive_failures"], _STOOQ_BREAKER_COOLDOWN)
+
+
+def _reset_stooq_breaker() -> None:
+    """Test-only helper — restores the breaker to a fresh, untripped state."""
+    with _STOOQ_BREAKER_LOCK:
+        _STOOQ_BREAKER["consecutive_failures"] = 0
+        _STOOQ_BREAKER["tripped_until"] = 0.0
 
 
 def _get_yf_crumb():
@@ -447,12 +499,17 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
 
     # ── Tier 1: Stooq CSV (daily bars only — no intraday support) ────────────
     if (df is None or df.empty) and interval == "1d":
-        try:
-            df = _fetch_stooq(ticker, period=period)
-            served = "Stooq"
-        except Exception as e:
-            df = None
-            _fail("Stooq", e)
+        if _stooq_breaker_is_tripped():
+            _log.debug("Stooq circuit breaker open — skipping Stooq for symbol=%s", ticker)
+        else:
+            try:
+                df = _fetch_stooq(ticker, period=period)
+                served = "Stooq"
+                _stooq_breaker_record(success=True)
+            except Exception as e:
+                df = None
+                _stooq_breaker_record(success=False)
+                _fail("Stooq", e)
     elif (df is None or df.empty) and served is None:
         _log.debug("intraday %s for %s — skipping Stooq (daily-only)", interval, ticker)
 
