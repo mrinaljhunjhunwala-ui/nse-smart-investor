@@ -28,9 +28,12 @@ import streamlit as st
 
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
-from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared.cache import get_composite_score
+from dashboard.shared.chart_helpers import render_top_bar, build_price_chart
+from dashboard.shared.cache import get_composite_score, load_ticker_df
 from dashboard.shared.flags_ui import get_cached_flags
+from dashboard.shared.trade_utils import (
+    _fetch_single_live_price, _reanchor_levels, _suggest_position, _paper_trade_popover,
+)
 from data.universe import resolve_ticker, get_sector
 import trade_store as _store
 
@@ -72,6 +75,83 @@ try:
 except ValueError as e:
     st.error(str(e))
     st.stop()
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Live Snapshot — chart, live price, re-anchored entry/SL/TP, suggested qty
+# (FIX CC-LOAD1: this section is WHY Command Centre's Buy/Sell cards no
+# longer fetch live price / re-anchor levels / compute qty per-pick — that
+# was a live-price network call for up to ~40 tickers on every single
+# Command Centre page load/rerun, whether or not the person was about to
+# act on any of them. Command Centre now shows only what's already cached
+# (score/headline/type) and links here — the one live fetch this section
+# does is for the ONE ticker actually being looked at, on demand.)
+# ═════════════════════════════════════════════════════════════════════════
+st.markdown("### 📡 Live Snapshot")
+
+_cs = None
+try:
+    _cs = get_composite_score(ticker)
+except Exception as e:
+    _log.warning("deep_dive: get_composite_score (live snapshot) failed for %s: %s", ticker, e)
+
+_lq = {}
+try:
+    _lq = _fetch_single_live_price(ticker) or {}
+except Exception as e:
+    _log.warning("deep_dive: live price fetch failed for %s: %s", ticker, e)
+
+_live_price = _lq.get("price")
+_live_chg   = _lq.get("chg")
+_live_vol   = _lq.get("volume")
+
+_entry_disp = _sl_disp = _tp_disp = None
+if _cs is not None and getattr(_cs, "entry", None):
+    _entry_disp, _sl_disp, _tp_disp = _reanchor_levels(
+        _cs.entry, _cs.stop_loss, _cs.target, _live_price)
+
+_snap_cols = st.columns(4)
+if _live_price:
+    _snap_cols[0].metric(
+        "Live Price", f"₹{_live_price:,.2f}",
+        f"{_live_chg:+.2f}%" if _live_chg is not None else None,
+    )
+else:
+    _snap_cols[0].metric("Live Price", "unavailable")
+_snap_cols[1].metric("Volume", f"{_live_vol:,.0f}" if _live_vol else "n/a")
+if _cs is not None:
+    _snap_cols[2].metric("Signal", getattr(_cs, "action", "n/a"),
+                         f"{_cs.score:.0f}/90" if getattr(_cs, "score", None) is not None else None)
+else:
+    _snap_cols[2].metric("Signal", "unavailable")
+if _entry_disp:
+    _snap_cols[3].caption(
+        f"Entry ₹{_entry_disp:,.2f} · SL ₹{_sl_disp:,.2f} · TP ₹{_tp_disp:,.2f}"
+        f"{' (live)' if _live_price else ' (last close)'}"
+    )
+
+if _entry_disp:
+    _dd_qty = _suggest_position(_entry_disp, _sl_disp)
+    st.caption(
+        f"💡 Suggested size at your current risk settings: **{_dd_qty['qty']} shares** "
+        f"({_dd_qty['basis']})"
+    )
+    _paper_trade_popover(
+        ticker, _entry_disp, _sl_disp, _tp_disp,
+        reason=f"Deep Dive: {getattr(_cs, 'headline', ticker)[:55]}" if _cs else "Deep Dive",
+        key=f"dd_paper_trade_{ticker}",
+    )
+
+with st.spinner("Loading chart..."):
+    try:
+        _chart_df = load_ticker_df(ticker)
+        if _chart_df is not None and not _chart_df.empty:
+            st.plotly_chart(build_price_chart(_chart_df, ticker), width="stretch")
+        else:
+            st.info("Chart unavailable — insufficient price history for this ticker.")
+    except Exception as e:
+        _log.warning("deep_dive: chart load failed for %s: %s", ticker, e)
+        st.info("Chart unavailable right now.")
 
 
 # ═════════════════════════════════════════════════════════════════════════
