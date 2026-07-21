@@ -578,6 +578,34 @@ def _grade_color(grade: str) -> str:
 # Position sizing
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _reanchor_levels(entry: float, sl: float, tp: float, live_price: float) -> tuple:
+    """Re-anchor entry/SL/TP to a live price while preserving the ATR-based
+    stop distance and conviction-scaled target distance already computed at
+    scan time — same technique analysis/score.py's score_stock() already
+    uses for single-ticker live lookups.
+
+    Used by Deep Dive Analysis's Live Snapshot section: a pick's entry/SL/TP
+    are frozen at whatever the last daily close was when the Top Picks scan
+    ran (Command Centre no longer live-fetches per-pick at all — see that
+    page's FIX CC-LOAD1 comment) — this re-anchors those three numbers to a
+    live price fetched on demand for the one ticker being looked at, cheap
+    since it's a single fetch rather than a batch across ~40 tickers.
+    Returns (entry, sl, tp) unchanged if live_price is falsy or entry is 0.
+    """
+    entry = float(entry or 0)
+    sl    = float(sl or 0)
+    tp    = float(tp or 0)
+    if not live_price or entry <= 0:
+        return entry, sl, tp
+    risk_dist   = entry - sl
+    reward_dist = tp - entry
+    return (
+        round(float(live_price), 2),
+        round(float(live_price) - risk_dist, 2),
+        round(float(live_price) + reward_dist, 2),
+    )
+
+
 def _suggest_position(
     entry: float, sl: float,
     capital: float = None,
