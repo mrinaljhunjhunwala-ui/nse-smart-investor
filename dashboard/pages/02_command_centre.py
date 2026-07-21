@@ -34,7 +34,6 @@ from dashboard.shared.trade_utils import (
     _paper_trade_popover,
     _portfolio_live_prices,
     _render_autoclose_banner,
-    _suggest_position,
     paper_close_trade,
 )
 
@@ -541,12 +540,15 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             "remaining cards below are watchlist-grade backfill, marked accordingly."
         )
 
-    # Live prices for the picks — the scan scores on last daily close, but the
-    # cards (and any paper trade) should reflect the real-time market price.
-    _pk_all_syms = tuple({*(b["ticker"] for b in _picks["buys"]),
-                          *(s["ticker"] for s in _picks["sells"])})
-    _pk_lp = _portfolio_live_prices(_pk_all_syms) if _pk_all_syms else {}
-
+    # FIX CC-LOAD1: this section used to batch-fetch live price/chg/volume
+    # for every buy+sell ticker (up to ~40) on EVERY Command Centre page
+    # load/rerun — real network cost paid whether or not the person was
+    # about to act on any of them. That live-price + re-anchored entry/SL/TP
+    # + suggested-qty work now lives in Deep Dive Analysis's "Live Snapshot"
+    # section instead, fetched on demand for the ONE ticker actually being
+    # looked at when "Open full analysis" is clicked. Cards below show only
+    # what's already in the cached scan (score/headline/entry-SL-TP at last
+    # close) — zero live network calls for this section.
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
         st.markdown("#### 🟢 Buy Candidates")
@@ -554,29 +556,6 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             st.caption("No strong buy setups today — market not offering clean entries.")
         for _b in _picks["buys"]:
             _bl = _b["ticker"].replace(".NS", "")
-            _blq = _pk_lp.get(_b["ticker"], {})
-            _blive = _blq.get("price")
-            _bchg  = _blq.get("chg")
-            _bvol  = _blq.get("volume")
-            _blive_html = ""
-            if _blive:
-                _bcc = "#26a69a" if (_bchg or 0) >= 0 else "#ef5350"
-                _barr = "▲" if (_bchg or 0) >= 0 else "▼"
-                # FIX VOL1: qty-traded, when the resolving tier provided one
-                # (guaranteed real-time on Angel One; best-effort daily
-                # volume from Yahoo/NSE/Stooq otherwise — omitted, not
-                # zeroed, when no tier had it).
-                _bvol_html = (f' <span style="color:#888;font-size:10px">· Vol {_bvol:,.0f}</span>'
-                              if _bvol else "")
-                _blive_html = (
-                    f'<div style="font-size:12px;color:#fff;margin-top:3px">'
-                    f'🔴 Live <b>₹{_blive:,.2f}</b> '
-                    f'<span style="color:{_bcc};font-size:11px">{_barr}{abs(_bchg or 0):.2f}%</span>'
-                    f'{_bvol_html}</div>'
-                )
-            _bs = _suggest_position(_b["entry"], _b["sl"]) if _b["entry"] else None
-            _qty_txt = (f'<span style="color:#888;font-size:11px"> · suggest '
-                        f'{_bs["qty"]} sh</span>') if _bs else ""
             _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
             _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
                           else "B" if _b["score"] >= 62 else "")
@@ -604,9 +583,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
-                + _blive_html
                 + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f}{_qty_txt}</div>'
+                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f} '
+                   f'<span style="color:#666">(last close — open full analysis for live price + qty)</span></div>'
                    if _b["entry"] else "")
                 + (f'<div style="font-size:11px;color:#6a8caf;margin-top:2px">'
                    f'⏱ {_b.get("horizon")}'
@@ -630,27 +609,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             st.caption("No clear sell signals — nothing flashing red in the scan.")
         for _sv in _picks["sells"]:
             _svl = _sv["ticker"].replace(".NS", "")
-            # FIX SELL1: _pk_lp already has live price/chg/volume for BOTH
-            # buys and sells (see _pk_all_syms above) — the Buy Candidates
-            # loop used it, this loop never did, so Sell/Avoid cards showed
-            # no live price at all. Now mirrors the Buy card's live-price
-            # block exactly.
-            _svq    = _pk_lp.get(_sv["ticker"], {})
-            _svlive = _svq.get("price")
-            _svchg  = _svq.get("chg")
-            _svvol  = _svq.get("volume")
-            _svlive_html = ""
-            if _svlive:
-                _svcc  = "#26a69a" if (_svchg or 0) >= 0 else "#ef5350"
-                _svarr = "▲" if (_svchg or 0) >= 0 else "▼"
-                _svvol_html = (f' <span style="color:#888;font-size:10px">· Vol {_svvol:,.0f}</span>'
-                               if _svvol else "")
-                _svlive_html = (
-                    f'<div style="font-size:12px;color:#fff;margin-top:3px">'
-                    f'🔴 Live <b>₹{_svlive:,.2f}</b> '
-                    f'<span style="color:{_svcc};font-size:11px">{_svarr}{abs(_svchg or 0):.2f}%</span>'
-                    f'{_svvol_html}</div>'
-                )
+            # FIX CC-LOAD1: live price fetch removed from this list for the
+            # same reason as the Buy loop above — see that section's
+            # comment. Open full analysis for live price on this ticker.
             st.markdown(
                 f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
                 f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
@@ -659,7 +620,6 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
-                + _svlive_html
                 + '</div>',
                 unsafe_allow_html=True,
             )
