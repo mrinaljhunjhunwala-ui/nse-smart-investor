@@ -1,0 +1,65 @@
+name: Warm Tomorrow's Watchlist
+
+# FIX W-SPEED. Runs the Tomorrow's Watchlist EOD scan once after market close
+# and persists it to trade_store (Postgres) so every visit to that page reads
+# an instant snapshot instead of paying the cold-scan cost on whichever visit
+# happens to hit an expired in-app cache — exactly the same fix
+# warm-top-picks.yml already applies to Command Centre's Top Picks, just
+# extended to this page. Requires DATABASE_URL to point at the SAME Postgres
+# instance configured in the Streamlit Cloud app's secrets — see
+# dashboard/DB_SETUP.md. If DATABASE_URL isn't set, trade_store falls back to
+# a local SQLite file only this ephemeral runner can see, which would make
+# this workflow a no-op for the deployed app (it still won't fail the job —
+# see scripts/warm_tomorrow_watchlist.py).
+#
+# This is an EOD/next-session scan (not intraday), so it only needs to run
+# once after close, not every 15 min like Top Picks. NSE closes 15:30 IST =
+# 10:00 UTC; running at 10:20 UTC (15:50 IST) gives a buffer for the day's
+# final close prints to settle at the data providers before scoring runs.
+#
+# timeout-minutes is deliberately generous (20, not 8) — an earlier version
+# of the sibling Top Picks workflow was set to 8 and was repeatedly getting
+# cancelled mid-scan once Stooq degraded for a run (every ticker paying a
+# ~4s Stooq timeout tax before falling through to Yahoo). That's now fixed
+# at the root with a circuit breaker in data/fetcher.py, but this timeout
+# still leaves headroom rather than re-creating the same failure mode here.
+
+on:
+  schedule:
+    - cron: "20 10 * * 1-5"   # 10:20 UTC = 15:50 IST, Mon–Fri (after NSE close)
+  workflow_dispatch:           # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: warm-tomorrow-watchlist
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Needs the fuller dependency set (same reasoning as warm-top-picks.yml)
+      # because it imports dashboard.shared.cache, which pulls in streamlit
+      # and plotly at module import time even though this job never renders
+      # a UI.
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Run Tomorrow's Watchlist warm-up
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional — set these only if you want the scan to use real-time
+          # Angel One prices instead of the free Stooq/Yahoo fallback chain:
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python scripts/warm_tomorrow_watchlist.py
