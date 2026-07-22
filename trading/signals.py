@@ -313,6 +313,12 @@ def check_breakout(
         return None
     if rsi > 80:
         return None
+    # FIX BRK-ADX — adx was fetched above but never used: a breakout near
+    # its 52w high with no real trend strength behind it (ADX < 20) is a
+    # much likelier fakeout than a confirmed move. Same threshold already
+    # used correctly by check_momentum_leader() for the same reason.
+    if not pd.isna(adx) and adx < 20:
+        return None
 
     sl = price - 2.0 * atr
     tp = price + 3.0 * atr
@@ -323,9 +329,10 @@ def check_breakout(
         "sl":           round(sl, 2),
         "tp":           round(tp, 2),
         "rsi":          round(rsi, 2),
+        "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "vol_ratio":    round(float(v_rat), 2) if not pd.isna(v_rat) else None,
         "pct_from_52h": round(pct_from_52h, 2),
-        "reason":       f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f}",
+        "reason":       f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f} | ADX={adx:.1f}" if not pd.isna(adx) else f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f}",
         "timestamp":    datetime.now().isoformat(),
     }
 
