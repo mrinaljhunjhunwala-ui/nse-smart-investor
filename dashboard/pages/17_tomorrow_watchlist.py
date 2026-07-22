@@ -36,7 +36,9 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared.cache import _tomorrow_watchlist, get_display_name, _trade_type
+from dashboard.shared.cache import (
+    _tomorrow_watchlist, get_tomorrow_watchlist, get_display_name, _trade_type,
+)
 from dashboard.shared.trade_utils import _paper_trade_popover
 from dashboard.shared.flags_ui import render_flag_badge_html  # QF2: shortlist-only flag badge
 
@@ -69,9 +71,13 @@ if "tw_stale" not in st.session_state:
 
 
 def _tw_worker(result_holder: list):
-    """Background worker — runs the (potentially slow) EOD scan once."""
+    """Background worker — runs the (potentially slow) EOD scan once.
+    FIX W-SPEED: calls get_tomorrow_watchlist() (snapshot-aware) rather than
+    _tomorrow_watchlist() directly, so a fresh pre-warmed snapshot (written
+    by scripts/warm_tomorrow_watchlist.py) is read instantly instead of this
+    page unconditionally re-running its own live scan."""
     try:
-        _r = _tomorrow_watchlist()
+        _r = get_tomorrow_watchlist()
         result_holder.append(("ok", _r))
     except Exception as _e:
         result_holder.append(("error", str(_e)))
@@ -211,6 +217,13 @@ def _render_cards(items, kind, key_prefix):
             _headline_full[:90] + "…" if len(_headline_full) > 90 else _headline_full
         )
 
+        # FIX HZ1-WL: holding-period label — already computed by score_stock()
+        # for every stock (see analysis/score.py's _pick_horizon), just wasn't
+        # threaded through this page before. Answers "how long is this setup
+        # good for" directly on the card instead of leaving it unclear.
+        _horizon = _it.get("horizon", "")
+        _valid_until = _it.get("valid_until", "")
+
         # QF2: qualitative flag badge — safe to call here because this is
         # the already-shortlisted, already-ranked list (≤15 items/bucket),
         # NOT the wide universe scan. Never call this inside the scan pass
@@ -233,6 +246,12 @@ def _render_cards(items, kind, key_prefix):
             f'{_it["signal_type"]} · key level {_it["key_level"]}</div>'
             f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_headline_card}</div>'
             + (
+                f'<div style="font-size:11px;color:#9aa;margin-top:2px">'
+                f'⏳ {_horizon}' + (f' · fresh until {_valid_until}' if _valid_until else '')
+                + '</div>'
+                if _horizon else ""
+            )
+            + (
                 f'<div style="font-size:11px;color:#888;margin-top:4px">'
                 f'Entry ₹{_entry:,.2f} · SL ₹{_sl:,.2f} · TP ₹{_tp:,.2f}</div>'
                 if _show_levels else ""
@@ -244,12 +263,30 @@ def _render_cards(items, kind, key_prefix):
             # FIX W2: use the full headline (not [:45]-truncated) for the
             # stored trade reason, so the Paper Trades journal shows the
             # complete context rather than a mid-word cut.
-            _paper_trade_popover(
-                _it["ticker"], _entry, _sl, _tp,
-                reason=f"Tomorrow Watch ({_it['signal_type']}): {_headline_full}",
-                key=f"{key_prefix}_{_it['ticker']}",
-                label=f"📌 Paper Trade {_lbl}",
-            )
+            _btn_col1, _btn_col2 = st.columns([1, 1])
+            with _btn_col1:
+                _paper_trade_popover(
+                    _it["ticker"], _entry, _sl, _tp,
+                    reason=f"Tomorrow Watch ({_it['signal_type']}): {_headline_full}",
+                    key=f"{key_prefix}_{_it['ticker']}",
+                    label=f"📌 Paper Trade {_lbl}",
+                )
+            with _btn_col2:
+                # FIX NAV-TW: this page had no way to jump into the full
+                # Analyze Stock view at all — same canonical handoff used on
+                # My Portfolio / Command Centre / Quality Watch (FIX NAV1).
+                if st.button(f"📊 Analyze {_lbl}", key=f"{key_prefix}_{_it['ticker']}_analyze",
+                             width="stretch"):
+                    st.session_state["analyze_ticker"] = _it["ticker"]
+                    st.session_state["_goto_page"] = "🔍 Analyze Stock"
+                    st.rerun()
+        else:
+            # No valid entry/SL/TP to paper-trade on, but Analyze is still useful.
+            if st.button(f"📊 Analyze {_lbl}", key=f"{key_prefix}_{_it['ticker']}_analyze_only",
+                         width="stretch"):
+                st.session_state["analyze_ticker"] = _it["ticker"]
+                st.session_state["_goto_page"] = "🔍 Analyze Stock"
+                st.rerun()
 
 
 _n_brk = len(_wl.get("breakout_candidates", []))
