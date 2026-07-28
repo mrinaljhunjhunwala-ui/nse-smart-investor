@@ -914,7 +914,16 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
                     "action": s.action, "headline": s.headline, "entry": s.entry,
                     "sl": s.stop_loss, "tp": s.target, "rr": s.risk_reward,
                     "technical": s.technical_score, "momentum": s.momentum_score,
-                    "volume": s.volume_score}
+                    "volume": s.volume_score,
+                    # FIX HZ1-WL: score_stock() already computes a horizon label
+                    # ("Swing (3-10 trading days)" / "Positional (2-6 weeks)")
+                    # and a valid_until date for every stock it scores, but this
+                    # function was dropping both before they reached the output
+                    # dict — exactly the gap flagged as "unclear holding period"
+                    # on this page. They were already being computed; just never
+                    # threaded through.
+                    "horizon": getattr(s, "horizon", ""),
+                    "valid_until": getattr(s, "valid_until", "")}
         except Exception as _e:
             _log.debug("cache._tomorrow_watchlist score failed for %s: %s", tk, _e)
             return None
@@ -930,7 +939,8 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     def _item(s, signal_type, key_level):
         return {"ticker": s["ticker"], "score": s["score"], "headline": s["headline"],
                 "signal_type": signal_type, "key_level": key_level,
-                "action": s["action"], "entry": s["entry"], "sl": s["sl"], "tp": s["tp"]}
+                "action": s["action"], "entry": s["entry"], "sl": s["sl"], "tp": s["tp"],
+                "horizon": s.get("horizon", ""), "valid_until": s.get("valid_until", "")}
 
     # FIX C1: track how many stocks would have matched more than one bucket,
     # so threshold overlap drift is visible in logs.
@@ -1005,6 +1015,60 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
             )
 
     return out
+
+
+_TW_KV_KEY  = "tomorrow_watchlist_snapshot"
+_TW_KV_USER = "_system"           # not per-user — one shared scan result
+_TW_MAX_AGE_SECONDS = 6 * 3600    # 6h — this is an EOD/next-session scan, not intraday;
+                                  # a once-daily cron has a lot more slack than Top Picks'
+                                  # 15-min cadence, so a generous window here is correct,
+                                  # not sloppy — see warm-tomorrow-watchlist.yml schedule.
+
+
+def get_tomorrow_watchlist(n: int = 15) -> dict:
+    """
+    Fast-path wrapper around _tomorrow_watchlist(), mirroring get_top_picks()'s
+    snapshot pattern exactly (see that function's docstring for the full
+    rationale — same fix, same reason: st.cache_data is process-local and
+    doesn't survive a Streamlit Cloud redeploy/restart, so whichever real
+    user's browser session hits an expired/empty cache pays the full ~2 min
+    cold scan).
+
+    scripts/warm_tomorrow_watchlist.py runs on a schedule (GitHub Actions —
+    see .github/workflows/warm-tomorrow-watchlist.yml, once after market
+    close) and writes a fresh scan result to trade_store. This function reads
+    that snapshot first; only if it's missing or older than
+    _TW_MAX_AGE_SECONDS does it fall back to a live scan (which
+    17_tomorrow_watchlist.py's own FIX W1 stale-while-revalidate handles
+    non-blockingly either way).
+    """
+    try:
+        snap = _store.kv_get(_TW_KV_KEY, user_id=_TW_KV_USER)
+        if snap and isinstance(snap, dict):
+            _gen_at = snap.get("generated_at")
+            _age = None
+            if _gen_at:
+                try:
+                    _age = (datetime.datetime.now() -
+                            datetime.datetime.fromisoformat(_gen_at)).total_seconds()
+                except Exception as _parse_e:
+                    _log.debug("cache.get_tomorrow_watchlist: bad generated_at %r: %s",
+                              _gen_at, _parse_e)
+            if _age is not None and _age <= _TW_MAX_AGE_SECONDS:
+                data = snap.get("data")
+                if isinstance(data, dict) and "scan_time" in data:
+                    data = dict(data)
+                    data["source"] = "persisted"
+                    data["generated_at"] = _gen_at
+                    return data
+    except Exception as _e:
+        _log.warning("cache.get_tomorrow_watchlist: persisted snapshot read failed, "
+                     "falling back to live scan: %s", _e)
+
+    result = _tomorrow_watchlist(n=n)
+    result = dict(result)
+    result["source"] = "live_scan"
+    return result
 
 
 @st.cache_data(ttl=3600, show_spinner=False)   # 1-hour cache — heavy multi-fetch
