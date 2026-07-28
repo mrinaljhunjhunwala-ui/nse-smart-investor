@@ -762,7 +762,18 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
 
     results = []
     try:
-        with _cf.ThreadPoolExecutor(max_workers=10) as ex:
+        # FIX TP5: 10 -> 16 workers. Was fine at ~2 min for the old 504-
+        # ticker nifty500 scan; after FIX TP2 widened this to niftytotalmarket
+        # (~745), 10 workers pushed the scan toward ~3 min, tight against the
+        # 5-min GitHub Actions cadence this pairs with (see warm-top-picks.yml
+        # FIX TP5 comment). 16 is a deliberately moderate bump, not a large
+        # one — Angel One's documented rate limiting is on get_batch_quotes
+        # and the token-lookup path (see data/angel_fetcher.py's AO1/AO2 fix
+        # notes), not necessarily the per-symbol quote endpoint this loop
+        # uses via score_stock(), but that boundary isn't fully
+        # characterised, so this errs cautious rather than maximising
+        # throughput.
+        with _cf.ThreadPoolExecutor(max_workers=16) as ex:
             results = list(ex.map(_one, _UNIV))
     except Exception as _e:
         _log.debug("cache.%s degraded: %s", "_home_top_picks", _e)
