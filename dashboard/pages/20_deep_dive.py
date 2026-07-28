@@ -33,6 +33,7 @@ from dashboard.shared.cache import get_composite_score, load_ticker_df
 from dashboard.shared.flags_ui import get_cached_flags
 from dashboard.shared.trade_utils import (
     _fetch_single_live_price, _reanchor_levels, _suggest_position, _paper_trade_popover,
+    _display_label, _action_emoji, _grade_color,
 )
 from data.universe import resolve_ticker, get_sector
 import trade_store as _store
@@ -110,25 +111,58 @@ if _cs is not None and getattr(_cs, "entry", None):
     _entry_disp, _sl_disp, _tp_disp = _reanchor_levels(
         _cs.entry, _cs.stop_loss, _cs.target, _live_price)
 
-_snap_cols = st.columns(4)
-if _live_price:
-    _snap_cols[0].metric(
-        "Live Price", f"₹{_live_price:,.2f}",
-        f"{_live_chg:+.2f}%" if _live_chg is not None else None,
-    )
-else:
-    _snap_cols[0].metric("Live Price", "unavailable")
-_snap_cols[1].metric("Volume", f"{_live_vol:,.0f}" if _live_vol else "n/a")
+# FIX DD-STYLE1: was plain st.metric() boxes — generic grey Streamlit
+# widgets that looked out of place next to this app's custom-styled cards
+# everywhere else (Command Centre's Buy/Sell candidates, Tomorrow's
+# Watchlist, etc.). Rebuilt as one HTML card in the same visual family:
+# grade-colored left border, live price with a directional arrow, and the
+# Signal badge using _display_label()/_action_emoji() — the same honest
+# trend-quality labels the rest of the app uses — rather than the raw
+# internal action string.
+_grade    = getattr(_cs, "grade", None) if _cs is not None else None
+_border_c = _grade_color(_grade) if _grade else "#3a3a3a"
+_up       = (_live_chg or 0) >= 0
+_price_c  = "#3ddc84" if _up else "#ef5350"
+_arrow    = "▲" if _up else "▼"
+
+_price_html = (
+    f'<div style="font-size:24px;font-weight:700;color:#fff">₹{_live_price:,.2f} '
+    f'<span style="font-size:14px;color:{_price_c};font-weight:600">'
+    f'{_arrow}{abs(_live_chg or 0):.2f}%</span></div>'
+    if _live_price else
+    '<div style="font-size:18px;font-weight:700;color:#888">Price unavailable</div>'
+)
+_vol_html = (f'<div style="font-size:12px;color:#888;margin-top:2px">Vol {_live_vol:,.0f}</div>'
+             if _live_vol else '<div style="font-size:12px;color:#666;margin-top:2px">Volume n/a</div>')
+
 if _cs is not None:
-    _snap_cols[2].metric("Signal", getattr(_cs, "action", "n/a"),
-                         f"{_cs.score:.0f}/90" if getattr(_cs, "score", None) is not None else None)
-else:
-    _snap_cols[2].metric("Signal", "unavailable")
-if _entry_disp:
-    _snap_cols[3].caption(
-        f"Entry ₹{_entry_disp:,.2f} · SL ₹{_sl_disp:,.2f} · TP ₹{_tp_disp:,.2f}"
-        f"{' (live)' if _live_price else ' (last close)'}"
+    _sig_lbl = _display_label(_cs.action)
+    _sig_emo = _action_emoji(_cs.action)
+    _sig_html = (
+        f'<div style="font-size:16px;font-weight:700;color:{_border_c}">{_sig_emo} {_sig_lbl}</div>'
+        f'<div style="font-size:12px;color:#888;margin-top:2px">{_cs.score:.0f}/90 · Grade {_grade}</div>'
     )
+else:
+    _sig_html = '<div style="font-size:16px;font-weight:700;color:#888">Signal unavailable</div>'
+
+_levels_html = ""
+if _entry_disp:
+    _levels_html = (
+        f'<div style="font-size:12px;color:#aaa;margin-top:10px;padding-top:10px;'
+        f'border-top:1px solid rgba(255,255,255,.08)">'
+        f'Entry ₹{_entry_disp:,.2f} · SL ₹{_sl_disp:,.2f} · TP ₹{_tp_disp:,.2f} '
+        f'<span style="color:#666">{"(live)" if _live_price else "(last close)"}</span></div>'
+    )
+
+st.markdown(
+    f'<div style="background:linear-gradient(135deg,#161616,#1c1c1c);'
+    f'border-left:4px solid {_border_c};border-radius:10px;padding:16px 20px;margin-bottom:10px">'
+    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">'
+    f'<div>{_price_html}{_vol_html}</div>'
+    f'<div style="text-align:right">{_sig_html}</div>'
+    f'</div>{_levels_html}</div>',
+    unsafe_allow_html=True,
+)
 
 if _entry_disp:
     _dd_qty = _suggest_position(_entry_disp, _sl_disp)
