@@ -335,6 +335,7 @@ def check_breakout(
         "rsi":          round(rsi, 2),
         "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "vol_ratio":    round(float(v_rat), 2) if not pd.isna(v_rat) else None,
+        "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "pct_from_52h": round(pct_from_52h, 2),
         "reason":       (f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | "
                         f"RSI={rsi:.1f} | ADX={adx:.1f}" if not pd.isna(adx) else
