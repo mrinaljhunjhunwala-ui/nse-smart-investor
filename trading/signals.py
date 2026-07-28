@@ -7,6 +7,9 @@ Fixes applied:
   - check_fibonacci_pullback: gracefully returns None when Fib cols absent vs crashing
   - scan_tickers VIX block: changed break → continue so other screens are still tried
   - _VIX_CACHE: now expires after 10 minutes so Streamlit doesn't use stale panic-mode data
+  - check_breakout: resolved unresolved git merge-conflict markers that were left in the
+    file (syntax error — module could not import); kept the ADX < 20 fakeout-rejection
+    check and removed a duplicate "adx" key in the returned dict
 """
 
 from __future__ import annotations
@@ -313,10 +316,11 @@ def check_breakout(
         return None
     if rsi > 80:
         return None
-    # FIX BRK-ADX — adx was fetched above but never used: a breakout near
-    # its 52w high with no real trend strength behind it (ADX < 20) is a
-    # much likelier fakeout than a confirmed move. Same threshold already
-    # used correctly by check_momentum_leader() for the same reason.
+    # FIX BRK-ADX: adx was fetched above but never checked — a breakout at
+    # the 52-week high with no real trend strength behind it (low ADX) is a
+    # much likelier fakeout than a confirmed move. check_momentum_leader()
+    # already gates on this same threshold; mirror it here rather than
+    # inventing a different cutoff for a sibling screen.
     if not pd.isna(adx) and adx < 20:
         return None
 
@@ -332,7 +336,9 @@ def check_breakout(
         "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "vol_ratio":    round(float(v_rat), 2) if not pd.isna(v_rat) else None,
         "pct_from_52h": round(pct_from_52h, 2),
-        "reason":       f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f} | ADX={adx:.1f}" if not pd.isna(adx) else f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f}",
+        "reason":       (f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | "
+                        f"RSI={rsi:.1f} | ADX={adx:.1f}" if not pd.isna(adx) else
+                        f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f}"),
         "timestamp":    datetime.now().isoformat(),
     }
 
