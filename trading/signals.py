@@ -7,6 +7,9 @@ Fixes applied:
   - check_fibonacci_pullback: gracefully returns None when Fib cols absent vs crashing
   - scan_tickers VIX block: changed break → continue so other screens are still tried
   - _VIX_CACHE: now expires after 10 minutes so Streamlit doesn't use stale panic-mode data
+  - check_breakout: resolved unresolved git merge-conflict markers that were left in the
+    file (syntax error — module could not import); kept the ADX < 20 fakeout-rejection
+    check and removed a duplicate "adx" key in the returned dict
 """
 
 from __future__ import annotations
@@ -330,6 +333,7 @@ def check_breakout(
         "sl":           round(sl, 2),
         "tp":           round(tp, 2),
         "rsi":          round(rsi, 2),
+        "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "vol_ratio":    round(float(v_rat), 2) if not pd.isna(v_rat) else None,
         "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "pct_from_52h": round(pct_from_52h, 2),
