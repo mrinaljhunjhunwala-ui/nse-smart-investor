@@ -21,6 +21,15 @@ B3  Normalised comparison now aligns all tickers to their common date range
 B4  In-app run now writes to portfolio_results.csv (same filename the loader
     reads) instead of backtest_results.csv, so the top summary table
     reflects the most recent run immediately after completion.
+
+FIX BT1  Styler.background_gradient() requires matplotlib as an optional
+    dependency — pandas imports it lazily only when that method is called,
+    so this was invisible in local testing (matplotlib happened to be
+    present in the sandbox) and crashed with an ImportError on Streamlit
+    Cloud, which doesn't have it (not in requirements.txt, and nothing else
+    in this app needs it). Replaced with a small hand-rolled Red-Yellow-
+    Green interpolation (chart_helpers.rdylgn_bg) that needs only stdlib — same
+    visual result, no new dependency to track.
 """
 
 import os, sys
@@ -52,7 +61,7 @@ import sys
 
 from dashboard.shared.design import apply_design
 from dashboard.shared.cache import load_ticker_df
-from dashboard.shared.chart_helpers import _ROOT, render_top_bar
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar, rdylgn_bg
 
 apply_design()
 render_sidebar(current="Backtest")
@@ -99,8 +108,13 @@ if not df.empty:
     bt4.metric("Total Trades",f"{df[t_col].sum():,.0f}"  if t_col else "—")
 
     grad_cols = [r_col] if r_col else []
+    _styler = df.style.format("{:.2f}")
+    for _gc in grad_cols:
+        _vmin, _vmax = df[_gc].min(), df[_gc].max()
+        _styler = _styler.map(lambda v, _lo=_vmin, _hi=_vmax: rdylgn_bg(v, _lo, _hi),
+                              subset=[_gc])
     st.dataframe(
-        df.style.background_gradient(subset=grad_cols, cmap="RdYlGn").format("{:.2f}"),
+        _styler,
         use_container_width=True,
     )
 
@@ -463,10 +477,13 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
 
         _grad_cols2 = [c for c in [_r_col2, _s_col2] if c]
         _bt_sorted  = _bt_res.sort_values(_r_col2, ascending=False) if _r_col2 else _bt_res
+        _styler2 = _bt_sorted.style
+        for _gc2 in _grad_cols2:
+            _vmin2, _vmax2 = _bt_sorted[_gc2].min(), _bt_sorted[_gc2].max()
+            _styler2 = _styler2.map(lambda v, _lo=_vmin2, _hi=_vmax2: rdylgn_bg(v, _lo, _hi),
+                                    subset=[_gc2])
         st.dataframe(
-            _bt_sorted.style.background_gradient(
-                subset=_grad_cols2, cmap="RdYlGn"
-            ),
+            _styler2,
             use_container_width=True, height=380,
         )
         st.caption(
