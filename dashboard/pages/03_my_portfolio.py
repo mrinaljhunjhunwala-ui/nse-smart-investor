@@ -100,7 +100,7 @@ from dashboard.shared.trade_utils import (
     load_manual_holdings,          # FIX MH1
     save_manual_holdings,          # FIX MH1
 )
-from dashboard.shared.chart_helpers import _ROOT, render_top_bar
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar, rdylgn_bg
 from dashboard.shared.squareoff_monitor import render_squareoff_monitor
 from dashboard.shared.cache import STOCK_SEARCH_MAP  # FIX MH6
 from analysis.portfolio_concentration import analyze_concentration, concentration_grade
@@ -956,8 +956,11 @@ if _csv_source is not None:
                         _fdf.style.format({
                             "Quality": "{:.0f}", "ROE %": "{:.1f}", "ROCE %": "{:.1f}",
                             "Rev CAGR %": "{:.1f}", "EPS CAGR %": "{:.1f}", "D/E": "{:.2f}",
-                        }, na_rep="—").background_gradient(
-                            subset=["Quality"], cmap="RdYlGn", vmin=0, vmax=100),
+                        }, na_rep="—").map(
+                            # FIX BT1: background_gradient() requires matplotlib,
+                            # not a project dependency — crashed on Streamlit
+                            # Cloud. See dashboard/shared/chart_helpers.rdylgn_bg.
+                            lambda v: rdylgn_bg(v, 0, 100), subset=["Quality"]),
                         hide_index=True, width="stretch")
                     _avg_q = _fdf["Quality"].dropna().mean()
                     if pd.notna(_avg_q):
