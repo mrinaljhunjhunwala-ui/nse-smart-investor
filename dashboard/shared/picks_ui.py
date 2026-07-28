@@ -46,14 +46,33 @@ def pick_pointers(pick: dict) -> list[tuple[str, str]]:
 
 
 def render_pick_analysis(pick: dict, key_prefix: str):
-    """Render reason pointers (always visible) + a Deep Dive expander (narrative +
-    score bars + full-analysis button) for one pick."""
+    """Render reason pointers (always visible) + an always-visible "Open full
+    analysis" button + a collapsed Deep Dive expander (narrative + score
+    bars) for one pick.
+
+    FIX PICKS-VIS1: the full-analysis button (the only way to reach live
+    price/chart/qty for a pick) used to live INSIDE the collapsed "why did
+    this score X" expander — easy to miss entirely if you never thought to
+    expand a section framed as an explanation, not as "see live price here".
+    Now rendered directly, unconditionally, right under the reason pointers.
+    """
     tkr = pick["ticker"].replace(".NS", "")
 
     pts_html = "".join(
         f'<div style="font-size:11.5px;color:#cfd6e6;margin:1px 0">{e}&nbsp;{txt}</div>'
         for e, txt in pick_pointers(pick))
     st.markdown(f'<div style="margin:-2px 0 4px 2px">{pts_html}</div>', unsafe_allow_html=True)
+
+    # FIX CC-LOAD1 / FIX PICKS-VIS1: routes to Deep Dive Analysis (not
+    # Analyze Stock) — that page has the live price, live chart, re-anchored
+    # entry/SL/TP, and suggested qty Command Centre no longer computes per-
+    # card. Analyze Stock is still reachable from Deep Dive itself or the
+    # sidebar for its own deeper indicator/pattern view.
+    if st.button(f"📊 Open full analysis for {tkr} (live price + qty)",
+                 key=f"{key_prefix}_full", width="stretch"):
+        st.session_state["analyze_ticker"] = pick["ticker"]
+        st.session_state["_goto_page"] = "📑 Deep Dive Analysis"
+        st.rerun()
 
     with st.expander(f"🔍 Deep Dive — why {tkr}?", expanded=False):
         narr = pick.get("narrative") or "No detailed narrative available for this pick."
@@ -73,14 +92,3 @@ def render_pick_analysis(pick: dict, key_prefix: str):
                         f'<b style="color:#e0e0e0">{val:.0f}/{cap}</b></span>',
                         unsafe_allow_html=True)
             st.progress(min(1.0, val / cap if cap else 0.0))
-
-        # FIX CC-LOAD1: routes to Deep Dive Analysis (not Analyze Stock) —
-        # that page now has the live price, live chart, re-anchored entry/
-        # SL/TP, and suggested qty this button used to imply Command Centre
-        # already showed. Analyze Stock is still reachable from Deep Dive
-        # itself or the sidebar for its own deeper indicator/pattern view.
-        if st.button(f"📊 Open full analysis for {tkr}", key=f"{key_prefix}_full",
-                     width="stretch"):
-            st.session_state["analyze_ticker"] = pick["ticker"]
-            st.session_state["_goto_page"] = "📑 Deep Dive Analysis"
-            st.rerun()
