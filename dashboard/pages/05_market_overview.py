@@ -27,6 +27,7 @@ from dashboard.shared.chart_helpers import (
     render_top_bar,
     load_macro_data,
     compute_market_breadth,
+    rdylgn_bg,
 )
 from dashboard.shared.cache import load_vix_data
 
@@ -149,9 +150,13 @@ with _tab_snapshot:
                 with s_col1:
                     disp = scores[["mom_20d", "mom_60d", "composite_score", "Rank"]].copy()
                     disp.columns = ["20d (%)", "60d (%)", "Score", "Rank"]
+                    # FIX BT1: Styler.background_gradient() requires matplotlib,
+                    # which isn't a project dependency — crashed on Streamlit
+                    # Cloud. See dashboard/shared/chart_helpers.rdylgn_bg.
+                    _mo_vmin, _mo_vmax = disp["Score"].min(), disp["Score"].max()
                     st.dataframe(
                         disp.style
-                        .background_gradient(subset=["Score"], cmap="RdYlGn")
+                        .map(lambda v: rdylgn_bg(v, _mo_vmin, _mo_vmax), subset=["Score"])
                         .format("{:.2f}"),
                         width="stretch",
                     )
