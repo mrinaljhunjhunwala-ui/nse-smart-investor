@@ -334,6 +334,34 @@ _INDEX_STRIP = [
 ]
 
 
+def rdylgn_bg(val: float, vmin: float, vmax: float) -> str:
+    """Red-Yellow-Green cell background for a pandas Styler, stdlib-only.
+
+    FIX BT1: pandas' own Styler.background_gradient() requires matplotlib
+    as an optional dependency — it isn't in requirements.txt (nothing else
+    in this app needs it), so every page that called it crashed with an
+    ImportError on Streamlit Cloud despite working fine in local testing
+    (matplotlib happened to be present in the dev sandbox, masking it).
+    Shared here rather than duplicated per-page since three separate pages
+    (08_backtest.py, 05_market_overview.py, 03_my_portfolio.py) each had
+    their own background_gradient() call and would each hit the same crash.
+
+    Usage: df.style.map(lambda v: rdylgn_bg(v, df[col].min(), df[col].max()),
+    subset=[col]) — same visual result as background_gradient(cmap="RdYlGn").
+    """
+    if pd.isna(val) or vmax == vmin:
+        return ""
+    t = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+    if t < 0.5:
+        lt = t / 0.5
+        rgb = (220 + (230 - 220) * lt, 50 + (220 - 50) * lt, 50 + (60 - 50) * lt)
+    else:
+        lt = (t - 0.5) / 0.5
+        rgb = (230 + (50 - 230) * lt, 220 + (180 - 220) * lt, 60 + (90 - 60) * lt)
+    r, g, b = (int(c) for c in rgb)
+    return f"background-color: rgb({r},{g},{b}); color: #111"
+
+
 @st.cache_data(ttl=5, show_spinner=False)        # 5-second freshness for live feel
 def _index_strip_data():
     """Live value + day-change % for each Nifty index via Yahoo chart meta."""
