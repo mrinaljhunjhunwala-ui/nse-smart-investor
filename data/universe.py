@@ -546,6 +546,24 @@ def resolve_ticker(query: str) -> str:
             + ", ".join(_NAME_MAP[m] for m in matches[:5])
         )
 
+    # FIX RT1: the substring check above only catches typos that are a
+    # strict prefix/suffix of a real ticker — it misses transposition-style
+    # typos (e.g. "LLYODSENT" vs the real "LLOYDSME"/"LLOYDSENGG", where
+    # letters are swapped rather than added/removed). Without this, such a
+    # typo silently fell through to the blind TICKER.NS guess below and
+    # produced a fully-rendered but empty page (every field showing
+    # DATA_UNAVAILABLE) instead of a clear "did you mean" error upfront.
+    # cutoff=0.72 is deliberately conservative — high enough to avoid
+    # false-positive suggestions on genuinely distinct short tickers, low
+    # enough to catch a couple of transposed/swapped letters.
+    import difflib
+    fuzzy = difflib.get_close_matches(q, list(_NAME_MAP.keys()), n=5, cutoff=0.72)
+    if fuzzy:
+        raise ValueError(
+            f"'{query}' doesn't match a known ticker. Did you mean: "
+            + ", ".join(_NAME_MAP[m] for m in fuzzy)
+        )
+
     candidate = q + ".NS"
     return candidate
 
