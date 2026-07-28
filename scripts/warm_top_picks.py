@@ -1,108 +1,72 @@
-"""
-scripts/warm_top_picks.py — Scheduled Top Picks pre-warm job.
+name: Warm Top Picks
 
-FIX SPEED1. Runs on a schedule (GitHub Actions, every 15 min during NSE
-market hours — see .github/workflows/warm-top-picks.yml) and writes a fresh
-Top Picks scan result to trade_store (shared Postgres, set via DATABASE_URL).
+# FIX SPEED1. Runs the Top Picks scan on a schedule and persists it to
+# trade_store (Postgres) so the deployed app can read it instantly instead
+# of paying the ~2-minute cold-scan cost on whichever visit happens to hit
+# an expired in-app cache. Requires DATABASE_URL to point at the SAME
+# Postgres instance configured in the Streamlit Cloud app's secrets — see
+# dashboard/DB_SETUP.md. If DATABASE_URL isn't set, trade_store falls back
+# to a local SQLite file that only this ephemeral runner can see, which
+# would make this workflow a no-op for the deployed app (it still won't
+# fail the job — see scripts/warm_top_picks.py).
+#
+# NSE hours 09:15–15:30 IST = 03:45–10:00 UTC. GitHub cron is UTC-only and
+# can't express :45, so we run 03–10 UTC (matches market-alerts.yml).
+#
+# FIX TP5 (cadence 15min -> 5min): scan universe was widened to
+# niftytotalmarket (~745 tickers, see FIX TP2 in dashboard/shared/cache.py),
+# so max_workers there was raised 10->16 to keep a full scan comfortably
+# under 5 min including this job's own startup overhead (checkout + deps +
+# python). Two honest caveats, not glossed over:
+#   1. GitHub's cron scheduler is best-effort, not a hard guarantee — under
+#      GitHub-wide load, triggers can lag a few minutes behind schedule.
+#      "Every 5 min" is the target cadence, not a contractual one.
+#   2. concurrency.cancel-in-progress is false (below) specifically so a
+#      slow run finishes rather than getting killed mid-write — but if a
+#      run ever does take longer than 5 min, the next trigger queues behind
+#      it rather than running concurrently, so cadence can drift under
+#      sustained slowness. Watch the Actions tab after this change ships;
+#      if runs are consistently taking >4 min, that's the signal to dial
+#      max_workers up further or fall back to a coarser cadence.
 
-Why this exists: dashboard/shared/cache.py's _home_top_picks() scans the
-full liquid NSE universe (~500 tickers) and takes ~2 minutes cold. It's
-cached with @st.cache_data(ttl=300), but that cache is process-local to the
-running Streamlit Cloud container — it doesn't survive a redeploy/restart,
-and on a low-traffic app it routinely expires between visits. Whoever's
-browser session happens to hit the expired cache pays the full 2-minute
-scan. That made every "cold" Command Centre visit feel broken.
+on:
+  schedule:
+    - cron: "*/5 3-10 * * 1-5"    # every 5 min, 03:00–10:59 UTC, Mon–Fri
+  workflow_dispatch:               # allow manual "Run workflow" from the Actions tab
 
-This script runs the same scan (or a cheaper walk-forward-safe copy of it,
-see NOTE below) headlessly and writes the result to trade_store, which
-GitHub Actions and the deployed app both have real network access to. The
-app's cache.get_top_picks() reads this snapshot first and only falls back to
-its own live scan if the snapshot is missing or older than 20 minutes — see
-dashboard/shared/cache.py.
+concurrency:
+  group: warm-top-picks
+  cancel-in-progress: false
 
-NOTE: this deliberately imports dashboard.shared.cache and calls
-_home_top_picks() directly rather than re-implementing the scan/selection
-logic here, so there is exactly one place that logic lives and this can
-never drift from what the app itself would compute. That does mean
-`streamlit` must be installed in this job (unlike alerts/check_alerts.py,
-which is intentionally dependency-light) — see the workflow file.
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-Exit codes: always 0 — a failed warm-up should not fail the workflow or
-block the next scheduled attempt; the app already degrades gracefully to a
-live scan if no fresh snapshot is available.
-"""
-from __future__ import annotations
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
 
-import datetime
-import logging
-import os
-import sys
+      # This job (unlike market-alerts.yml) needs the fuller dependency set
+      # because it imports dashboard.shared.cache, which pulls in streamlit
+      # and plotly at module import time even though this job never renders
+      # a UI. Kept as its own requirements file so a future trim of the main
+      # requirements.txt doesn't silently break this job.
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
 
-_log = logging.getLogger("scripts.warm_top_picks")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception as _enc_e:
-    print(f"[startup] stdout reconfigure skipped: {_enc_e}")
-
-# Make project root importable (script lives in <root>/scripts/)
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
-_KV_KEY  = "top_picks_snapshot"
-_KV_USER = "_system"
-
-
-def main() -> int:
-    try:
-        from dashboard.shared.cache import _home_top_picks, get_vix_info, _sector_ranks_tuple
-        import trade_store as store
-    except Exception as e:
-        _log.error("warm_top_picks: import failed, aborting this run: %s", e)
-        return 0
-
-    try:
-        vix_info = get_vix_info()
-        vix_regime = vix_info.get("regime", "normal")
-    except Exception as e:
-        _log.warning("warm_top_picks: get_vix_info() failed, defaulting to 'normal': %s", e)
-        vix_regime = "normal"
-
-    try:
-        sector_tuple = _sector_ranks_tuple()
-    except Exception as e:
-        _log.warning("warm_top_picks: _sector_ranks_tuple() failed, defaulting to (): %s", e)
-        sector_tuple = ()
-
-    _log.info("warm_top_picks: starting scan (vix_regime=%s, sectors=%d)...",
-              vix_regime, len(sector_tuple))
-    _t0 = datetime.datetime.now()
-    try:
-        result = _home_top_picks(vix_regime=vix_regime, n=20, sector_ranks=sector_tuple)
-    except Exception as e:
-        _log.error("warm_top_picks: scan failed, nothing persisted this run: %s", e)
-        return 0
-    _elapsed = (datetime.datetime.now() - _t0).total_seconds()
-    _log.info("warm_top_picks: scan done in %.1fs — %d buys, %d sells",
-              _elapsed, len(result.get("buys", [])), len(result.get("sells", [])))
-
-    snapshot = {
-        "data": result,
-        "generated_at": datetime.datetime.now().isoformat(),
-        "scan_seconds": round(_elapsed, 1),
-    }
-    ok = store.kv_set(_KV_KEY, snapshot, user_id=_KV_USER)
-    if ok:
-        _log.info("warm_top_picks: persisted snapshot to trade_store (backend=%s)",
-                  store.backend_name())
-    else:
-        _log.error("warm_top_picks: kv_set FAILED — snapshot not persisted this run "
-                   "(app will fall back to a live scan)")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+      - name: Run Top Picks warm-up
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional — set these only if you want the scan to use real-time
+          # Angel One prices instead of the free Stooq/Yahoo fallback chain:
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python scripts/warm_top_picks.py
