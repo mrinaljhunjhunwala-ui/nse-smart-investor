@@ -10,9 +10,6 @@ import pandas as pd
 import streamlit as st
 import trade_store as _store
 
-from data.universe import get_universe
-from data.angel_fetcher import is_configured as _ao_is_configured
-
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.picks_ui import render_pick_analysis
@@ -398,8 +395,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     _tp_h1, _tp_h2 = st.columns([5, 2])
     with _tp_h1:
         st.markdown("### 🔥 Today's Top Picks — NSE Scan")
-        st.caption("Strongest and weakest **trend-quality** setups across the **full liquid "
-                   "NSE universe** (trend + momentum + RSI + volume + sector + VIX). "
+        st.caption("Strongest and weakest **trend-quality** setups today. "
                    "Scores rank trend health — they are **not a forecast of returns**. "
                    "Refreshes automatically every 5 min during market hours; old picks "
                    "stay on screen while a refresh runs in the background.")
@@ -407,35 +403,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         st.write("")
         _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
 
-    _scan_univ = get_universe("niftytotalmarket")
-    with st.expander(f"📋 What's scanned? ({len(_scan_univ)} stocks)", expanded=False):
-        st.caption(
-            f"Top Picks scans the **full liquid NSE universe — {len(_scan_univ)} large/mid/"
-            "small/micro-caps** (Nifty Total Market set) — scoring each on trend + momentum "
-            "+ RSI + volume + sector strength + VIX. The strongest longs and the clearest "
-            "SELL/EXITs are surfaced (20 each — buys and sells). A scheduled scan runs every "
-            "15 min during market hours, so this normally loads instantly from that snapshot. "
-            "If the scheduled scan hasn't run recently (e.g. right after a config change), it "
-            "falls back to a live scan here, which takes longer with the wider universe and "
-            "runs in the background without blocking the page.")
-
     from dashboard.shared.disclosures import (
         render_regime_reliability_note as _cc_regime_note,
         render_score_methodology as _cc_score_methodology,
     )
     _cc_regime_note()
     _cc_score_methodology()
-
-    try:
-        if _ao_is_configured():
-            st.caption("⚡ **Angel One configured** — the scan uses it first (Tier-0 broker "
-                       "feed, throttled to its rate limit). Stooq/Yahoo are only a last-resort "
-                       "fallback if an Angel call fails or its session has expired.")
-        else:
-            st.caption("ℹ️ **Using free sources** (Stooq → Yahoo). Set up **Angel One** on its "
-                       "page for faster, more reliable scans.")
-    except Exception as _ao_cc_e:
-        import logging; logging.getLogger("dashboard.command_centre").debug("Angel One config check failed: %s", _ao_cc_e)
 
     # ── Decide whether a (re)scan is needed, then kick it off in the background ──
     _now = datetime.datetime.now()
