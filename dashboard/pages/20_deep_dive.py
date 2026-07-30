@@ -22,6 +22,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import datetime
+import html
 import logging
 
 import streamlit as st
@@ -77,6 +78,70 @@ except ValueError as e:
     st.error(str(e))
     st.stop()
 
+# ═════════════════════════════════════════════════════════════════════════
+# Auto-computed context — reuses the exact same functions Analyze Stock does
+# ═════════════════════════════════════════════════════════════════════════
+def _gather_context(tkr: str) -> dict:
+    """Pull everything the app already computes for this ticker. Every piece
+    degrades independently to None/empty on failure — one missing source
+    (e.g. fundamentals provider down) never blocks the others."""
+    ctx: dict = {
+        "ticker": tkr, "cs": None, "sector_profile": None,
+        "fundamentals": None, "valuation": None, "valuation_assessment": None,
+        "thesis": None, "flags": [],
+    }
+
+    try:
+        ctx["cs"] = get_composite_score(tkr)
+    except Exception as e:
+        _log.warning("deep_dive: get_composite_score failed for %s: %s", tkr, e)
+
+    company_name = getattr(ctx["cs"], "company_name", None)
+    sector_raw = get_sector(tkr)
+
+    try:
+        from analysis.sector_classification import classify_sector
+        ctx["sector_profile"] = classify_sector(sector_raw, name=company_name)
+    except Exception as e:
+        _log.warning("deep_dive: classify_sector failed for %s: %s", tkr, e)
+
+    cf = None
+    try:
+        from analysis.fundamentals.service import default_service as _fund_service
+        cf = _fund_service().get_fundamentals(tkr)
+        from analysis.fundamentals import analytics as _fund_analytics
+        ctx["fundamentals"] = _fund_analytics.compute_all(cf, cagr_years=5)
+    except Exception as e:
+        _log.warning("deep_dive: fundamentals failed for %s: %s", tkr, e)
+
+    try:
+        from analysis.fundamentals.valuation import build_valuation_context
+        ctx["valuation"] = build_valuation_context(cf, sector_profile=ctx["sector_profile"])
+        if ctx["valuation"] is not None and ctx["fundamentals"] is not None:
+            from analysis.fundamentals.valuation_decision import assess_valuation
+            ctx["valuation_assessment"] = assess_valuation(
+                ctx["valuation"], ctx["fundamentals"], ctx["sector_profile"], cf=cf)
+    except Exception as e:
+        _log.warning("deep_dive: valuation failed for %s: %s", tkr, e)
+
+    try:
+        from analysis.thesis.thesis_engine import build_inputs, generate_thesis
+        _inputs = build_inputs(tkr, composite=ctx["cs"], sector=sector_raw)
+        ctx["thesis"] = generate_thesis(_inputs)
+    except Exception as e:
+        _log.warning("deep_dive: thesis failed for %s: %s", tkr, e)
+
+    try:
+        ctx["flags"] = get_cached_flags(tkr, company_name=company_name) or []
+    except Exception as e:
+        _log.warning("deep_dive: qualitative flags failed for %s: %s", tkr, e)
+
+    return ctx
+
+with st.spinner(f"Pulling everything the app already knows about {ticker}..."):
+    context = _gather_context(ticker)
+
+
 
 # ═════════════════════════════════════════════════════════════════════════
 # Live Snapshot — chart, live price, re-anchored entry/SL/TP, suggested qty
@@ -90,11 +155,7 @@ except ValueError as e:
 # ═════════════════════════════════════════════════════════════════════════
 st.markdown("### 📡 Live Snapshot")
 
-_cs = None
-try:
-    _cs = get_composite_score(ticker)
-except Exception as e:
-    _log.warning("deep_dive: get_composite_score (live snapshot) failed for %s: %s", ticker, e)
+_cs = context.get("cs")
 
 _lq = {}
 try:
@@ -176,6 +237,83 @@ if _entry_disp:
         key=f"dd_paper_trade_{ticker}",
     )
 
+# ═════════════════════════════════════════════════════════════════════════
+# Short-Term vs Long-Term Read — trend/momentum (this ticker's own
+# CompositeScore + horizon, already computed above) vs a fundamentals-driven
+# thesis verdict (thesis_engine, already computed in `context` above). Two
+# different questions people ask about the same stock, kept as two clearly
+# separate cards rather than blended into one number — nothing new is
+# invented here, both pull straight from data the app already computes.
+# ═════════════════════════════════════════════════════════════════════════
+st.markdown("#### 🧭 Short-Term vs Long-Term Read")
+_st_col, _lt_col = st.columns(2)
+
+with _st_col:
+    if _cs is not None:
+        st.markdown(
+            f'<div style="background:#141414;border-left:4px solid {_border_c};'
+            f'border-radius:8px;padding:10px 14px">'
+            f'<div style="font-size:11px;color:#888;text-transform:uppercase;'
+            f'letter-spacing:.5px">Short-Term (trend &amp; momentum)</div>'
+            f'<div style="font-size:15px;font-weight:700;color:{_border_c};margin-top:2px">'
+            f'{_sig_emo} {_sig_lbl}</div>'
+            f'<div style="font-size:12px;color:#aaa;margin-top:4px">'
+            f'Momentum {_cs.momentum_score:.0f}/25 · RSI {_cs.rsi:.0f} · '
+            f'1D {_cs.return_1d:+.1f}%</div>'
+            + (f'<div style="font-size:11px;color:#6a8caf;margin-top:4px">⏱ {_cs.horizon}</div>'
+               if _cs.horizon else '')
+            + '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Reflects trend/momentum health — not a forecast of returns.")
+    else:
+        st.markdown(
+            '<div style="background:#141414;border-left:4px solid #3a3a3a;'
+            'border-radius:8px;padding:10px 14px;color:#888;font-size:13px">'
+            'Short-term read unavailable for this ticker.</div>',
+            unsafe_allow_html=True,
+        )
+
+with _lt_col:
+    _thesis = context.get("thesis")
+    if _thesis is not None:
+        _verdict_colors = {
+            "Strong Positive": "#26a69a", "Positive": "#4caf7d",
+            "Neutral": "#FF9800", "Negative": "#ef7350", "Strong Negative": "#ef5350",
+        }
+        _v_color = _verdict_colors.get(_thesis.verdict, "#888")
+        _bull_html = "".join(
+            f'<div style="font-size:11px;color:#9fd6b0;margin-top:2px">✅ {html.escape(f.text)}</div>'
+            for f in (_thesis.bull_factors or [])[:2]
+        )
+        _bear_html = "".join(
+            f'<div style="font-size:11px;color:#e8a8a8;margin-top:2px">⚠️ {html.escape(f.text)}</div>'
+            for f in (_thesis.bear_factors or [])[:2]
+        )
+        st.markdown(
+            f'<div style="background:#141414;border-left:4px solid {_v_color};'
+            f'border-radius:8px;padding:10px 14px">'
+            f'<div style="font-size:11px;color:#888;text-transform:uppercase;'
+            f'letter-spacing:.5px">Long-Term (fundamentals thesis)</div>'
+            f'<div style="font-size:15px;font-weight:700;color:{_v_color};margin-top:2px">'
+            f'{html.escape(_thesis.verdict)}</div>'
+            f'<div style="font-size:12px;color:#aaa;margin-top:4px">'
+            f'{html.escape((_thesis.verdict_rationale or ""))[:160]}</div>'
+            f'{_bull_html}{_bear_html}'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Based on fundamentals, valuation and governance flags — a separate "
+                   "read from the trend score above, not a rescoring of it.")
+    else:
+        st.markdown(
+            '<div style="background:#141414;border-left:4px solid #3a3a3a;'
+            'border-radius:8px;padding:10px 14px;color:#888;font-size:13px">'
+            'Long-term fundamentals read unavailable — the fundamentals data source '
+            'may be down for this ticker.</div>',
+            unsafe_allow_html=True,
+        )
+
 with st.spinner("Loading chart..."):
     try:
         _chart_df = load_ticker_df(ticker)
@@ -187,66 +325,6 @@ with st.spinner("Loading chart..."):
         _log.warning("deep_dive: chart load failed for %s: %s", ticker, e)
         st.info("Chart unavailable right now.")
 
-
-# ═════════════════════════════════════════════════════════════════════════
-# Auto-computed context — reuses the exact same functions Analyze Stock does
-# ═════════════════════════════════════════════════════════════════════════
-def _gather_context(tkr: str) -> dict:
-    """Pull everything the app already computes for this ticker. Every piece
-    degrades independently to None/empty on failure — one missing source
-    (e.g. fundamentals provider down) never blocks the others."""
-    ctx: dict = {
-        "ticker": tkr, "cs": None, "sector_profile": None,
-        "fundamentals": None, "valuation": None, "valuation_assessment": None,
-        "thesis": None, "flags": [],
-    }
-
-    try:
-        ctx["cs"] = get_composite_score(tkr)
-    except Exception as e:
-        _log.warning("deep_dive: get_composite_score failed for %s: %s", tkr, e)
-
-    company_name = getattr(ctx["cs"], "company_name", None)
-    sector_raw = get_sector(tkr)
-
-    try:
-        from analysis.sector_classification import classify_sector
-        ctx["sector_profile"] = classify_sector(sector_raw, name=company_name)
-    except Exception as e:
-        _log.warning("deep_dive: classify_sector failed for %s: %s", tkr, e)
-
-    cf = None
-    try:
-        from analysis.fundamentals.service import default_service as _fund_service
-        cf = _fund_service().get_fundamentals(tkr)
-        from analysis.fundamentals import analytics as _fund_analytics
-        ctx["fundamentals"] = _fund_analytics.compute_all(cf, cagr_years=5)
-    except Exception as e:
-        _log.warning("deep_dive: fundamentals failed for %s: %s", tkr, e)
-
-    try:
-        from analysis.fundamentals.valuation import build_valuation_context
-        ctx["valuation"] = build_valuation_context(cf, sector_profile=ctx["sector_profile"])
-        if ctx["valuation"] is not None and ctx["fundamentals"] is not None:
-            from analysis.fundamentals.valuation_decision import assess_valuation
-            ctx["valuation_assessment"] = assess_valuation(
-                ctx["valuation"], ctx["fundamentals"], ctx["sector_profile"], cf=cf)
-    except Exception as e:
-        _log.warning("deep_dive: valuation failed for %s: %s", tkr, e)
-
-    try:
-        from analysis.thesis.thesis_engine import build_inputs, generate_thesis
-        _inputs = build_inputs(tkr, composite=ctx["cs"], sector=sector_raw)
-        ctx["thesis"] = generate_thesis(_inputs)
-    except Exception as e:
-        _log.warning("deep_dive: thesis failed for %s: %s", tkr, e)
-
-    try:
-        ctx["flags"] = get_cached_flags(tkr, company_name=company_name) or []
-    except Exception as e:
-        _log.warning("deep_dive: qualitative flags failed for %s: %s", tkr, e)
-
-    return ctx
 
 
 def _context_to_prompt_text(ctx: dict) -> str:
@@ -408,9 +486,7 @@ def _build_full_prompt(ticker: str, context_text: str) -> str:
     return _ANALYST_FRAMEWORK.format(ticker=ticker, context=context_text)
 
 
-with st.spinner(f"Pulling everything the app already knows about {ticker}..."):
-    context = _gather_context(ticker)
-    context_text = _context_to_prompt_text(context)
+context_text = _context_to_prompt_text(context)
 
 st.subheader(f"📊 {ticker} — Auto-Computed Context")
 with st.expander("View what will be sent to the model", expanded=False):
