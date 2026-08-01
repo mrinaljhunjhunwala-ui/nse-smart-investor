@@ -98,14 +98,23 @@ _NSE_HOLIDAYS_FALLBACK = {
     datetime.date(2025, 11,  5),  # Diwali Balipratipada
     datetime.date(2025, 11, 15),  # Gurunanak Jayanti
     datetime.date(2025, 12, 25),  # Christmas
-    # 2026
+    # 2026 (FIX MH3: corrected + completed against NSE's published 2026
+    # equity holiday list — was missing 7 of the year's 15 holidays)
     datetime.date(2026, 1, 26),   # Republic Day
     datetime.date(2026, 3,  3),   # Holi
+    datetime.date(2026, 3, 26),   # Shri Ram Navami
+    datetime.date(2026, 3, 31),   # Shri Mahavir Jayanti
     datetime.date(2026, 4,  3),   # Good Friday
     datetime.date(2026, 4, 14),   # Dr. Ambedkar Jayanti
     datetime.date(2026, 5,  1),   # Maharashtra Day
-    datetime.date(2026, 8, 15),   # Independence Day
+    datetime.date(2026, 5, 28),   # Bakri Id
+    datetime.date(2026, 6, 26),   # Muharram
+    datetime.date(2026, 8, 15),   # Independence Day (falls on a Saturday)
+    datetime.date(2026, 9, 14),   # Ganesh Chaturthi
     datetime.date(2026, 10,  2),  # Gandhi Jayanti
+    datetime.date(2026, 10, 20),  # Dussehra
+    datetime.date(2026, 11, 10),  # Diwali — Balipratipada
+    datetime.date(2026, 11, 24),  # Guru Nanak Jayanti
     datetime.date(2026, 12, 25),  # Christmas
 }
 
