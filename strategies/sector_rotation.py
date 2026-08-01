@@ -28,6 +28,28 @@ SECTORS: Dict[str, List[str]] = {
     "FMCG":    ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"],
     "Energy":  ["RELIANCE.NS", "ONGC.NS", "BPCL.NS", "NTPC.NS", "POWERGRID.NS"],
     "Metal":   ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS", "NMDC.NS"],
+    # FIX SEC2 — the 15 sectors below exist in data.universe.get_sector()'s
+    # taxonomy (used by analysis/score.py's sentiment sub-scorer) but had no
+    # entry here, so any stock in one of them could never receive a real
+    # sector-momentum rank. 5 liquid, representative tickers each — kept
+    # small deliberately so compute_sector_scores() stays fast; these are
+    # NOT meant to be exhaustive sector constituent lists (see data.universe
+    # for the full ~578-ticker breakdown across all 22 sectors).
+    "CapitalGoods":  ["LT.NS", "BEL.NS", "SIEMENS.NS", "ABB.NS", "HAVELLS.NS"],
+    "Cement":        ["ULTRACEMCO.NS", "SHREECEM.NS", "AMBUJACEM.NS", "ACC.NS", "RAMCOCEM.NS"],
+    "Chemicals":     ["PIDILITIND.NS", "AARTIIND.NS", "DEEPAKNTR.NS", "SRF.NS", "GNFC.NS"],
+    "Conglomerate":  ["ADANIENT.NS", "ADANIPORTS.NS", "GRASIM.NS", "TITAN.NS", "ASIANPAINT.NS"],
+    "Consumer":      ["SYMPHONY.NS", "HONASA.NS", "BAJAJELEC.NS", "AMBER.NS", "BLUESTARCO.NS"],
+    "Finance":       ["BAJFINANCE.NS", "BAJAJFINSV.NS", "SHRIRAMFIN.NS", "CHOLAFIN.NS", "MUTHOOTFIN.NS"],
+    "Healthcare":    ["APOLLOHOSP.NS", "MAXHEALTH.NS", "FORTIS.NS", "LALPATHLAB.NS", "METROPOLIS.NS"],
+    "Hospitality":   ["INDHOTEL.NS", "CHALET.NS", "WONDERLA.NS", "EIHOTEL.NS", "LEMONTREE.NS"],
+    "Insurance":     ["HDFCLIFE.NS", "SBILIFE.NS", "GICRE.NS", "NIACL.NS", "STARHEALTH.NS"],
+    "Media":         ["SUNTV.NS", "ZEEL.NS", "PVRINOX.NS", "NAZARA.NS", "SAREGAMA.NS"],
+    "RealEstate":    ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PHOENIXLTD.NS", "PRESTIGE.NS"],
+    "Retail":        ["TRENT.NS", "DMART.NS", "NYKAA.NS", "INDIAMART.NS", "KALYANKJIL.NS"],
+    "Shipping":      ["GESHIP.NS", "SCI.NS", "COCHINSHIP.NS", "MAZDOCK.NS", "GRSE.NS"],
+    "Telecom":       ["BHARTIARTL.NS", "INDUSTOWER.NS", "TATACOMM.NS", "IDEA.NS", "TTML.NS"],
+    "Textiles":      ["TRIDENT.NS", "VTL.NS", "KPRMILL.NS", "RAYMOND.NS", "SIYARAM.NS"],
 }
 
 # Lookback windows (trading days) and their weights in composite score
