@@ -105,6 +105,7 @@ class PortfolioSummary:
     diversification:     PortfolioDiversification
     vix_regime:          str
     summary_narrative:   str      # 2–3 sentence overall take for non-traders
+    errored_tickers:     List[str] = field(default_factory=list)  # FIX PM1: holdings excluded from totals due to a failed price fetch
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -326,13 +327,15 @@ class PortfolioManager:
                 holdings.append(self._score_holding(raw, vix_info))
 
         # Sort by portfolio weight (largest first)
-        total_invested = sum(h.invested for h in holdings)
+        priced = [h for h in holdings if not h.error]   # FIX PM1: exclude failed-price-fetch rows from totals
+        total_invested = sum(h.invested for h in priced)
         if total_invested > 0:
             holdings.sort(key=lambda h: h.invested, reverse=True)
 
-        total_current = sum(h.current_value for h in holdings)
+        total_current = sum(h.current_value for h in priced)
         total_pnl     = total_current - total_invested
         total_pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0.0
+        errored_tickers = [h.ticker for h in holdings if h.error]
 
         scored = [h for h in holdings if not h.error]
         if scored:
@@ -362,6 +365,7 @@ class PortfolioManager:
             diversification      = diversification,
             vix_regime           = vix_regime,
             summary_narrative    = "",
+            errored_tickers      = errored_tickers,
         )
         summary.summary_narrative = _portfolio_narrative(summary, holdings)
         return summary
@@ -475,6 +479,10 @@ class PortfolioManager:
         print(f"  Current Value  : ₹{summary.total_current_value:>12,.0f}")
         print(f"  Total P&L      : {pnl_sign}₹{summary.total_pnl:>11,.0f}  "
               f"({pnl_sign}{summary.total_pnl_pct:.1f}%)")
+        if summary.errored_tickers:
+            print(f"  ⚠️  Excludes {len(summary.errored_tickers)} holding(s) with a failed live-price "
+                  f"fetch (shown as N/A below, not counted in P&L): "
+                  f"{', '.join(t.replace('.NS','') for t in summary.errored_tickers)}")
         print(f"  Portfolio Score: {summary.portfolio_score:.0f}/100  "
               f"[{summary.portfolio_grade}]")
         print()
