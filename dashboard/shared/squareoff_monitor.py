@@ -85,6 +85,8 @@ def render_squareoff_monitor(
             _log.debug("render_squareoff_monitor badge: %s", _e)
 
     # ── 2. Polling fragment ───────────────────────────────────────────────────
+    _SQOFF_TIGHT_INTERVAL = 20  # seconds — the cadence promised during 15:15-15:30
+
     @st.fragment(run_every=f"{poll_every}s")
     def _poll():
         try:
@@ -104,14 +106,10 @@ def render_squareoff_monitor(
             if not _open and not _sqoff:
                 return
 
-            # Tighten poll during square-off window
-            # (Streamlit doesn't support dynamic run_every, but we can
-            # trigger an extra immediate rerun to compensate)
             if _sqoff:
                 st.session_state["_sqoff_active"] = True
             elif st.session_state.pop("_sqoff_active", False):
-                # Window just closed — one final sweep to catch stragglers
-                pass
+                pass  # window just closed — the check below still runs once more
 
             closed = _auto_close_breached(account=account)
             _render_autoclose_banner(closed)
@@ -143,6 +141,22 @@ def render_squareoff_monitor(
                         f"P&L ₹{(c.get('pnl') or 0):+,.0f}",
                         icon="🛑",
                     )
+
+            # FIX SQ1: st.fragment's run_every is fixed at decoration time and
+            # can't be changed mid-flight, so a page opened with poll_every=60
+            # (the live default — see dashboard/pages/03_my_portfolio.py)
+            # would otherwise keep ticking every 60s straight through the
+            # 15-minute square-off window, well short of the 20s cadence this
+            # function documents. While inside the window, sleep the
+            # remaining gap down to 20s and force an immediate fragment-scoped
+            # rerun instead — this only reruns this fragment, not the whole
+            # page — which self-sustains a ~20s loop for the rest of the
+            # window regardless of poll_every, then stops once the window
+            # closes and normal run_every-paced polling resumes.
+            if _sqoff and poll_every > _SQOFF_TIGHT_INTERVAL:
+                import time
+                time.sleep(_SQOFF_TIGHT_INTERVAL)
+                st.rerun(scope="fragment")
 
         except Exception as _e:
             _log.warning("render_squareoff_monitor._poll error: %s", _e)
