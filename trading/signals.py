@@ -168,7 +168,12 @@ def shares_from_risk(entry_price: float, stop_price: float, risk_rs: float) -> i
     risk_per_share = entry_price - stop_price
     if risk_per_share <= 0:
         return 0
-    return max(1, int(risk_rs / risk_per_share))
+    # FIX RM2: previously forced a minimum of 1 share even when the
+    # risk-appropriate quantity rounded to 0 (a wide stop relative to the
+    # risk budget) — silently letting a 1-share trade risk more than the
+    # caller intended. 0 is the honest answer: this trade doesn't fit the
+    # risk budget at this entry/stop distance.
+    return int(risk_rs / risk_per_share)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -721,7 +726,13 @@ def scan_tickers(
 
                         fired.append(sig)
             else:
-                # 5-screen priority: first match wins
+                # FIX SR2: check every screen (not "stop at the first match")
+                # so a later, stronger screen can't be silently pre-empted by
+                # an earlier, weaker one — see fix note above for the
+                # concrete Oversold-WATCHLIST vs Pullback-BUY scenario this
+                # was masking.
+                _ACTION_STRENGTH = {"BUY": 2, "WATCHLIST": 1, "SELL": 1, "HOLD": 0}
+                candidates = []
                 for fn in [
                     lambda d: check_oversold_bounce(d),
                     lambda d: check_fibonacci_pullback(d),
@@ -735,9 +746,16 @@ def scan_tickers(
                         continue   # screen didn't fire — try next
 
                     if sig["action"] == "BUY" and not vix_info["allow_buy"]:
-                        # FIX: was `break` — now `continue` so other screens are tried
-                        # (a later screen might produce a WATCHLIST or SELL signal)
+                        # BUY blocked by VIX panic regime — try other screens
+                        # (a later screen might still produce a WATCHLIST)
                         continue
+
+                    candidates.append(sig)
+
+                if candidates:
+                    # Strongest action wins; original screen-check order is
+                    # the tie-break among equal-strength matches (stable sort).
+                    sig = max(candidates, key=lambda s: _ACTION_STRENGTH.get(s["action"], 0))
 
                     sig["ticker"]   = ticker
                     sig["strategy"] = sig["screen"]
@@ -752,8 +770,7 @@ def scan_tickers(
                             sig["stop_type"] = "atr"
                         sig["structure_stop"] = struct_stop
 
-                    fired.append(sig)
-                    break   # only one signal per ticker
+                    fired.append(sig)   # only one signal per ticker
 
             if fired:
                 for sig in fired:
