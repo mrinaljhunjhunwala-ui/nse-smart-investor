@@ -96,7 +96,9 @@ class PaperTrader:
         )
 
         self._init_db()
-        print(f"  [PaperTrader] Initialised  |  Capital=₹{initial_capital:,.0f}  |  DB={db_path}")
+        self._load_state()
+        print(f"  [PaperTrader] Initialised  |  Capital=₹{initial_capital:,.0f}  |  DB={db_path}  "
+              f"|  Cash=₹{self.cash:,.0f}  |  Open positions={len(self.positions)}")
 
     # ── Database setup ────────────────────────────────────────────────────────
 
@@ -105,6 +107,57 @@ class PaperTrader:
             conn.execute(_CREATE_TRADES)
             conn.execute(_CREATE_PORTFOLIO)
             conn.commit()
+
+    def _load_state(self) -> None:
+        """FIX PT1: reconstruct self.cash and self.positions from every trade
+        ever recorded in trades.db, so state is consistent across separate
+        process invocations rather than resetting on every run.
+
+        Ledger logic: every trade (any status) deducted `price * quantity`
+        from cash at BUY time. A CLOSED/STOPPED trade later added back
+        `exit_price * quantity` when it was exited. OPEN trades are
+        rebuilt into self.positions so the duplicate-buy guard and the
+        SELL path both see positions opened in earlier runs.
+        """
+        try:
+            with self._conn() as conn:
+                rows = pd.read_sql_query(
+                    "SELECT ticker, price, quantity, sl, tp, strategy, status, exit_price "
+                    "FROM trades",
+                    conn,
+                )
+        except Exception as e:
+            print(f"  [PaperTrader] _load_state: could not read trades.db ({e}) — starting fresh")
+            return
+
+        if rows.empty:
+            return
+
+        dup_open_tickers = set()
+        for _, r in rows.iterrows():
+            ticker   = str(r["ticker"])
+            quantity = int(r["quantity"])
+            cost     = float(r["price"]) * quantity
+            self.cash -= cost
+
+            if r["status"] in ("CLOSED", "STOPPED"):
+                if pd.notna(r["exit_price"]):
+                    self.cash += float(r["exit_price"]) * quantity
+            elif r["status"] == "OPEN":
+                if ticker in self.positions:
+                    dup_open_tickers.add(ticker)  # pre-existing duplicate OPEN rows — keep latest
+                self.positions[ticker] = {
+                    "quantity":    quantity,
+                    "entry_price": float(r["price"]),
+                    "sl":          float(r["sl"]) if pd.notna(r["sl"]) else None,
+                    "tp":          float(r["tp"]) if pd.notna(r["tp"]) else None,
+                    "strategy":    r["strategy"],
+                }
+
+        if dup_open_tickers:
+            print(f"  [PaperTrader] WARNING: multiple OPEN rows found for {sorted(dup_open_tickers)} "
+                  f"— using the most recent row for in-memory position tracking; "
+                  f"older duplicate rows remain OPEN in trades.db and should be reviewed manually.")
 
     def _conn(self):
         return sqlite3.connect(self.db_path)
@@ -471,7 +524,7 @@ class PaperTrader:
         payoff    = abs(avg_win / avg_loss) if avg_loss != 0 else float("inf")
         expectancy= (win_rate/100 * avg_win) + ((1 - win_rate/100) * avg_loss)
 
-        charges   = total * (closed["price"].mean() * 10 * 0.0017)  # rough estimate
+        charges   = (closed["price"] * closed["quantity"] * 0.0017).sum()
         net_pnl   = total_pnl - charges
 
         print(f"\n  {'='*50}")
