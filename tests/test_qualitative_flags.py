@@ -285,6 +285,57 @@ def test_refresh_all_flags_degrades_gracefully_on_fetch_failure(monkeypatch):
     assert merged[0].headline == "JV"
 
 
+def test_refresh_all_flags_falls_back_to_bse_when_nse_empty(monkeypatch):
+    """FIX FLAGS-BSE1: NSE and BSE run independent WAFs — when NSE's
+    corp_info comes back empty (e.g. blocked), refresh_all_flags should try
+    data/bse_corp_info.py next, and flags built from it must be labeled
+    "BSE: ..." (not mislabeled as NSE-sourced)."""
+    kv = _FakeKv()
+
+    import data.nse_corp_info as nci
+    import data.bse_corp_info as bci
+    monkeypatch.setattr(nci, "get_corp_info", lambda ticker, use_cache=True: {})
+    monkeypatch.setattr(bci, "get_corp_info", lambda ticker, use_cache=True: {
+        "latest_announcements": {"data": [
+            {"subject": "Board approves buyback", "broadcastdate": "2026-07-30"}]},
+        "corporate_actions": {"data": []},
+    })
+
+    merged = refresh_all_flags(
+        "SOMETICKER.NS", kv.get, kv.set, corp_info=None,
+        news_items=[], rss_items_by_category={},
+    )
+    sources = [f.source for f in merged]
+    assert any(s.startswith("BSE:") for s in sources), sources
+    assert not any(s.startswith("NSE top-corp-info:") for s in sources), sources
+
+
+def test_refresh_all_flags_skips_bse_when_nse_succeeds(monkeypatch):
+    """The BSE fallback should only fire when NSE is truly empty — it must
+    not be called at all when NSE already returned data, so a working NSE
+    source never pays the extra BSE round-trip."""
+    kv = _FakeKv()
+
+    import data.nse_corp_info as nci
+    import data.bse_corp_info as bci
+    monkeypatch.setattr(nci, "get_corp_info", lambda ticker, use_cache=True: {
+        "latest_announcements": {"data": [
+            {"subject": "NSE-sourced announcement", "broadcastdate": "2026-07-30"}]},
+        "corporate_actions": {"data": []},
+    })
+
+    def _bse_should_not_be_called(ticker, use_cache=True):
+        raise AssertionError("BSE fallback should not be called when NSE succeeded")
+    monkeypatch.setattr(bci, "get_corp_info", _bse_should_not_be_called)
+
+    merged = refresh_all_flags(
+        "SOMETICKER2.NS", kv.get, kv.set, corp_info=None,
+        news_items=[], rss_items_by_category={},
+    )
+    sources = [f.source for f in merged]
+    assert any(s.startswith("NSE top-corp-info:") for s in sources), sources
+
+
 # ── summarize_flags ──────────────────────────────────────────────────────
 
 def test_summarize_flags_counts_by_sentiment():

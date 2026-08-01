@@ -538,12 +538,26 @@ def resolve_ticker(query: str) -> str:
     if len(matches) == 1:
         return _NAME_MAP[matches[0]]
     if len(matches) > 1:
+        # FIX RT2: this used to auto-resolve to prefix[0] whenever ANY match
+        # started with the query — but for company-family prefixes (query
+        # "TATA" prefix-matches TATASTEEL, TATAPOWER, TATACOMM, TATACONSUM,
+        # TATAELXSI, TATAINVEST, TATATECH... query "BAJAJ", "ADANI", "GODREJ",
+        # "ICICI" all have the same shape) that left MULTIPLE valid prefix
+        # matches, and it silently returned whichever one happened to be
+        # first in _NAME_MAP's iteration order with no indication anything
+        # was ambiguous — defeating the very "did you mean" disambiguation
+        # this function exists to provide. Only auto-resolve when exactly
+        # ONE match shares the query as a prefix; otherwise fall through to
+        # the same disambiguation error used for the non-prefix case, listing
+        # the prefix matches (they're the most relevant candidates) instead
+        # of the full match set.
         prefix = [m for m in matches if m.startswith(q)]
-        if prefix:
+        if len(prefix) == 1:
             return _NAME_MAP[prefix[0]]
+        candidates = prefix if prefix else matches
         raise ValueError(
             f"'{query}' is ambiguous. Did you mean: "
-            + ", ".join(_NAME_MAP[m] for m in matches[:5])
+            + ", ".join(_NAME_MAP[m] for m in candidates[:5])
         )
 
     # FIX RT1: the substring check above only catches typos that are a

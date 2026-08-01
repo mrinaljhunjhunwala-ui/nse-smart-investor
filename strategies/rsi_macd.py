@@ -95,7 +95,10 @@ class RSIMACDStrategy(Strategy):
                     return  # can't afford even 1 share — skip instead of forcing an order
 
                 size = int((self.equity * self.risk_pct) / risk_per_share)
-                size = max(1, min(size, affordable))
+                if size < 1:
+                    return  # FIX RM2: risk-sized qty rounds to 0 — a forced 1-share
+                             # trade here would risk more than risk_pct of equity
+                size = min(size, affordable)
                 self.buy(size=size, sl=stop, tp=tp)
 
         # ── Exit ─────────────────────────────────────────────────────────────

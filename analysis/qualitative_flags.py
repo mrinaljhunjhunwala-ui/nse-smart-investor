@@ -234,10 +234,16 @@ def _classify_keyword_sentiment(text: str) -> FlagSentiment:
 
 
 def parse_announcement_flags(
-    ticker: str, corp_info: dict, max_items: int = 5
+    ticker: str, corp_info: dict, max_items: int = 5,
+    source_label: str = "NSE top-corp-info",
 ) -> list[QualitativeFlag]:
-    """Turn NSE's latest_announcements into flags. Keyword-classified only —
-    treat AMBER results as "needs a human read", not "neutral"."""
+    """Turn latest_announcements into flags. Keyword-classified only —
+    treat AMBER results as "needs a human read", not "neutral".
+
+    source_label defaults to the NSE label for backward compatibility;
+    refresh_all_flags() passes "BSE" when corp_info came from the BSE
+    fallback (data/bse_corp_info.py) instead of NSE, so flags are never
+    mislabeled as coming from a source that didn't actually supply them."""
     flags: list[QualitativeFlag] = []
     now = _dt.datetime.now().isoformat()
     items = (corp_info.get("latest_announcements") or {}).get("data") or []
@@ -251,7 +257,7 @@ def parse_announcement_flags(
             category=FlagCategory.ANNOUNCEMENT,
             sentiment=_classify_keyword_sentiment(subject),
             headline=subject[:180],
-            source="NSE top-corp-info: latest_announcements",
+            source=f"{source_label}: latest_announcements",
             date=bdate,
             detected_at=now,
         ))
@@ -259,10 +265,13 @@ def parse_announcement_flags(
 
 
 def parse_corporate_action_flags(
-    ticker: str, corp_info: dict, max_items: int = 5
+    ticker: str, corp_info: dict, max_items: int = 5,
+    source_label: str = "NSE top-corp-info",
 ) -> list[QualitativeFlag]:
-    """Turn NSE's corporate_actions (buyback/rights/QIP/dividend/etc.) into
-    flags. `purpose` is NSE's own free-text field for the action type."""
+    """Turn corporate_actions (buyback/rights/QIP/dividend/etc.) into flags.
+    `purpose` is the free-text field for the action type.
+
+    source_label — see parse_announcement_flags docstring."""
     flags: list[QualitativeFlag] = []
     now = _dt.datetime.now().isoformat()
     items = (corp_info.get("corporate_actions") or {}).get("data") or []
@@ -276,7 +285,7 @@ def parse_corporate_action_flags(
             category=FlagCategory.CORPORATE_ACTION,
             sentiment=_classify_keyword_sentiment(purpose),
             headline=purpose[:180],
-            source="NSE top-corp-info: corporate_actions",
+            source=f"{source_label}: corporate_actions",
             date=exdate,
             detected_at=now,
         ))
@@ -460,10 +469,12 @@ def parse_rss_flags(ticker: str, rss_items_by_category: dict) -> list[Qualitativ
 def build_auto_flags(
     ticker: str, corp_info: dict, news_items: Optional[list] = None,
     rss_items_by_category: Optional[dict] = None,
+    corp_info_source_label: str = "NSE top-corp-info",
 ) -> list[QualitativeFlag]:
     """Run all auto-detectors against fetched data. Three independent
     sources, each may be {}/[]/None on its own failure without suppressing
-    the others: corp_info (data/nse_corp_info.py — WAF-prone JSON API),
+    the others: corp_info (data/nse_corp_info.py — WAF-prone JSON API, or
+    data/bse_corp_info.py as a fallback — see corp_info_source_label),
     news_items (data/news_feed.py — Google News RSS), rss_items_by_category
     (data/nse_rss_feeds.py — NSE's own official syndication feeds, a
     different NSE subdomain with a much lighter WAF profile than corp_info).
@@ -471,8 +482,10 @@ def build_auto_flags(
     flags: list[QualitativeFlag] = []
     if corp_info:
         flags.extend(parse_shareholding_flags(ticker, corp_info))
-        flags.extend(parse_corporate_action_flags(ticker, corp_info))
-        flags.extend(parse_announcement_flags(ticker, corp_info))
+        flags.extend(parse_corporate_action_flags(ticker, corp_info,
+                                                   source_label=corp_info_source_label))
+        flags.extend(parse_announcement_flags(ticker, corp_info,
+                                              source_label=corp_info_source_label))
     if news_items:
         flags.extend(parse_news_flags(ticker, news_items))
     if rss_items_by_category:
@@ -532,6 +545,7 @@ def refresh_all_flags(
     existing = load_flags(ticker, kv_get, user_id=user_id)
     manual = [f for f in existing if f.is_manual]
 
+    corp_info_source_label = "NSE top-corp-info"
     if corp_info is None:
         try:
             from data.nse_corp_info import get_corp_info
@@ -539,6 +553,21 @@ def refresh_all_flags(
         except Exception as e:
             _log.warning("refresh_all_flags(%s): nse_corp_info fetch failed: %s", ticker, e)
             corp_info = {}
+
+        # FIX FLAGS-BSE1: NSE and BSE run independent WAFs — a block on one
+        # says nothing about the other. Only tried when NSE came back truly
+        # empty (not merely "no announcements today"), so this never doubles
+        # up work when NSE is working fine.
+        if not corp_info:
+            try:
+                from data.bse_corp_info import get_corp_info as get_bse_corp_info
+                bse_info = get_bse_corp_info(ticker)
+                if bse_info:
+                    corp_info = bse_info
+                    corp_info_source_label = "BSE"
+            except Exception as e:
+                _log.warning("refresh_all_flags(%s): bse_corp_info fallback failed: %s",
+                            ticker, e)
 
     if news_items is None:
         try:
@@ -558,7 +587,8 @@ def refresh_all_flags(
 
     fresh: list[QualitativeFlag] = []
     fresh.extend(build_regulatory_flags(ticker))
-    fresh.extend(build_auto_flags(ticker, corp_info, news_items, rss_items_by_category))
+    fresh.extend(build_auto_flags(ticker, corp_info, news_items, rss_items_by_category,
+                                  corp_info_source_label=corp_info_source_label))
 
     merged = manual + fresh
     save_flags(ticker, merged, kv_set, user_id=user_id)

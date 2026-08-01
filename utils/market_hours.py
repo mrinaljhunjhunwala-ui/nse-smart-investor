@@ -1,26 +1,37 @@
 """
 utils/market_hours.py — NSE market hours and session detection.
-No external dependencies — uses stdlib datetime only.
+
+FIX MH2: this module used to maintain its OWN hardcoded, single-year
+(2026-only) holiday calendar, completely independent of
+dashboard/shared/market_hours.py's calendar. The two drifted — this file's
+2026 dates for Holi, Ram Navami, and Diwali were all wrong, and it was
+missing Mahavir Jayanti, Good Friday, Bakri Id, Muharram, Ganesh Chaturthi,
+Dussehra, and Guru Nanak Jayanti outright. Every year it wasn't manually
+extended it would also silently stop detecting ANY holiday at all.
+
+This module is still imported directly by 5 files (dashboard/pages/
+01_market_live.py, 04_analyze_stock.py, dashboard/shared/chart_helpers.py,
+dashboard/shared/nav.py, dashboard/shared/trade_utils.py) — including
+trade_utils.py's _is_market_open(), which is the primary gate for the
+auto square-off / SL-TP auto-close logic. Rather than update all 5 call
+sites (a wider, riskier change), this module now delegates ALL of its
+open/closed/holiday logic to dashboard.shared.market_hours — the single
+source of truth — while keeping its exact original function names,
+signatures, and market_status() return-dict shape, so every existing
+caller keeps working unchanged and automatically gets the correct calendar.
 """
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta, time as dtime
 
+from dashboard.shared.market_hours import (
+    is_market_open as _canonical_is_open,
+    is_preopen as _canonical_is_preopen,
+    market_status as _canonical_status,
+    NSE_HOLIDAYS as _CANONICAL_HOLIDAYS,   # kept importable for anything reading it directly
+)
 
 IST = timezone(timedelta(hours=5, minutes=30))
-
-# NSE holidays 2026 (add more as needed)
-NSE_HOLIDAYS_2026 = {
-    (2026, 1, 26),   # Republic Day
-    (2026, 3, 25),   # Holi
-    (2026, 4, 2),    # Ram Navami
-    (2026, 4, 14),   # Dr. Ambedkar Jayanti
-    (2026, 5, 1),    # Maharashtra Day
-    (2026, 8, 15),   # Independence Day
-    (2026, 10, 2),   # Gandhi Jayanti
-    (2026, 11, 4),   # Diwali (Laxmi Pujan)
-    (2026, 12, 25),  # Christmas
-}
 
 MARKET_OPEN  = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
@@ -32,53 +43,43 @@ def now_ist() -> datetime:
 
 
 def is_market_open() -> bool:
-    n = now_ist()
-    if n.weekday() >= 5:
-        return False
-    if (n.year, n.month, n.day) in NSE_HOLIDAYS_2026:
-        return False
-    return MARKET_OPEN <= n.time() <= MARKET_CLOSE
+    return _canonical_is_open()
 
 
 def is_pre_open() -> bool:
-    n = now_ist()
-    if n.weekday() >= 5:
-        return False
-    return PRE_OPEN <= n.time() < MARKET_OPEN
+    return _canonical_is_preopen()
 
 
 def market_status() -> dict:
-    n = now_ist()
-    open_ = is_market_open()
-    pre   = is_pre_open()
-    if open_:
+    """Same return shape as before (is_open/is_pre/status/color/detail/
+    time_ist/day) — now sourced from the corrected canonical calendar."""
+    c = _canonical_status()
+    n = c["ist_now"]
+
+    session = c["session"]
+    if session == "open":
         status = "OPEN"
-        color  = "🟢"
-        detail = f"Closes at 3:30 PM IST"
-    elif pre:
+    elif session == "preopen":
         status = "PRE-OPEN"
-        color  = "🟡"
-        detail = f"Market opens at 9:15 AM IST"
-    elif n.weekday() >= 5:
+    elif session == "weekend":
         status = "CLOSED (Weekend)"
-        color  = "🔴"
-        detail = "Opens Monday 9:15 AM"
-    elif n.time() < MARKET_OPEN:
-        status = "CLOSED"
-        color  = "🔴"
-        detail = "Opens at 9:15 AM IST"
+    elif session == "holiday":
+        status = "CLOSED (Holiday)"
     else:
         status = "CLOSED"
-        color  = "🔴"
-        detail = "Reopens tomorrow 9:15 AM IST"
+
+    # Preserve the old emoji-only color convention (old callers expect a
+    # plain 🟢/🟡/🔴, not the canonical module's hex color codes).
+    color = "🟢" if session == "open" else ("🟡" if session == "preopen" else "🔴")
+
     return {
-        "is_open":   open_,
-        "is_pre":    pre,
-        "status":    status,
-        "color":     color,
-        "detail":    detail,
-        "time_ist":  n.strftime("%H:%M IST"),
-        "day":       n.strftime("%A, %d %b %Y"),
+        "is_open":  c["is_open"],
+        "is_pre":   session == "preopen",
+        "status":   status,
+        "color":    color,
+        "detail":   c["next_event"],
+        "time_ist": n.strftime("%H:%M IST"),
+        "day":      n.strftime("%A, %d %b %Y"),
     }
 
 

@@ -249,9 +249,10 @@ def main():
         if signals:
             print(f"\n  ── WATCHLIST ({len(signals)} setups) ───────────────────")
             for s in signals:
+                _tp = s.get("tp")
                 print(f"  {s['ticker']:<22}  [{s.get('screen',''):<20}]  "
                       f"Rs.{s['price']:,.2f}  SL:Rs.{s.get('sl',0):,.2f}  "
-                      f"{'TP:Rs.' + str(s.get('tp','trail'))}")
+                      f"{'TP:Rs.' + str(_tp) if _tp is not None else 'TP:trail'}")
 
     # ── TRAIL MODE — update trailing stops on open paper trades ──────────────
     elif args.mode == "trail":
@@ -274,7 +275,9 @@ def main():
         from analysis.score import score_stock
         from trading.signals import get_india_vix_regime
         vix_info = get_india_vix_regime()
-        print(f"\n  India VIX: {vix_info.get('vix', 'N/A'):.2f}  [{vix_info.get('regime', '?')}]")
+        _vix_val = vix_info.get("vix")
+        _vix_str = f"{_vix_val:.2f}" if _vix_val is not None else "N/A"
+        print(f"\n  India VIX: {_vix_str}  [{vix_info.get('regime', '?')}]")
         print(f"  Scoring {len(tickers)} stock(s)…\n")
         results = []
         for t in tickers:

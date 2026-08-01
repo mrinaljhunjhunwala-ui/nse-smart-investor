@@ -47,6 +47,21 @@ class TelegramAlerter:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
+    # ── Internal ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _escape_md(text) -> str:
+        """Escape Telegram legacy-Markdown special characters in dynamic
+        content so an unbalanced entity (most commonly an odd number of
+        underscores in a screen name or reason string) doesn't make the
+        whole message fail to send. Per Telegram's Bot API, in the legacy
+        Markdown parse mode '_', '*', '`', '[' can be escaped with a
+        preceding backslash to be treated as literal characters."""
+        text = str(text)
+        for ch in ("\\", "_", "*", "`", "["):
+            text = text.replace(ch, "\\" + ch)
+        return text
+
     def send_signal(
         self,
         ticker:   str,
@@ -75,19 +90,28 @@ class TelegramAlerter:
         now  = datetime.datetime.now().strftime("%d %b %Y  %H:%M IST")
         icon = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(action.upper(), "⚪")
 
+        # FIX TG1: escape dynamic, data-derived fields — ticker/strategy/reason
+        # come straight from trading/signals.py and routinely contain
+        # underscores (e.g. "Pullback_SMA_20", "RSI_Bull_Div"), which would
+        # otherwise unbalance Telegram's legacy Markdown entity parsing and
+        # silently fail the send.
+        _ticker   = self._escape_md(ticker)
+        _strategy = self._escape_md(strategy) if strategy else strategy
+        _reason   = self._escape_md(reason) if reason else reason
+
         lines = [
-            f"{icon} *{action.upper()} SIGNAL — {ticker}*",
+            f"{icon} *{action.upper()} SIGNAL — {_ticker}*",
             f"━━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {now}",
             f"💰 Price    : ₹{price:,.2f}",
         ]
-        if sl:  lines.append(f"🛡 Stop-Loss : ₹{sl:,.2f}  ({(sl/price-1)*100:+.2f}%)")
-        if tp:  lines.append(f"🎯 Target    : ₹{tp:,.2f}  ({(tp/price-1)*100:+.2f}%)")
-        if sl and tp:
+        if sl is not None:  lines.append(f"🛡 Stop-Loss : ₹{sl:,.2f}  ({(sl/price-1)*100:+.2f}%)")
+        if tp is not None:  lines.append(f"🎯 Target    : ₹{tp:,.2f}  ({(tp/price-1)*100:+.2f}%)")
+        if sl is not None and tp is not None:
             rr = abs(tp - price) / abs(price - sl) if abs(price - sl) > 0 else 0
             lines.append(f"📊 R:R       : 1 : {rr:.1f}")
-        if strategy: lines.append(f"⚙️ Strategy  : {strategy}")
-        if reason:   lines.append(f"📝 Reason    : {reason}")
+        if strategy: lines.append(f"⚙️ Strategy  : {_strategy}")
+        if reason:   lines.append(f"📝 Reason    : {_reason}")
         lines.append(f"━━━━━━━━━━━━━━━━━━━━━━")
         lines.append("_⚠️ For educational purposes only. Not investment advice._")
 
