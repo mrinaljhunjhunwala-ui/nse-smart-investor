@@ -19,6 +19,13 @@ name: Research Refresh (score efficacy + regime study)
 # after the real score_efficacy/regime_study runs above found it near-zero-
 # to-negative in every regime breakdown in both studies.
 #
+# Also runs research/score_variants_untapped.py — tests five candidate
+# indicator-family bonuses (VWAP deviation, Supertrend direction, Bollinger
+# %B, Stochastic K/D, and relative strength vs Nifty) that utils/indicators.py
+# already computes on every walk-forward frame but analysis/score.py never
+# scores, each against the same forward-return/decile framework as the studies
+# above, before any of them are considered for production weight changes.
+#
 # This job does NOT rewrite the .md reports automatically — it only produces
 # the raw CSVs + console output as a downloadable artifact. Turning those
 # numbers into report prose/conclusions is a separate, deliberate step.
@@ -58,6 +65,8 @@ jobs:
         run: python -m research.regime_study 2>&1 | tee research/output/regime_study_console.log
       - name: Run volume variant study
         run: python -m research.score_variants_volume 2>&1 | tee research/output/score_variants_volume_console.log
+      - name: Run untapped-indicator variant study
+        run: python -m research.score_variants_untapped 2>&1 | tee research/output/score_variants_untapped_console.log
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
