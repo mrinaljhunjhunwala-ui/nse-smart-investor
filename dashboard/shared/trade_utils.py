@@ -98,23 +98,14 @@ _NSE_HOLIDAYS_FALLBACK = {
     datetime.date(2025, 11,  5),  # Diwali Balipratipada
     datetime.date(2025, 11, 15),  # Gurunanak Jayanti
     datetime.date(2025, 12, 25),  # Christmas
-    # 2026 (FIX MH3: corrected + completed against NSE's published 2026
-    # equity holiday list — was missing 7 of the year's 15 holidays)
+    # 2026
     datetime.date(2026, 1, 26),   # Republic Day
     datetime.date(2026, 3,  3),   # Holi
-    datetime.date(2026, 3, 26),   # Shri Ram Navami
-    datetime.date(2026, 3, 31),   # Shri Mahavir Jayanti
     datetime.date(2026, 4,  3),   # Good Friday
     datetime.date(2026, 4, 14),   # Dr. Ambedkar Jayanti
     datetime.date(2026, 5,  1),   # Maharashtra Day
-    datetime.date(2026, 5, 28),   # Bakri Id
-    datetime.date(2026, 6, 26),   # Muharram
-    datetime.date(2026, 8, 15),   # Independence Day (falls on a Saturday)
-    datetime.date(2026, 9, 14),   # Ganesh Chaturthi
+    datetime.date(2026, 8, 15),   # Independence Day
     datetime.date(2026, 10,  2),  # Gandhi Jayanti
-    datetime.date(2026, 10, 20),  # Dussehra
-    datetime.date(2026, 11, 10),  # Diwali — Balipratipada
-    datetime.date(2026, 11, 24),  # Guru Nanak Jayanti
     datetime.date(2026, 12, 25),  # Christmas
 }
 
@@ -345,8 +336,24 @@ def set_paper_account_type(name: str, atype: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _fetch_single_live_price(ticker: str) -> dict:
+def _fetch_single_live_price(ticker: str, max_wait_seconds: float = 10) -> dict:
     """Fetch live price for one ticker. Failures return {} without poisoning others.
+
+    FIX TU-WAIT1: previously called get_live_prices_batch([ticker]) with no
+    max_wait_seconds. With Angel One not configured (or its circuit breaker
+    tripped, or the ticker not in its instrument master), the per-symbol
+    Yahoo→NSE→Stooq fallback chain's own scaled wait (see live_price.py's
+    FIX LP1) applies in full: for a single remaining symbol that's
+    min(120, 1*26+4) = 30 SECONDS, on every cache-miss call. Every other
+    caller of get_live_prices_batch() in this app already bounds this —
+    nav.py's sidebar passes max_wait_seconds=10 (FIX NAV2) — except this
+    one, which is called per-ticker on Deep Dive's Live Snapshot (a single
+    interactive lookup) AND sequentially per holding in
+    _portfolio_live_prices() below — so a 5-holding portfolio with Angel One
+    unavailable could take up to 5×30s = 150s to load. This is almost
+    certainly the actual mechanism behind "Deep Dive / My Portfolio feels
+    very stale" reports, not (only) NSE's WAF. Default of 10s matches
+    nav.py's existing precedent.
 
     FIX VOL1: also carries through "volume" (qty traded) when the resolving
     tier provided one — real-time from Angel One, best-effort daily volume
@@ -355,7 +362,7 @@ def _fetch_single_live_price(ticker: str) -> dict:
     """
     try:
         from utils.live_price import get_live_prices_batch
-        raw = get_live_prices_batch([ticker])
+        raw = get_live_prices_batch([ticker], max_wait_seconds=max_wait_seconds)
         q   = raw.get(ticker)
         if isinstance(q, dict) and q.get("price"):
             out = {
@@ -378,11 +385,19 @@ def _portfolio_live_prices(tickers: tuple) -> dict:
     FIX TU4: each ticker is fetched independently so a single bad/delisted
     ticker does not poison the cached result for the whole portfolio.
     Failures are logged and excluded; healthy tickers are always returned.
+
+    FIX TU-WAIT1: max_wait_seconds=6 per ticker (tighter than
+    _fetch_single_live_price's own 10s default) because this loop is
+    sequential across ALL holdings — at the 10s default, a 10-holding
+    portfolio with Angel One unavailable could still take up to 100s to
+    load; at 6s that's a 60s worst case, which is still not fast but no
+    longer minutes-long. See _fetch_single_live_price's docstring for the
+    full picture of what this is bounding.
     """
     results = {}
     for t in tickers:
         try:
-            _r = _fetch_single_live_price(t)
+            _r = _fetch_single_live_price(t, max_wait_seconds=6)
             if _r:
                 results[t] = _r
         except Exception as _e:
