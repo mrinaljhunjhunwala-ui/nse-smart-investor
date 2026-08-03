@@ -26,6 +26,14 @@ name: Research Refresh (score efficacy + regime study)
 # scores, each against the same forward-return/decile framework as the studies
 # above, before any of them are considered for production weight changes.
 #
+# Also runs research/score_variants_rs.py — the confirmatory follow-up to the
+# untapped-indicator study above. Re-tests only the RS (relative strength vs
+# Nifty) variant that looked promising there, but on calendar-aligned,
+# near-non-overlapping sample dates shared across the whole universe, with an
+# explicit train/holdout split, cluster-bootstrap confidence intervals, and a
+# documented survivorship-bias caveat — see the module docstring for why each
+# of those exists. Still makes no production changes.
+#
 # This job does NOT rewrite the .md reports automatically — it only produces
 # the raw CSVs + console output as a downloadable artifact. Turning those
 # numbers into report prose/conclusions is a separate, deliberate step.
@@ -67,6 +75,8 @@ jobs:
         run: python -m research.score_variants_volume 2>&1 | tee research/output/score_variants_volume_console.log
       - name: Run untapped-indicator variant study
         run: python -m research.score_variants_untapped 2>&1 | tee research/output/score_variants_untapped_console.log
+      - name: Run RS confirmatory study (calendar-aligned, train/holdout)
+        run: python -m research.score_variants_rs 2>&1 | tee research/output/score_variants_rs_console.log
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
