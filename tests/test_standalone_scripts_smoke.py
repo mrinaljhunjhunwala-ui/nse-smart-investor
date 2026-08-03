@@ -51,6 +51,7 @@ _STANDALONE_SCRIPTS = [
     ("research.score_variants_volume",       "research/score_variants_volume.py", ["main"]),
     ("research.score_variants_regime",       "research/score_variants_regime.py", ["main"]),
     ("research.score_variants_untapped",     "research/score_variants_untapped.py", ["main"]),
+    ("research.score_variants_rs",           "research/score_variants_rs.py", ["main"]),
     ("research.fundamentals_historical_variant", "research/fundamentals_historical_variant.py", ["main"]),
     ("research.fundamentals_prospective_collect", "research/fundamentals_prospective_collect.py", ["main"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
