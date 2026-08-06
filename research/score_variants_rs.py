@@ -1,82 +1,80 @@
 """
-research/score_variants_rs.py — confirmatory follow-up to
+research/score_variants_rs.py — v2, confirmatory follow-up to
 research/score_variants_untapped.py, testing ONLY the relative-strength
-(RS_Score vs Nifty) variant that looked promising there, with a tighter
-methodology built to survive scrutiny rather than just look good once.
+(RS_Score vs Nifty) variant that looked promising there.
 
-WHY A SEPARATE SCRIPT INSTEAD OF JUST RE-RUNNING score_variants_untapped.py:
+WHY THIS FILE WAS REWRITTEN (v1 -> v2):
 
-The exploratory pass answered "is anything here worth a second look" and RS
-was the only clear yes. This script exists to answer the harder question —
-"would it still look good if I stopped being generous with the methodology"
-— by fixing four specific gaps the exploratory pass had:
+v1 sampled one calendar date every 20 trading days (== the fwd_20d horizon,
+so forward-return windows never overlapped) to get honestly-independent
+observations. It worked as designed, but a live run exposed the cost: over
+5 years that's only 43 total calendar dates. Two consequences, both visible
+in the v1 output:
 
- 1. CALENDAR-ALIGNED, NEAR-NON-OVERLAPPING SAMPLING.
-    score_variants_untapped.py samples every 5th row of EACH TICKER'S OWN
-    index. Two problems: (a) different tickers land on different calendar
-    dates, so "cross-sectional, same-day" comparisons (which is what
-    Top Picks / Tomorrow's Watchlist actually do) only had ~10-20 tickers
-    on a typical date out of a 480-name universe — thin and unrepresentative.
-    (b) a 5-trading-day step against a 20-trading-day forward window means
-    consecutive samples share 75% of their forward-return period — they are
-    not independent draws, so a pooled Spearman's apparent precision
-    (86,828 "observations") is substantially overstated.
-    Fix: sample from ONE shared calendar grid (built off the ^NSEI trading
-    calendar) spaced STEP=20 trading days apart — matching the fwd_20d
-    horizon exactly, so those windows do not overlap at all — and every
-    ticker is scored on the SAME dates (a ticker only drops out of a date
-    if it genuinely lacks history there, e.g. a later listing).
+  1. BASE's headline fwd20 correlation flipped sign between the dense
+     exploratory pass (+0.04) and v1's sparse pass (-0.01 to -0.04, train
+     and holdout). With only 43 independent time-snapshots, a result this
+     small (already known to be ~0.02-0.04 from the dense studies) is well
+     within what pure date-placement luck can produce.
+  2. The by-regime breakdown was outright unusable: v1's "holdout bear"
+     correlation was built from exactly 2 distinct calendar dates. Digging
+     further (counting contiguous regime runs, not just sampled dates) found
+     the deeper reason: the underlying 5-year history only contains ~3
+     sustained bear episodes and ~3 sustained bull legs. That is a data-
+     availability ceiling, not a sampling-density bug — no amount of
+     resampling manufactures market history that didn't happen. v2 does not
+     try to fix this; see REGIME CAVEAT below.
 
- 2. TRAIN/HOLDOUT SPLIT.
-    The exploratory pass tested 6 variants on the full 5-year window and
-    RS happened to win — a classic multiple-comparisons setup where the
-    "winner" can just be the variant that got lucky on this particular
-    history. This script reserves the most recent ~12 months
-    (HOLDOUT_DAYS trading days) as a holdout that plays no role in the RS
-    design (the bonus formula is unchanged from the exploratory pass — see
-    _bonus_rs) and reports TRAIN and HOLDOUT metrics separately. Caveat,
-    stated plainly: the exploratory pass already looked at the full window
-    before RS was chosen for this follow-up, so this holdout is not a
-    perfectly clean pre-registration — it is a "going forward, this slice
-    doesn't get touched again" discipline marker, and the honest read is
-    "does the edge survive being looked at a second, harder way" rather
-    than "was this proven from a blank slate."
+v2's fix, scoped only to the part that IS fixable — the split-level
+train/holdout point estimates:
 
- 3. CLUSTER-BOOTSTRAP CONFIDENCE INTERVALS.
-    A single Spearman number invites over-reading small differences as
-    signal. Resampling TICKERS (not rows) with replacement respects the
-    fact that a ticker's own observations are correlated with each other —
-    this is the standard fix for panel data, and it directly answers "is
-    the gap between BASE and RS bigger than what noise alone would produce."
+  - STEP_DAYS dropped from 20 to 5 (still one shared calendar grid across
+    every ticker, unlike score_variants_untapped.py's per-ticker-index
+    sampling). This quadruples the raw date count (43 -> ~170), which
+    directly stabilises the point estimate: instead of one date's noise
+    deciding a whole block, each ~20-trading-day BLOCK now averages over
+    ~4 dates x ~480 tickers before contributing to the headline number.
+  - BLOCK_DAYS=20 groups those denser samples back into ~43 non-overlapping
+    time blocks (unchanged from v1's date count) for the CONFIDENCE
+    INTERVAL. This is the honest part: the underlying number of independent
+    ~20-trading-day market windows in 5 years hasn't changed just because
+    we sample more densely inside each one. v1's ticker-only bootstrap
+    ignored this and was almost certainly overconfident (too narrow) about
+    time-dimension uncertainty; v2's block bootstrap resamples BLOCKS, not
+    tickers, and directly answers "would this conclusion survive different
+    market windows happening to fall in the sample" rather than "would it
+    survive different stocks being in the universe."
+  - Net effect: sturdier, less date-placement-sensitive POINT ESTIMATES,
+    and a CI that may well be WIDER than v1 reported, because it is now
+    measuring the real bottleneck instead of the wrong one. A wider-but-
+    honest interval is the intended outcome here, not a regression.
 
- 4. TURNOVER AS A REPORTED NUMBER, NOT AN AD-HOC CHECK.
-    Day-over-day top-decile membership overlap, now computed properly on
-    the full shared-calendar universe (previously eyeballed on a thin
-    same-day slice) — this is the real answer to "how much would my
-    Top Picks list actually change."
+REGIME CAVEAT (this is why the by-regime table below is directional only):
+the ~3 real bear episodes and ~3 real bull legs in this 5-year window are
+each counted once as an "episode" alongside their date/observation counts.
+Read n_episodes, not n (observation count) or a Spearman decimal, as the
+true sample size for any regime-specific claim. No fix in this script raises
+that number — only more calendar time or a longer history would.
 
-STANDING CAVEAT THIS SCRIPT CANNOT FIX (documented, not silently ignored):
-data/universe.py's get_universe() returns TODAY's Nifty constituent list,
-applied retroactively across the past 5 years. Any stock that was dropped
-from the index during that period (usually for underperforming) is invisible
-to this study and to every sibling research script. This specifically tends
-to inflate relative-strength-style findings, because today's survivors are,
-almost by construction, stocks that didn't underperform badly enough to be
-removed. Treat every number below as "promising, not proven" for that
-reason — there is no free-tier fix for point-in-time index membership.
+STANDING CAVEAT THIS SCRIPT CANNOT FIX: data/universe.py's get_universe()
+returns TODAY's Nifty constituent list applied retroactively across 5 years.
+Stocks dropped from the index in that period (usually for underperforming)
+are invisible here, which specifically tends to inflate relative-strength
+findings. There is no free-tier fix for point-in-time index membership.
 
 PRODUCTION SCORING IS NOT MODIFIED.
 
 Run:
-    py -m research.score_variants_rs                 # full universe (~2-3 min)
+    py -m research.score_variants_rs                 # full universe (~5-7 min)
     py -m research.score_variants_rs --limit 20       # pipeline check
 
 Outputs (research/output/):
-    variant_rs_observations.csv   one row per ticker x sampled calendar date
-    variant_rs_summary.csv        pooled + cross-sectional + bootstrap CI, by split
-    variant_rs_by_regime.csv      spearman by split x market/VIX regime
+    variant_rs_observations.csv   one row per ticker x sampled date (+ block_id)
+    variant_rs_summary.csv        pooled + cross-sectional + block-bootstrap CI, by split
+    variant_rs_verdict.txt        plain-language read of whether BASE/RS's CI excludes zero
+    variant_rs_by_regime.csv      DIRECTIONAL ONLY — see REGIME CAVEAT above
     variant_rs_turnover.csv       day-over-day top-decile overlap, by split
-    variant_rs_caveats.txt        the survivorship-bias note above, in one place
+    variant_rs_caveats.txt        the two caveats above, in one place
 """
 from __future__ import annotations
 
@@ -103,13 +101,14 @@ from research.regime_study import _market_regime_series   # noqa: E402
 OUT_DIR = os.path.join(_ROOT, "research", "output")
 
 PERIOD        = "5y"
-STEP_DAYS     = 20      # calendar-day spacing == fwd_20d horizon -> non-overlapping fwd20 windows
+STEP_DAYS     = 5        # dense enough to average out single-date noise within a block
+BLOCK_DAYS    = 20        # == fwd_20d horizon; the unit the bootstrap treats as independent
 MAX_HORIZON   = 60
-WARMUP_DAYS   = 330      # >= RS's 252-bar window + 63-bar momentum lookback + buffer
-HOLDOUT_DAYS  = 252      # ~1 trading year reserved, untouched by the RS design
+WARMUP_DAYS   = 330        # >= RS's 252-bar window + 63-bar momentum lookback + buffer
+HOLDOUT_DAYS  = 252        # ~1 trading year reserved, untouched by the RS design
 BENCH_TICKER  = "^NSEI"
 RS_PERIOD     = 63
-BONUS_MAX     = 8.0       # unchanged from score_variants_untapped.py — same bonus, harder test
+BONUS_MAX     = 8.0         # unchanged from score_variants_untapped.py — same bonus, harder test
 
 VARIANTS = ["base", "var_rs", "gated_rs"]
 VARIANT_LABELS = {
@@ -125,20 +124,23 @@ SURVIVORSHIP_CAVEAT = (
     "invisible to this study. This specifically tends to inflate relative-strength "
     "findings, since today's survivors are, almost by construction, names that did "
     "not underperform badly enough to be removed. There is no free-tier fix for "
-    "point-in-time index membership. Read every number in this study as "
-    "'promising, not proven' for that reason.\n\n"
-    "MULTIPLE-COMPARISONS CAVEAT: RS was selected as the one variant worth a "
-    "follow-up after score_variants_untapped.py tested six candidates on this same "
-    "5-year window. The TRAIN/HOLDOUT split below is a 'going forward, this slice "
-    "is not touched again' discipline marker, not a from-a-blank-slate "
-    "pre-registration — the exploratory pass had already seen the holdout period "
-    "before this script existed."
+    "point-in-time index membership."
+)
+REGIME_CAVEAT = (
+    "REGIME TABLE CAVEAT: the by-regime breakdown is DIRECTIONAL ONLY, not a "
+    "statistical claim. This 5-year window contains roughly 3 sustained bear "
+    "episodes and 3 sustained bull legs (see n_episodes column) — every date "
+    "inside one episode is a correlated draw from the same market event, not a "
+    "fresh independent sample. No amount of denser date sampling raises that "
+    "count; only more calendar time or a longer history would. Treat n_episodes, "
+    "not the observation count or the correlation's decimal places, as the real "
+    "sample size here."
 )
 
 
 def _bonus_rs(rs_score: float) -> float:
-    """Identical to score_variants_untapped.py's _bonus_rs — the point of this
-    script is to re-test the SAME formula more rigorously, not to re-tune it."""
+    """Identical to score_variants_untapped.py's _bonus_rs — re-testing the SAME
+    formula more rigorously, not re-tuning it."""
     if rs_score is None or not np.isfinite(rs_score):
         return BONUS_MAX / 2.0
     return round(float(np.clip(rs_score, 0.0, 100.0)) / 100.0 * BONUS_MAX, 3)
@@ -160,20 +162,25 @@ def _prepare_ticker_rs(ticker: str, period: str,
     return df
 
 
-def _canonical_dates(bench_df: pd.DataFrame, step: int, warmup: int,
-                     max_horizon: int) -> pd.DatetimeIndex:
-    """One shared calendar grid every ticker is scored on — this is what makes
-    'today's top decile' comparisons meaningful instead of an artifact of
-    whichever tickers happened to land on a per-ticker sample row."""
+def _canonical_grid(bench_df: pd.DataFrame, step: int, block_days: int, warmup: int,
+                    max_horizon: int) -> "tuple[pd.DatetimeIndex, Dict[pd.Timestamp, int]]":
+    """One shared calendar grid every ticker is scored on, plus a date -> block_id
+    map (block_id = which non-overlapping ~block_days-trading-day window a date
+    falls in). Same block map is reused for both the bootstrap and the regime-
+    episode count, so 'how many independent time units do we have' means the
+    same thing everywhere in this script."""
     idx = bench_df.index
     last = len(idx) - max_horizon
     if last <= warmup:
-        return idx[0:0]
-    return idx[warmup:last:step]
+        return idx[0:0], {}
+    dates = idx[warmup:last:step]
+    block_of = {d: int((pos - warmup) // block_days)
+                for pos, d in zip(range(warmup, last, step), dates)}
+    return dates, block_of
 
 
 def _walk_forward_rs(ticker: str, df: pd.DataFrame, dates: pd.DatetimeIndex,
-                     holdout_cutoff: pd.Timestamp,
+                     block_of: Dict[pd.Timestamp, int], holdout_cutoff: pd.Timestamp,
                      vix_regimes: Optional[pd.Series],
                      mkt_regimes: Optional[pd.Series]) -> List[Dict]:
     from analysis.score import score_dataframe
@@ -189,7 +196,7 @@ def _walk_forward_rs(ticker: str, df: pd.DataFrame, dates: pd.DatetimeIndex,
         start = int(np.argmax(valid)) if valid.any() else n
     else:
         start = 200
-    start = max(start, WARMUP_DAYS - 30)   # a little slack vs. the shared-grid warmup
+    start = max(start, WARMUP_DAYS - 30)
     last  = n - MAX_HORIZON - 1
 
     rows: List[Dict] = []
@@ -222,6 +229,7 @@ def _walk_forward_rs(ticker: str, df: pd.DataFrame, dates: pd.DatetimeIndex,
         rows.append({
             "ticker": ticker,
             "date": str(date)[:10],
+            "block_id": block_of.get(date, -1),
             "split": "holdout" if date >= holdout_cutoff else "train",
             "vix_regime": _regime_for(date, vix_regimes),
             "mkt_regime": mreg,
@@ -255,31 +263,33 @@ def _cross_sectional_spearman(sub: pd.DataFrame, col: str, target: str = "fwd_20
     return round(float(np.mean(rs)), 4), round(float(np.median(rs)), 4), len(rs)
 
 
-def _bootstrap_ci(sub: pd.DataFrame, col: str, target: str = "fwd_20d",
-                  n_boot: int = 400, seed: int = 42) -> "tuple[float, float, float]":
-    """Cluster bootstrap by TICKER (not by row) — resampling whole tickers with
-    replacement respects that one ticker's observations aren't independent of
-    each other, unlike resampling individual rows would assume."""
-    groups = {t: g[[col, target]].dropna().values for t, g in sub.groupby("ticker")}
-    groups = {t: v for t, v in groups.items() if len(v) > 0}
-    tickers = list(groups.keys())
-    if len(tickers) < 10:
-        return np.nan, np.nan, np.nan
+def _block_bootstrap_ci(sub: pd.DataFrame, col: str, target: str = "fwd_20d",
+                        n_boot: int = 400, seed: int = 42) -> "tuple[float, float, float, int]":
+    """Resample TIME BLOCKS (not tickers, not individual dates) with replacement.
+    This is the fix for v1's flaw: a block (~20 trading days) is the actual unit
+    of independent market history here, since forward-return windows within a
+    block overlap by construction. Ticker count was never the bottleneck --
+    ~470 tickers per date is already plenty -- so this replaces v1's ticker
+    bootstrap rather than supplementing it."""
+    blocks = {b: g[[col, target]].dropna().values for b, g in sub.groupby("block_id")}
+    blocks = {b: v for b, v in blocks.items() if len(v) > 0}
+    block_ids = list(blocks.keys())
+    if len(block_ids) < 5:
+        return np.nan, np.nan, np.nan, len(block_ids)
     rng = np.random.default_rng(seed)
     boots = []
     for _ in range(n_boot):
-        samp = rng.choice(tickers, size=len(tickers), replace=True)
-        arrs = [groups[t] for t in samp]
-        allrows = np.vstack(arrs)
+        samp = rng.choice(block_ids, size=len(block_ids), replace=True)
+        allrows = np.vstack([blocks[b] for b in samp])
         if len(allrows) < 30:
             continue
         r, _ = spearmanr(allrows[:, 0], allrows[:, 1])
         if np.isfinite(r):
             boots.append(r)
     if not boots:
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, len(block_ids)
     lo, hi = np.percentile(boots, [2.5, 97.5])
-    return round(float(np.mean(boots)), 4), round(float(lo), 4), round(float(hi), 4)
+    return round(float(np.mean(boots)), 4), round(float(lo), 4), round(float(hi), 4), len(block_ids)
 
 
 def _decile_spread(sub: pd.DataFrame, col: str, target: str = "fwd_20d") -> "tuple[float, float]":
@@ -296,8 +306,6 @@ def _decile_spread(sub: pd.DataFrame, col: str, target: str = "fwd_20d") -> "tup
 
 def _turnover(sub: pd.DataFrame, col: str, base_col: str = "base",
              frac: float = 0.10, min_n: int = 30) -> "tuple[float, int]":
-    """Day-over-day: of the names in today's top decile by BASE, what % are
-    still in the top decile by `col`? Lower = more list churn if adopted."""
     overlaps = []
     for date, g in sub.groupby("date"):
         gg = g[["ticker", base_col, col]].dropna()
@@ -312,44 +320,66 @@ def _turnover(sub: pd.DataFrame, col: str, base_col: str = "base",
     return round(float(np.mean(overlaps)) * 100, 1), len(overlaps)
 
 
+def _regime_episodes(obs: pd.DataFrame, split: str, kind_col: str) -> pd.DataFrame:
+    """Count contiguous regime RUNS (episodes), not sampled dates or rows --
+    this is the number that actually bounds statistical confidence here."""
+    dr = (obs[obs["split"] == split][["date", kind_col]]
+          .drop_duplicates().sort_values("date").reset_index(drop=True))
+    if dr.empty:
+        return pd.DataFrame(columns=["regime", "n_episodes"])
+    dr["ep"] = (dr[kind_col] != dr[kind_col].shift()).cumsum()
+    return (dr.groupby("ep")[kind_col].first().value_counts()
+              .rename_axis("regime").reset_index(name="n_episodes"))
+
+
 def aggregate(obs: pd.DataFrame, n_boot: int) -> Dict[str, pd.DataFrame]:
     summary_rows, regime_rows, turnover_rows = [], [], []
+    verdict_lines = []
 
     for split in ["train", "holdout"]:
         sub = obs[obs["split"] == split]
         if sub.empty:
             continue
+        verdict_lines.append(f"\n[{split.upper()}]")
         for v in VARIANTS:
             pooled_r, _ = spearmanr(sub[v], sub["fwd_20d"]) if sub[v].notna().any() else (np.nan, None)
             xs_mean, xs_med, n_dates = _cross_sectional_spearman(sub, v)
-            boot_mean, boot_lo, boot_hi = _bootstrap_ci(sub, v, n_boot=n_boot)
+            boot_mean, boot_lo, boot_hi, n_blocks = _block_bootstrap_ci(sub, v, n_boot=n_boot)
             monotonicity, spread = _decile_spread(sub, v)
             summary_rows.append({
-                "split": split,
-                "variant": VARIANT_LABELS[v],
-                "n_obs": int(sub[v].notna().sum()),
-                "n_dates": n_dates,
+                "split": split, "variant": VARIANT_LABELS[v],
+                "n_obs": int(sub[v].notna().sum()), "n_dates": n_dates, "n_blocks": n_blocks,
                 "pooled_spearman_fwd20": round(float(pooled_r), 4) if np.isfinite(pooled_r) else None,
                 "cross_sectional_mean_fwd20": xs_mean,
-                "cross_sectional_median_fwd20": xs_med,
-                "bootstrap_mean": boot_mean,
-                "bootstrap_ci_low": boot_lo,
-                "bootstrap_ci_high": boot_hi,
+                "block_bootstrap_mean": boot_mean,
+                "block_bootstrap_ci_low": boot_lo,
+                "block_bootstrap_ci_high": boot_hi,
                 "decile_monotonicity": monotonicity,
                 "d10_minus_d1_fwd20": spread,
             })
+            if np.isfinite(boot_lo) and np.isfinite(boot_hi):
+                if boot_lo > 0:
+                    read = f"reliably POSITIVE (CI [{boot_lo:+.4f}, {boot_hi:+.4f}], {n_blocks} blocks)"
+                elif boot_hi < 0:
+                    read = f"reliably NEGATIVE (CI [{boot_lo:+.4f}, {boot_hi:+.4f}], {n_blocks} blocks)"
+                else:
+                    read = f"NOT distinguishable from zero (CI [{boot_lo:+.4f}, {boot_hi:+.4f}], {n_blocks} blocks)"
+            else:
+                read = "too few blocks to estimate a CI"
+            verdict_lines.append(f"  {VARIANT_LABELS[v]:42s} {read}")
+
             if v != "base":
                 overlap_pct, n_pairs = _turnover(sub, v)
-                turnover_rows.append({
-                    "split": split, "variant": VARIANT_LABELS[v],
-                    "top_decile_overlap_pct_vs_base": overlap_pct, "n_dates": n_pairs,
-                })
+                turnover_rows.append({"split": split, "variant": VARIANT_LABELS[v],
+                                      "top_decile_overlap_pct_vs_base": overlap_pct, "n_dates": n_pairs})
 
         for kind, col in [("market", "mkt_regime"), ("vix", "vix_regime")]:
+            ep = _regime_episodes(sub, split, col).set_index("regime")["n_episodes"].to_dict()
             for reg, g in sub.groupby(col):
                 if len(g) < 200:
                     continue
-                row = {"split": split, "regime_type": kind, "regime": reg, "n": len(g)}
+                row = {"split": split, "regime_type": kind, "regime": reg,
+                      "n_episodes": ep.get(reg, None), "n_obs": len(g)}
                 for v in VARIANTS:
                     r, _ = spearmanr(g[v], g["fwd_20d"])
                     row[v] = round(float(r), 4) if np.isfinite(r) else None
@@ -359,6 +389,7 @@ def aggregate(obs: pd.DataFrame, n_boot: int) -> Dict[str, pd.DataFrame]:
         "summary": pd.DataFrame(summary_rows).set_index(["split", "variant"]),
         "by_regime": pd.DataFrame(regime_rows).set_index(["split", "regime_type", "regime"]) if regime_rows else pd.DataFrame(),
         "turnover": pd.DataFrame(turnover_rows).set_index(["split", "variant"]) if turnover_rows else pd.DataFrame(),
+        "verdict": "\n".join(verdict_lines),
     }
 
 
@@ -370,8 +401,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=10)
-    ap.add_argument("--step", type=int, default=STEP_DAYS,
-                    help="trading-day spacing between sample dates")
+    ap.add_argument("--step", type=int, default=STEP_DAYS)
+    ap.add_argument("--block-days", type=int, default=BLOCK_DAYS)
     ap.add_argument("--holdout-days", type=int, default=HOLDOUT_DAYS)
     ap.add_argument("--bootstrap-n", type=int, default=400)
     args = ap.parse_args()
@@ -385,27 +416,28 @@ def main() -> int:
 
     os.makedirs(OUT_DIR, exist_ok=True)
     t0 = time.time()
-    print(f"RS CONFIRMATORY STUDY | universe={len(universe)} | period={PERIOD} | "
-          f"step={args.step}d | holdout={args.holdout_days}d")
+    print(f"RS CONFIRMATORY STUDY v2 | universe={len(universe)} | period={PERIOD} | "
+          f"step={args.step}d | block={args.block_days}d | holdout={args.holdout_days}d")
 
     vix_regimes = _vix_regime_series(period=PERIOD)
     mkt_regimes = _market_regime_series()
 
     bench_df = fetch_single(BENCH_TICKER, period=PERIOD)
     if bench_df is None or len(bench_df) == 0:
-        print(f"Benchmark ({BENCH_TICKER}) fetch failed — cannot build a shared "
-              f"calendar grid or RS_Score. Aborting.")
+        print(f"Benchmark ({BENCH_TICKER}) fetch failed — aborting.")
         return 1
     print(f"Benchmark ({BENCH_TICKER}): OK, {len(bench_df)} bars")
 
-    dates = _canonical_dates(bench_df, args.step, WARMUP_DAYS, MAX_HORIZON)
+    dates, block_of = _canonical_grid(bench_df, args.step, args.block_days, WARMUP_DAYS, MAX_HORIZON)
     if len(dates) == 0:
         print("No valid sample dates in range — aborting.")
         return 1
+    n_blocks_total = len(set(block_of.values()))
     holdout_cutoff = dates[-1] - pd.Timedelta(days=int(args.holdout_days * 1.45))
     n_holdout_dates = int((dates >= holdout_cutoff).sum())
-    print(f"Sample dates: {len(dates)} ({dates[0].date()} -> {dates[-1].date()}), "
-          f"{len(dates) - n_holdout_dates} train / {n_holdout_dates} holdout "
+    print(f"Sample dates: {len(dates)} across {n_blocks_total} time blocks "
+          f"({dates[0].date()} -> {dates[-1].date()}), "
+          f"{len(dates) - n_holdout_dates} train dates / {n_holdout_dates} holdout dates "
           f"(cutoff {holdout_cutoff.date()})")
 
     frames: Dict[str, pd.DataFrame] = {}
@@ -430,7 +462,7 @@ def main() -> int:
 
     all_rows: List[Dict] = []
     for k, (t, df) in enumerate(frames.items(), 1):
-        all_rows.extend(_walk_forward_rs(t, df, dates, holdout_cutoff, vix_regimes, mkt_regimes))
+        all_rows.extend(_walk_forward_rs(t, df, dates, block_of, holdout_cutoff, vix_regimes, mkt_regimes))
         if k % 100 == 0:
             print(f"  scored {k}/{len(frames)} ({len(all_rows)} obs) [{time.time()-t0:.0f}s]")
 
@@ -444,9 +476,6 @@ def main() -> int:
     n_holdout = int((obs["split"] == "holdout").sum())
     print(f"Observations: {len(obs)} total ({n_train} train / {n_holdout} holdout) "
           f"from {obs['ticker'].nunique()} tickers [{time.time()-t0:.0f}s]")
-    print(f"(For comparison: score_variants_untapped.py's exploratory pass produced "
-          f"86,828 heavily-overlapping observations for the same signal — this run "
-          f"trades that redundant volume for calendar-aligned, near-independent samples.)")
 
     aggs = aggregate(obs, args.bootstrap_n)
     aggs["summary"].to_csv(os.path.join(OUT_DIR, "variant_rs_summary.csv"), encoding="utf-8")
@@ -454,17 +483,20 @@ def main() -> int:
         aggs["by_regime"].to_csv(os.path.join(OUT_DIR, "variant_rs_by_regime.csv"), encoding="utf-8")
     if not aggs["turnover"].empty:
         aggs["turnover"].to_csv(os.path.join(OUT_DIR, "variant_rs_turnover.csv"), encoding="utf-8")
+    with open(os.path.join(OUT_DIR, "variant_rs_verdict.txt"), "w", encoding="utf-8") as fh:
+        fh.write("Plain-language read of each variant's block-bootstrap CI vs zero:\n" + aggs["verdict"] + "\n")
     with open(os.path.join(OUT_DIR, "variant_rs_caveats.txt"), "w", encoding="utf-8") as fh:
-        fh.write(SURVIVORSHIP_CAVEAT + "\n")
+        fh.write(SURVIVORSHIP_CAVEAT + "\n\n" + REGIME_CAVEAT + "\n")
 
     pd.set_option("display.width", 220)
     pd.set_option("display.max_columns", 20)
     print("\n=== SUMMARY (train vs holdout) ==="); print(aggs["summary"])
+    print("\n=== VERDICT ==="); print(aggs["verdict"])
     if not aggs["turnover"].empty:
         print("\n=== TURNOVER vs BASE ==="); print(aggs["turnover"])
     if not aggs["by_regime"].empty:
-        print("\n=== BY REGIME ==="); print(aggs["by_regime"])
-    print(f"\n{SURVIVORSHIP_CAVEAT}")
+        print("\n=== BY REGIME (directional only — see caveat) ==="); print(aggs["by_regime"])
+    print(f"\n{SURVIVORSHIP_CAVEAT}\n\n{REGIME_CAVEAT}")
     print(f"\nDone in {time.time()-t0:.0f}s. CSVs in {OUT_DIR}")
     return 0
 
