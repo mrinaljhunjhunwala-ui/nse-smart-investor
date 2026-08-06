@@ -366,6 +366,67 @@ def _trade_type(headline: str) -> tuple:
     return ("Trend", "•", "#8899bb")
 
 
+def _horizon_countdown(valid_until: str) -> str:
+    """Render a pick's valid_until as a live countdown instead of a static
+    date. The underlying date doesn't change between visits, but 'stale
+    after 19 Aug' reads as fixed/dead on every reload — 'expires in 4 days'
+    visibly counts down, and flips to a red warning once the window has
+    actually passed, without any new data (valid_until was already computed
+    by analysis.score._pick_horizon; this just re-reads it against today's
+    date at render time)."""
+    if not valid_until:
+        return ""
+    try:
+        import datetime as _dtm
+        _d = _dtm.date.fromisoformat(valid_until)
+    except Exception:
+        return f"stale after {valid_until}"
+    import datetime as _dtm
+    _days = (_d - _dtm.date.today()).days
+    if _days < 0:
+        return '<span style="color:#ef5350;font-weight:700">⚠ past its window — reassess</span>'
+    if _days == 0:
+        return '<span style="color:#FF9800;font-weight:700">⚠ expires today</span>'
+    if _days <= 2:
+        return f'<span style="color:#FF9800;font-weight:600">expires in {_days}d</span>'
+    return f'<span style="color:#6a8caf">expires in {_days}d</span>'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX CC-LIVE1 — bounded live price for Buy/Sell cards
+#
+# FIX CC-LOAD1 (see 02_command_centre.py) pulled per-pick live price, SL/TP
+# re-anchoring AND qty sizing out of this section entirely, because doing
+# all three for up to ~40 tickers on every rerun of a 20s-refreshing fragment
+# was real, unbounded network cost paid whether or not anyone was looking.
+# The Top Picks ticker strip (_top_picks_ticker, above) proved a safe middle
+# ground since: ONE tiered batch call (Angel One -> Yahoo -> NSE -> Stooq,
+# same as this), cached 60s so a 20s-refreshing enclosing fragment doesn't
+# turn into a 20s-refreshing live-price fetch. This reuses that exact pattern
+# for the full Buy/Sell card list (still <= ~40 tickers, one call, Angel
+# One's batch endpoint handles up to 50/call) — PRICE ONLY. Qty and SL/TP
+# re-anchoring are deliberately NOT added back here; those stay in Deep
+# Dive's on-demand Live Snapshot, which is the boundary FIX CC-LOAD1 drew
+# for good reason (position sizing off a stale-by-seconds price is a much
+# worse failure mode than a stale-by-seconds price label).
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=60, show_spinner=False)
+def _picks_live_prices(tickers: tuple) -> dict:
+    """Live price + %chg for exactly the tickers currently on screen in
+    Command Centre's Buy/Sell cards. Returns {} entries silently omitted for
+    any ticker no tier could resolve — callers fall back to '(last close)'
+    per-ticker rather than failing the whole section."""
+    if not tickers:
+        return {}
+    from utils.live_price import get_live_prices_batch
+    try:
+        raw = get_live_prices_batch(list(tickers), max_workers=20)
+    except Exception as _e:
+        _log.debug("cache._picks_live_prices: batch fetch failed: %s", _e)
+        return {}
+    return {t: d for t, d in (raw or {}).items() if d and d.get("price")}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared helpers
 # ─────────────────────────────────────────────────────────────────────────────
