@@ -22,6 +22,8 @@ from dashboard.shared.cache import (
     _sparkline_closes,
     _sparkline_svg,
     _trade_type,
+    _picks_live_prices,     # FIX CC-LIVE1
+    _horizon_countdown,     # FIX CC-LIVE1
     get_vix_info,
 )
 from dashboard.shared.trade_utils import (
@@ -397,8 +399,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         st.markdown("### 🔥 Today's Top Picks — NSE Scan")
         st.caption("Strongest and weakest **trend-quality** setups today. "
                    "Scores rank trend health — they are **not a forecast of returns**. "
-                   "Refreshes automatically every 5 min during market hours; old picks "
-                   "stay on screen while a refresh runs in the background.")
+                   "The pick list itself refreshes every 5 min during market hours; prices "
+                   "on each card tick live (~60s) in between. Old picks stay on screen "
+                   "while a refresh runs in the background.")
     with _tp_h2:
         st.write("")
         _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
@@ -513,15 +516,25 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             "remaining cards below are watchlist-grade backfill, marked accordingly."
         )
 
-    # FIX CC-LOAD1: this section used to batch-fetch live price/chg/volume
-    # for every buy+sell ticker (up to ~40) on EVERY Command Centre page
-    # load/rerun — real network cost paid whether or not the person was
-    # about to act on any of them. That live-price + re-anchored entry/SL/TP
-    # + suggested-qty work now lives in Deep Dive Analysis's "Live Snapshot"
-    # section instead, fetched on demand for the ONE ticker actually being
-    # looked at when "Open full analysis" is clicked. Cards below show only
-    # what's already in the cached scan (score/headline/entry-SL-TP at last
-    # close) — zero live network calls for this section.
+    # FIX CC-LOAD1 (original): this section used to batch-fetch live price,
+    # re-anchor entry/SL/TP AND compute suggested qty for every buy+sell
+    # ticker (up to ~40) on EVERY Command Centre rerun — real, unbounded
+    # network cost paid whether or not anyone was about to act on any of it.
+    # All three were removed; SL/TP re-anchoring + qty sizing still live only
+    # in Deep Dive's on-demand Live Snapshot, for the one ticker actually
+    # being looked at — sizing off a stale price is a worse failure mode
+    # than a stale price label, so that boundary stays.
+    #
+    # FIX CC-LIVE1: price alone is reinstated, on the same bounded pattern
+    # already proven safe by the Top Picks ticker strip above — one tiered
+    # batch call (_picks_live_prices, cached 60s) for every ticker actually
+    # on screen, not a fetch-per-card. This fragment reruns every 20s, but
+    # the 60s cache means the live-price network cost only actually fires
+    # once every 3rd rerun, same cost profile as the strip.
+    _pk_tickers = tuple(sorted({b["ticker"] for b in _picks["buys"]} |
+                               {s["ticker"] for s in _picks["sells"]}))
+    _pk_live = _picks_live_prices(_pk_tickers)
+
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
         st.markdown("#### 🟢 Buy Candidates")
@@ -547,6 +560,21 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 'WATCHLIST-GRADE</span>'
             ) if _is_watch_tier else ""
 
+            # FIX CC-LIVE1: live price if the batch fetch resolved this
+            # ticker, otherwise the same honest "(last close)" fallback as
+            # before — never silently pretend a stale price is live.
+            _b_lp = _pk_live.get(_b["ticker"])
+            if _b_lp:
+                _b_up = (_b_lp.get("chg_pct") or 0) >= 0
+                _b_pc = "#3ddc84" if _b_up else "#ef5350"
+                _b_live_span = (
+                    f'<span style="color:{_b_pc};font-weight:700">₹{_b_lp["price"]:,.2f} '
+                    f'{"▲" if _b_up else "▼"}{abs(_b_lp.get("chg_pct") or 0):.2f}%</span>'
+                    f' <span style="color:#666">live · qty in full analysis</span>'
+                )
+            else:
+                _b_live_span = '<span style="color:#666">(last close — open full analysis for live price + qty)</span>'
+
             st.markdown(
                 f'<div style="background:{_card_grad};'
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
@@ -558,11 +586,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
                 + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
                    f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f} '
-                   f'<span style="color:#666">(last close — open full analysis for live price + qty)</span></div>'
+                   f'{_b_live_span}</div>'
                    if _b["entry"] else "")
                 + (f'<div style="font-size:11px;color:#6a8caf;margin-top:2px">'
                    f'⏱ {_b.get("horizon")}'
-                   + (f' · stale after {_b["valid_until"]}' if _b.get("valid_until") else '')
+                   + (f' · {_horizon_countdown(_b.get("valid_until"))}' if _b.get("valid_until") else '')
                    + '</div>'
                    if _b.get("horizon") else "")
                 + '</div>',
@@ -582,9 +610,21 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             st.caption("No clear sell signals — nothing flashing red in the scan.")
         for _sv in _picks["sells"]:
             _svl = _sv["ticker"].replace(".NS", "")
-            # FIX CC-LOAD1: live price fetch removed from this list for the
-            # same reason as the Buy loop above — see that section's
-            # comment. Open full analysis for live price on this ticker.
+            # FIX CC-LIVE1: same bounded pattern as the Buy loop above —
+            # price only, from the one shared _pk_live batch fetch already
+            # done for every ticker on screen this rerun.
+            _sv_lp = _pk_live.get(_sv["ticker"])
+            if _sv_lp:
+                _sv_up = (_sv_lp.get("chg_pct") or 0) >= 0
+                _sv_pc = "#3ddc84" if _sv_up else "#ef5350"
+                _sv_live_html = (
+                    f'<div style="font-size:11px;margin-top:4px">'
+                    f'<span style="color:{_sv_pc};font-weight:700">₹{_sv_lp["price"]:,.2f} '
+                    f'{"▲" if _sv_up else "▼"}{abs(_sv_lp.get("chg_pct") or 0):.2f}%</span> '
+                    f'<span style="color:#666">live</span></div>'
+                )
+            else:
+                _sv_live_html = ""
             st.markdown(
                 f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
                 f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
@@ -593,6 +633,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+                f'{_sv_live_html}'
                 + '</div>',
                 unsafe_allow_html=True,
             )
