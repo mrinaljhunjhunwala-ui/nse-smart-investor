@@ -1,4 +1,7 @@
-"""analysis/price_bands.py — helpers for price banding and within-band normalization.
+"""
+analysis/price_bands.py 
+
+helpers for price banding and within-band normalization.
 
 Simple, deterministic quantile banding over a list of prices and an in-place
 normaliser that writes a score_norm key to each result dict so selection can
