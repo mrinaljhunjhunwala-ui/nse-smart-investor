@@ -1,56 +1,72 @@
 """
 data/nse_corp_info.py
 
-Utilities to fetch corporate/company information from NSE and capture diagnostic
-information (including HTTP status codes) into module-level diagnostics so tests
-can assert on blocking status (e.g., status_code == 403).
+NSE corporate-info fetcher used by the app and tests.
 
-Public:
- - get_corp_info(symbol) -> dict (empty dict on failure)
- - _last_diagnostics dict holding last failure info per symbol
+Exports:
+ - get_corp_info(symbol, use_cache=True) -> dict
+ - get_last_diagnostic(symbol) -> dict | None
+ - _NseFetchError exception class
+ - _session_singleton (module-level) so tests can reset it
+
+Behavior notes:
+ - Primes the NSE homepage (simple GET to "/") before calling the API path.
+ - On HTTP 403 from the API returns a raised _NseFetchError (tests expect this).
+ - On non-200, malformed JSON (non-dict), or network errors it records diagnostics
+   and returns {} (recoverable).
+ - Maintains a small in-memory cache when use_cache=True.
 """
 
 from __future__ import annotations
+import logging
 import re
 from datetime import datetime
-import logging
 from typing import Optional, Dict, Any
 import requests
 
 _log = logging.getLogger("data.nse_corp_info")
 
+# Module-level session singleton; tests may reset this to force a fresh session.
+_session_singleton: Optional[requests.Session] = None
+
+# Simple in-memory cache: symbol -> (data_dict, generated_at_iso)
+_cache: Dict[str, Dict[str, Any]] = {}
+
+# Last diagnostics recorded per symbol for observability (used by UI/tests)
 _last_diagnostics: Dict[str, Dict[str, Any]] = {}
 
 
-def _extract_status_code_from_exception(e: Exception) -> Optional[int]:
-    """
-    Extract an HTTP status code from common exception shapes:
-      - requests.HTTPError with .response.status_code
-      - exceptions that have .response or .status_code attributes
-      - numeric status codes embedded in the textual message
+class _NseFetchError(Exception):
+    """Raised when the NSE API explicitly blocks the request (HTTP 403)."""
 
-    Returns status code int or None.
+
+def _extract_status_code_from_exception(exc: Exception) -> Optional[int]:
     """
-    # requests exceptions often have .response
-    resp = getattr(e, "response", None)
+    Best-effort extract of an HTTP status code from an exception object or its text.
+    Looks for:
+      - exc.response.status_code (requests.HTTPError shape)
+      - exc.status_code attribute
+      - first 3-digit number in the exception text
+    """
+    # requests exceptions may carry .response
+    resp = getattr(exc, "response", None)
     if resp is not None:
+        sc = getattr(resp, "status_code", None)
         try:
-            sc = getattr(resp, "status_code", None)
             if sc is not None:
                 return int(sc)
         except Exception:
             pass
 
-    # direct attribute (some libs attach status_code)
-    sc_attr = getattr(e, "status_code", None)
+    sc_attr = getattr(exc, "status_code", None)
     if sc_attr is not None:
         try:
             return int(sc_attr)
         except Exception:
             pass
 
-    # Search text for 3-digit code
-    m = re.search(r"\b(\d{3})\b", str(e))
+    # Fallback: search for a 3-digit code in text
+    m = re.search(r"\b(\d{3})\b", str(exc))
     if m:
         try:
             return int(m.group(1))
@@ -60,80 +76,149 @@ def _extract_status_code_from_exception(e: Exception) -> Optional[int]:
     return None
 
 
-def get_corp_info(symbol: str) -> dict:
-    """
-    Fetch corporate/company info for a ticker symbol from NSE.
+def _ensure_session() -> requests.Session:
+    """Return a module-level Session, creating it if needed."""
+    global _session_singleton
+    if _session_singleton is None:
+        s = requests.Session()
+        # Default headers mimic a real browser to reduce 403 risk in practice.
+        s.headers.update({
+            "User-Agent": "nse-smart-investor/1.0 (+https://example.invalid)",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.nseindia.com/",
+        })
+        _session_singleton = s
+    return _session_singleton
 
-    On success returns a dict of parsed data (shape depends on NSE API).
-    On failure returns {} and records diagnostics in _last_diagnostics[symbol]
-    with keys: ok (bool), status_code (int|None), reason (str), at (iso timestamp).
+
+def get_last_diagnostic(symbol: str) -> Optional[Dict[str, Any]]:
+    """Return the last recorded diagnostic dict for a symbol, or None."""
+    if not symbol:
+        return None
+    sym = symbol.strip().upper()
+    return _last_diagnostics.get(sym)
+
+
+def get_corp_info(symbol: str, use_cache: bool = True) -> dict:
     """
-    symbol = (symbol or "").strip().upper()
+    Fetch corporate info for `symbol` from NSE.
+
+    Parameters:
+      - symbol: ticker symbol, e.g. "RELIANCE.NS" (function normalizes case)
+      - use_cache: if True, return cached data if present (default True).
+                   tests call with use_cache=False to force a fresh fetch.
+
+    Returns:
+      - dict with parsed API result on success
+      - {} on recoverable failure (network error, parse error, non-200)
+    Raises:
+      - _NseFetchError when the API explicitly blocks us (HTTP 403) so callers/tests
+        can detect blocking vs transient failures.
+    """
     if not symbol:
         raise ValueError("symbol required")
+    sym = symbol.strip().upper()
 
-    url = f"https://www.nseindia.com/api/corporate-info/{symbol}"
-    headers = {
-        "User-Agent": "nse-smart-investor/1.0 (+https://example.invalid)",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.nseindia.com/",
-    }
+    # Cache fast-path
+    if use_cache:
+        cached = _cache.get(sym)
+        if cached and isinstance(cached, dict) and "data" in cached:
+            return cached["data"]
+
+    base = "https://www.nseindia.com"
+    homepage_url = base + "/"
+    api_url = f"{base}/api/corporate-info/{sym}"
+
+    session = _ensure_session()
 
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        # Raise for HTTP error to unify handling (requests raises HTTPError on raise_for_status)
+        # Prime the session by GETting the homepage; some NSE endpoints expect this.
         try:
-            resp.raise_for_status()
-        except requests.HTTPError as http_err:
-            # Extract status code and record diagnostics, then return {}
-            sc = _extract_status_code_from_exception(http_err)
-            _last_diagnostics[symbol] = {
+            session.get(homepage_url, timeout=10)
+        except Exception:
+            # Ignore homepage priming errors; we'll still attempt the API call below.
+            _log.debug("nse_corp_info: homepage prime failed (ignoring)")
+
+        resp = session.get(api_url, timeout=10)
+
+        # If blocked (403), record diagnostics and raise explicit blocking error.
+        if getattr(resp, "status_code", None) == 403:
+            diag = {
                 "ok": False,
-                "status_code": sc,
-                "reason": str(http_err),
+                "status_code": 403,
+                "reason": "HTTP 403 Forbidden from NSE API",
                 "at": datetime.now().isoformat(),
             }
-            _log.debug("nse_corp_info: request failed for %s: status=%s reason=%s", symbol, sc, http_err)
+            _last_diagnostics[sym] = diag
+            _log.warning("nse_corp_info: blocked fetching %s — status=403", sym)
+            raise _NseFetchError("NSE returned HTTP 403 Forbidden")
+
+        if getattr(resp, "status_code", None) != 200:
+            # Non-200 (but not 403): record and return empty dict
+            sc = getattr(resp, "status_code", None)
+            diag = {
+                "ok": False,
+                "status_code": sc,
+                "reason": f"HTTP {sc} from NSE API",
+                "at": datetime.now().isoformat(),
+            }
+            _last_diagnostics[sym] = diag
+            _log.debug("nse_corp_info: non-200 fetching %s — status=%s", sym, sc)
             return {}
 
-        # Try parse response JSON defensively
+        # Parse JSON defensively
         try:
             parsed = resp.json()
         except Exception:
-            # Some endpoints return text: fall back to text parse attempt
-            txt = resp.text
+            # fallback: try to parse text as JSON if possible
             try:
                 import json as _json
-                parsed = _json.loads(txt)
-            except Exception:
-                parsed = None
+                parsed = _json.loads(resp.text or "")
+            except Exception as _e:
+                diag = {
+                    "ok": False,
+                    "status_code": getattr(resp, "status_code", None),
+                    "reason": f"failed to parse JSON: {str(_e)}",
+                    "at": datetime.now().isoformat(),
+                }
+                _last_diagnostics[sym] = diag
+                _log.debug("nse_corp_info: JSON parse failed for %s: %s", sym, _e)
+                return {}
 
-        if not parsed:
-            _last_diagnostics[symbol] = {
+        # Ensure parsed is a dict — callers expect dict shape
+        if not isinstance(parsed, dict):
+            diag = {
                 "ok": False,
                 "status_code": getattr(resp, "status_code", None),
-                "reason": "failed to parse response body",
+                "reason": "parsed JSON not an object/dict",
                 "at": datetime.now().isoformat(),
             }
-            _log.debug("nse_corp_info: parsed empty for %s; text len=%d", symbol, len(resp.text or ""))
+            _last_diagnostics[sym] = diag
+            _log.debug("nse_corp_info: parsed JSON is not dict for %s (type=%s)", sym, type(parsed))
             return {}
 
-        # On success, clear/update diagnostics
-        _last_diagnostics[symbol] = {
+        # Success: cache & diagnostics
+        _cache[sym] = {"data": parsed, "generated_at": datetime.now().isoformat()}
+        _last_diagnostics[sym] = {
             "ok": True,
             "status_code": getattr(resp, "status_code", None),
             "reason": "ok",
             "at": datetime.now().isoformat(),
         }
-        return parsed if isinstance(parsed, dict) else {"result": parsed}
+        return parsed
 
+    except _NseFetchError:
+        # Already recorded diagnostics above; re-raise so tests can detect 403
+        raise
     except Exception as e:
+        # Network/parsing/other unexpected errors: record and return {}
         sc = _extract_status_code_from_exception(e)
-        _last_diagnostics[symbol] = {
+        diag = {
             "ok": False,
             "status_code": sc,
             "reason": str(e),
             "at": datetime.now().isoformat(),
         }
-        _log.debug("nse_corp_info: fetch failed for %s: %s (extracted_status=%s)", symbol, e, sc)
+        _last_diagnostics[sym] = diag
+        _log.debug("nse_corp_info: fetch failed for %s: %s (extracted_status=%s)", sym, e, sc)
         return {}
