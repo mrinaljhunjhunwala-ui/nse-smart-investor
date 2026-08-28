@@ -52,6 +52,7 @@ def test_fetch_single_stooq_then_yahoo_fallback(monkeypatch):
     def fake_yahoo(ticker, period=None, interval=None):
         return sample.copy()
 
+    monkeypatch.setattr(fetcher, "_FETCH_CACHE", {}, raising=False)
     monkeypatch.setattr(fetcher, "_fetch_stooq", fake_stooq)
     monkeypatch.setattr(fetcher, "_fetch_yahoo_direct", fake_yahoo)
     # Ensure Angel is not used
@@ -71,6 +72,13 @@ def test_fetch_single_all_providers_fail(monkeypatch):
     def bad_yahoo(t, period=None, interval=None):
         raise ValueError("yahoo fail")
 
+    # Reset the module-level fetch cache — without this, a prior test in the
+    # same session (test_fetch_single_stooq_then_yahoo_fallback, same ticker/
+    # period/interval) leaves a valid cache entry behind, fetch_single()
+    # returns it without ever calling stooq/yahoo, and this test never
+    # observes the ValueError it's asserting on. Order-dependent pollution
+    # via shared global state, not a production bug.
+    monkeypatch.setattr(fetcher, "_FETCH_CACHE", {}, raising=False)
     monkeypatch.setattr(fetcher, "_fetch_stooq", bad_stooq)
     monkeypatch.setattr(fetcher, "_fetch_yahoo_direct", bad_yahoo)
     # Angel disabled
