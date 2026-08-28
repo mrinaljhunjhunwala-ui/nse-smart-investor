@@ -11,6 +11,18 @@ font                     = "sans serif"
 
 [server]
 headless = true
+# FIX CFG1 — production hardening for Streamlit Cloud:
+#  * runOnSave: default is true, which triggers a full app rerun on every file
+#    write. Harmless in dev, wasteful in prod where the "file" doesn't change
+#    while a viewer is on the page.
+#  * enableXsrfProtection defaults on; explicit for auditability.
+runOnSave            = false
+enableXsrfProtection = true
+
+[browser]
+# The default gathers usage metrics from every viewer of the app and forwards
+# them to a third party. Off in prod.
+gatherUsageStats = false
 
 # Hide Streamlit's auto-generated pages/ navigation — the app ships its own
 # grouped sidebar nav in dashboard/shared/nav.py (render_sidebar). Without this,

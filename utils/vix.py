@@ -35,48 +35,29 @@ def get_india_vix_regime() -> Dict:
         return {k: v for k, v in _VIX_CACHE.items() if k != "_ts"}
 
     try:
-        import http.cookiejar
         import json
         import urllib.parse
         import urllib.request
 
-        # ── Step 1: build cookie-aware opener (Yahoo requires GUC/B cookies) ──
-        cj     = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-        _ua    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        opener.addheaders = [("User-Agent", _ua), ("Accept", "application/json, */*")]
+        # FIX YF-SESSION — this used to open its OWN cookie jar + do its OWN
+        # two-step consent-gate + crumb dance, duplicating what data.fetcher's
+        # _get_yf_crumb() already does (and caches for 30 minutes). Two separate
+        # sessions meant a fresh 4-request handshake here on every 10-minute
+        # cache miss even when the fetcher already had a live one, and the
+        # module docstring's "deliberately has NO imports from this project"
+        # rule (written to avoid a stale sys.modules chain) is preserved by
+        # importing lazily inside the function rather than at module top-level.
+        # If the shared crumb call fails for any reason we fall back to an
+        # unauthenticated request — same graceful path as the old inline code.
+        try:
+            from data.fetcher import _get_yf_crumb
+            _opener, _crumb = _get_yf_crumb()
+        except Exception as e:
+            _log.debug("VIX: shared YF session unavailable, going unauthenticated: %s", e)
+            _opener, _crumb = urllib.request.build_opener(), ""
 
-        for _gate in ("https://fc.yahoo.com/", "https://finance.yahoo.com/"):
-            try:
-                opener.open(urllib.request.Request(
-                    _gate, headers={"User-Agent": _ua}
-                ), timeout=8)
-                break
-            except Exception as e:
-                _log.debug("VIX gateway %s failed: %s", _gate, e)  # try next gateway
-                continue
-
-        # ── Step 2: get crumb token ───────────────────────────────────────────
-        crumb = ""
-        for _cu in (
-            "https://query2.finance.yahoo.com/v1/test/getcrumb",
-            "https://query1.finance.yahoo.com/v1/test/getcrumb",
-        ):
-            try:
-                with opener.open(
-                    urllib.request.Request(_cu, headers={"User-Agent": _ua}),
-                    timeout=8,
-                ) as _r:
-                    _raw = _r.read().decode("utf-8").strip()
-                    if _raw and len(_raw) <= 25 and not _raw.startswith("<"):
-                        crumb = _raw
-                        break
-            except Exception as e:
-                _log.debug("VIX crumb %s failed: %s", _cu, e)  # try next crumb endpoint
-                continue
-
-        # ── Step 3: fetch India VIX (^INDIAVIX) ──────────────────────────────
-        _cqs = f"&crumb={urllib.parse.quote(crumb)}" if crumb else ""
+        _ua  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        _cqs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
         url  = (
             "https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
             f"?interval=1d&range=5d&includePrePost=false{_cqs}"
@@ -85,7 +66,7 @@ def get_india_vix_regime() -> Dict:
             "User-Agent": _ua,
             "Accept":     "application/json",
         })
-        with opener.open(req, timeout=10) as r:
+        with _opener.open(req, timeout=10) as r:
             data = json.loads(r.read())
 
         closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
