@@ -5,7 +5,7 @@ only score variants against the production composite, through the same
 research/score_variants.py.
 
 WHY THIS EXISTS: the July 2026 score_efficacy.py / regime_study.py runs
-(SCORE_EFFICACY_REPORT.md / REGIME_STUDY_REPORT.md, post FIX EFF1) found the
+(docs/SCORE_EFFICACY_REPORT.md / docs/REGIME_STUDY_REPORT.md, post FIX EFF1) found the
 volume component (15 of 90 pts) showing near-zero-to-negative Spearman
 correlation with forward returns in EVERY regime breakdown in BOTH studies:
 
@@ -14,7 +14,7 @@ correlation with forward returns in EVERY regime breakdown in BOTH studies:
 
 That's the same shape of evidence (near-zero-to-negative across every
 regime) that motivated the pattern component's removal
-(RESEARCH_SCORE_VARIANTS.md, PATTERN_REMOVAL_MIGRATION.md) — but a
+(docs/RESEARCH_SCORE_VARIANTS.md, docs/PATTERN_REMOVAL_MIGRATION.md) — but a
 correlation number alone isn't sufficient grounds to change production
 weights, per this codebase's own established discipline: test a variant
 first, look at decile monotonicity + regime breakdown, THEN decide.

@@ -1,6 +1,6 @@
 """analysis/fundamentals/valuation_decision.py — Valuation Decision Layer (Phase E1-v2).
 
-Implements VALUATION_DECISION_E1_V2_SPEC.md exactly: a sector-aware, growth- and
+Implements docs/VALUATION_DECISION_E1_V2_SPEC.md exactly: a sector-aware, growth- and
 quality-adjusted *descriptive* valuation posture, with all stress-test guardrails
 (G1 peak, G2 quality gate, G3 PEG band, G4 cash-conversion veto, G5–G10) applied as an
 ORDERED pipeline — guards run BEFORE the reasoning matrices.

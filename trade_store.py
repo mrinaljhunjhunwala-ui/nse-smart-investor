@@ -155,7 +155,7 @@ def validate_persistence() -> dict:
         status["warnings"].append(
             "SQLite backend: storage is EPHEMERAL on Streamlit Cloud — paper trades, "
             "watchlist and saved settings RESET on every redeploy. Set DATABASE_URL "
-            "(Postgres) to persist them. See DEPLOYMENT_CHECKLIST.md."
+            "(Postgres) to persist them. See docs/DEPLOYMENT_CHECKLIST.md."
         )
     try:
         ensure_schema()

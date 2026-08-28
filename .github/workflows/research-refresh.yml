@@ -2,7 +2,7 @@ name: Research Refresh (score efficacy + regime study)
 # Manually-triggered only — this is an occasional, deliberate re-run of the
 # two read-only research scripts, not part of every push/PR.
 #
-# WHY THIS EXISTS: SCORE_EFFICACY_REPORT.md and REGIME_STUDY_REPORT.md were
+# WHY THIS EXISTS: docs/SCORE_EFFICACY_REPORT.md and docs/REGIME_STUDY_REPORT.md were
 # both committed 2026-06-10, but the walk-forward loop in both
 # research/score_efficacy.py and research/regime_study.py raised
 # AttributeError on cs.pattern_score on EVERY sample (analysis/score.py
@@ -14,7 +14,7 @@ name: Research Refresh (score efficacy + regime study)
 # market-alerts.yml, which hits the same providers on a schedule).
 #
 # Also runs research/score_variants_volume.py — a follow-up variant study
-# (same discipline as RESEARCH_SCORE_VARIANTS.md's pattern/oversold-RSI
+# (same discipline as docs/RESEARCH_SCORE_VARIANTS.md's pattern/oversold-RSI
 # tests) checking whether the volume component (15/90 pts) is dead weight,
 # after the real score_efficacy/regime_study runs above found it near-zero-
 # to-negative in every regime breakdown in both studies.

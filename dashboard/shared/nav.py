@@ -718,7 +718,7 @@ def render_sidebar(current: str = None) -> None:
                              + (_pv.get("error") or ""))
         elif _pv.get("ephemeral"):
             st.sidebar.caption("🟡 Paper trades & watchlist: local SQLite — **resets on "
-                               "redeploy**. Set DATABASE_URL to persist (DEPLOYMENT_CHECKLIST.md).")
+                               "redeploy**. Set DATABASE_URL to persist (docs/DEPLOYMENT_CHECKLIST.md).")
         else:
             st.sidebar.caption("🟢 Paper trades & watchlist: cloud DB (persistent)")
         if st.session_state.get("_persist_failed"):

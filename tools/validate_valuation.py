@@ -32,7 +32,7 @@ if _ROOT not in sys.path:
 
 DEFAULT_SNAPSHOT = os.path.join("data", "valuation_golden_snapshot.json")
 
-# The 62 V1-validated tickers (V1_NSE_VALIDATION_REPORT.md) — the regression seed.
+# The 62 V1-validated tickers (docs/V1_NSE_VALIDATION_REPORT.md) — the regression seed.
 SEED_TICKERS = [
     # Nifty50
     "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "HINDUNILVR", "ITC", "LT",
@@ -93,7 +93,7 @@ def write_snapshot(path: str, tickers: dict) -> None:
     payload = {
         "schema_version": 1,
         "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
-        "source": "V1_NSE_VALIDATION_REPORT.md",
+        "source": "docs/V1_NSE_VALIDATION_REPORT.md",
         "tickers": tickers,
     }
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

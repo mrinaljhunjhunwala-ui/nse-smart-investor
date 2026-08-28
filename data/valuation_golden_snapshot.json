@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-06-06T02:54:00",
   "schema_version": 1,
-  "source": "V1_NSE_VALIDATION_REPORT.md",
+  "source": "docs/V1_NSE_VALIDATION_REPORT.md",
   "tickers": {
     "ABB": {
       "branch": "non-financial",

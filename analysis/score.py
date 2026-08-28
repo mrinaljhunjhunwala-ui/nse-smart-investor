@@ -10,9 +10,9 @@ Score breakdown (90 pts max):
     Sentiment   10 pts  — India VIX regime + sector rank
 
 Candlestick patterns are detected and shown in the narrative but are NOT
-scored. The 5-year variant study (RESEARCH_SCORE_VARIANTS.md, 40,663
+scored. The 5-year variant study (docs/RESEARCH_SCORE_VARIANTS.md, 40,663
 observations) found the 10-pt pattern component contributed zero-to-negative
-ranking power in every market regime. See PATTERN_REMOVAL_MIGRATION.md.
+ranking power in every market regime. See docs/PATTERN_REMOVAL_MIGRATION.md.
 
 Grades:   A+ (≥88) | A (≥75) | B (≥62) | C (≥48) | D (≥32) | F (<32)
 Actions:  STRONG BUY | BUY | WATCHLIST | HOLD | CAUTION | EXIT

@@ -9,7 +9,7 @@ professional, non-alarmist disclosure:
   • render_regime_reliability_note() — VIX-regime reliability note from the 5y regime study
 
 The score components implement Phase 1 (UI honesty) of the score research:
-SCORE_EFFICACY_REPORT.md and REGIME_STUDY_REPORT.md found the composite score
+docs/SCORE_EFFICACY_REPORT.md and docs/REGIME_STUDY_REPORT.md found the composite score
 correlates with trend persistence (+0.41 Spearman) far more than with future
 returns (+0.04), and that its ranking power degrades/inverts in elevated-fear
 regimes. Wording here reflects those findings; the scoring engine is unchanged.
@@ -76,7 +76,7 @@ def render_score_methodology(expanded: bool = False) -> None:
     """'What this score measures' — reusable methodology transparency component.
 
     Shown wherever the trend-quality (composite) score is a primary element.
-    Grounded in the 5-year regime study (REGIME_STUDY_REPORT.md, re-run July
+    Grounded in the 5-year regime study (docs/REGIME_STUDY_REPORT.md, re-run July
     2026 after FIX EFF1, 86,589 obs).
     """
     with st.expander("ℹ️ What this score measures", expanded=expanded):
@@ -104,7 +104,7 @@ def render_regime_reliability_note() -> None:
     """VIX-regime reliability note for score surfaces.
 
     The 5-year regime study (research/regime_study.py, re-run July 2026 after
-    FIX EFF1 — see REGIME_STUDY_REPORT.md) found score rankings work in
+    FIX EFF1 — see docs/REGIME_STUDY_REPORT.md) found score rankings work in
     complacency-VIX regimes but degrade and invert as VIX rises (Spearman vs
     60-day forward return): complacency +0.15, normal −0.03, elevated −0.01,
     fear −0.06. "Normal" VIX is NOT reliably informative despite sitting
@@ -147,7 +147,7 @@ def render_revenue_growth_evidence() -> None:
     """Brief evidence disclosure for revenue growth (Revenue Growth Visibility
     Phase 1, R4). Same honesty discipline as the trend-quality components:
     states the research finding, avoids recommendation/forecast/certainty.
-    Source: FUNDAMENTAL_QUALITY_REPORT.md (4,266 point-in-time observations)."""
+    Source: docs/FUNDAMENTAL_QUALITY_REPORT.md (4,266 point-in-time observations)."""
     st.caption(
         "🔬 Revenue growth has been the **strongest return-predictive signal** "
         "identified in platform research (2022–2025 validation). Historical "

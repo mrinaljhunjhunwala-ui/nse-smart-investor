@@ -93,7 +93,7 @@ class PortfolioRiskResult:
                 ("Annualised Volatility", self.annualized_vol_pct, "%")]
 
 
-# Fixed taxonomy (per PORTFOLIO_NAV_ASSUMPTION_AUDIT.md severity findings)
+# Fixed taxonomy (per docs/PORTFOLIO_NAV_ASSUMPTION_AUDIT.md severity findings)
 ROBUST_RISK_METRICS = ("Portfolio Beta", "Annualised Volatility", "Correlation",
                        "Risk Contribution")
 HYPOTHETICAL_PERF_METRICS = ("CAGR (Ann. Return)", "Total Return", "Sharpe", "Sortino",

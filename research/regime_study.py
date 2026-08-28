@@ -156,7 +156,7 @@ def _walk_forward_5y(ticker: str, df: pd.DataFrame, sector: str,
             "volume":    float(cs.volume_score),
             # FIX EFF1 (companion to research/score_efficacy.py) — cs.pattern_score
             # no longer exists on CompositeScore (removed in production; see
-            # PATTERN_REMOVAL_MIGRATION.md). This raised AttributeError on every
+            # docs/PATTERN_REMOVAL_MIGRATION.md). This raised AttributeError on every
             # walk-forward sample, so this study has never actually completed a
             # run either. Binary any-pattern-detected flag, same fix as the
             # sibling script.

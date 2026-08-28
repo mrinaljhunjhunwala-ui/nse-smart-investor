@@ -74,7 +74,7 @@ def test_replay_no_drift(snap):
 # ── Layer 2: structure + known V1 postures ───────────────────────────────────────
 def test_snapshot_valid_json_and_schema(snap):
     assert snap.get("schema_version") == 1
-    assert snap.get("source") == "V1_NSE_VALIDATION_REPORT.md"
+    assert snap.get("source") == "docs/V1_NSE_VALIDATION_REPORT.md"
     assert isinstance(snap.get("tickers"), dict)
 
 

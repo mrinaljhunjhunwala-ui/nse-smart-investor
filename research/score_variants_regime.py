@@ -4,7 +4,7 @@ conditional score-reweighting variants against the production composite,
 through the same 5-year walk-forward framework as research/regime_study.py,
 research/score_variants.py and research/score_variants_volume.py.
 
-WHY THIS EXISTS: REGIME_STUDY_REPORT.md (86,589 obs, 2026-07-15) found the
+WHY THIS EXISTS: docs/REGIME_STUDY_REPORT.md (86,589 obs, 2026-07-15) found the
 composite score's ranking power flips sign by market regime — positive in
 bull (+0.061, beating naive momentum there), inverted in bear (-0.062 at
 fwd20, -0.104 at fwd60), near-flat in sideways (+0.014). Its Q4 component
@@ -23,7 +23,7 @@ forward observation's already-computed CompositeScore sub-scores (tech/mom/
 vol/sent — same convention as score_variants_volume.py) PLUS that
 observation's market regime label (bull/bear/sideways, from
 regime_study._market_regime_series — same regime rule used to produce
-REGIME_STUDY_REPORT.md, so results are directly comparable to it):
+docs/REGIME_STUDY_REPORT.md, so results are directly comparable to it):
 
   BASE   : production 90-pt composite (sentiment neutralised, same
            convention as the other variant scripts) = tech + mom + vol + sent,
@@ -47,7 +47,7 @@ REGIME_STUDY_REPORT.md, so results are directly comparable to it):
            percentile rank within its own trailing 252-day distribution of
            5-day returns, inverted (low recent 5d return -> high reversal
            score) and scaled to momentum's 0-25 point range. This directly
-           tests REGIME_STUDY_REPORT.md's Q5 finding of a real bear-regime
+           tests docs/REGIME_STUDY_REPORT.md's Q5 finding of a real bear-regime
            reversal edge (+0.106 Spearman, vs momentum's own -0.020 there)
            — but per the report's explicit caveat, a positive result here
            is grounds for FURTHER study, not for shipping a mean-reversion

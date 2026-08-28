@@ -12,12 +12,12 @@ the production score at each observation:
   Variant C : BASE − pattern − oversold-RSI bonus (remove both)
 
 NOTE (post pattern-removal): candlestick patterns are no longer a scored
-component in production at all (PATTERN_REMOVAL_MIGRATION.md) — this
+component in production at all (docs/PATTERN_REMOVAL_MIGRATION.md) — this
 script's own original run is what motivated that removal. BASE therefore
 already has zero pattern contribution, which makes Variant A mathematically
 identical to BASE, and Variant C identical to Variant B. They're kept in the
 variant list for continuity with the historical report in
-RESEARCH_SCORE_VARIANTS.md, but only Variant B (oversold-RSI bonus removal)
+docs/RESEARCH_SCORE_VARIANTS.md, but only Variant B (oversold-RSI bonus removal)
 tests a question that's still actually open.
 
 Definition of "remove the oversold-RSI bonus" (documented design decision):
@@ -145,7 +145,7 @@ def _walk_forward_variants(ticker: str, df: pd.DataFrame,
         # broken by the removal — its whole original purpose was to test
         # "does removing the pattern component improve the score," and that
         # question was already answered (pattern hurts) and already acted on:
-        # PATTERN_REMOVAL_MIGRATION.md confirms it's gone from production for
+        # docs/PATTERN_REMOVAL_MIGRATION.md confirms it's gone from production for
         # good. So `base` (cs.score minus sentiment) is now ALREADY the
         # "no pattern" score — pattern's point contribution is definitionally
         # 0 in the current model. Reconstructing a nonzero synthetic value

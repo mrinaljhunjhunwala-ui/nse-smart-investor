@@ -12,7 +12,7 @@ Methodology (agreed spec):
     framed as ranking power *within surviving* liquid NSE names.
   • Sentiment handled separately — the primary metric is the 90-point
     price-derived score (technical+momentum+volume). Candlestick patterns are
-    no longer a scored component in production (see PATTERN_REMOVAL_MIGRATION.md);
+    no longer a scored component in production (see docs/PATTERN_REMOVAL_MIGRATION.md);
     "pattern" here is tracked as a binary any-pattern-detected flag for factor
     attribution, not a point value. VIX regime is used as a BREAKDOWN label
     (reconstructed from the historical ^INDIAVIX series), not as a score input.
@@ -218,7 +218,7 @@ def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
             "volume":    float(cs.volume_score),
             # FIX EFF1 — cs.pattern_score no longer exists: analysis/score.py
             # removed it in favor of patterns_detected: List[str] (informational
-            # only, no longer scored — see PATTERN_REMOVAL_MIGRATION.md). This
+            # only, no longer scored — see docs/PATTERN_REMOVAL_MIGRATION.md). This
             # line previously raised AttributeError on every single walk-forward
             # sample, meaning this script has never actually completed a run.
             # Track pattern presence as a binary flag (any pattern detected at

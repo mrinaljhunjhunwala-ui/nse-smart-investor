@@ -71,7 +71,7 @@ with sc3:
     enrich_scores = st.checkbox("Enrich with trend-quality score", value=True,
                                 help="Adds the 0-100 trend-quality score to each result (slower)")
 
-# ── Revenue-growth filter (R1 — per REVENUE_GROWTH_DISCOVERY_AUDIT.md) ────────
+# ── Revenue-growth filter (R1 — per docs/REVENUE_GROWTH_DISCOVERY_AUDIT.md) ────────
 # Thresholds capped at 15%: the audit showed >20% concentrates results into one
 # sector and silently removes 19/21 top trend-quality names. Default "Any" so
 # the column informs without filtering; missing data is included by default.
