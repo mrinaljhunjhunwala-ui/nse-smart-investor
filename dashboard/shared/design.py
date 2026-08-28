@@ -25,7 +25,11 @@ import plotly.express as px
 import plotly.io as pio
 from plotly.subplots import make_subplots
 import streamlit as st
-warnings.filterwarnings('ignore')
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)

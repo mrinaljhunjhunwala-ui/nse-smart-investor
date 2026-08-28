@@ -42,7 +42,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
-warnings.filterwarnings("ignore")
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 
 _log = logging.getLogger("analysis.score")
 
@@ -63,13 +67,66 @@ _get_india_vix_regime  = None
 
 # FIX LAZY1 — score_stock() previously called add_all_indicators() with no
 # argument, computing all 14 indicator groups (82 columns) even though this
-# function only ever reads columns from 6 of them. Verified by grepping every
-# column access in this file: SMA_20/50/200 ("ma"), RSI ("rsi"),
-# MACD/MACD_Signal/MACD_Hist ("macd"), ADX ("adx"), Volume_Ratio/OBV
-# ("volume"), ATR ("atr"). Do NOT add groups here speculatively — if
-# score_stock() is changed to read a new indicator column, add that column's
-# group here at the same time, or it will KeyError at the dropna/read site.
-_SCORE_INDICATOR_GROUPS = ("ma", "rsi", "macd", "adx", "volume", "atr")
+# function only ever reads columns from 6 of them. Do NOT add groups here
+# speculatively — if score_stock() is changed to read a new indicator column,
+# add that column's group here at the same time, or it will KeyError at the
+# dropna/read site.
+#
+# FIX SCORE-PAT — "patterns" and "divergence" were MISSING from this tuple even
+# though score_dataframe() calls _detect_patterns(), which reads Pat_Doji,
+# Pat_Hammer, Pat_ShootingStar, Pat_BullMarubozu, Pat_BearMarubozu,
+# Pat_BullEngulfing, Pat_BearEngulfing, Pat_MorningStar, Pat_EveningStar,
+# RSI_Bull_Div and RSI_Bear_Div. Because _detect_patterns() guards every read
+# with `if col in recent.columns` / `cur.get(col, 0)`, the omission did not
+# raise — it silently returned an EMPTY pattern list for every stock scored
+# through score_stock(), which is the entry point behind Top Picks, the
+# screener, Analyze Stock, Watchlist and Quality Watch. Downstream that meant:
+#   * CompositeScore.patterns_detected was always []
+#   * the headline never got its "(BullEngulfing pattern)" suffix
+#   * _build_narrative()'s sentence 4 could never take the pattern branch, so
+#     the "volume × pattern confirmation" line and the bearish-pattern warning
+#     were dead code for the main path
+# i.e. a documented, user-facing feature was switched off by an optimisation
+# that only audited the *numeric* score's column reads and missed the narrative
+# layer's. The tests didn't catch it because test_smoke_score_indicators.py only
+# asserts `isinstance(cs.patterns_detected, list)` — [] satisfies that.
+#
+# Both groups are cheap enough to restore: "patterns" is fully vectorised, and
+# "divergence" is now vectorised too (FIX IND5 in utils/indicators.py replaced
+# its per-bar Python loop with sliding_window_view), so this no longer
+# reintroduces the per-ticker cost that motivated FIX LAZY1.
+_SCORE_INDICATOR_GROUPS = (
+    "ma", "rsi", "macd", "adx", "volume", "atr", "patterns", "divergence",
+)
+
+
+def _num(row: "pd.Series", key: str, default: float) -> float:
+    """
+    Read a numeric field from an indicator row, falling back to `default` when
+    the value is missing OR NaN.
+
+    FIX SCORE-NAN — the scorers used `float(cur.get("SMA_200", price * 0.80))`.
+    `Series.get(key, default)` only returns the default when the KEY IS ABSENT;
+    when the column exists but the value is NaN — the normal case during an
+    indicator's warm-up — it returns NaN, and `float(nan)` propagates. Every
+    subsequent comparison against NaN is False under IEEE-754, so the intended
+    fallback never applied and the value silently fell through to the LAST
+    branch of each ladder:
+      * _score_technical()'s SMA stack awarded 0.0 / 10 whenever SMA_200 was
+        NaN (a stock with under 200 bars of history — recent listings, and any
+        caller passing a shorter period to score_dataframe()), scoring it
+        identically to a stock genuinely trading below its 200-day average.
+      * the same pattern applied to RSI, ADX, MACD and Volume_Ratio.
+    Reading through this helper makes the documented default actually take
+    effect, so "unknown" no longer silently reads as "bearish".
+    """
+    val = row.get(key, default)
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return default
+    return default if math.isnan(f) else f
+
 
 def _load_deps() -> bool:
     global _DEPS_LOADED, _fetch_single, _get_sector, _resolve_ticker
@@ -171,18 +228,21 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
     cur  = df.iloc[-1]
     prev = df.iloc[-2] if len(df) > 1 else cur
 
-    rsi    = float(cur.get("RSI",         50))
-    macd   = float(cur.get("MACD",         0))
-    sig    = float(cur.get("MACD_Signal",  0))
-    macd_p = float(prev.get("MACD",        0))
-    sig_p  = float(prev.get("MACD_Signal", 0))
-    hist   = float(cur.get("MACD_Hist",    0))
-    hist_p = float(prev.get("MACD_Hist",   0))
-    adx    = float(cur.get("ADX",         15))
+    # FIX SCORE-NAN: read through _num() so an indicator still in its warm-up
+    # (NaN, not missing) uses the documented default instead of poisoning every
+    # comparison below into False. See _num()'s docstring.
+    rsi    = _num(cur,  "RSI",         50)
+    macd   = _num(cur,  "MACD",         0)
+    sig    = _num(cur,  "MACD_Signal",  0)
+    macd_p = _num(prev, "MACD",         0)
+    sig_p  = _num(prev, "MACD_Signal",  0)
+    hist   = _num(cur,  "MACD_Hist",    0)
+    hist_p = _num(prev, "MACD_Hist",    0)
+    adx    = _num(cur,  "ADX",         15)
     price  = float(cur["Close"])
-    sma20  = float(cur.get("SMA_20",  price * 0.95))
-    sma50  = float(cur.get("SMA_50",  price * 0.90))
-    sma200 = float(cur.get("SMA_200", price * 0.80))
+    sma20  = _num(cur, "SMA_20",  price * 0.95)
+    sma50  = _num(cur, "SMA_50",  price * 0.90)
+    sma200 = _num(cur, "SMA_200", price * 0.80)
 
     pts: Dict[str, float] = {}
 
@@ -238,7 +298,19 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
     close = df["Close"]
     r5d   = float(close.pct_change(5).iloc[-1])  * 100
     r20d  = float(close.pct_change(20).iloc[-1]) * 100
-    r60d  = float(close.pct_change(60).iloc[-1]) * 100 if len(df) >= 60 else 0.0
+
+    # FIX SCORE-R60 — when fewer than 60 bars were available this used to set
+    # r60d = 0.0 and score it like any other number. 0.0 does not land in a
+    # neutral bucket: it falls past `r60d > 0` (0 is not > 0) into the
+    # `r60d > -10` branch, which pays 1.0 of 10 points. So "we have no 3-month
+    # history for this stock" was scored as "this stock is slightly DOWN over
+    # 3 months" — a 9-point penalty out of a 25-point momentum budget, applied
+    # to every recent listing and every caller passing a short frame to
+    # score_dataframe(). Same defect family as FIX SCORE-NAN: absence of
+    # evidence read as evidence of weakness. Unknown now scores the neutral
+    # midpoint of that component and says so, rather than quietly convicting.
+    has_r60 = len(df) >= 61
+    r60d    = float(close.pct_change(60).iloc[-1]) * 100 if has_r60 else float("nan")
 
     pts: Dict[str, float] = {}
 
@@ -259,7 +331,12 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
     else:           pts["r20d"] = 0.0
 
     # 60-day return — 10 pts
-    if r60d > 25:    pts["r60d"] = 10.0
+    if not has_r60:
+        # FIX SCORE-R60: unknown ≠ weak. Neutral midpoint of this component,
+        # flagged so the narrative can disclose it instead of silently
+        # presenting a penalised score as a considered one.
+        pts["r60d"] = 5.0
+    elif r60d > 25:  pts["r60d"] = 10.0
     elif r60d > 15:  pts["r60d"] = 8.0
     elif r60d > 8:   pts["r60d"] = 6.0
     elif r60d > 3:   pts["r60d"] = 5.0
@@ -269,7 +346,8 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
 
     pts["_r5d"]  = round(r5d,  2)
     pts["_r20d"] = round(r20d, 2)
-    pts["_r60d"] = round(r60d, 2)
+    pts["_r60d"] = round(r60d, 2) if has_r60 else None
+    pts["r60d_available"] = has_r60
 
     total = pts["r5d"] + pts["r20d"] + pts["r60d"]
     return round(min(total, 25.0), 2), pts
@@ -281,9 +359,9 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
 
 def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
     cur        = df.iloc[-1]
-    vol_ratio  = float(cur.get("Volume_Ratio", 1.0))
+    vol_ratio  = _num(cur, "Volume_Ratio", 1.0)   # FIX SCORE-NAN
     close      = float(cur["Close"])
-    open_price = float(cur.get("Open", close))
+    open_price = _num(cur, "Open", close)
     up_day     = close >= open_price
 
     pts: Dict[str, float] = {}
@@ -518,12 +596,15 @@ def _build_narrative(
 
     cur        = df.iloc[-1]
     price      = float(cur["Close"])
-    rsi        = float(cur.get("RSI", 50))
-    sma20      = float(cur.get("SMA_20",  price))
-    sma200     = float(cur.get("SMA_200", price * 0.8))
-    vol        = float(cur.get("Volume_Ratio", 1.0))
+    rsi        = _num(cur, "RSI",          50)          # FIX SCORE-NAN
+    sma20      = _num(cur, "SMA_20",       price)
+    sma200     = _num(cur, "SMA_200",      price * 0.8)
+    vol        = _num(cur, "Volume_Ratio", 1.0)
     r20d       = mom_pts.get("_r20d", 0.0)
-    r60d       = mom_pts.get("_r60d", 0.0)
+    # FIX SCORE-R60: _r60d is None when there is under 60 bars of history — the
+    # sentence below must say so rather than format None or print a fake 0.0%.
+    r60d       = mom_pts.get("_r60d")
+    has_r60    = r60d is not None
     bull_pats  = [p for p in patterns if "⚠️" not in p]
     bear_pats  = [p for p in patterns if "⚠️" in p]
     short_name = ticker.replace(".NS", "")
@@ -602,10 +683,17 @@ def _build_narrative(
             "— treat the momentum score as indicative only."
         )
     elif r20d > 10:
-        parts.append(
-            f"The stock has gained {r20d:.1f}% in the last month and {r60d:.1f}% "
-            f"over 3 months — strong institutional interest."
-        )
+        if has_r60:
+            parts.append(
+                f"The stock has gained {r20d:.1f}% in the last month and {r60d:.1f}% "
+                f"over 3 months — strong institutional interest."
+            )
+        else:
+            parts.append(
+                f"The stock has gained {r20d:.1f}% in the last month — strong buying "
+                f"interest. Under 3 months of price history is available, so the "
+                f"3-month momentum component is scored neutral rather than measured."
+            )
     elif r20d > 3:
         parts.append(f"Returns over the last month: +{r20d:.1f}%. Steady accumulation phase.")
     elif r20d >= -3:

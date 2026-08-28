@@ -40,7 +40,11 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-warnings.filterwarnings("ignore")
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 
 _log = logging.getLogger("analysis.macro")
 
@@ -120,7 +124,10 @@ def _fetch_yahoo_macro(symbol: str, period: str = "3mo") -> pd.DataFrame:
     timestamps = r0.get("timestamp", [])
     quote      = r0["indicators"]["quote"][0]
 
-    dates = [datetime.datetime.utcfromtimestamp(ts).date() for ts in timestamps]
+    # utcfromtimestamp() is deprecated (3.12+) and returns a naive datetime that
+    # only claims to be UTC; fromtimestamp(..., tz=utc) is the supported form.
+    dates = [datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).date()
+             for ts in timestamps]
     df = pd.DataFrame({
         "Open":   quote.get("open",   [None] * len(dates)),
         "High":   quote.get("high",   [None] * len(dates)),

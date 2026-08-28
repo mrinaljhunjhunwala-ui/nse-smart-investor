@@ -46,7 +46,11 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-warnings.filterwarnings("ignore")
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 _log = logging.getLogger("portfolio_manager")
 
 

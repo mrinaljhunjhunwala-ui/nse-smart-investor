@@ -38,8 +38,74 @@ _log = logging.getLogger("data.fetcher")
 
 # ── In-process cache: {(ticker, period, interval): (dataframe, timestamp)} ──────
 # Entries expire after _FETCH_CACHE_TTL seconds (5 min, matching utils/vix.py pattern)
+#
+# FIX CACHE1 — two problems with the previous bare dict:
+#
+#   (a) Not thread-safe. fetch_data() drives this from a 16-worker
+#       ThreadPoolExecutor, and the expiry path was a check-then-act:
+#           if cache_key in _FETCH_CACHE:      # thread A and B both True
+#               ... if expired: del _FETCH_CACHE[cache_key]
+#       Two workers asking for the same (ticker, period, interval) can both
+#       see the stale entry and both reach the `del`; the loser raises
+#       KeyError, which escapes fetch_single() and is caught upstream in
+#       _fetch_with_retry()'s generic `except Exception` as a "data error (no
+#       retry)" — so the ticker is silently dropped from the batch result. The
+#       Stooq breaker (below) already takes a lock for exactly this reason.
+#
+#   (b) Unbounded. Nothing ever evicted an entry except the re-fetch path, so
+#       a full-universe scan (~1,400 tickers) held ~1,400 DataFrames of ~500
+#       daily bars each, and each additional period/interval the dashboard
+#       asks for adds another full set on top. Expired entries for tickers
+#       never requested again were never reclaimed at all. On Streamlit Cloud's
+#       ~1 GB container that grows until the app is evicted.
+#
+# Both are handled by _FETCH_CACHE_LOCK plus a capacity bound: on insert,
+# already-expired entries are dropped first, and if that isn't enough the
+# oldest entries are evicted until the cache is under _FETCH_CACHE_MAX.
 _FETCH_CACHE: dict = {}
 _FETCH_CACHE_TTL = 300  # 5 minutes — consistent with VIX cache TTL
+_FETCH_CACHE_MAX = 2000  # entries; comfortably covers one full-universe scan
+_FETCH_CACHE_LOCK = threading.Lock()
+
+
+def _cache_get(cache_key, now: float):
+    """Return a cached DataFrame for `cache_key`, or None if absent/expired."""
+    with _FETCH_CACHE_LOCK:
+        entry = _FETCH_CACHE.get(cache_key)
+        if entry is None:
+            return None
+        cached_df, cached_ts = entry
+        if now - cached_ts < _FETCH_CACHE_TTL:
+            _log.debug("cache hit: symbol=%s (age=%.0fs)", cache_key[0], now - cached_ts)
+            return cached_df
+        # Expired — pop() rather than `del` so a concurrent expiry of the same
+        # key can't raise KeyError on the loser.
+        _FETCH_CACHE.pop(cache_key, None)
+        _log.debug("cache expired: symbol=%s (age=%.0fs, ttl=%ds)",
+                   cache_key[0], now - cached_ts, _FETCH_CACHE_TTL)
+        return None
+
+
+def _cache_put(cache_key, df, now: float) -> None:
+    """Store `df` under `cache_key`, evicting expired then oldest entries."""
+    with _FETCH_CACHE_LOCK:
+        _FETCH_CACHE[cache_key] = (df, now)
+        if len(_FETCH_CACHE) <= _FETCH_CACHE_MAX:
+            return
+        for k in [k for k, (_, ts) in _FETCH_CACHE.items()
+                  if now - ts >= _FETCH_CACHE_TTL]:
+            _FETCH_CACHE.pop(k, None)
+        if len(_FETCH_CACHE) > _FETCH_CACHE_MAX:
+            # Still over budget with everything live — drop the oldest first.
+            for k, _ in sorted(_FETCH_CACHE.items(), key=lambda kv: kv[1][1])[
+                    : len(_FETCH_CACHE) - _FETCH_CACHE_MAX]:
+                _FETCH_CACHE.pop(k, None)
+
+
+def clear_fetch_cache() -> None:
+    """Drop every cached price frame — test helper / manual refresh hook."""
+    with _FETCH_CACHE_LOCK:
+        _FETCH_CACHE.clear()
 
 
 # ── Yahoo Finance session cache (cookie jar + crumb token) ───────────────────
@@ -253,8 +319,16 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
         "ytd": "ytd",  "max": "max",
         "1mo": "1mo",  "2mo": "3mo",  "3mo": "3mo",  "6mo": "6mo",
         "1y":  "1y",   "2y":  "2y",   "3y":  "5y",   "5y":  "5y",
-        # Intraday period keys (used by fetch_intraday)
-        "7d":  "5d",   "15d": "1mo",  "30d": "1mo",   "60d": "60d",
+        # Intraday period keys (used by fetch_intraday).
+        # FIX INTRA1 — two of these were wrong. "7d" mapped to Yahoo's "5d",
+        # so fetch_intraday(days=6..15) asked for up to 15 days of 15m bars and
+        # got 5; and "60d" mapped to "60d", which is not a value Yahoo's chart
+        # API accepts at all (its ranges are 1d/5d/1mo/3mo/6mo/1y/2y/5y/10y/
+        # ytd/max), so the longest intraday request fell through to the "1y"
+        # default and came back as daily-scale coverage. Both now map to the
+        # smallest real Yahoo range that actually contains the requested span;
+        # callers already trim to their own window.
+        "7d":  "1mo",  "15d": "1mo",  "30d": "1mo",   "60d": "3mo",
     }
     yf_range = _RANGE_MAP.get(period.lower(), "1y")
     # Allow intraday intervals — Yahoo supports 5m, 15m, 30m, 60m, 1h
@@ -305,16 +379,21 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
 
     # For intraday intervals keep full datetime; for daily use date-only
     _intraday = yf_interval not in ("1d", "1wk", "1mo")
+    # datetime.utcfromtimestamp() is deprecated (Python 3.12+) and slated for
+    # removal; it also returns a naive datetime that merely *claims* to be UTC.
+    # fromtimestamp(..., tz=utc) is the supported spelling. The IST conversion
+    # is now a real timezone shift rather than manual arithmetic, then stripped
+    # back to naive so the index type the callers already handle is unchanged.
+    _UTC = datetime.timezone.utc
     if _intraday:
-        # Convert UTC unix seconds → IST (UTC+5:30) datetime
-        _ist_offset = datetime.timedelta(hours=5, minutes=30)
+        _IST  = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
         dates = [
-            datetime.datetime.utcfromtimestamp(ts) + _ist_offset
+            datetime.datetime.fromtimestamp(ts, tz=_UTC).astimezone(_IST).replace(tzinfo=None)
             for ts in timestamps
         ]
         idx = pd.DatetimeIndex(dates, name="Datetime")
     else:
-        dates = [datetime.datetime.utcfromtimestamp(ts).date() for ts in timestamps]
+        dates = [datetime.datetime.fromtimestamp(ts, tz=_UTC).date() for ts in timestamps]
         idx   = pd.DatetimeIndex(dates, name="Date")
 
     df = pd.DataFrame({
@@ -460,18 +539,11 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     """
     cache_key = (ticker, period, interval)
     now = time.time()
-    
-    # Check cache: if entry exists and hasn't expired, return cached copy
-    if cache_key in _FETCH_CACHE:
-        cached_df, cached_ts = _FETCH_CACHE[cache_key]
-        if now - cached_ts < _FETCH_CACHE_TTL:
-            _log.debug("cache hit: symbol=%s (age=%.0fs)", ticker, now - cached_ts)
-            return cached_df.copy()
-        else:
-            # Cache expired — remove and re-fetch
-            del _FETCH_CACHE[cache_key]
-            _log.debug("cache expired: symbol=%s (age=%.0fs, ttl=%ds)", 
-                      ticker, now - cached_ts, _FETCH_CACHE_TTL)
+
+    # FIX CACHE1: lock-guarded lookup + expiry (see _cache_get above).
+    cached = _cache_get(cache_key, now)
+    if cached is not None:
+        return cached.copy()
 
     df = None
     served = None
@@ -535,8 +607,8 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     else:
         _log.debug("data served: symbol=%s provider=%s rows=%d", ticker, served, len(df))
 
-    # Store in cache with current timestamp
-    _FETCH_CACHE[cache_key] = (df, now)
+    # Store in cache with current timestamp (bounded + lock-guarded — FIX CACHE1)
+    _cache_put(cache_key, df, now)
     return df.copy()
 
 

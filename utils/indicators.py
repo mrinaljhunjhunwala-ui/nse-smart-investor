@@ -85,6 +85,7 @@ synthetic OHLC data with controlled ATR.
 import logging
 import pandas as pd
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from typing import Optional, Iterable, List
 
 # FIX IND-LOG — add_avwap() and add_relative_strength() both call
@@ -257,13 +258,59 @@ def add_bollinger_bands(df: pd.DataFrame, period: int = 20, std_dev: float = 2.0
 # ─────────────────────────────────────────────────────────────────────────────
 
 def add_atr(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
-    """Average True Range — raw volatility measure."""
+    """
+    Average True Range — Wilder's smoothing (the standard definition).
+
+    FIX IND3 — this used a plain `true_range.rolling(period).mean()`, i.e. a
+    simple moving average of True Range. That is NOT the ATR Wilder defined
+    and NOT the ATR that TradingView, Zerodha Kite, Angel One or any Indian
+    broker's charts display. A simple mean weights the 14th-oldest bar exactly
+    as heavily as today's and then drops it off a cliff, so a single wide bar
+    makes ATR jump on the way in and jump again 14 bars later on the way out,
+    long after the volatility event is over.
+
+    This matters well beyond cosmetics, because ATR is load-bearing across the
+    whole app: stop-loss distance (`_compute_entry_levels` in analysis/score.py
+    uses 1.2–3.0 × ATR), the volatility-scaled target multiplier, position
+    sizing (`shares_from_risk`), the trailing stop (`calc_trailing_stop`), every
+    screen's `sl`/`tp` in trading/signals.py, and the Supertrend bands. A stop
+    computed from an SMA-ATR is a different rupee number from the one a user
+    reads off their broker's chart for the same stock on the same day — the
+    app and the broker disagree about the same "2 × ATR" instruction.
+
+    The implementation seeds with the simple average of the first `period`
+    True Ranges and then applies Wilder's recursion
+        ATR_i = (ATR_{i-1} × (period − 1) + TR_i) / period
+    which is exactly TradingView's reference implementation (their `rma()`),
+    rather than the `ewm(adjust=False)` first-value seed used elsewhere in this
+    repo (analysis/trend_quality_score.py's `_compute_adx`) — that seed differs
+    for the first few dozen bars.
+
+    The NaN warm-up is deliberately unchanged: rows 0 … period-2 stay NaN
+    exactly as the old rolling mean left them. add_supertrend() below depends
+    on that (it locates the first non-NaN band row to seed its recursion — see
+    FIX IND2(c)), so preserving the warm-up shape keeps that fix intact.
+    """
     high_low   = df["High"] - df["Low"]
     high_close = (df["High"] - df["Close"].shift()).abs()
     low_close  = (df["Low"]  - df["Close"].shift()).abs()
     true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["ATR"]     = true_range.rolling(window=period).mean()
-    df["ATR_Pct"] = df["ATR"] / df["Close"] * 100   # ATR as % of price
+
+    if len(true_range) >= period:
+        # Wilder's seed = SMA of the first `period` True Ranges, placed at row
+        # period-1; everything before it stays NaN (same warm-up as before).
+        # Feeding that seeded series through ewm(adjust=False) then reproduces
+        # Wilder's recursion exactly, vectorised.
+        seeded = true_range.copy()
+        seed   = float(true_range.iloc[:period].mean())
+        seeded.iloc[:period - 1] = np.nan
+        seeded.iloc[period - 1]  = seed
+        atr = seeded.ewm(alpha=1.0 / period, adjust=False, ignore_na=True).mean()
+    else:
+        atr = pd.Series(np.nan, index=df.index, dtype=float)
+
+    df["ATR"]     = atr
+    df["ATR_Pct"] = df["ATR"] / df["Close"].replace(0, np.nan) * 100  # ATR as % of price
     return df
 
 
@@ -440,20 +487,22 @@ def add_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> p
 def add_volume_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Volume SMA, Volume Ratio, and On-Balance Volume."""
     df["Volume_SMA_20"] = df["Volume"].rolling(window=20).mean()
-    df["Volume_Ratio"]  = df["Volume"] / df["Volume_SMA_20"]
+    # Guard a zero/NaN 20-day volume mean (halted stock, all-holiday window) so
+    # Volume_Ratio is NaN rather than inf — _score_volume() reads this column.
+    df["Volume_Ratio"]  = df["Volume"] / df["Volume_SMA_20"].replace(0, np.nan)
 
-    # On-Balance Volume (pure-python loop — avoids float precision issues)
-    obv = [0]
-    closes = df["Close"].values
-    vols   = df["Volume"].values
-    for i in range(1, len(df)):
-        if closes[i] > closes[i - 1]:
-            obv.append(obv[-1] + vols[i])
-        elif closes[i] < closes[i - 1]:
-            obv.append(obv[-1] - vols[i])
-        else:
-            obv.append(obv[-1])
-    df["OBV"] = obv
+    # FIX IND4 — On-Balance Volume was a pure-Python bar-by-bar loop. It is
+    # mathematically just a cumulative sum of signed volume, so the loop bought
+    # nothing (the "avoids float precision issues" note it carried is not true:
+    # both forms accumulate the same float64 additions in the same order) while
+    # costing one Python-level iteration per bar per stock. On the full-universe
+    # scan path — ~1,400 tickers × ~500 daily bars — that is ~700k interpreter
+    # iterations per scan, on a code path whose runtime budget already had to be
+    # defended with a circuit breaker (see data/fetcher.py FIX SPEED2).
+    # analysis/trend_quality_score.py already computes OBV this vectorised way;
+    # this makes the two agree.
+    signed_vol = np.sign(df["Close"].diff()).fillna(0.0) * df["Volume"].fillna(0.0)
+    df["OBV"] = signed_vol.cumsum()
     return df
 
 
@@ -666,44 +715,75 @@ def detect_rsi_divergence(df: pd.DataFrame, swing_lookback: int = 20) -> pd.Data
     Only flags divergence when RSI is in a meaningful zone:
         Bullish  — RSI must be < 45 (oversold / approaching oversold)
         Bearish  — RSI must be > 55 (overbought / approaching overbought)
+
+    FIX IND5 — this was a Python loop over every bar, each iteration doing four
+    numpy reductions over a 20-bar slice. Same cost problem as the OBV loop
+    (see FIX IND4), but worse per bar, and it is the reason "divergence" could
+    not be afforded in analysis/score.py's screening indicator subset — which
+    in turn is why patterns/divergence silently never appeared in any score
+    narrative (see FIX SCORE-PAT in analysis/score.py). Rewritten with
+    sliding_window_view: the same windows are materialised once as a single
+    (n − lookback + 1, lookback) view and reduced along axis 1 in C. The
+    detection rules below are unchanged, bar for bar.
     """
     if "RSI" not in df.columns or len(df) < swing_lookback + 5:
         df["RSI_Bull_Div"] = 0
         df["RSI_Bear_Div"] = 0
         return df
 
-    bull_div = np.zeros(len(df), dtype=int)
-    bear_div = np.zeros(len(df), dtype=int)
+    n        = len(df)
+    bull_div = np.zeros(n, dtype=int)
+    bear_div = np.zeros(n, dtype=int)
 
-    prices = df["Close"].values
-    rsis   = df["RSI"].values
+    prices = np.asarray(df["Close"], dtype=float)
+    rsis   = np.asarray(df["RSI"],   dtype=float)
 
-    for i in range(swing_lookback, len(df)):
-        curr_p = prices[i]
-        curr_r = rsis[i]
-        if np.isnan(curr_r):
-            continue
+    # Row j of these views is prices[j : j + swing_lookback], which is exactly
+    # the window the old loop used for bar i = j + swing_lookback.
+    win_p = sliding_window_view(prices, swing_lookback)[: n - swing_lookback]
+    win_r = sliding_window_view(rsis,   swing_lookback)[: n - swing_lookback]
 
-        window_p = prices[i - swing_lookback : i]
-        window_r = rsis[i  - swing_lookback : i]
+    # Bars the old loop covered: i = swing_lookback … n-1.
+    curr_p = prices[swing_lookback:]
+    curr_r = rsis[swing_lookback:]
 
-        # Bullish divergence
-        if curr_r < 45:
-            prev_low_val = float(np.nanmin(window_p))
-            if curr_p <= prev_low_val * 1.01:       # price at/near new low
-                low_idx  = int(np.nanargmin(window_p))
-                rsi_then = window_r[low_idx]
-                if not np.isnan(rsi_then) and curr_r > rsi_then + 2:
-                    bull_div[i] = 1
+    # An all-NaN window would make nanmin/nanargmin raise (the old loop would
+    # have raised too); skip those rows rather than change behaviour silently.
+    usable = ~np.isnan(win_p).all(axis=1) & ~np.isnan(curr_r)
+    if not usable.any():
+        df["RSI_Bull_Div"] = bull_div
+        df["RSI_Bear_Div"] = bear_div
+        return df
 
-        # Bearish divergence
-        if curr_r > 55:
-            prev_high_val = float(np.nanmax(window_p))
-            if curr_p >= prev_high_val * 0.99:      # price at/near new high
-                high_idx  = int(np.nanargmax(window_p))
-                rsi_then  = window_r[high_idx]
-                if not np.isnan(rsi_then) and curr_r < rsi_then - 2:
-                    bear_div[i] = 1
+    rows      = np.flatnonzero(usable)
+    wp, wr    = win_p[rows], win_r[rows]
+    cp, cr    = curr_p[rows], curr_r[rows]
+    positions = rows + swing_lookback          # index back into the full series
+
+    low_idx   = np.nanargmin(wp, axis=1)
+    high_idx  = np.nanargmax(wp, axis=1)
+    row_range = np.arange(len(rows))
+    rsi_at_low  = wr[row_range, low_idx]
+    rsi_at_high = wr[row_range, high_idx]
+
+    # Bullish: price at/near the window low but RSI meaningfully higher than it
+    # was at that low → selling pressure fading.
+    bull = (
+        (cr < 45)
+        & (cp <= np.nanmin(wp, axis=1) * 1.01)
+        & ~np.isnan(rsi_at_low)
+        & (cr > rsi_at_low + 2)
+    )
+    # Bearish: price at/near the window high but RSI lower than at that high.
+    bear = (
+        (cr > 55)
+        & (cp >= np.nanmax(wp, axis=1) * 0.99)
+        & ~np.isnan(rsi_at_high)
+        & (cr < rsi_at_high - 2)
+    )
+
+    bull_div[positions[bull]] = 1
+    bear_div[positions[bear]] = 1
 
     df["RSI_Bull_Div"] = bull_div
     df["RSI_Bear_Div"] = bear_div

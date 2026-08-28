@@ -69,7 +69,11 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 _log = logging.getLogger("dashboard.trade_utils")
-warnings.filterwarnings("ignore")
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -82,32 +86,38 @@ import trade_store as _store
 # FIX TU1 — NSE holiday calendar
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Hard-coded NSE trading holidays for 2025 and 2026 as a last-resort fallback.
-# Update this list annually or rely on the live fetch below.
-_NSE_HOLIDAYS_FALLBACK = {
-    # 2025
-    datetime.date(2025, 1, 26),   # Republic Day
-    datetime.date(2025, 3, 14),   # Holi
-    datetime.date(2025, 4, 14),   # Dr. Ambedkar Jayanti / Good Friday
-    datetime.date(2025, 4, 18),   # Good Friday
-    datetime.date(2025, 5,  1),   # Maharashtra Day
-    datetime.date(2025, 8, 15),   # Independence Day
-    datetime.date(2025, 10,  2),  # Gandhi Jayanti
-    datetime.date(2025, 10, 22),  # Dussehra
-    datetime.date(2025, 10, 24),  # Diwali Laxmi Puja (Muhurat trading only)
-    datetime.date(2025, 11,  5),  # Diwali Balipratipada
-    datetime.date(2025, 11, 15),  # Gurunanak Jayanti
-    datetime.date(2025, 12, 25),  # Christmas
-    # 2026
-    datetime.date(2026, 1, 26),   # Republic Day
-    datetime.date(2026, 3,  3),   # Holi
-    datetime.date(2026, 4,  3),   # Good Friday
-    datetime.date(2026, 4, 14),   # Dr. Ambedkar Jayanti
-    datetime.date(2026, 5,  1),   # Maharashtra Day
-    datetime.date(2026, 8, 15),   # Independence Day
-    datetime.date(2026, 10,  2),  # Gandhi Jayanti
-    datetime.date(2026, 12, 25),  # Christmas
-}
+# FIX TU-HOL — this was a SECOND, hand-maintained NSE holiday list, separate
+# from the canonical one in dashboard/shared/market_hours.NSE_HOLIDAYS, and it
+# had drifted badly. It was missing EIGHT of 2026's sixteen closures:
+#   26 Mar (Ram Navami), 31 Mar (Mahavir Jayanti), 28 May (Bakri Id),
+#   26 Jun (Muharram), 14 Sep (Ganesh Chaturthi), 20 Oct (Dussehra),
+#   10 Nov (Diwali Balipratipada), 24 Nov (Guru Nanak Jayanti)
+# — four of which are still ahead of us this year. It also carried 2025 dates
+# that disagree with the canonical list (e.g. Dussehra on 22 Oct vs 2 Oct).
+#
+# That is not cosmetic: this set is what _is_market_open() and
+# _is_squareoff_time() consult, and FIX TU1 added it specifically so auto
+# square-off would never run against stale EOD prices on a closed exchange.
+# On any holiday missing from this copy, that protection simply wasn't there —
+# the live NSE fetch below is the only other guard, and it routinely fails from
+# datacenter IPs (nseindia.com 403s unauthenticated requests), which is exactly
+# why a fallback exists.
+#
+# Deriving from the canonical list means one place to update each year, and no
+# way for the two to silently disagree again. utils/market_hours.py already
+# imports the same constant for the same reason.
+def _canonical_holiday_dates() -> set:
+    from dashboard.shared.market_hours import NSE_HOLIDAYS
+    out = set()
+    for d in NSE_HOLIDAYS:
+        try:
+            out.add(datetime.date.fromisoformat(d) if isinstance(d, str) else d)
+        except (TypeError, ValueError) as _e:
+            _log.debug("trade_utils: unparseable canonical holiday %r: %s", d, _e)
+    return out
+
+
+_NSE_HOLIDAYS_FALLBACK = _canonical_holiday_dates()
 
 # Cache the fetched holiday set for the current calendar day
 _holiday_cache: dict = {}   # {"date": datetime.date, "holidays": set}

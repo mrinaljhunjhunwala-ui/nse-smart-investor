@@ -24,7 +24,27 @@ from datetime import datetime
 
 _log = logging.getLogger("trading.signals")
 
-warnings.filterwarnings("ignore")
+# ── 52-week window ───────────────────────────────────────────────────────────
+# FIX SIG-52W — check_oversold_bounce() and check_breakout() described their
+# reference levels as the "52-week low" / "52-week high" but computed them as
+# df["Low"].min() / df["High"].max() over the ENTIRE DataFrame handed in. That
+# is only 52 weeks by coincidence, when the caller happens to pass period="1y".
+# It doesn't: analysis/score.py fetches "2y" by default, backtest/ and several
+# dashboard pages pass 2y–5y, and scan_tickers() itself takes `period` as a
+# parameter. On a 5-year frame the "52-week high" became a 5-year high, so
+# check_breakout()'s `pct_from_52h <= 3%` gate silently became a near-5-year-
+# high gate — a far rarer event, which quietly starves the Breakout screen of
+# signals — while check_oversold_bounce()'s `min_pct_above_52wL` floor was
+# measured from a 5-year low, letting through names that are nowhere near a
+# 52-week base. Both now slice a real 252-trading-day window regardless of how
+# much history the caller supplies.
+_52W_BARS = 252
+
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 
 from data.fetcher import fetch_single
 from utils.indicators import add_all_indicators
@@ -206,7 +226,7 @@ def check_oversold_bounce(
     if not pd.isna(v_rat) and v_rat < min_vol_ratio:
         return None
 
-    low_52w   = float(df["Low"].min())
+    low_52w   = float(df["Low"].tail(_52W_BARS).min())   # FIX SIG-52W
     pct_above = (price - low_52w) / max(low_52w, 1) * 100
     if pct_above < min_pct_above_52wL:
         return None
@@ -312,7 +332,7 @@ def check_breakout(
     if any(pd.isna(v) for v in [rsi, atr]):
         return None
 
-    high_52w     = float(df["High"].max())
+    high_52w     = float(df["High"].tail(_52W_BARS).max())   # FIX SIG-52W
     pct_from_52h = (high_52w - price) / max(high_52w, 1) * 100
 
     if pct_from_52h > pct_from_high:
@@ -338,13 +358,19 @@ def check_breakout(
         "sl":           round(sl, 2),
         "tp":           round(tp, 2),
         "rsi":          round(rsi, 2),
+        # The "adx" key was listed twice here; the fix note at the top of this
+        # module claimed the duplicate had been removed but it hadn't. Same
+        # value both times, so it was harmless — just dead, and misleading to
+        # anyone reading the note.
         "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "vol_ratio":    round(float(v_rat), 2) if not pd.isna(v_rat) else None,
-        "adx":          round(float(adx), 2) if not pd.isna(adx) else None,
         "pct_from_52h": round(pct_from_52h, 2),
-        "reason":       (f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | "
-                        f"RSI={rsi:.1f} | ADX={adx:.1f}" if not pd.isna(adx) else
-                        f"Near 52w high (−{pct_from_52h:.1f}%) | VolRatio={v_rat:.2f}x | RSI={rsi:.1f}"),
+        # v_rat is allowed to be NaN here (the volume gate above is skipped
+        # when it is), so format it defensively rather than printing "nan×".
+        "reason":       (f"Near 52w high (−{pct_from_52h:.1f}%) | "
+                         f"VolRatio={'n/a' if pd.isna(v_rat) else f'{float(v_rat):.2f}x'} | "
+                         f"RSI={rsi:.1f}"
+                         + ("" if pd.isna(adx) else f" | ADX={float(adx):.1f}")),
         "timestamp":    datetime.now().isoformat(),
     }
 

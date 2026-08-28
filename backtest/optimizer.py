@@ -19,7 +19,18 @@ from typing import Type, List, Dict, Optional
 from data.fetcher import fetch_single
 from utils.indicators import add_all_indicators
 
-warnings.filterwarnings("ignore")
+# FIX WARN1 — this was a blanket `warnings.filterwarnings("ignore")`. Called at
+# import time from a library module, that switches off EVERY warning for the
+# whole process, for every caller — including numpy's RuntimeWarning on
+# "invalid value encountered in divide" / "All-NaN slice encountered", which is
+# precisely the signal that would have surfaced the NaN-propagation bugs this
+# codebase has had to rediscover by hand (see FIX IND1/IND2 in
+# utils/indicators.py and FIX SCORE-NAN in analysis/score.py). Narrowed to the
+# third-party API-churn categories that motivated the line in the first place,
+# so genuine numerical warnings stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 
 PARAMS_FILE = "best_params.json"
 

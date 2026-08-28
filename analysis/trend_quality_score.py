@@ -9,7 +9,11 @@ to resolve dependency installation failures (e.g., pandas-ta packaging issues).
 
 from __future__ import annotations
 import warnings
-warnings.filterwarnings("ignore")
+# FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
+# RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 
 import os
 import sys
@@ -76,18 +80,47 @@ def _fast_slope(series: pd.Series, window: int) -> pd.Series:
 
 
 def _compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """Welles Wilder's RSI calculation using native pandas EWM."""
+    """
+    Welles Wilder's RSI.
+
+    FIX TQS-RSI — this ended with a blanket `rsi.fillna(50)`, which is the
+    exact bug utils/indicators.py documents as FIX IND1, left unfixed in this
+    parallel implementation.
+
+    When a stock has zero down-days across the smoothing window — a real,
+    routine state for an NSE momentum name in a strong multi-day rally, not a
+    corner case — `avg_loss` is 0, `replace(0, nan)` makes RS NaN, and RSI comes
+    out NaN. The conventional value there is 100 (no losses at all = maximally
+    overbought). Filling it with 50 instead did not merely lose information, it
+    inverted the reading: _score_all_pillars() awards its P3 RSI pillar
+        RSI 45–55  →  9.00 pts   (the "healthy neutral" bucket)
+        RSI > 80   →  2.25 pts   (the "running too hot" bucket)
+    so the strongest-momentum stocks in the universe were scored as calm and
+    neutral and handed 4× the points the rule intends — a silent, systematic
+    ranking error in exactly the names a trend-quality score exists to rank.
+    The same fillna also painted the leading warm-up bars (before `period` bars
+    of history exist) as a confident neutral 50 rather than "not yet known";
+    those bars are now left NaN and dropped by add_indicators()'s dropna, the
+    same way SMA200/ADX warm-up already is.
+
+    min_periods=period matches utils/indicators.add_rsi(), so the two RSI
+    implementations in this repo now agree bar for bar.
+    """
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    
+
     # Use standard Wilder's smoothing alpha = 1 / period
-    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    
+    avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+
     rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+
+    no_loss = avg_loss == 0
+    rsi = rsi.mask(no_loss & (avg_gain > 0), 100.0)   # zero down-days → 100
+    rsi = rsi.mask(no_loss & (avg_gain == 0), 50.0)   # dead flat → neutral 50
+    return rsi
 
 
 def _compute_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
@@ -327,21 +360,32 @@ def score_ticker(
     period: str = "2y",
     last_n: int = 1,
 ) -> Union[TQSResult, List[TQSResult]]:
-    """Score one ticker using native logic. Warmup windows are padded automatically."""
-    warm_periods = {"1y": "2y", "2y": "3y", "5y": "6y"}
+    """Score one ticker using native logic. Warmup windows are padded automatically.
+
+    FIX TQS-PERIOD — the padding table mapped "5y" → "6y", but "6y" is not a
+    period either data source understands. data/fetcher.py's `_PERIOD_DAYS` has
+    no "6y" key, so `_period_to_dates()` fell through to its 370-day default for
+    Stooq; `_fetch_yahoo_direct`'s `_RANGE_MAP` has no "6y" key either, so it
+    fell through to its "1y" default. Net effect: asking for a 5-year TQS
+    silently returned ONE year of history — no error, no warning, just a
+    quietly truncated series, with SMA200 / the 252-bar OBV slope percentile /
+    the 60-bar Sharpe all computed off a fraction of the intended window.
+    "max" (1,830 days ≈ 5 years) is the longest span both sources actually
+    support, so it is the honest ceiling here; padding beyond 5 years is not
+    available from these providers.
+    """
+    warm_periods = {"1y": "2y", "2y": "3y", "5y": "max"}
     padded_period = warm_periods.get(period, period)
 
     df_raw = fetch_data(ticker, period=padded_period)
     df_ind = add_indicators(df_raw)
     df_tqs = _score_all_pillars(df_ind)
 
-    target_sessions = {"1y": 252, "2y": 504, "5y": 1260}
-    session_limit = target_sessions.get(period, len(df_tqs))
-    
-    active_df = df_tqs.tail(max(last_n, session_limit))
-
     results = []
-    for idx, row in active_df.tail(last_n).iterrows():
+    # The previous `.tail(max(last_n, session_limit)).tail(last_n)` was just
+    # `.tail(last_n)` — the outer window was always ≥ the inner one, so the
+    # first slice never removed a row the second wouldn't have.
+    for idx, row in df_tqs.tail(last_n).iterrows():
         results.append(TQSResult(
             ticker=ticker, date=str(idx.date()) if hasattr(idx, "date") else str(idx),
             close=float(row["Close"]), tqs=float(row["TQS"]),
