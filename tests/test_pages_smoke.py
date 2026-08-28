@@ -24,14 +24,36 @@ _PAGES = sorted(glob.glob(os.path.join(_PAGES_DIR, "*.py")))
 _IDS = [os.path.basename(p) for p in _PAGES]
 
 
-@pytest.fixture
-def _no_network(monkeypatch):
-    """Block outbound network so pages take the fast, deterministic degraded path."""
+@pytest.fixture(scope="module", autouse=True)
+def _no_network():
+    """Block outbound network so pages take the fast, deterministic degraded path.
+
+    Module-scoped on purpose. As a per-test fixture this block was torn down at
+    the end of each test, but the pages under test start their own background
+    threads (utils/live_price.get_live_prices_batch runs a ThreadPoolExecutor,
+    and its caller returns as soon as its wait expires — see FIX LP3 there).
+    Those threads outlive the test that spawned them, so tearing the block down
+    per-test let them escape into REAL network calls, with real 6–10s per-tier
+    timeouts, while the NEXT test was running. That is what made this file
+    non-deterministic and monstrously slow in a full-suite run — the analyze-
+    stock page measured 7,754s (2h 9m) in-suite versus ~60s in isolation, and
+    which page ended up carrying the blame moved around between runs.
+
+    Holding the block for the whole module means a leaked thread still fails
+    fast no matter which test is executing when it wakes up.
+    """
     def _blocked(*args, **kwargs):
         raise OSError("network blocked for page smoke test")
-    monkeypatch.setattr(socket.socket, "connect", _blocked, raising=False)
-    monkeypatch.setattr(socket, "create_connection", _blocked, raising=False)
-    yield
+
+    orig_connect = socket.socket.connect
+    orig_create  = socket.create_connection
+    socket.socket.connect = _blocked
+    socket.create_connection = _blocked
+    try:
+        yield
+    finally:
+        socket.socket.connect = orig_connect
+        socket.create_connection = orig_create
 
 
 def test_all_pages_present():
@@ -52,7 +74,7 @@ def test_all_pages_present():
 
 @pytest.mark.smoke
 @pytest.mark.parametrize("page", _PAGES, ids=_IDS)
-def test_page_loads_without_exception(page, _no_network):
+def test_page_loads_without_exception(page):
     at = AppTest.from_file(page, default_timeout=120).run()
     # AppTest.exception is an ElementList (falsy when empty), not None.
     assert not at.exception, (

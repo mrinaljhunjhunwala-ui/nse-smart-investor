@@ -408,6 +408,32 @@ def get_live_prices_batch(
                 len(not_done), len(futs), wait_timeout, ", ".join(pending_syms[:10]),
             )
     finally:
-        pool.shutdown(wait=False)
+        # FIX LP3 — this was `pool.shutdown(wait=False)`, which returns
+        # immediately but does NOT stop the work. Futures that were submitted
+        # and are still QUEUED keep getting picked up and executed by the
+        # worker threads long after this function has returned its results.
+        #
+        # That is the common case, not the rare one: max_workers is 8, so a
+        # 50-symbol scan queues 42 tasks behind the first 8. When the wait
+        # above expires, those 42 are abandoned as far as the caller is
+        # concerned — their results are thrown away — but each one still runs
+        # the full Yahoo(8s) → NSE(6s) → Stooq(10s) fallback chain. The pool
+        # keeps burning threads and sockets on answers nobody will read, on
+        # every page load that hits the timeout, competing with the next
+        # page's fetches. The worker threads are also non-daemon, so the
+        # interpreter joins them at exit.
+        #
+        # cancel_futures=True (Python 3.9+) drops everything not yet started —
+        # the large majority. Already-running tasks can't be interrupted and
+        # still finish, bounded by their own per-tier timeouts.
+        #
+        # This was also what made tests/test_pages_smoke.py pathological:
+        # 04_analyze_stock.py resolves ~50 Nifty quotes, its leftover queued
+        # tasks outlived the test, and once the per-test socket block was torn
+        # down they escaped into REAL network calls with real multi-second
+        # timeouts. That one page test took 7,754s (2h9m) in a full-suite run
+        # versus ~60s in isolation, which is what pushed the CI suite (20-minute
+        # budget) to 3h11m.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     return results
