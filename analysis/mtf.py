@@ -11,7 +11,7 @@ Key Functions
     resample_weekly(df)              → weekly OHLCV from daily bars
     resample_monthly(df)             → monthly OHLCV from daily bars
     get_trend_direction(df)          → 'bullish' | 'bearish' | 'neutral'
-    check_daily_weekly_alignment(df) → dict with alignment details
+    check_daily_weekly_alignment(df, weekly_df=None) → dict with alignment details
     check_all_timeframes(ticker)     → full 3-TF alignment dict
     mtf_score(ticker)                → 0-3 bullish TF count (quick integer)
 """
@@ -141,13 +141,20 @@ def get_trend_direction(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> dic
 # Daily / Weekly Alignment Check
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_daily_weekly_alignment(df: pd.DataFrame) -> dict:
+def check_daily_weekly_alignment(df: pd.DataFrame, weekly_df: pd.DataFrame = None) -> dict:
     """
     Compare daily vs weekly trend to confirm or contradict a signal.
 
     Parameters
     ──────────
     df : daily OHLCV DataFrame (already fetched, needs ≥ 252 rows for reliability)
+    weekly_df : optional, already-fetched weekly OHLCV DataFrame. Pass this when
+        the caller has real exchange-reported weekly bars available (e.g. fetched
+        with interval="1wk") rather than a daily->weekly resample, which is a
+        weaker proxy — Yahoo/NSE's actual weekly bars can differ from a naive
+        resample near week boundaries and holidays. When omitted, falls back to
+        resample_weekly(df) as before, so existing single-argument callers are
+        unaffected.
 
     Returns
     ───────
@@ -160,7 +167,7 @@ def check_daily_weekly_alignment(df: pd.DataFrame) -> dict:
     }
     """
     daily_trend  = get_trend_direction(df)
-    weekly_df    = resample_weekly(df)
+    weekly_df    = weekly_df if weekly_df is not None and not weekly_df.empty else resample_weekly(df)
     weekly_trend = get_trend_direction(weekly_df)
 
     d_dir = daily_trend["direction"]
