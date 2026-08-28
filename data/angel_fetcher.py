@@ -732,7 +732,7 @@ def get_holdings() -> Optional[List[Dict]]:
             timeout=15,
         )
         parsed = _safe_parse_json_response(resp)
-        raw = parsed.get("data") if isinstance(parsed, dict) else None or []
+        raw = (parsed.get("data") if isinstance(parsed, dict) else None) or []
         if not raw:
             return []
 
@@ -777,7 +777,7 @@ def get_positions() -> Optional[Dict]:
             timeout=12,
         )
         parsed = _safe_parse_json_response(resp)
-        raw = parsed.get("data") if isinstance(parsed, dict) else None or {}
+        raw = (parsed.get("data") if isinstance(parsed, dict) else None) or {}
         if not raw:
             return {"day": [], "net": []}
 
@@ -822,7 +822,7 @@ def get_funds() -> Optional[Dict]:
             timeout=10,
         )
         parsed = _safe_parse_json_response(resp)
-        d = parsed.get("data") if isinstance(parsed, dict) else None or {}
+        d = (parsed.get("data") if isinstance(parsed, dict) else None) or {}
         return {
             "available_cash": float(d.get("availablecash", 0) or 0),
             "used_margin": float(d.get("utiliseddebits", 0) or 0),
@@ -848,7 +848,7 @@ def get_order_book() -> Optional[List[Dict]]:
             timeout=12,
         )
         parsed = _safe_parse_json_response(resp)
-        data = parsed.get("data") if isinstance(parsed, dict) else None or []
+        data = (parsed.get("data") if isinstance(parsed, dict) else None) or []
         return [
             {
                 "order_id": o.get("orderid", ""),
@@ -884,7 +884,7 @@ def get_trade_book() -> Optional[List[Dict]]:
             timeout=12,
         )
         parsed = _safe_parse_json_response(resp)
-        data = parsed.get("data") if isinstance(parsed, dict) else None or []
+        data = (parsed.get("data") if isinstance(parsed, dict) else None) or []
         return [
             {
                 "order_id": t.get("orderid", ""),
@@ -1082,7 +1082,7 @@ def get_gtt_list() -> Optional[List[Dict]]:
             timeout=10,
         )
         parsed = _safe_parse_json_response(resp)
-        data = parsed.get("data") if isinstance(parsed, dict) else None or []
+        data = (parsed.get("data") if isinstance(parsed, dict) else None) or []
         return [
             {
                 "rule_id": str(g.get("id", "")),
@@ -1139,7 +1139,7 @@ def get_profile() -> Optional[Dict]:
             timeout=10,
         )
         parsed = _safe_parse_json_response(resp)
-        d = parsed.get("data") if isinstance(parsed, dict) else None or {}
+        d = (parsed.get("data") if isinstance(parsed, dict) else None) or {}
         return {
             "name": d.get("name", ""),
             "client_id": d.get("clientcode", ""),
