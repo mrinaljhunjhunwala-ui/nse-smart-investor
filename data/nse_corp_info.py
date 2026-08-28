@@ -11,9 +11,9 @@ Exports:
 
 Behavior notes:
  - Primes the NSE homepage (simple GET to "/") before calling the API path.
- - On HTTP 403 from the API returns a raised _NseFetchError (tests expect this).
- - On non-200, malformed JSON (non-dict), or network errors it records diagnostics
-   and returns {} (recoverable).
+ - On HTTP 403, other non-200, malformed JSON (non-dict), or network errors
+   it records diagnostics and returns {} (recoverable) — callers should check
+   get_last_diagnostic(symbol) to see why, if the result is empty.
  - Maintains a small in-memory cache when use_cache=True.
 """
 
@@ -110,10 +110,8 @@ def get_corp_info(symbol: str, use_cache: bool = True) -> dict:
 
     Returns:
       - dict with parsed API result on success
-      - {} on recoverable failure (network error, parse error, non-200)
-    Raises:
-      - _NseFetchError when the API explicitly blocks us (HTTP 403) so callers/tests
-        can detect blocking vs transient failures.
+      - {} on recoverable failure (network error, parse error, non-200 incl. 403)
+        — check get_last_diagnostic(symbol) for the reason
     """
     if not symbol:
         raise ValueError("symbol required")
@@ -141,7 +139,8 @@ def get_corp_info(symbol: str, use_cache: bool = True) -> dict:
 
         resp = session.get(api_url, timeout=10)
 
-        # If blocked (403), record diagnostics and raise explicit blocking error.
+        # If blocked (403), record diagnostics and return {} like other
+        # non-200 failures (matches this function's documented contract).
         if getattr(resp, "status_code", None) == 403:
             diag = {
                 "ok": False,
@@ -151,7 +150,7 @@ def get_corp_info(symbol: str, use_cache: bool = True) -> dict:
             }
             _last_diagnostics[sym] = diag
             _log.warning("nse_corp_info: blocked fetching %s — status=403", sym)
-            raise _NseFetchError("NSE returned HTTP 403 Forbidden")
+            return {}
 
         if getattr(resp, "status_code", None) != 200:
             # Non-200 (but not 403): record and return empty dict
@@ -207,9 +206,6 @@ def get_corp_info(symbol: str, use_cache: bool = True) -> dict:
         }
         return parsed
 
-    except _NseFetchError:
-        # Already recorded diagnostics above; re-raise so tests can detect 403
-        raise
     except Exception as e:
         # Network/parsing/other unexpected errors: record and return {}
         sc = _extract_status_code_from_exception(e)
