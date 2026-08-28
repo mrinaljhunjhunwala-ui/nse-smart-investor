@@ -123,15 +123,20 @@ def _prune_state(state: dict, today: str) -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Market hours guard
+#
+# FIX HOL1: this used to be a hand-rolled weekday+time-of-day check with no
+# NSE holiday awareness at all — a real gap given FIX MH2 (see
+# dashboard/shared/market_hours.py) already consolidated every OTHER
+# market-hours check in the repo onto one canonical, holiday-aware calendar
+# specifically because a second, independent implementation like this one
+# drifts out of date. Without this fix, check_price_alerts() would run and
+# attempt to fetch "live" prices on every NSE holiday that falls on a
+# weekday, on a schedule that fires every 15 minutes for ~8 hours.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _is_market_hours() -> bool:
-    now = datetime.datetime.now(_IST)
-    if now.weekday() >= 5:                      # Sat/Sun
-        return False
-    open_t  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
-    close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    return open_t <= now <= close_t
+    from dashboard.shared.market_hours import is_market_open
+    return is_market_open()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
