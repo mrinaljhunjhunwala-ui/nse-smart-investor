@@ -102,6 +102,51 @@ def test_malformed_json_from_searchscrip(monkeypatch):
     assert af.get_full_quote("RELIANCE.NS") is None
 
 
+def test_get_funds_handles_null_data(monkeypatch):
+    # Angel One's getRMS can legitimately respond {"status": true, "data": null}
+    # (e.g. no margin data available yet). get_funds() must degrate to zeros,
+    # not crash with AttributeError: 'NoneType' object has no attribute 'get'
+    # — regression test for a missing-parens operator-precedence bug where
+    # `x.get("data") if isinstance(x, dict) else None or {}` only applies the
+    # `or {}` fallback to the `else` branch, not to a None "data" value.
+    monkeypatch.setattr(af, "_get_session", lambda: {"jwt": "J", "api_key": "K"})
+
+    class NullDataSession:
+        def get(self, url, headers=None, timeout=None):
+            return FakeResponse(200, {"status": True, "data": None})
+
+    monkeypatch.setattr(af, "_http", NullDataSession())
+    funds = af.get_funds()
+    assert funds == {
+        "available_cash": 0.0,
+        "used_margin": 0.0,
+        "total_margin": 0.0,
+        "collateral": 0.0,
+        "m2m": 0.0,
+    }
+
+
+def test_get_profile_handles_null_data(monkeypatch):
+    # Same bug, same fix, in get_profile() — see test_get_funds_handles_null_data.
+    monkeypatch.setattr(af, "_get_session", lambda: {"jwt": "J", "api_key": "K"})
+
+    class NullDataSession:
+        def get(self, url, headers=None, timeout=None):
+            return FakeResponse(200, {"status": True, "data": None})
+
+    monkeypatch.setattr(af, "_http", NullDataSession())
+    profile = af.get_profile()
+    assert profile == {
+        "name": "",
+        "client_id": "",
+        "email": "",
+        "mobile": "",
+        "exchanges": [],
+        "products": [],
+        "broker": "Angel One",
+    }
+
+
 def test_searchscrip_rate_limit_trips_breaker(monkeypatch):
     # simulate repeated failures to trip the breaker
     class FailSession(FakeSession):
@@ -117,4 +162,3 @@ def test_searchscrip_rate_limit_trips_breaker(monkeypatch):
     for _ in range(af._BREAKER_THRESHOLD + 1):
         _ = af._get_token("RELIANCE", {"jwt": "J", "api_key": "K"})
     assert af._breaker_tripped()
-

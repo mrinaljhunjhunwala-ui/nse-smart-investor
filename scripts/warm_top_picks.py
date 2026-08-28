@@ -64,9 +64,23 @@ def main() -> int:
             get_vix_info,
             _sector_ranks_tuple,
         )
+        from dashboard.shared.market_hours import is_trading_day
         import trade_store as store
     except Exception as e:
         _log.error("warm_top_picks: import failed, aborting this run: %s", e)
+        return 0
+
+    # FIX HOL1: the workflow's cron is weekday-only (Mon-Fri), which does NOT
+    # account for NSE holidays that fall on a weekday (Republic Day, Holi,
+    # Diwali, etc. — see dashboard/shared/market_hours.py's NSE_HOLIDAYS,
+    # the single canonical calendar every other market-hours check in this
+    # repo already delegates to). Without this guard, a holiday still burns
+    # a full ~745-ticker scan every 15 minutes for ~8 hours, producing an
+    # unchanging snapshot (nothing traded) while writing a timestamp that
+    # misleadingly looks freshly updated. Checks the DAY only (not
+    # time-of-day) since this job deliberately also runs pre-open/post-close.
+    if not is_trading_day():
+        _log.info("warm_top_picks: not a trading day (weekend or NSE holiday) — skipping scan.")
         return 0
 
     _log.info("warm_top_picks: starting scan...")
