@@ -17,15 +17,20 @@ An 18-page platform, grouped into six workspaces:
 
 | Workspace | Pages |
 |---|---|
-| **Markets** | Market Live · Market Overview · Market Internals (breadth + macro) |
-| **Trading** | Intraday Trader (CPR / ORB / Supertrend / VWAP) · Smart Screener · OI & Options |
+| **Markets** | Market Live · Market Overview (incl. breadth + macro) |
+| **Trading** | Intraday Trader (CPR / ORB / Supertrend / VWAP / OI & options) · Smart Screener |
 | **Portfolio** | My Portfolio · Paper Trades · My Watchlist · Tomorrow's Watchlist |
-| **Analysis** | Analyze Stock · Backtest · Swing Checklist |
+| **Analysis** | Analyze Stock · Deep Dive · Backtest · Swing Checklist |
 | **Scanners** | TQS Scanner (Trend Quality Score) · Quality Watch (long-term holds) |
 | **Tools** | Position Sizer · Angel One · Investor Guide · Command Centre (home) |
 
 **Highlights**
-- **Composite Score (0–100):** technical · momentum · volume · candlestick pattern · news sentiment.
+- **Composite Score (0–90):** technical (40) · momentum (25) · volume (15) · sentiment (10),
+  where sentiment is the India VIX regime plus the stock's sector rank. Candlestick patterns are
+  detected and shown in the narrative but are **not** scored — the 5-year, 40,663-observation
+  variant study found the old 10-point pattern component had zero-to-negative ranking power in
+  every regime (see `PATTERN_REMOVAL_MIGRATION.md`). This line previously read "0–100 · …
+  candlestick pattern · news sentiment", describing a scoring model that no longer exists.
 - **Trend Quality Score (TQS):** a 90-point, four-pillar scanner across Nifty 50/100/500/Total Market.
 - **Qualitative flags:** governance/regulatory red-amber-green flags from NSE corporate actions,
   Google News, and NSE RSS feeds — surfaced on Quality Watch and Analyze Stock.
