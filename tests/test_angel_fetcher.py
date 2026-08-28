@@ -51,6 +51,20 @@ def patch_session(monkeypatch):
     fake = FakeSession()
     monkeypatch.setattr(af, "_http", fake)
     af._SESSION["jwt"] = None
+    af._LOGIN_BREAKER_FAILS[0] = 0
+    af._LOGIN_BREAKER_TRIPPED_AT[0] = 0.0
+    # These tests exercise the real _get_session()/login flow (asserting
+    # _SESSION["jwt"] gets populated), which gates on _get_credentials()
+    # returning 4 non-empty values before it ever calls _http.post() for
+    # login — previously only satisfied if ANGEL_API_KEY/CLIENT_ID/
+    # PASSWORD/TOTP_SECRET happened to be set as real env vars/secrets, so
+    # these tests silently no-op'd (session stayed None) wherever those
+    # weren't configured, including this CI. Fake but valid-shaped
+    # credentials so the login path always actually runs in any environment.
+    monkeypatch.setattr(af, "_get_credentials", lambda: {
+        "api_key": "TESTKEY", "client_id": "TESTCLIENT",
+        "password": "TESTPASS", "totp_secret": "JBSWY3DPEHPK3PXP",
+    })
     yield fake
 
 
@@ -98,6 +112,13 @@ def test_malformed_json_from_searchscrip(monkeypatch):
 
     monkeypatch.setattr(af, "_http", MalformSession())
     af._SESSION["jwt"] = None
+    # Clear the token cache — without this, an earlier test in this file
+    # (test_login_and_fetch_historical_success / test_get_full_quote_success
+    # / test_get_batch_quotes_success) already resolved and cached a real
+    # "RELIANCE" -> token entry with a 6h TTL, so _get_token() here would
+    # return that cached token without ever calling the mocked (malformed)
+    # searchScrip endpoint — the scenario this test claims to exercise.
+    af._TOKEN_CACHE.clear()
     # Token lookup fails but should be handled and return None
     assert af.get_full_quote("RELIANCE.NS") is None
 
@@ -157,8 +178,21 @@ def test_searchscrip_rate_limit_trips_breaker(monkeypatch):
 
     s = FailSession()
     monkeypatch.setattr(af, "_http", s)
-    af._TOKEN_CACHE.clear()
-    # call _get_token several times to record failures
+
+    # Reset breaker state too — it's module-level global state like
+    # _TOKEN_CACHE, so an earlier test's real API calls (e.g.
+    # test_malformed_json_from_searchscrip) can leave it non-zero.
+    af._BREAKER_FAILS[0] = 0
+    af._BREAKER_TRIPPED_AT[0] = 0.0
+
+    # call _get_token several times to record failures. Must clear
+    # _TOKEN_CACHE on EVERY iteration, not just once before the loop:
+    # _get_token() caches a failed lookup for _TOKEN_FAIL_TTL (300s), so
+    # without this, only the 1st call ever reaches the mocked searchScrip
+    # endpoint — the other 5 just replay the cached failure and never call
+    # _breaker_record_failure() again, so the counter never reaches
+    # _BREAKER_THRESHOLD and the assertion below fails.
     for _ in range(af._BREAKER_THRESHOLD + 1):
+        af._TOKEN_CACHE.clear()
         _ = af._get_token("RELIANCE", {"jwt": "J", "api_key": "K"})
     assert af._breaker_tripped()
