@@ -58,6 +58,73 @@ VERDICTS = ["AVOID", "HOLD", "WATCH", "BUY", "STRONG BUY"]
 
 CONFIDENCE = ("low", "medium", "high")
 
+# ── Horizons (FIX FV-HORIZON) ─────────────────────────────────────────────────
+# "Should I buy this?" is a different question depending on holding period.
+#   * SHORT  (days–weeks)   — swing trade. Technical setup dominates; a bad
+#                             valuation doesn't kill a 5-day trade.
+#   * MEDIUM (weeks–months) — positional. Technical + trend + regime matter.
+#     (Same behaviour as the original single-lens FinalVerdict — this is the
+#     default so existing callers see no change.)
+#   * LONG   (6 months +)   — investment. Quality + valuation + thesis
+#                             dominate; a technical EXIT signal today is
+#                             mostly noise vs the multi-year hold thesis.
+#
+# One aggregator, three lenses. Same subsystem inputs get read through
+# horizon-specific gate weights. Every horizon still respects the quality /
+# thesis / (short & medium) technical VETO — you don't buy a fraud on any
+# horizon; you don't enter today into a technical EXIT signal for a trade
+# your horizon says is a swing.
+HORIZONS = ("short", "medium", "long")
+
+
+# Gate-effect multipliers per horizon. A veto is always a veto (0 conviction);
+# damp/amplify magnitudes flex.  Numbers chosen to be simple, defensible, and
+# reversible — no fine-tuned coefficients, no over-fitting to a specific run.
+_HORIZON_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "short": {
+        "quality_damp":     0.5,   # amber flag hurts less on a 5-day trade
+        "valuation_damp":   0.25,  # DEMANDING valuation barely matters
+        "valuation_amp":    0.25,
+        "thesis_damp":      0.75,  # Negative thesis still uncomfortable
+        "thesis_amp":       0.75,
+        "trend_damp":       1.5,   # weak trend really hurts a swing trade
+        "trend_amp":        1.5,
+        "technical_veto":   1.0,   # EXIT today = don't enter today
+        "technical_amp":    1.2,   # BUY today = the whole point of a swing
+    },
+    "medium": {   # default — matches the original single-lens behaviour
+        "quality_damp":     1.0,
+        "valuation_damp":   1.0,
+        "valuation_amp":    1.0,
+        "thesis_damp":      1.0,
+        "thesis_amp":       1.0,
+        "trend_damp":       1.0,
+        "trend_amp":        1.0,
+        "technical_veto":   1.0,
+        "technical_amp":    1.0,
+    },
+    "long": {
+        "quality_damp":     1.5,   # amber flag matters more when holding years
+        "valuation_damp":   1.75,  # DEMANDING valuation is a genuine problem
+        "valuation_amp":    1.75,  # so is SUPPORTED (much more so long-term)
+        "thesis_damp":      1.5,
+        "thesis_amp":       1.5,
+        "trend_damp":       0.25,  # weak trend today doesn't kill a 5y hold
+        "trend_amp":        0.25,
+        "technical_veto":   0.0,   # NOT a veto long-term — see docstring
+        "technical_amp":    0.25,  # BUY today isn't why you'd buy for 5y
+    },
+}
+
+# Base-conviction weighting per horizon. The composite score dominates on
+# short horizons (it IS the trading signal); on longer horizons the base
+# blends in TQS and fundamental quality with progressively higher weight.
+_HORIZON_BASE_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "short":  {"composite": 1.0,  "tqs": 0.0,  "quality": 0.0},
+    "medium": {"composite": 0.7,  "tqs": 0.3,  "quality": 0.0},
+    "long":   {"composite": 0.3,  "tqs": 0.3,  "quality": 0.4},
+}
+
 
 @dataclass
 class GateEvaluation:
@@ -75,6 +142,7 @@ class FinalVerdict:
     confidence:       str                                   # low | medium | high
     conviction:       int                                   # 0-100 aggregated conviction score
     primary_reason:   str                                   # single sentence
+    horizon:          str = "medium"                        # short | medium | long
     gates:            List[GateEvaluation] = field(default_factory=list)
     limiting_gate:    Optional[str] = None                  # gate that most reduced conviction
     subsystem_labels: Dict[str, str] = field(default_factory=dict)  # {"composite": "BUY", ...}
@@ -85,6 +153,7 @@ class FinalVerdict:
             "confidence":       self.confidence,
             "conviction":       self.conviction,
             "primary_reason":   self.primary_reason,
+            "horizon":          self.horizon,
             "limiting_gate":    self.limiting_gate,
             "gates": [
                 {"name": g.name, "passed": g.passed,
@@ -275,43 +344,84 @@ def _gate_technical(composite_score: Optional[float],
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _apply_effects(base_conviction: int,
-                   gates: List[GateEvaluation]) -> Tuple[int, Optional[str]]:
+                   gates: List[GateEvaluation],
+                   horizon: str = "medium",
+                   ) -> Tuple[int, Optional[str]]:
     """
-    Turn gate effects into a conviction score adjustment.
+    Turn gate effects into a conviction score adjustment, scaled by horizon.
 
-    Numeric interpretation:
-      * veto      → cap to 0        (returned as the limiting gate)
-      * damp      → −20 each
-      * amplify   → +10 each
-      * none      → no change
+    The BASE magnitudes are: damp = -20, amplify = +10. Horizon multipliers
+    (see _HORIZON_WEIGHTS) can up- or down-scale each per gate. A veto is
+    only a veto if the horizon's veto weight for that gate is > 0 (the LONG
+    horizon has technical_veto=0, so a technical EXIT signal today does NOT
+    veto a long-term buy verdict — it only lowers conviction).
 
     Bounded 0..100. `limiting_gate` is the gate that most reduced conviction.
     """
+    w = _HORIZON_WEIGHTS.get(horizon, _HORIZON_WEIGHTS["medium"])
+    _damp_key = {
+        "quality":   "quality_damp",
+        "valuation": "valuation_damp",
+        "thesis":    "thesis_damp",
+        "trend":     "trend_damp",
+    }
+    _amp_key = {
+        "valuation": "valuation_amp",
+        "thesis":    "thesis_amp",
+        "trend":     "trend_amp",
+        "technical": "technical_amp",
+    }
+
     convict = base_conviction
     veto_gate: Optional[str] = None
-    biggest_damp = 0
+    biggest_damp = 0.0
     biggest_damp_gate: Optional[str] = None
 
     for g in gates:
         if g.effect == "veto" and g.passed is False:
-            veto_gate = g.name
-            convict = 0
+            # Technical veto is horizon-scaled — some horizons don't veto on it
+            if g.name == "technical":
+                veto_scale = w.get("technical_veto", 1.0)
+                if veto_scale > 0:
+                    veto_gate = g.name
+                    convict = 0
+                else:
+                    # Long horizon: treat "don't enter today" as a big DAMP
+                    # rather than a veto, since horizon >> today.
+                    convict -= int(round(30 * (1 - veto_scale)))
+                    if 30 > biggest_damp:
+                        biggest_damp = 30
+                        biggest_damp_gate = g.name
+            else:
+                veto_gate = g.name
+                convict = 0
         elif g.effect == "damp":
-            convict -= 20
-            if 20 > biggest_damp:
-                biggest_damp = 20
+            scale = w.get(_damp_key.get(g.name, ""), 1.0)
+            hit = 20 * scale
+            convict -= int(round(hit))
+            if hit > biggest_damp:
+                biggest_damp = hit
                 biggest_damp_gate = g.name
         elif g.effect == "amplify":
-            convict += 10
+            scale = w.get(_amp_key.get(g.name, ""), 1.0)
+            convict += int(round(10 * scale))
 
     limiting = veto_gate or biggest_damp_gate
     return max(0, min(100, convict)), limiting
 
 
 def _label_from_conviction(conviction: int,
-                           tech_gate: GateEvaluation) -> str:
-    """Map final conviction number back to a verdict label."""
-    if tech_gate.effect == "veto":
+                           tech_gate: GateEvaluation,
+                           horizon: str = "medium") -> str:
+    """
+    Map final conviction number back to a verdict label.
+
+    The technical-veto short-circuit is horizon-aware: on the LONG horizon
+    a technical EXIT signal today does NOT force AVOID (it's already been
+    damped in _apply_effects). On SHORT/MEDIUM it does.
+    """
+    w = _HORIZON_WEIGHTS.get(horizon, _HORIZON_WEIGHTS["medium"])
+    if tech_gate.effect == "veto" and w.get("technical_veto", 1.0) > 0:
         return "AVOID"
     if conviction >= 85:  return "STRONG BUY"
     if conviction >= 65:  return "BUY"
@@ -332,6 +442,35 @@ def _confidence_from_gate_coverage(gates: List[GateEvaluation]) -> str:
     return "low"
 
 
+def _base_conviction(horizon: str,
+                     composite_score: Optional[float],
+                     tqs:             Optional[float],
+                     quality_score:   Optional[float]) -> int:
+    """
+    Horizon-weighted base conviction (0-100).
+
+    Composite score dominates on short horizons (it IS the trading signal).
+    On long horizons the base blends in TQS and fundamental quality, so a
+    stock with a bad short-term setup but excellent quality can still
+    surface as a valid long-term BUY.
+    """
+    w = _HORIZON_BASE_WEIGHTS.get(horizon, _HORIZON_BASE_WEIGHTS["medium"])
+    total_weight = 0.0
+    total_score  = 0.0
+    if composite_score is not None:
+        total_weight += w["composite"]
+        total_score  += w["composite"] * (composite_score * (100 / 90))
+    if tqs is not None:
+        total_weight += w["tqs"]
+        total_score  += w["tqs"] * (tqs * (100 / 90))
+    if quality_score is not None:
+        total_weight += w["quality"]
+        total_score  += w["quality"] * quality_score
+    if total_weight <= 0:
+        return 50   # neutral prior when nothing numeric available
+    return int(round(min(100, total_score / total_weight)))
+
+
 def combine(*,
             composite_score:   Optional[float] = None,
             composite_action:  Optional[str]   = None,
@@ -341,15 +480,23 @@ def combine(*,
             valuation_posture: Optional[str]   = None,
             thesis_verdict:    Optional[str]   = None,
             thesis_score:      Optional[int]   = None,
+            horizon:           str             = "medium",
             ) -> FinalVerdict:
     """
     Combine every subsystem's output into ONE verdict.
 
     Every argument is optional; a caller that only has half the pieces
-    still gets a defensible answer, just with lower confidence. The
-    subsystem outputs themselves are preserved in `subsystem_labels` for
-    the UI to render as drilldown chips.
+    still gets a defensible answer, just with lower confidence.
+
+    `horizon` — one of "short" | "medium" | "long" (default "medium",
+    which preserves the original single-lens behaviour). Different
+    horizons re-weight the SAME subsystem outputs — a bad valuation is
+    a big damp long-term but nearly zero short-term; a technical EXIT
+    is a veto short-term but only a damp long-term. See _HORIZON_WEIGHTS
+    and _HORIZON_BASE_WEIGHTS for the exact rules.
     """
+    horizon = horizon if horizon in HORIZONS else "medium"
+
     tech = _gate_technical(composite_score, composite_action)
     qual = _gate_quality(quality_score, quality_flags)
     valu = _gate_valuation(valuation_posture)
@@ -357,14 +504,10 @@ def combine(*,
     trnd = _gate_trend_quality(tqs)
     gates = [tech, qual, valu, thes, trnd]
 
-    # Base conviction from the composite score (0-90 scaled to 0-100)
-    if composite_score is not None:
-        base = int(round(min(100, composite_score * (100 / 90))))
-    else:
-        base = 50  # neutral prior when even the composite is missing
+    base = _base_conviction(horizon, composite_score, tqs, quality_score)
 
-    conviction, limiting = _apply_effects(base, gates)
-    verdict = _label_from_conviction(conviction, tech)
+    conviction, limiting = _apply_effects(base, gates, horizon=horizon)
+    verdict = _label_from_conviction(conviction, tech, horizon=horizon)
     confidence = _confidence_from_gate_coverage(gates)
 
     # Primary reason: the strongest signal driving the verdict
@@ -392,6 +535,7 @@ def combine(*,
     return FinalVerdict(
         verdict=verdict, confidence=confidence,
         conviction=conviction, primary_reason=primary,
+        horizon=horizon,
         gates=gates, limiting_gate=limiting,
         subsystem_labels=labels,
     )

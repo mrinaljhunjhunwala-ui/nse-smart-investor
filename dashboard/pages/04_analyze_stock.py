@@ -341,10 +341,42 @@ if analyze_btn or _prefill_active or (
                     import logging
                     logging.getLogger("dashboard.analyze_stock").debug(
                         "FinalVerdict TQS fetch failed for %s: %s", ticker, _fv_tqs_e)
+
+                # FIX FV-HORIZON — one aggregator, three lenses. Same subsystem
+                # readings; the horizon selector re-weights how they combine.
+                # See analysis/final_verdict._HORIZON_WEIGHTS for exact rules.
+                _fv_horizon_labels = {
+                    "short":  "🎯 Short-term  (days–weeks)",
+                    "medium": "📈 Medium  (weeks–months)",
+                    "long":   "🏛 Long-term  (6 months +)",
+                }
+                _fv_horizon_choice = st.session_state.get("_fv_horizon", "medium")
+                _fv_h_col1, _fv_h_col2 = st.columns([3, 2])
+                with _fv_h_col1:
+                    _fv_horizon = st.radio(
+                        "Verdict horizon",
+                        options=list(_fv_horizon_labels.keys()),
+                        format_func=lambda k: _fv_horizon_labels[k],
+                        index=list(_fv_horizon_labels.keys()).index(_fv_horizon_choice),
+                        horizontal=True,
+                        key="_fv_horizon",
+                        help=(
+                            "Same subsystem readings, three lenses.\n"
+                            "• Short: technical setup + trend dominant. "
+                            "Bad valuation barely matters — you're not holding long enough.\n"
+                            "• Medium: technical + trend + regime, valuation informational.\n"
+                            "• Long: quality + valuation + thesis dominate. A technical "
+                            "EXIT signal today doesn't kill a 5-year thesis."
+                        ),
+                    )
+                with _fv_h_col2:
+                    st.caption("")   # vertical spacer to align
+
                 _fv = _fv_combine(
                     composite_score=cs.score,
                     composite_action=cs.action,
                     tqs=_fv_tqs,
+                    horizon=_fv_horizon,
                 )
                 _fv_colors = {
                     "STRONG BUY": "#26a69a",
@@ -362,7 +394,7 @@ if analyze_btn or _prefill_active or (
                     f'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap">'
                     f'<div>'
                     f'<div style="font-size:12px;color:#aaa;letter-spacing:1.5px;text-transform:uppercase">'
-                    f'Final verdict · {_fv.confidence.title()} confidence</div>'
+                    f'Final verdict · {_fv.horizon.title()}-term · {_fv.confidence.title()} confidence</div>'
                     f'<div style="font-size:32px;font-weight:700;color:{_fv_bg};margin:4px 0">'
                     f'{_fv.verdict}</div>'
                     f'<div style="font-size:14px;color:#ddd">{_fv.primary_reason}</div>'

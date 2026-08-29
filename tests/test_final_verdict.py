@@ -219,5 +219,118 @@ def test_as_dict_shape_is_stable_for_ui_consumption():
             assert k in g
 
 
+# ─────────────── Horizon lens (FIX FV-HORIZON) ───────────────
+
+def test_horizon_default_is_medium_and_preserves_original_behaviour():
+    v_default = combine(composite_score=70, composite_action="BUY", tqs=55,
+                        valuation_posture="REASONABLE")
+    v_medium  = combine(composite_score=70, composite_action="BUY", tqs=55,
+                        valuation_posture="REASONABLE", horizon="medium")
+    # Same inputs, default vs explicit medium — must be identical
+    assert v_default.verdict     == v_medium.verdict
+    assert v_default.conviction  == v_medium.conviction
+    assert v_default.horizon     == "medium"
+
+
+def test_technical_exit_does_not_veto_long_horizon():
+    """A technical EXIT signal today should NOT force AVOID on a 5-year
+    thesis — this is the whole reason a horizon parameter exists."""
+    kwargs = dict(
+        composite_score=15, composite_action="EXIT",
+        quality_score=90,
+        valuation_posture="SUPPORTED_BY_GROWTH_AND_QUALITY",
+        thesis_verdict="Strong Positive", thesis_score=2,
+    )
+    v_short = combine(**kwargs, horizon="short")
+    v_long  = combine(**kwargs, horizon="long")
+    assert v_short.verdict == "AVOID", "short horizon must veto on EXIT signal"
+    assert v_long.verdict  != "AVOID", (
+        f"long horizon shouldn't veto on EXIT signal — got {v_long.verdict}"
+    )
+
+
+def test_demanding_valuation_hurts_long_horizon_more_than_short():
+    """A DEMANDING valuation should barely dent a 5-day swing trade but
+    materially cut conviction for a 5-year hold."""
+    kwargs = dict(
+        composite_score=80, composite_action="BUY",
+        valuation_posture="DEMANDING_VS_GROWTH",
+    )
+    v_short = combine(**kwargs, horizon="short")
+    v_long  = combine(**kwargs, horizon="long")
+    # Direct A/B against the same setup with REASONABLE valuation
+    v_short_ok = combine(composite_score=80, composite_action="BUY",
+                         valuation_posture="REASONABLE", horizon="short")
+    v_long_ok  = combine(composite_score=80, composite_action="BUY",
+                         valuation_posture="REASONABLE", horizon="long")
+    short_hit = v_short_ok.conviction - v_short.conviction
+    long_hit  = v_long_ok.conviction  - v_long.conviction
+    assert long_hit > short_hit, (
+        f"DEMANDING valuation should cut conviction MORE long-term "
+        f"({long_hit}) than short-term ({short_hit})"
+    )
+
+
+def test_weak_tqs_hurts_short_horizon_more_than_long():
+    """Weak trend really hurts a swing trade; barely matters for a 5y hold."""
+    kwargs = dict(composite_score=70, composite_action="BUY", tqs=15)
+    v_short = combine(**kwargs, horizon="short")
+    v_long  = combine(**kwargs, horizon="long")
+    v_short_ok = combine(composite_score=70, composite_action="BUY",
+                         tqs=45, horizon="short")
+    v_long_ok  = combine(composite_score=70, composite_action="BUY",
+                         tqs=45, horizon="long")
+    short_hit = v_short_ok.conviction - v_short.conviction
+    long_hit  = v_long_ok.conviction  - v_long.conviction
+    assert short_hit > long_hit, (
+        f"weak TQS should hurt short-term ({short_hit}) more than long-term ({long_hit})"
+    )
+
+
+def test_quality_veto_still_applies_on_every_horizon():
+    """Fraud is fraud — a red governance flag vetoes at any holding period."""
+    for horizon in ("short", "medium", "long"):
+        v = combine(
+            composite_score=85, composite_action="STRONG BUY",
+            quality_flags={"severity": "red", "top_flag": "Pledge > 50 %"},
+            horizon=horizon,
+        )
+        assert v.verdict == "AVOID", (
+            f"quality veto should hold on {horizon} horizon — got {v.verdict}"
+        )
+
+
+def test_long_horizon_base_conviction_uses_quality_when_available():
+    """On the long horizon, quality is part of the base — a high-quality
+    business with a middling composite score should still surface as BUY."""
+    v_long  = combine(composite_score=45, composite_action="WATCHLIST",
+                      tqs=45, quality_score=95,
+                      valuation_posture="REASONABLE", horizon="long")
+    v_short = combine(composite_score=45, composite_action="WATCHLIST",
+                      tqs=45, quality_score=95,
+                      valuation_posture="REASONABLE", horizon="short")
+    # Base conviction weight of quality on long is 0.4 — 95/100 quality
+    # should lift the long-horizon conviction meaningfully vs short (which
+    # doesn't count quality at all in its base).
+    assert v_long.conviction > v_short.conviction, (
+        f"quality-driven base should lift long ({v_long.conviction}) "
+        f"vs short ({v_short.conviction})"
+    )
+
+
+def test_horizon_out_of_range_falls_back_to_medium():
+    v_ok = combine(composite_score=70, composite_action="BUY", horizon="medium")
+    v_bad = combine(composite_score=70, composite_action="BUY", horizon="galactic")
+    assert v_bad.verdict     == v_ok.verdict
+    assert v_bad.conviction  == v_ok.conviction
+    # Recorded horizon must be the fallback, not the invalid input
+    assert v_bad.horizon == "medium"
+
+
+def test_as_dict_carries_horizon_for_ui():
+    d = combine(composite_score=70, composite_action="BUY", horizon="long").as_dict()
+    assert d["horizon"] == "long"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
