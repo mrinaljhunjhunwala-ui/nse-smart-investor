@@ -414,12 +414,27 @@ if analyze_btn or _prefill_active or (
                 try:
                     from analysis.fundamentals.valuation import build_valuation_context as _bvc
                     from analysis.fundamentals.valuation_decision import assess_valuation as _av
-                    from analysis.sector_classification import get_sector_profile as _gsp
+                    # FIX FV-BANNER-IMPORT — sector_classification exposes
+                    # `classify_sector`, not `get_sector_profile`. The old alias
+                    # raised ImportError → the whole try block silently swallowed
+                    # it → gate showed "Valuation data unavailable" for every
+                    # ticker. Same bug applied identically for BAJHIND + the
+                    # Nifty 50 large-caps (Yahoo had the multiples, the code
+                    # never got to read them).
+                    from analysis.sector_classification import classify_sector as _classify
+                    from analysis.fundamentals import analytics as _fv_fa
                     _fv_cf = _fund_service().get_fundamentals(ticker)
                     if _fv_cf is not None:
-                        _fv_spv = _gsp(cs.sector) if cs.sector else None
+                        _fv_spv = _classify(cs.sector,
+                                            name=getattr(cs, "company_name", None))
                         _fv_val = _bvc(_fv_cf, sector_profile=_fv_spv)
-                        _fv_va  = _av(_fv_val, None, _fv_spv, cf=_fv_cf)
+                        # FIX FV-BANNER-ANALYTICS — passing analytics=None made
+                        # assess_valuation return INSUFFICIENT_EVIDENCE for every
+                        # ticker (no PEG, no ROE-check inputs). Compute the same
+                        # analytics the Valuation section below uses so the
+                        # banner reads a REAL posture (SUPPORTED/REASONABLE/…).
+                        _fv_analytics = _fv_fa.compute_all(_fv_cf)
+                        _fv_va  = _av(_fv_val, _fv_analytics, _fv_spv, cf=_fv_cf)
                         if _fv_va and getattr(_fv_va, "posture", None):
                             _fv_valuation = _fv_va.posture
                 except Exception as _fv_val_e:
@@ -428,7 +443,11 @@ if analyze_btn or _prefill_active or (
                         "FinalVerdict valuation fetch failed for %s: %s", ticker, _fv_val_e)
                 try:
                     from analysis.thesis import generate_thesis as _gt, build_inputs as _bti
-                    _fv_th_inputs = _bti(ticker, cs=cs)
+                    # FIX FV-BANNER-KWARG — build_inputs takes `composite=`, not
+                    # `cs=`. The old call raised TypeError → caught silently →
+                    # thesis gate showed "Thesis engine not run" for every
+                    # ticker on the FinalVerdict banner.
+                    _fv_th_inputs = _bti(ticker, composite=cs)
                     _fv_th = _gt(_fv_th_inputs)
                     if _fv_th:
                         _fv_thesis_verdict = getattr(_fv_th, "verdict", None)
