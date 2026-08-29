@@ -243,6 +243,56 @@ if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
     get_vix_info.clear()
     st.rerun()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX CC-REGIME — composite regime badge (Phase 2 wiring)
+# The 5-year efficacy study established that the composite score's edge is
+# regime-dependent: 62-66 % BUY hit rate on train (2020-22, trending), 46 %
+# on holdout (2023-25, mean-reverting). Users need to see WHAT REGIME the
+# app thinks the market is in RIGHT NOW so they can calibrate expectations
+# on every BUY signal below. Fetches are cached at the classifier layer —
+# no per-page-load network cost.
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _cc_regime_snapshot() -> "dict | None":
+        from analysis.regime import snapshot_live
+        try:
+            snap = snapshot_live()
+            return snap.as_dict()
+        except Exception as _reg_e:
+            import logging as _reg_log
+            _reg_log.getLogger("dashboard.command_centre").debug(
+                "regime snapshot failed: %s", _reg_e)
+            return None
+
+    _cc_reg = _cc_regime_snapshot()
+    if _cc_reg:
+        _reg_lbl = _cc_reg.get("label", "unknown")
+        _reg_conf = _cc_reg.get("confidence", "low")
+        _reg_colors = {
+            "trend_up":   ("#26a69a", "📈", "Trending up — momentum-heavy signals have historically hit ~60 %"),
+            "trend_down": ("#ef5350", "📉", "Trending down — contrarian BUYs have outperformed, momentum signals have not"),
+            "range":      ("#FFC107", "⇄",  "Range-bound — historical BUY hit rate here is ~46 % vs 55 %+ in trending regimes. Halve size or wait"),
+            "risk_off":   ("#B71C1C", "🚨", "Risk-off (VIX ≥ 22) — historically all BUYs paid 5-12 % but you have to buy the fear"),
+            "unknown":    ("#666666", "❓", "Regime undetermined — data unavailable"),
+        }
+        _reg_c, _reg_e, _reg_note = _reg_colors.get(_reg_lbl, _reg_colors["unknown"])
+        st.markdown(
+            f'<div style="background:linear-gradient(90deg,{_reg_c}15,{_reg_c}05);'
+            f'border-left:4px solid {_reg_c};border-radius:8px;padding:9px 14px;margin:6px 0 12px 0;'
+            f'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap">'
+            f'<span><span style="font-size:15px">{_reg_e} <b style="color:{_reg_c}">{_reg_lbl.replace("_"," ").title()}</b></span> '
+            f'<span style="font-size:11px;color:#888;margin-left:8px">'
+            f'{_reg_conf.title()} confidence</span></span>'
+            f'<span style="font-size:12px;color:#bbb">{_reg_note}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+except Exception as _cc_reg_e:
+    import logging as _cc_reg_log
+    _cc_reg_log.getLogger("dashboard.command_centre").debug(
+        "regime banner render failed: %s", _cc_reg_e)
+
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -393,6 +443,71 @@ import datetime
 
 
 @st.fragment(run_every=20)
+# ── FIX CC-FRESH — pick-card freshness + live re-anchoring helper ─────────────
+# The Top Picks cards used to render `Entry ₹X · SL ₹Y · TP ₹Z` verbatim from
+# a score computed against yesterday's close, next to a LIVE price that had
+# drifted overnight. On even a modest 2% gap, SL might sit ABOVE the current
+# live price (nonsensical for a BUY), and the printed R:R was fiction.
+#
+# _reanchor_levels() takes the score-time (entry, sl, tp) plus the current
+# live price and returns a dict the card renderer can paste in verbatim:
+#   * If the price has drifted > 0.5% from the score-time entry, entry/SL/TP
+#     are shifted to preserve their ATR-based distances from the NEW price
+#     (same logic score_stock() already has for the Analyze Stock live-price
+#     overlay — see analysis/score.py, FIX entry/SL/TP staleness).
+#   * The dict includes gross AND net-of-cost R:R using the same 0.30%
+#     round-trip cost floor as the score-efficacy validation.
+_COST_ROUNDTRIP_PCT = 0.30   # keep in sync with research.score_efficacy.COST_ROUNDTRIP_PCT
+_LIVE_DRIFT_THRESHOLD_PCT = 0.5
+
+
+def _reanchor_levels(entry: float, sl: float, tp: float,
+                     live_price: "float | None") -> dict:
+    """Return re-anchored entry/SL/TP + honest R:R for one pick card."""
+    if not entry or entry <= 0:
+        return {"entry": entry, "sl": sl, "tp": tp, "rr": 0.0, "rr_net": 0.0,
+                "drift_pct": 0.0, "reanchored": False}
+
+    if not live_price or live_price <= 0:
+        # No live price — honest gross R:R off the score-time numbers.
+        risk = max(entry - sl, 0.01) if sl else 0.01
+        reward = max(tp - entry, 0.0) if tp else 0.0
+        rr = round(reward / risk, 2) if risk > 0 else 0.0
+        cost_pct_of_entry = _COST_ROUNDTRIP_PCT
+        cost_abs = entry * cost_pct_of_entry / 100
+        rr_net = round(max(0.0, reward - cost_abs) / max(risk + cost_abs, 0.01), 2)
+        return {"entry": entry, "sl": sl, "tp": tp, "rr": rr, "rr_net": rr_net,
+                "drift_pct": 0.0, "reanchored": False}
+
+    drift_pct = (live_price - entry) / entry * 100
+    if abs(drift_pct) < _LIVE_DRIFT_THRESHOLD_PCT:
+        # Live price within 0.5% of the scored entry — original triangle
+        # is still faithful, just add cost-adjusted R:R.
+        risk = max(entry - sl, 0.01) if sl else 0.01
+        reward = max(tp - entry, 0.0) if tp else 0.0
+        rr = round(reward / risk, 2) if risk > 0 else 0.0
+        cost_abs = entry * _COST_ROUNDTRIP_PCT / 100
+        rr_net = round(max(0.0, reward - cost_abs) / max(risk + cost_abs, 0.01), 2)
+        return {"entry": entry, "sl": sl, "tp": tp, "rr": rr, "rr_net": rr_net,
+                "drift_pct": round(drift_pct, 2), "reanchored": False}
+
+    # Live has drifted — preserve the RISK and REWARD distances, re-anchor
+    # both to the live price. Same logic score_stock() uses when Angel One
+    # returns a live quote (analysis/score.py, "entry/SL/TP staleness" fix).
+    risk_dist   = entry - sl if sl > 0 else 0
+    reward_dist = tp - entry if tp > 0 else 0
+    new_entry = round(live_price, 2)
+    new_sl    = round(live_price - risk_dist, 2) if risk_dist > 0 else sl
+    new_tp    = round(live_price + reward_dist, 2) if reward_dist > 0 else tp
+    risk = max(new_entry - new_sl, 0.01) if new_sl else 0.01
+    reward = max(new_tp - new_entry, 0.0) if new_tp else 0.0
+    rr = round(reward / risk, 2) if risk > 0 else 0.0
+    cost_abs = new_entry * _COST_ROUNDTRIP_PCT / 100
+    rr_net = round(max(0.0, reward - cost_abs) / max(risk + cost_abs, 0.01), 2)
+    return {"entry": new_entry, "sl": new_sl, "tp": new_tp, "rr": rr, "rr_net": rr_net,
+            "drift_pct": round(drift_pct, 2), "reanchored": True}
+
+
 def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     _tp_h1, _tp_h2 = st.columns([5, 2])
     with _tp_h1:
@@ -564,16 +679,49 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             # ticker, otherwise the same honest "(last close)" fallback as
             # before — never silently pretend a stale price is live.
             _b_lp = _pk_live.get(_b["ticker"])
+            _b_live_price = float(_b_lp["price"]) if _b_lp else None
+
+            # FIX CC-FRESH — re-anchor entry/SL/TP to live price if it's
+            # drifted > 0.5 % from the scored entry, and compute honest
+            # cost-adjusted R:R. See _reanchor_levels() docstring above.
+            _b_lvl = _reanchor_levels(
+                float(_b.get("entry") or 0), float(_b.get("sl") or 0),
+                float(_b.get("tp") or 0), _b_live_price,
+            )
             if _b_lp:
                 _b_up = (_b_lp.get("chg_pct") or 0) >= 0
                 _b_pc = "#3ddc84" if _b_up else "#ef5350"
                 _b_live_span = (
                     f'<span style="color:{_b_pc};font-weight:700">₹{_b_lp["price"]:,.2f} '
                     f'{"▲" if _b_up else "▼"}{abs(_b_lp.get("chg_pct") or 0):.2f}%</span>'
-                    f' <span style="color:#666">live · qty in full analysis</span>'
+                    f' <span style="color:#666">live</span>'
                 )
+                if _b_lvl["reanchored"]:
+                    _b_live_span += (
+                        f' <span style="color:#ffb300"> · re-anchored '
+                        f'({_b_lvl["drift_pct"]:+.1f}% drift from scored entry)</span>'
+                    )
             else:
-                _b_live_span = '<span style="color:#666">(last close — open full analysis for live price + qty)</span>'
+                _b_live_span = '<span style="color:#666">(last close — live price unavailable)</span>'
+
+            _b_rr_html = ""
+            if _b_lvl["entry"] and _b_lvl["sl"] and _b_lvl["tp"]:
+                _rr_gross = _b_lvl["rr"]
+                _rr_net   = _b_lvl["rr_net"]
+                _b_rr_html = (
+                    f'<div style="font-size:11px;color:#888;margin-top:2px">'
+                    f'R:R <span style="color:#fff">{_rr_gross:.1f}:1</span> gross, '
+                    f'<span style="color:#ffb300">{_rr_net:.1f}:1 net of ~{_COST_ROUNDTRIP_PCT:.2f}% costs</span></div>'
+                )
+
+            # Freshness stamps — score time and live-price time
+            _b_scored_at = st.session_state.get(f"{_PICKS_KEY}_ts")
+            _stamp_html = (
+                f'<div style="font-size:10px;color:#555;margin-top:3px">'
+                f'📊 Scored at {_b_scored_at.strftime("%H:%M") if _b_scored_at else "unknown"}'
+                f' · 💹 Live price {"as of now" if _b_lp else "unavailable"}'
+                f'</div>'
+            )
 
             st.markdown(
                 f'<div style="background:{_card_grad};'
@@ -585,20 +733,25 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
                 + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
-                   f'Entry ₹{_b["entry"]:,.2f} · SL ₹{_b["sl"]:,.2f} · TP ₹{_b["tp"]:,.2f} '
+                   f'Entry ₹{_b_lvl["entry"]:,.2f} · SL ₹{_b_lvl["sl"]:,.2f} · TP ₹{_b_lvl["tp"]:,.2f} '
                    f'{_b_live_span}</div>'
-                   if _b["entry"] else "")
+                   if _b_lvl["entry"] else "")
+                + _b_rr_html
                 + (f'<div style="font-size:11px;color:#6a8caf;margin-top:2px">'
                    f'⏱ {_b.get("horizon")}'
                    + (f' · {_horizon_countdown(_b.get("valid_until"))}' if _b.get("valid_until") else '')
                    + '</div>'
                    if _b.get("horizon") else "")
+                + _stamp_html
                 + '</div>',
                 unsafe_allow_html=True,
             )
-            if _b["entry"]:
+            if _b_lvl["entry"]:
+                # Paper trade uses the RE-ANCHORED levels — a live-price
+                # entry with SL/TP at the stale-scored values would set stops
+                # in the wrong place from the moment the trade opens.
                 _paper_trade_popover(
-                    _b["ticker"], _b["entry"], _b["sl"], _b["tp"],
+                    _b["ticker"], _b_lvl["entry"], _b_lvl["sl"], _b_lvl["tp"],
                     reason=f"Top Pick: {_b['headline'][:55]}",
                     key=f"cc_pick_{_b['ticker']}",
                     label=f"📌 Paper Trade {_bl}",
