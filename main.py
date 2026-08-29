@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Indian Share Market Trading Model
-CLI entry point — backtests, ML prediction, sector rotation, LSTM.
+CLI entry point — backtests, ML prediction, sector rotation.
 
 Usage examples
 ──────────────
@@ -20,10 +20,7 @@ python main.py --mode backtest --strategy rsi_macd --index nifty50 --portfolio
 # Phase 3a: Sector rotation — score sectors, pick top 3, run portfolio
 python main.py --mode sector --strategy rsi_macd --n-sectors 3
 
-# Phase 3b: LSTM price direction predictor
-python main.py --mode lstm --tickers RELIANCE.NS TCS.NS --period 3y
-
-# Score a single stock (composite 0–100 with plain-English narrative)
+# Score a single stock (composite 0–90 with plain-English narrative)
 python main.py --mode score --tickers RELIANCE.NS
 
 # Score all NIFTY100 stocks
@@ -123,7 +120,7 @@ def print_header(args, tickers):
     if args.optimize:                  flags.append("Phase 2a OPTIMISE")
     if args.portfolio:                 flags.append("Phase 2b PORTFOLIO")
     if args.mode == "sector":          flags.append(f"Phase 3a SECTOR-ROTATE (top {args.n_sectors})")
-    if args.mode == "lstm":            flags.append("Phase 3b LSTM")
+    # (Phase 3b LSTM mode removed — see FIX DEAD-LSTM above)
     if flags:
         print(f"  Active    : {' | '.join(flags)}")
     print(f"{'='*60}")
@@ -211,10 +208,7 @@ def main():
             strategy_params = best_params or None,
         )
 
-    # ── LSTM MODE — Phase 3b ──────────────────────────────────────────────────
-    elif args.mode == "lstm":
-        from models.lstm import train_and_evaluate_lstm
-        train_and_evaluate_lstm(tickers=tickers, period=args.period)
+    # (LSTM mode removed — see FIX DEAD-LSTM at the argparse block above)
 
     # ── SCAN MODE — Phase 4a: signal scanner + paper trade execution ─────────
     elif args.mode == "scan":
