@@ -765,10 +765,19 @@ def score_dataframe(
     sector_rank:  int = 7,
     sector:       str = "Other",
     n_sectors:    int = 15,
+    dispersion:   Optional[float] = None,
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
     Call this when you already have the df to avoid redundant fetches.
+
+    `dispersion` is the current cross-sectional 20-day return dispersion
+    across the universe, as produced by
+    analysis.regime.cross_sectional_dispersion_20d. When passed and below
+    the low-dispersion threshold, the narrative for BUY/STRONG BUY signals
+    gets a warning suffix — see FIX REGIME-DISP-SCORE below. Optional;
+    callers that don't have it (e.g. single-stock ad-hoc scoring) can
+    still pass None and get the previous behavior unchanged.
     """
     if vix_info is None:
         vix_info = {"regime": "normal", "vix": None, "allow_buy": True}
@@ -810,6 +819,23 @@ def score_dataframe(
         sector_rank=sector_rank, n_sectors=n_sectors,
         momentum_fallback=momentum_fallback,
     )
+
+    # FIX REGIME-DISP-SCORE — append the low-dispersion caution to the
+    # narrative when the market is in a correlated (low-dispersion) regime
+    # AND this is a BUY/STRONG BUY signal. That is the ONE stable filter
+    # the Path B axis search produced (see analysis/regime.py). Kept as a
+    # narrative append rather than a score deduction on purpose: the finding
+    # is a hit-rate CAUTION, not a scoring re-weight (train/holdout show
+    # different directions on the axis magnitude — see FIX REGIME-DISP for
+    # the deliberate design choice not to overfit the effect direction).
+    if dispersion is not None and action in ("BUY", "STRONG BUY"):
+        try:
+            from analysis.regime import dispersion_verdict as _dv
+            _v = _dv(dispersion)
+            if _v.get("zone") == "low" and _v.get("note"):
+                narrative = narrative + " " + _v["note"]
+        except Exception as _dispersion_e:
+            _log.debug("dispersion narrative append skipped: %s", _dispersion_e)
 
     return CompositeScore(
         ticker            = ticker,
