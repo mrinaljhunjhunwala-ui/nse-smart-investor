@@ -92,6 +92,26 @@ st.markdown(
     "chart, stop-loss, and plain-English read of the setup."
 )
 
+# FIX ANL-XREF — the per-ticker analytics surface is spread across four pages
+# (this one, Swing Checklist, Quality Watch, Deep Dive) and the reason they
+# each exist isn't obvious from the sidebar labels. Users would land here, not
+# find a specific detail, and give up rather than click through to the sibling
+# page that has it. Explicit map here so someone starting on any of the four
+# learns the shape.
+with st.expander("↔️ Related per-ticker views: Deep Dive · Quality Watch · Swing Checklist", expanded=False):
+    st.markdown(
+        "- **This page (Analyze Stock)** — headline read: composite score, "
+        "chart, entry/SL/target, narrative.\n"
+        "- **Deep Dive** — prepares a full equity-research prompt (all this "
+        "page's outputs + fundamentals + governance flags + thesis verdict) "
+        "for you to paste into a Claude conversation with the annual report / "
+        "concall PDFs attached. Save the write-up back with a date.\n"
+        "- **Quality Watch** — long-term-hold suitability lens (fundamental "
+        "quality flags, governance, event risk). Use for a name you plan to sit in.\n"
+        "- **Swing Checklist** — pre-trade go/no-go checklist against a "
+        "specific entry idea. Use once you've decided to act on a name."
+    )
+
 from dashboard.shared.disclosures import (
     render_score_methodology as _render_score_methodology,
     render_regime_reliability_note as _render_regime_note,

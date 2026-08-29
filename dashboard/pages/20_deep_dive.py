@@ -56,6 +56,16 @@ st.caption(
     "then paste the result back here to save it with a date."
 )
 
+# FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
+with st.expander("↔️ Also see: Analyze Stock · Quality Watch · Swing Checklist", expanded=False):
+    st.markdown(
+        "Deep Dive assembles the FULL research prompt for an off-app Claude "
+        "conversation (bring your own PDFs). If you just want the app's own "
+        "quick take: **Analyze Stock**. If you want a hold-quality lens: "
+        "**Quality Watch**. If you're already convinced and want to check an "
+        "entry: **Swing Checklist**."
+    )
+
 _DD_KV_USER = "default"   # matches trade_store's default single-user convention
 
 

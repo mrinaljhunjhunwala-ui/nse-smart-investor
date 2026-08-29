@@ -28,6 +28,15 @@ st.markdown(
     # ── FIX 7: Updated copy to reflect actual factor count (was 7, now 8 with Volume) ──
 )
 
+# FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
+with st.expander("↔️ Also see: Analyze Stock · Deep Dive · Quality Watch", expanded=False):
+    st.markdown(
+        "This page is a **pre-trade go/no-go** — use after you've decided a "
+        "name is worth acting on. For the setup itself go to **Analyze Stock**; "
+        "for structural / hold-worthiness questions go to **Deep Dive** or "
+        "**Quality Watch**."
+    )
+
 # ── Stock picker ──
 _sc_search_options = sorted(
     f"{name}  ({sym.replace('.NS', '')})"

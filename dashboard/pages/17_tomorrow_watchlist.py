@@ -54,6 +54,17 @@ st.markdown(
     "and divergence/reversal candidates."
 )
 
+# FIX SCR-XREF — see the matching note in 06_smart_screener.py.
+with st.expander("↔️ Also see: Smart Screener · TQS Scanner", expanded=False):
+    st.markdown(
+        "- **Smart Screener** — run the same 4-screen scan interactively with your "
+        "own universe / parameters. Use when this pre-computed list doesn't have "
+        "what you're after.\n"
+        "- **TQS Scanner** — a *different* scoring engine (four-pillar Trend "
+        "Quality Score) applied to the same universes. Cross-check a shortlisted "
+        "name against its TQS reading before acting."
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX W1 — non-blocking scan with stale-while-revalidate pattern
 # ─────────────────────────────────────────────────────────────────────────────

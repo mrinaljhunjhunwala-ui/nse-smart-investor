@@ -33,6 +33,18 @@ st.caption(
     "Validated baseline: +0.41 rank correlation with staying in an uptrend next month."
 )
 
+# FIX SCR-XREF — see the matching note in 06_smart_screener.py.
+with st.expander("↔️ Also see: Smart Screener · Tomorrow's Watchlist", expanded=False):
+    st.markdown(
+        "TQS is a *different scoring engine* to the composite score used by "
+        "the other two screener-family pages — it emphasises trend PERSISTENCE "
+        "over signal fires. Use them together, not instead of each other:\n\n"
+        "- **Smart Screener** — interactive 4-screen scan (oversold, momentum, "
+        "breakout, pullback) with a composite score per hit.\n"
+        "- **Tomorrow's Watchlist** — the same scan pre-computed on last close, "
+        "no wait time."
+    )
+
 # ── Lazy import engine ────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def _load_engine():

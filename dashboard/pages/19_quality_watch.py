@@ -76,6 +76,15 @@ st.caption(
     "week\" — see Command Centre or Smart Screener for that."
 )
 
+# FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
+with st.expander("↔️ Also see: Analyze Stock · Deep Dive · Swing Checklist", expanded=False):
+    st.markdown(
+        "Quality Watch answers \"is this a good name to sit in\". For \"how "
+        "does the setup look right now\" go to **Analyze Stock**; for the full "
+        "structural + valuation + thesis breakdown go to **Deep Dive**; for "
+        "a pre-trade go/no-go checklist go to **Swing Checklist**."
+    )
+
 _POSTURE_COLOR = {
     "REASONABLE": "#26a69a",
     "SUPPORTED_BY_ROE": "#26a69a",

@@ -27,6 +27,22 @@ st.markdown(
     "not a return forecast)."
 )
 
+# FIX SCR-XREF — the three screener-family pages (this one, Tomorrow's Watchlist,
+# TQS Scanner) all answer "which names should I look at" but pick different
+# universes / different scoring engines / different refresh cadences. Users
+# regularly ran ONE of the three, didn't find what they expected, and gave up
+# — not realising the other two existed. Cross-links here so someone starting
+# on any of the three learns the map.
+with st.expander("↔️ Also see: Tomorrow's Watchlist · TQS Scanner", expanded=False):
+    st.markdown(
+        "- **Tomorrow's Watchlist** — the same style of scan, but pre-computed in "
+        "the background on yesterday's close so you don't wait. Use when you want "
+        "next-session setups without kicking off a live scan.\n"
+        "- **TQS Scanner** — a *different* scoring engine (four-pillar Trend "
+        "Quality Score, 0-90) applied to the same universes. Cross-check a "
+        "name here against its TQS reading before acting."
+    )
+
 # Phase 1 (UI honesty): regime reliability next to live score output
 from dashboard.shared.disclosures import (
     render_regime_reliability_note as _scr_regime_note,
