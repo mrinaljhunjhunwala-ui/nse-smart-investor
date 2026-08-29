@@ -316,6 +316,93 @@ if analyze_btn or _prefill_active or (
             except Exception as _rg_e:
                 import logging; logging.getLogger("dashboard.analyze_stock").debug("Revenue growth fetch failed for %s: %s", ticker, _rg_e)
 
+            # ── FinalVerdict banner (single answer combining every subsystem) ─
+            # FIX FV-BANNER — the seven-scores problem lived here: users saw
+            # composite / TQS / valuation / thesis / quality / flags stacked
+            # top-to-bottom and had to synthesise a decision themselves. This
+            # banner renders analysis.final_verdict.combine() output at the
+            # top so the ONE verdict is the first thing they read; the
+            # existing subsystem sections stay below as drilldown.
+            #
+            # We compute cheap inputs (composite + TQS) here and pass what
+            # richer subsystems produce further down the page as None — the
+            # aggregator degrades gracefully (see FinalVerdict confidence
+            # tracking). A future pass can compute valuation/thesis/quality
+            # up top too, at the cost of moving their fetches earlier.
+            try:
+                from analysis.final_verdict import combine as _fv_combine
+                _fv_tqs = None
+                try:
+                    from analysis.trend_quality_score import score_ticker as _fv_tqs_score
+                    _fv_tqs_res = _fv_tqs_score(ticker, period="1y")
+                    if hasattr(_fv_tqs_res, "tqs"):
+                        _fv_tqs = float(_fv_tqs_res.tqs)
+                except Exception as _fv_tqs_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "FinalVerdict TQS fetch failed for %s: %s", ticker, _fv_tqs_e)
+                _fv = _fv_combine(
+                    composite_score=cs.score,
+                    composite_action=cs.action,
+                    tqs=_fv_tqs,
+                )
+                _fv_colors = {
+                    "STRONG BUY": "#26a69a",
+                    "BUY":        "#4CAF50",
+                    "WATCH":      "#2196F3",
+                    "HOLD":       "#9E9E9E",
+                    "AVOID":      "#ef5350",
+                }
+                _fv_bg = _fv_colors.get(_fv.verdict, "#9E9E9E")
+                st.markdown("---")
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,#0d1526,#1a2540);'
+                    f'border-left:6px solid {_fv_bg};border-radius:10px;'
+                    f'padding:16px 20px;margin-bottom:8px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap">'
+                    f'<div>'
+                    f'<div style="font-size:12px;color:#aaa;letter-spacing:1.5px;text-transform:uppercase">'
+                    f'Final verdict · {_fv.confidence.title()} confidence</div>'
+                    f'<div style="font-size:32px;font-weight:700;color:{_fv_bg};margin:4px 0">'
+                    f'{_fv.verdict}</div>'
+                    f'<div style="font-size:14px;color:#ddd">{_fv.primary_reason}</div>'
+                    f'</div>'
+                    f'<div style="text-align:right">'
+                    f'<div style="font-size:12px;color:#aaa">Conviction</div>'
+                    f'<div style="font-size:28px;font-weight:700;color:#fff">{_fv.conviction}</div>'
+                    f'<div style="font-size:11px;color:#888">/ 100</div>'
+                    f'</div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+                with st.expander("Why? — gate-by-gate breakdown", expanded=False):
+                    st.caption(
+                        "Verdict combines every subsystem via a decision tree "
+                        "(quality/thesis are vetoes, valuation/trend are dampers, "
+                        "technical is the driver). Gates showing 'insufficient data' "
+                        "are ones whose inputs weren't computed on this page — the "
+                        "aggregator uses what's available and marks confidence "
+                        "accordingly."
+                    )
+                    for _g in _fv.gates:
+                        _pill = ("✅" if _g.passed is True else
+                                 "❌" if _g.passed is False else "❓")
+                        _effect_txt = _g.effect if _g.effect != "none" else ""
+                        st.markdown(
+                            f"{_pill} **{_g.name.title()}** "
+                            f"{'(' + _effect_txt + ')' if _effect_txt else ''} — "
+                            f"{_g.message}"
+                        )
+                    if _fv.subsystem_labels:
+                        st.caption(
+                            "Subsystem readings: " +
+                            " · ".join(f"{k}: {v}" for k, v in _fv.subsystem_labels.items())
+                        )
+            except Exception as _fv_err:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "FinalVerdict banner failed for %s: %s", ticker, _fv_err)
+
             # ── Score hero section ─────────────────────────────────────────
             st.markdown("---")
             hero_col, detail_col = st.columns([1, 2])
