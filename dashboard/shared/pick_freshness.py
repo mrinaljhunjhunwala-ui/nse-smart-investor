@@ -111,18 +111,47 @@ def _horizon_for_pick(pick: Dict[str, Any]) -> str:
 
 
 def compose_finalverdict_for_card(pick: Dict[str, Any],
-                                  tqs: Optional[float] = None):
+                                  tqs: Optional[float] = None,
+                                  *,
+                                  log_source: Optional[str] = "shadow_auto"):
     """
     Build a FinalVerdict for one pick card, using its composite score /
     action + optional TQS. Horizon is inferred from the pick's own
     horizon hint so a "Swing (3-10 trading days)" pick is scored on the
     short lens (technical dominant) and a positional/investment pick on
     medium/long. Returns the FinalVerdict object.
+
+    SHADOW LEDGER (Tier 1 #2) — every card compose call also silently
+    persists the verdict to verdict_log with source=`log_source` (default
+    "shadow_auto") so we later know which BUY/STRONG BUY signals the app
+    surfaced whether or not the user paper-traded them. Pass log_source=None
+    to opt a specific call out of logging (e.g. re-renders inside the same
+    session). All failure paths are swallowed — logging never breaks a UI
+    render.
     """
     from analysis.final_verdict import combine
-    return combine(
+    fv = combine(
         composite_score=pick.get("score"),
         composite_action=pick.get("action"),
         tqs=tqs,
         horizon=_horizon_for_pick(pick),
     )
+    if log_source:
+        try:
+            from analysis.verdict_ledger import log_verdict as _vl_log
+            _t = pick.get("ticker") or pick.get("symbol")
+            _px = pick.get("entry") or pick.get("price") or pick.get("close")
+            if _t:
+                _t = str(_t).upper()
+                if not _t.endswith(".NS") and not _t.endswith(".BO"):
+                    _t = _t + ".NS"
+                _score = pick.get("score")
+                _vl_log(ticker=_t, final_verdict=fv,
+                        entry_price=(float(_px) if _px else None),
+                        composite_score=(float(_score) if _score is not None else None),
+                        source=log_source,
+                        horizon=_horizon_for_pick(pick))
+        except Exception:
+            # Ledger is a background concern — never break a card render
+            pass
+    return fv

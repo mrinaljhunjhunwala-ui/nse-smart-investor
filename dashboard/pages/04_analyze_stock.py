@@ -545,6 +545,24 @@ if analyze_btn or _prefill_active or (
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )
+                # ── VERDICT LEDGER — silent auto-log (Tier 1 #1/#2) ─────────
+                # Every FinalVerdict the user sees on this page is persisted so
+                # we can compute forward returns and calibration later. Idempotent
+                # per (date, ticker, horizon, source) via a UNIQUE index — visiting
+                # the same page 20 times a day writes ONE row per horizon. Failure
+                # never surfaces (logger swallows and continues).
+                try:
+                    from analysis.verdict_ledger import log_verdict as _vl_log
+                    _vl_log(ticker=ticker, final_verdict=_fv,
+                            entry_price=float(getattr(cs, "entry", 0.0) or 0.0) or None,
+                            composite_score=float(getattr(cs, "score", 0.0) or 0.0) or None,
+                            thesis_score=_fv_thesis_score,
+                            source="analyze_page", horizon=_fv_horizon)
+                except Exception as _vl_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "verdict_ledger log_verdict failed for %s: %s", ticker, _vl_e)
+
                 with st.expander("Why? — gate-by-gate breakdown", expanded=False):
                     st.caption(
                         "Verdict combines every subsystem via a decision tree "
