@@ -442,7 +442,6 @@ def _picks_background_fetch(vix_regime: str, sector_ranks: tuple) -> None:
 import datetime
 
 
-@st.fragment(run_every=20)
 # FIX CC-FRESH → dashboard/shared/pick_freshness — pick-card freshness helper
 # was extracted here so both Command Centre and My Watchlist use one impl.
 # Local aliases kept so the test that scrapes _reanchor_levels + _COST_ROUNDTRIP_PCT
@@ -455,6 +454,15 @@ from dashboard.shared.pick_freshness import (
 )
 
 
+# FIX CC-FRAG — this decorator used to live above the old inline
+# _reanchor_levels() helper (before it was extracted to pick_freshness).
+# The extraction left the decorator dangling above the import block, which
+# is a SyntaxError on real Python (streamlit-testing's AppTest was swallowing
+# it as a startup error, so the local smoke test passed while the actual
+# Streamlit Cloud runtime crashed with "invalid syntax" on ast.parse).
+# The decorator belongs on _render_top_picks_section — that's what should
+# rerun every 20s to keep the pick cards' live prices ticking.
+@st.fragment(run_every=20)
 def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     _tp_h1, _tp_h2 = st.columns([5, 2])
     with _tp_h1:
