@@ -92,6 +92,33 @@ st.markdown(
     "chart, stop-loss, and plain-English read of the setup."
 )
 
+# FIX UI-REGIME — surface the current market regime next to the title so
+# users see the SAME regime context as on Command Centre. The tooltip
+# carries the historical hit-rate note per regime; users interpret every
+# BUY signal below through it.
+try:
+    import streamlit as _as_st_reg
+    from dashboard.shared.ui_components import regime_badge as _ui_regime_badge
+    @_as_st_reg.cache_data(ttl=1800, show_spinner=False)
+    def _as_regime_snap():
+        from analysis.regime import snapshot_live
+        try:
+            return snapshot_live().as_dict()
+        except Exception:
+            return None
+    _as_reg = _as_regime_snap()
+    if _as_reg:
+        _as_st_reg.markdown(
+            _ui_regime_badge(_as_reg.get("label", "unknown"),
+                             _as_reg.get("confidence", "low"),
+                             compact=False),
+            unsafe_allow_html=True,
+        )
+except Exception as _as_reg_err:
+    import logging
+    logging.getLogger("dashboard.analyze_stock").debug(
+        "regime badge render failed: %s", _as_reg_err)
+
 # FIX ANL-XREF — the per-ticker analytics surface is spread across four pages
 # (this one, Swing Checklist, Quality Watch, Deep Dive) and the reason they
 # each exist isn't obvious from the sidebar labels. Users would land here, not

@@ -265,27 +265,17 @@ try:
                 "regime snapshot failed: %s", _reg_e)
             return None
 
+    # FIX UI-REGIME — inline regime banner replaced with the shared
+    # dashboard.shared.ui_components.regime_badge so this page's regime
+    # visual matches Analyze Stock and My Portfolio exactly. Removes ~20
+    # lines of duplicated color/emoji/note tables — one source of truth.
     _cc_reg = _cc_regime_snapshot()
     if _cc_reg:
-        _reg_lbl = _cc_reg.get("label", "unknown")
-        _reg_conf = _cc_reg.get("confidence", "low")
-        _reg_colors = {
-            "trend_up":   ("#26a69a", "📈", "Trending up — momentum-heavy signals have historically hit ~60 %"),
-            "trend_down": ("#ef5350", "📉", "Trending down — contrarian BUYs have outperformed, momentum signals have not"),
-            "range":      ("#FFC107", "⇄",  "Range-bound — historical BUY hit rate here is ~46 % vs 55 %+ in trending regimes. Halve size or wait"),
-            "risk_off":   ("#B71C1C", "🚨", "Risk-off (VIX ≥ 22) — historically all BUYs paid 5-12 % but you have to buy the fear"),
-            "unknown":    ("#666666", "❓", "Regime undetermined — data unavailable"),
-        }
-        _reg_c, _reg_e, _reg_note = _reg_colors.get(_reg_lbl, _reg_colors["unknown"])
+        from dashboard.shared.ui_components import regime_badge as _ui_regime_badge
         st.markdown(
-            f'<div style="background:linear-gradient(90deg,{_reg_c}15,{_reg_c}05);'
-            f'border-left:4px solid {_reg_c};border-radius:8px;padding:9px 14px;margin:6px 0 12px 0;'
-            f'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap">'
-            f'<span><span style="font-size:15px">{_reg_e} <b style="color:{_reg_c}">{_reg_lbl.replace("_"," ").title()}</b></span> '
-            f'<span style="font-size:11px;color:#888;margin-left:8px">'
-            f'{_reg_conf.title()} confidence</span></span>'
-            f'<span style="font-size:12px;color:#bbb">{_reg_note}</span>'
-            f'</div>',
+            _ui_regime_badge(_cc_reg.get("label", "unknown"),
+                             _cc_reg.get("confidence", "low"),
+                             compact=False),
             unsafe_allow_html=True,
         )
 except Exception as _cc_reg_e:

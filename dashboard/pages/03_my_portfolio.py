@@ -117,6 +117,30 @@ st.markdown(
     "Your holdings health check — live prices, trend-quality scores, and plain English guidance for each stock."
 )
 
+# FIX UI-REGIME — same regime badge as Command Centre / Analyze Stock so
+# the "current regime affects the read" context is consistent across the app.
+try:
+    from dashboard.shared.ui_components import regime_badge as _ui_regime_badge
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _mp_regime_snap():
+        from analysis.regime import snapshot_live
+        try:
+            return snapshot_live().as_dict()
+        except Exception:
+            return None
+    _mp_reg = _mp_regime_snap()
+    if _mp_reg:
+        st.markdown(
+            _ui_regime_badge(_mp_reg.get("label", "unknown"),
+                             _mp_reg.get("confidence", "low"),
+                             compact=False),
+            unsafe_allow_html=True,
+        )
+except Exception as _mp_reg_err:
+    import logging
+    logging.getLogger("dashboard.my_portfolio").debug(
+        "regime badge render failed: %s", _mp_reg_err)
+
 render_squareoff_monitor(poll_every=60, show_badge=True)
 
 
