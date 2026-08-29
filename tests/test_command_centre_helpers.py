@@ -23,33 +23,13 @@ if _ROOT not in sys.path:
 # outright would run the whole page. Extract just the helper we need via
 # a temp module that imports the source string. Kept crude on purpose;
 # the helper is pure and doesn't touch Streamlit.
-_PATH = os.path.join(_ROOT, "dashboard", "pages", "02_command_centre.py")
-
-
-def _load_helper():
-    """Return _reanchor_levels + _COST_ROUNDTRIP_PCT extracted from the CC page.
-
-    We can't `import dashboard.pages.02_command_centre` directly (invalid
-    module name — starts with a digit) and we don't want to execute the
-    whole page. Read the source, extract the two constants and the helper
-    function's def block by markers, exec it in a bare namespace."""
-    with open(_PATH, encoding="utf-8") as f:
-        src = f.read()
-    start_marker = "_COST_ROUNDTRIP_PCT ="
-    end_marker   = "def _render_top_picks_section"
-    i = src.index(start_marker)
-    j = src.index(end_marker)
-    snippet = src[i:j]
-    # Use the SAME dict as both globals and no locals kwarg so the
-    # extracted function's module-level constant lookups resolve —
-    # a plain (globals, locals) split leaves _COST_ROUNDTRIP_PCT
-    # unfindable from inside _reanchor_levels.
-    ns: dict = {"__builtins__": __builtins__}
-    exec(snippet, ns)
-    return ns["_reanchor_levels"], ns["_COST_ROUNDTRIP_PCT"]
-
-
-_reanchor_levels, _COST = _load_helper()
+# FIX CC-FRESH → the helper moved into dashboard/shared/pick_freshness so
+# both Command Centre and My Watchlist can consume the same impl. Import
+# directly instead of scraping the CC page source.
+from dashboard.shared.pick_freshness import (  # noqa: E402
+    COST_ROUNDTRIP_PCT as _COST,
+    reanchor_levels as _reanchor_levels,
+)
 
 
 # ─────────────── Basic contract ───────────────

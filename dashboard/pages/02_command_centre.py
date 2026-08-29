@@ -443,69 +443,16 @@ import datetime
 
 
 @st.fragment(run_every=20)
-# ── FIX CC-FRESH — pick-card freshness + live re-anchoring helper ─────────────
-# The Top Picks cards used to render `Entry ₹X · SL ₹Y · TP ₹Z` verbatim from
-# a score computed against yesterday's close, next to a LIVE price that had
-# drifted overnight. On even a modest 2% gap, SL might sit ABOVE the current
-# live price (nonsensical for a BUY), and the printed R:R was fiction.
-#
-# _reanchor_levels() takes the score-time (entry, sl, tp) plus the current
-# live price and returns a dict the card renderer can paste in verbatim:
-#   * If the price has drifted > 0.5% from the score-time entry, entry/SL/TP
-#     are shifted to preserve their ATR-based distances from the NEW price
-#     (same logic score_stock() already has for the Analyze Stock live-price
-#     overlay — see analysis/score.py, FIX entry/SL/TP staleness).
-#   * The dict includes gross AND net-of-cost R:R using the same 0.30%
-#     round-trip cost floor as the score-efficacy validation.
-_COST_ROUNDTRIP_PCT = 0.30   # keep in sync with research.score_efficacy.COST_ROUNDTRIP_PCT
-_LIVE_DRIFT_THRESHOLD_PCT = 0.5
-
-
-def _reanchor_levels(entry: float, sl: float, tp: float,
-                     live_price: "float | None") -> dict:
-    """Return re-anchored entry/SL/TP + honest R:R for one pick card."""
-    if not entry or entry <= 0:
-        return {"entry": entry, "sl": sl, "tp": tp, "rr": 0.0, "rr_net": 0.0,
-                "drift_pct": 0.0, "reanchored": False}
-
-    if not live_price or live_price <= 0:
-        # No live price — honest gross R:R off the score-time numbers.
-        risk = max(entry - sl, 0.01) if sl else 0.01
-        reward = max(tp - entry, 0.0) if tp else 0.0
-        rr = round(reward / risk, 2) if risk > 0 else 0.0
-        cost_pct_of_entry = _COST_ROUNDTRIP_PCT
-        cost_abs = entry * cost_pct_of_entry / 100
-        rr_net = round(max(0.0, reward - cost_abs) / max(risk + cost_abs, 0.01), 2)
-        return {"entry": entry, "sl": sl, "tp": tp, "rr": rr, "rr_net": rr_net,
-                "drift_pct": 0.0, "reanchored": False}
-
-    drift_pct = (live_price - entry) / entry * 100
-    if abs(drift_pct) < _LIVE_DRIFT_THRESHOLD_PCT:
-        # Live price within 0.5% of the scored entry — original triangle
-        # is still faithful, just add cost-adjusted R:R.
-        risk = max(entry - sl, 0.01) if sl else 0.01
-        reward = max(tp - entry, 0.0) if tp else 0.0
-        rr = round(reward / risk, 2) if risk > 0 else 0.0
-        cost_abs = entry * _COST_ROUNDTRIP_PCT / 100
-        rr_net = round(max(0.0, reward - cost_abs) / max(risk + cost_abs, 0.01), 2)
-        return {"entry": entry, "sl": sl, "tp": tp, "rr": rr, "rr_net": rr_net,
-                "drift_pct": round(drift_pct, 2), "reanchored": False}
-
-    # Live has drifted — preserve the RISK and REWARD distances, re-anchor
-    # both to the live price. Same logic score_stock() uses when Angel One
-    # returns a live quote (analysis/score.py, "entry/SL/TP staleness" fix).
-    risk_dist   = entry - sl if sl > 0 else 0
-    reward_dist = tp - entry if tp > 0 else 0
-    new_entry = round(live_price, 2)
-    new_sl    = round(live_price - risk_dist, 2) if risk_dist > 0 else sl
-    new_tp    = round(live_price + reward_dist, 2) if reward_dist > 0 else tp
-    risk = max(new_entry - new_sl, 0.01) if new_sl else 0.01
-    reward = max(new_tp - new_entry, 0.0) if new_tp else 0.0
-    rr = round(reward / risk, 2) if risk > 0 else 0.0
-    cost_abs = new_entry * _COST_ROUNDTRIP_PCT / 100
-    rr_net = round(max(0.0, reward - cost_abs) / max(risk + cost_abs, 0.01), 2)
-    return {"entry": new_entry, "sl": new_sl, "tp": new_tp, "rr": rr, "rr_net": rr_net,
-            "drift_pct": round(drift_pct, 2), "reanchored": True}
+# FIX CC-FRESH → dashboard/shared/pick_freshness — pick-card freshness helper
+# was extracted here so both Command Centre and My Watchlist use one impl.
+# Local aliases kept so the test that scrapes _reanchor_levels + _COST_ROUNDTRIP_PCT
+# out of this file still passes.
+from dashboard.shared.pick_freshness import (
+    COST_ROUNDTRIP_PCT as _COST_ROUNDTRIP_PCT,
+    LIVE_DRIFT_THRESHOLD_PCT as _LIVE_DRIFT_THRESHOLD_PCT,
+    reanchor_levels as _reanchor_levels,
+    compose_finalverdict_for_card as _compose_fv_for_card,
+)
 
 
 def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
@@ -675,6 +622,32 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 'WATCHLIST-GRADE</span>'
             ) if _is_watch_tier else ""
 
+            # FIX FV-PILL — surface the ONE-verdict answer on the pick card.
+            # Horizon is inferred from the pick's own "horizon" hint so a
+            # Swing-labelled pick is scored on the short lens and a
+            # Positional-labelled one on medium. See
+            # dashboard/shared/pick_freshness._horizon_for_pick.
+            _fv_pill = ""
+            try:
+                _fv = _compose_fv_for_card(_b, tqs=None)
+                _fv_pill_colors = {
+                    "STRONG BUY": "#26a69a", "BUY": "#4CAF50", "WATCH": "#2196F3",
+                    "HOLD": "#9E9E9E", "AVOID": "#ef5350",
+                }
+                _pc = _fv_pill_colors.get(_fv.verdict, "#9E9E9E")
+                _fv_pill = (
+                    f'<span style="background:{_pc}22;color:{_pc};border:1px solid {_pc};'
+                    f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px" '
+                    f'title="FinalVerdict on the {_fv.horizon} horizon — '
+                    f'{_fv.confidence} confidence, conviction {_fv.conviction}/100. '
+                    f'{_fv.primary_reason}">'
+                    f'VERDICT: {_fv.verdict}</span>'
+                )
+            except Exception as _fv_pill_e:
+                import logging
+                logging.getLogger("dashboard.command_centre").debug(
+                    "FinalVerdict pill failed for %s: %s", _b.get("ticker"), _fv_pill_e)
+
             # FIX CC-LIVE1: live price if the batch fetch resolved this
             # ticker, otherwise the same honest "(last close)" fallback as
             # before — never silently pretend a stale price is live.
@@ -727,7 +700,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div style="background:{_card_grad};'
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}{_tier_badge}</span>'
+                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
                 f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'

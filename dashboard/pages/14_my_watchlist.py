@@ -124,22 +124,50 @@ else:
 
     @st.cache_data(ttl=600, show_spinner=False)
     def _wl_scores(tickers_tuple):
+        """
+        Score every watchlist ticker via cache.get_composite_score.
+
+        FIX WL-ATTRS — this used to read cs.composite_score / cs.current_price /
+        cs.overall_signal, none of which exist on the current CompositeScore
+        dataclass (the real names are cs.score, cs.price, cs.action). Every
+        row was silently falling into the except block and showing "Error" —
+        the entire watchlist has been broken since the dataclass was renamed.
+        Now uses the actual attribute names and derives change_1d directly
+        (CompositeScore already exposes .return_1d per FIX WL1).
+
+        FIX WL-FV — attach a FinalVerdict per row (short horizon by default
+        since a watchlist card is a "should I do something this week?" view).
+        The verdict column is what a user actually scans for.
+        """
+        from dashboard.shared.pick_freshness import compose_finalverdict_for_card
         rows = []
         for tkr in tickers_tuple:
             try:
                 cs = get_composite_score(tkr)
+                # Build the dict shape compose_finalverdict_for_card expects
+                _pick_shape = {
+                    "score":   float(getattr(cs, "score", 0) or 0),
+                    "action":  getattr(cs, "action", "HOLD"),
+                    "horizon": getattr(cs, "horizon", ""),
+                }
+                _fv = compose_finalverdict_for_card(_pick_shape, tqs=None)
                 rows.append({
-                    "ticker":    tkr,
-                    "price":     cs.current_price,
-                    "score":     cs.composite_score,
-                    "signal":    cs.overall_signal,
-                    "rsi":       round(cs.technical_indicators.get("rsi", 0), 1),
-                    "change_1d": round(cs.technical_indicators.get("return_1d", 0) * 100, 2),
+                    "ticker":       tkr,
+                    "price":        float(getattr(cs, "price", 0) or 0),
+                    "score":        float(getattr(cs, "score", 0) or 0),
+                    "action":       getattr(cs, "action", "HOLD"),
+                    "rsi":          round(float(getattr(cs, "rsi", 50) or 50), 1),
+                    "change_1d":    round(float(getattr(cs, "return_1d", 0) or 0), 2),
+                    "verdict":      _fv.verdict,
+                    "conviction":   _fv.conviction,
+                    "horizon_used": _fv.horizon,
                 })
             except Exception as e:
                 _log.debug("watchlist scoring failed for %s: %s", tkr, e)
                 rows.append({"ticker": tkr, "price": None, "score": None,
-                             "signal": "Error", "rsi": None, "change_1d": None})
+                             "action": "Error", "rsi": None, "change_1d": None,
+                             "verdict": "—", "conviction": None,
+                             "horizon_used": ""})
         return rows
 
     _tickers_tuple = tuple(_wl_data["ticker"].tolist())
@@ -154,12 +182,13 @@ else:
         tkr = row["ticker"]
         sc  = _score_map.get(tkr, {})
         _merged.append({
-            "⭐": "⭐",
             "Ticker":       tkr.replace(".NS",""),
+            "Verdict":      sc.get("verdict", "—"),           # FIX WL-FV
+            "Conviction":   sc.get("conviction") if sc.get("conviction") is not None else "—",
             "Price ₹":      f"₹{sc.get('price',0):,.2f}" if sc.get("price") else "—",
             "1d %":         f"{sc.get('change_1d',0):+.2f}%" if sc.get("change_1d") is not None else "—",
-            "Score":        sc.get("score", "—"),
-            "Signal":       _display_label(sc.get("signal", "—")),
+            "Score":        f"{sc.get('score',0):.0f}" if sc.get("score") is not None else "—",
+            "Action":       _display_label(sc.get("action", "—")),
             "RSI":          sc.get("rsi","—"),
             "Target ₹":     f"₹{row['target_price']:.1f}" if row["target_price"] else "—",
             "Alert SL ₹":   f"₹{row['alert_sl']:.1f}"   if row["alert_sl"]     else "—",
