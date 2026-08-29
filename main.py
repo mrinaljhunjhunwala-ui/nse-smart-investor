@@ -67,7 +67,15 @@ def parse_args():
     )
 
     # Core arguments
-    p.add_argument("--mode",      choices=["backtest", "ml", "sector", "lstm",
+    # FIX DEAD-LSTM — "lstm" mode removed. The dependency (torch >= 2.0) was
+    # never actually installed by requirements.txt (see the commented line
+    # there), so the mode's only real behaviour was to crash on the import.
+    # LSTMs on daily OHLCV are a well-documented poor fit — daily samples are
+    # too few and too noisy to train a recurrent network usefully — and the
+    # module carried no offline artefacts or research indicating this one
+    # was any different. Removed the mode, the flag, the branch, and
+    # models/lstm.py itself. Nothing else in the app imported it.
+    p.add_argument("--mode",      choices=["backtest", "ml", "sector",
                                            "scan", "screen", "paper", "trail",
                                            "score", "portfolio", "dashboard"],
                    default="backtest", help="Run mode")
@@ -103,7 +111,7 @@ def print_header(args, tickers):
     print(f"\n{'='*60}")
     print(f"  Indian Share Market Trading Model")
     print(f"  Mode      : {args.mode}")
-    if args.mode not in ("sector", "lstm"):
+    if args.mode != "sector":   # FIX DEAD-LSTM: mode "lstm" removed
         print(f"  Strategy  : {args.strategy}")
     if tickers:
         print(f"  Tickers   : {', '.join(tickers[:5])}{'  …' if len(tickers) > 5 else ''}")
