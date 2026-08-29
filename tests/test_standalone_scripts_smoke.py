@@ -54,6 +54,10 @@ _STANDALONE_SCRIPTS = [
     ("research.score_variants_rs",           "research/score_variants_rs.py", ["main"]),
     ("research.fundamentals_historical_variant", "research/fundamentals_historical_variant.py", ["main"]),
     ("research.fundamentals_prospective_collect", "research/fundamentals_prospective_collect.py", ["main"]),
+    # New research scripts added in the audit-driven regime work:
+    ("research.accuracy_deepdive",          "research/accuracy_deepdive.py", ["main"]),
+    ("research.regime_validation",          "research/regime_validation.py", ["main"]),
+    ("research.regime_axes_search",         "research/regime_axes_search.py", ["main"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
     ("tools.refresh_flags_batch",           "tools/refresh_flags_batch.py", ["main"]),
 ]
