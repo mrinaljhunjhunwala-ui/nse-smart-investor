@@ -1,20 +1,27 @@
 """analysis/fundamentals/service.py — the provider-agnostic facade.
 
 The UI and analytics call ONLY this (and read CompanyFundamentals). It:
-  * holds an ordered provider list (Phase 0: Yahoo only; loop is ready for tiering),
-  * caches normalized CompanyFundamentals for 24 h (raw responses are cached inside the
-    provider), logging hits/misses,
-  * stamps per-field provenance and computes is_partial / missing_fields from the inputs
-    the analytics actually need — failures are surfaced, never silently zero-filled.
+  * holds an ordered provider list (Yahoo → Screener.in fallback + fill),
+  * merges results: Yahoo is primary, Screener.in fills every field Yahoo left None
+    (closes the small/mid-cap gap without changing any downstream module),
+  * caches normalized CompanyFundamentals for 24 h (raw responses are cached inside
+    each provider), logging hits/misses,
+  * stamps per-field provenance and computes is_partial / missing_fields from the
+    inputs the analytics actually need — failures are surfaced, never silently
+    zero-filled.
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime
 from typing import List, Optional
 
 from .cache import TTLCache
-from .models import CompanyFundamentals, PeriodType
+from .models import (
+    BalanceSheet, CashFlow, CompanyFundamentals, IncomeStatement, PeriodType,
+    RatioSnapshot,
+)
 from .provider import FundamentalProvider
 
 _log = logging.getLogger("fundamentals.service")
@@ -25,7 +32,9 @@ class FundamentalsService:
                  cache: Optional[TTLCache] = None, ttl_hours: int = 24):
         if providers is None:
             from .providers.yahoo_fundamentals import YahooFundamentalProvider
-            providers = [YahooFundamentalProvider()]      # Phase 0: Yahoo only
+            from .providers.screener_fundamentals import ScreenerFundamentalProvider
+            # Yahoo first (fast, cached, richer margins/GP). Screener fills every gap.
+            providers = [YahooFundamentalProvider(), ScreenerFundamentalProvider()]
         self.providers = providers
         self.cache = cache or TTLCache(ttl_seconds=ttl_hours * 3600, name="fundamentals")
 
@@ -41,6 +50,7 @@ class FundamentalsService:
 
     # ── internal ─────────────────────────────────────────────────────────────
     def _build(self, symbol: str, period: PeriodType, years: int) -> CompanyFundamentals:
+        assembled: List[CompanyFundamentals] = []
         for p in self.providers:
             try:
                 if not p.is_available():
@@ -48,18 +58,24 @@ class FundamentalsService:
                     continue
                 cf = self._assemble(p, symbol, period, years)
                 if cf.has_any_data():
-                    return cf
-                _log.info("provider %s returned no data for %s", p.name, symbol)
-            except Exception as e:   # transport failure — try the next tier
+                    assembled.append(cf)
+            except Exception as e:                     # transport failure — try the next
                 _log.warning("provider %s failed for %s: %s: %s",
                              p.name, symbol, type(e).__name__, e)
                 continue
-        # nothing resolved — return an explicit empty, fully flagged (not a silent blank)
-        return CompanyFundamentals(
-            symbol=symbol, provider_name=None, last_updated=datetime.now(),
-            is_partial=True,
-            missing_fields=["income_statements", "balance_sheets", "cash_flows", "ratios"],
-        )
+        if not assembled:
+            # nothing resolved — return an explicit empty, fully flagged
+            return CompanyFundamentals(
+                symbol=symbol, provider_name=None, last_updated=datetime.now(),
+                is_partial=True,
+                missing_fields=["income_statements", "balance_sheets", "cash_flows", "ratios"],
+            )
+        # Merge: first provider is primary, later ones fill None fields only.
+        merged = assembled[0]
+        for follower in assembled[1:]:
+            merged = self._merge(merged, follower)
+        self._stamp(merged)
+        return merged
 
     def _assemble(self, provider: FundamentalProvider, symbol: str,
                   period: PeriodType, years: int) -> CompanyFundamentals:
@@ -96,14 +112,72 @@ class FundamentalsService:
         self._stamp(cf)
         return cf
 
+    # ── merge (primary + fill) ───────────────────────────────────────────────
+    @staticmethod
+    def _fill_dataclass(primary, follower):
+        """Return a copy of `primary` with every None field replaced by follower's value."""
+        if primary is None:
+            return follower
+        if follower is None:
+            return primary
+        patch = {}
+        for f_name in primary.__dataclass_fields__:
+            if getattr(primary, f_name) is None:
+                v = getattr(follower, f_name, None)
+                if v is not None:
+                    patch[f_name] = v
+        return replace(primary, **patch) if patch else primary
+
+    @classmethod
+    def _merge_series(cls, primary_list, follower_list, key_getter):
+        """Fill primary rows by period_end match; append follower-only rows (deeper history)."""
+        by_key = {key_getter(x): x for x in primary_list}
+        for row in follower_list:
+            k = key_getter(row)
+            if k in by_key:
+                by_key[k] = cls._fill_dataclass(by_key[k], row)
+            else:
+                by_key[k] = row
+        # newest-first
+        return sorted(by_key.values(),
+                      key=lambda r: (key_getter(r) or datetime(1900, 1, 1).date()),
+                      reverse=True)
+
+    @classmethod
+    def _merge(cls, primary: CompanyFundamentals,
+               follower: CompanyFundamentals) -> CompanyFundamentals:
+        period_key = lambda row: (row.period.period_end if row and row.period else None)
+
+        primary.income_statements = cls._merge_series(
+            primary.income_statements, follower.income_statements, period_key)
+        primary.balance_sheets = cls._merge_series(
+            primary.balance_sheets, follower.balance_sheets, period_key)
+        primary.cash_flows = cls._merge_series(
+            primary.cash_flows, follower.cash_flows, period_key)
+        primary.ratios = cls._fill_dataclass(primary.ratios, follower.ratios)
+
+        if not primary.company_name and follower.company_name:
+            primary.company_name = follower.company_name
+        if not primary.statement_date and follower.statement_date:
+            primary.statement_date = follower.statement_date
+
+        # Record every provider that contributed something
+        names = [n for n in (primary.provider_name, follower.provider_name) if n]
+        primary.provider_name = " + ".join(dict.fromkeys(names)) or primary.provider_name
+
+        # Provenance: keep primary's stamps, add follower.name where primary lacked
+        for k, v in (follower.provenance or {}).items():
+            primary.provenance.setdefault(k, v)
+        return primary
+
     @staticmethod
     def _stamp(cf: CompanyFundamentals) -> None:
         prov = cf.provider_name
         for group in ("income_statements", "balance_sheets", "cash_flows"):
             if getattr(cf, group):
-                cf.provenance[group] = prov
+                cf.provenance.setdefault(group, prov)
         if cf.ratios:
-            cf.provenance["ratios"] = prov
+            cf.provenance.setdefault("ratios", prov)
 
         li, lb = cf.latest_income(), cf.latest_balance()
         checks = {
@@ -116,7 +190,7 @@ class FundamentalsService:
         }
         for k, present in checks.items():
             if present:
-                cf.provenance[k] = prov
+                cf.provenance.setdefault(k, prov)
         missing = [k for k, present in checks.items() if not present]
         if len([s for s in cf.income_statements if s.revenue is not None]) < 2:
             missing.append("revenue_history(<2y)")
