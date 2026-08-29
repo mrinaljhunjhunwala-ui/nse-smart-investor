@@ -399,10 +399,102 @@ if analyze_btn or _prefill_active or (
                 with _fv_h_col2:
                     st.caption("")   # vertical spacer to align
 
+                # FIX FV-BANNER-RICHER — pull valuation posture, thesis verdict,
+                # and qualitative-flag severity up here so the top-of-page
+                # verdict banner uses the FULL 5-gate read rather than reading
+                # "insufficient data" for three of them. Each fetch is guarded
+                # so a single failure still leaves that ONE gate as unknown;
+                # confidence tracking then downgrades from "high" to "medium"
+                # or "low" honestly.
+                _fv_valuation = None
+                _fv_thesis_verdict = None
+                _fv_thesis_score   = None
+                _fv_quality_score  = None
+                _fv_quality_flags  = None
+                try:
+                    from analysis.fundamentals.valuation import build_valuation_context as _bvc
+                    from analysis.fundamentals.valuation_decision import assess_valuation as _av
+                    from analysis.sector_classification import get_sector_profile as _gsp
+                    _fv_cf = _fund_service().get_fundamentals(ticker)
+                    if _fv_cf is not None:
+                        _fv_spv = _gsp(cs.sector) if cs.sector else None
+                        _fv_val = _bvc(_fv_cf, sector_profile=_fv_spv)
+                        _fv_va  = _av(_fv_val, None, _fv_spv, cf=_fv_cf)
+                        if _fv_va and getattr(_fv_va, "posture", None):
+                            _fv_valuation = _fv_va.posture
+                except Exception as _fv_val_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "FinalVerdict valuation fetch failed for %s: %s", ticker, _fv_val_e)
+                try:
+                    from analysis.thesis import generate_thesis as _gt, build_inputs as _bti
+                    _fv_th_inputs = _bti(ticker, cs=cs)
+                    _fv_th = _gt(_fv_th_inputs)
+                    if _fv_th:
+                        _fv_thesis_verdict = getattr(_fv_th, "verdict", None)
+                        _fv_thesis_score   = getattr(_fv_th, "verdict_score", None)
+                except Exception as _fv_th_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "FinalVerdict thesis fetch failed for %s: %s", ticker, _fv_th_e)
+                try:
+                    # Use the already-cached list-of-dicts helper the flags
+                    # strip below (render_flag_strip) uses. Derive severity
+                    # from the highest-priority flag: any red > any amber > green.
+                    from dashboard.shared.flags_ui import get_cached_flags as _gcf
+                    _fv_flag_dicts = _gcf(ticker, company_name=getattr(cs, "company_name", None)) or []
+                    if _fv_flag_dicts:
+                        _sevs = {str(f.get("sentiment", "")).lower() for f in _fv_flag_dicts}
+                        # QualitativeFlag.FlagSentiment uses "negative"/"positive"/"neutral";
+                        # map to the {red, amber, green} shape _gate_quality expects.
+                        if "negative" in _sevs:
+                            _sev_final = "red"
+                        elif "neutral" in _sevs:
+                            _sev_final = "amber"
+                        else:
+                            _sev_final = "green"
+                        _top = str((_fv_flag_dicts[0].get("message") or
+                                    _fv_flag_dicts[0].get("headline") or ""))[:80]
+                        _fv_quality_flags = {"severity": _sev_final, "top_flag": _top}
+                except Exception as _fv_qf_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "FinalVerdict qualitative-flags fetch failed for %s: %s", ticker, _fv_qf_e)
+                try:
+                    # analysis.portfolio_fundamentals.compute_quality_score
+                    # takes a fundamentals DICT, not a ticker — so reuse the
+                    # cached fundamentals we already fetched for the valuation
+                    # branch above rather than fetching a second time.
+                    from analysis.portfolio_fundamentals import compute_quality_score as _cqs
+                    if _fv_cf is not None:
+                        # The engine reads ROE / ROCE / Revenue CAGR / EPS CAGR
+                        # from an already-parsed dict shape; the fundamentals
+                        # service already exposes that shape as .to_metrics_dict()
+                        # when it's available. Guarded because implementations
+                        # vary and this path must never break the page.
+                        _fv_metrics = None
+                        if hasattr(_fv_cf, "to_metrics_dict"):
+                            _fv_metrics = _fv_cf.to_metrics_dict()
+                        elif isinstance(_fv_cf, dict):
+                            _fv_metrics = _fv_cf
+                        if _fv_metrics:
+                            _fv_qs = _cqs(_fv_metrics)
+                            if _fv_qs and _fv_qs > 0:
+                                _fv_quality_score = float(_fv_qs)
+                except Exception as _fv_qs_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "FinalVerdict quality-score fetch failed for %s: %s", ticker, _fv_qs_e)
+
                 _fv = _fv_combine(
                     composite_score=cs.score,
                     composite_action=cs.action,
                     tqs=_fv_tqs,
+                    quality_score=_fv_quality_score,
+                    quality_flags=_fv_quality_flags,
+                    valuation_posture=_fv_valuation,
+                    thesis_verdict=_fv_thesis_verdict,
+                    thesis_score=_fv_thesis_score,
                     horizon=_fv_horizon,
                 )
                 _fv_colors = {

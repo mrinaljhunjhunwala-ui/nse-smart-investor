@@ -58,6 +58,7 @@ _STANDALONE_SCRIPTS = [
     ("research.accuracy_deepdive",          "research/accuracy_deepdive.py", ["main"]),
     ("research.regime_validation",          "research/regime_validation.py", ["main"]),
     ("research.regime_axes_search",         "research/regime_axes_search.py", ["main"]),
+    ("research.mean_reversion_factors",     "research/mean_reversion_factors.py", ["main"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
     ("tools.refresh_flags_batch",           "tools/refresh_flags_batch.py", ["main"]),
 ]
