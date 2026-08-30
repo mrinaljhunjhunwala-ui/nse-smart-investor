@@ -553,10 +553,47 @@ if analyze_btn or _prefill_active or (
                 # never surfaces (logger swallows and continues).
                 try:
                     from analysis.verdict_ledger import log_verdict as _vl_log
+                    # ── SIGNAL-TAG DERIVATION (Tier 1 #3) ──────────────
+                    # Build a compact list of every sub-signal that fired for
+                    # this verdict. The Calibration page grades each tag's own
+                    # forward return so we can see WHICH rules are earning
+                    # their weight — patterns like "BullEngulfing" vs
+                    # thresholds like "tech_high" vs regime tags like
+                    # "vix_calm". Small list, one row per tag in a linked
+                    # table, indexed for fast group-by.
+                    _tags: list = []
+                    for _p in (getattr(cs, "patterns_detected", []) or []):
+                        _tags.append(f"pattern.{str(_p)[:40]}")
+                    _tech = float(getattr(cs, "technical_score", 0) or 0)
+                    _mom  = float(getattr(cs, "momentum_score",  0) or 0)
+                    _vol  = float(getattr(cs, "volume_score",    0) or 0)
+                    _sent = float(getattr(cs, "sentiment_score", 0) or 0)
+                    _rsi  = float(getattr(cs, "rsi",             50) or 50)
+                    if _tech >= 32: _tags.append("tech_high")
+                    elif _tech <= 15: _tags.append("tech_low")
+                    if _mom  >= 18: _tags.append("momentum_high")
+                    elif _mom  <= 8:  _tags.append("momentum_low")
+                    if _vol  >= 11: _tags.append("volume_surge")
+                    elif _vol  <= 4:  _tags.append("volume_weak")
+                    if _sent >= 7:  _tags.append("sentiment_positive")
+                    elif _sent <= 3:  _tags.append("sentiment_negative")
+                    if _rsi  <= 30: _tags.append("rsi_oversold")
+                    elif _rsi  >= 70: _tags.append("rsi_overbought")
+                    _vixr = getattr(cs, "vix_regime", "") or ""
+                    if _vixr: _tags.append(f"vix.{str(_vixr).lower()}")
+                    if _fv_tqs is not None:
+                        if _fv_tqs >= 60: _tags.append("tqs_strong")
+                        elif _fv_tqs < 25: _tags.append("tqs_weak")
+                    if _fv_valuation:
+                        _tags.append(f"val.{str(_fv_valuation).lower()}")
+                    if _fv_quality_flags and _fv_quality_flags.get("severity"):
+                        _tags.append(f"flags.{_fv_quality_flags['severity']}")
+
                     _vl_log(ticker=ticker, final_verdict=_fv,
                             entry_price=float(getattr(cs, "entry", 0.0) or 0.0) or None,
                             composite_score=float(getattr(cs, "score", 0.0) or 0.0) or None,
                             thesis_score=_fv_thesis_score,
+                            signal_tags=_tags,
                             source="analyze_page", horizon=_fv_horizon)
                 except Exception as _vl_e:
                     import logging

@@ -231,6 +231,38 @@ else:
     })
     st.dataframe(_sub_tbl, hide_index=True, width="stretch")
 
+# ── Section C-bis — Per-signal-tag hit rate (Tier 1 #3) ──────────────────────
+st.markdown("---")
+st.subheader("🔬 Per-signal-tag calibration")
+st.caption(
+    "Every verdict is a bundle of individual rules that fired — RSI oversold, "
+    "volume surge, a BullEngulfing pattern, a valuation posture, etc. This "
+    "table grades **each rule independently** by its own forward return. "
+    "Tags with < 5 firings are hidden — they're statistical noise. Sort by "
+    "Wilson lower to see which rules are the most reliable regardless of "
+    "sample size."
+)
+_min_n = st.slider("Minimum firings per tag", 3, 30, 5, 1,
+                    key="_cal_tag_minn")
+_tag_tbl = _vl.tag_calibration(horizon_days=_horizon_choice, min_n=_min_n)
+if _tag_tbl.empty:
+    st.info(
+        "No signal tags with enough firings yet. Every time you open Analyze "
+        "Stock, the sub-signals that contributed are recorded — after ~20-30 "
+        "verdicts this table becomes meaningful."
+    )
+else:
+    _tag_tbl = _tag_tbl.rename(columns={
+        "n": "N", "tag": "Signal tag",
+        "mean_ret":         f"Mean {_horizon_choice}d %",
+        "median_ret":       f"Median {_horizon_choice}d %",
+        "mean_alpha":       "α vs NIFTY %",
+        "win_rate":         "Win %",
+        "wilson_lower_win": "Wilson lower %",
+        "wins":             "Wins",
+    })
+    st.dataframe(_tag_tbl, hide_index=True, width="stretch")
+
 # ── Section D — Shadow trades P&L ─────────────────────────────────────────────
 st.markdown("---")
 st.subheader("👥 Shadow trades — the winners you skipped")

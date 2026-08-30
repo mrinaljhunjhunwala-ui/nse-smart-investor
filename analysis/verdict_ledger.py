@@ -124,6 +124,21 @@ def ensure_schema() -> None:
             CREATE INDEX IF NOT EXISTS ix_verdict_log_ticker
             ON verdict_log(ticker)
         """)
+        # Signal-tag ledger — one row per (verdict_log_id, tag). Lets us grade
+        # each individual sub-signal (RSI oversold, volume surge, BullEngulfing
+        # pattern, tech_high bucket…) independently of the verdict label, with
+        # its own Wilson-lower win rate and mean forward return.
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS verdict_signal_tags (
+                verdict_log_id {integer} NOT NULL,
+                tag            TEXT      NOT NULL,
+                PRIMARY KEY (verdict_log_id, tag)
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS ix_verdict_signal_tags_tag
+            ON verdict_signal_tags(tag)
+        """)
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS verdict_forward_returns (
                 verdict_log_id    {integer} PRIMARY KEY,
@@ -149,6 +164,7 @@ def log_verdict(*,
                 entry_price:     Optional[float] = None,
                 composite_score: Optional[float] = None,   # FV doesn't expose it
                 thesis_score:    Optional[int]   = None,   # ditto
+                signal_tags:     Optional[List[str]] = None,
                 source:          str = "analyze_page",
                 horizon:         Optional[str]  = None,
                 ) -> Optional[int]:
@@ -226,6 +242,18 @@ def log_verdict(*,
                         f"INSERT OR IGNORE INTO verdict_log ({cols}) VALUES ({placeholders})",
                         row)
                     new_id = int(cur.lastrowid) if cur.lastrowid else None
+                # Persist the signal tags associated with this verdict (if any).
+                # PRIMARY KEY (verdict_log_id, tag) → duplicate tag inserts are
+                # no-ops. Only fired when we actually got a new_id (dedup case
+                # would insert against a stale id).
+                if new_id and signal_tags:
+                    for _tag in {str(t)[:64] for t in signal_tags if t}:
+                        try:
+                            cur.execute(_store._q(
+                                "INSERT INTO verdict_signal_tags (verdict_log_id, tag) "
+                                "VALUES (?, ?)"), (new_id, _tag))
+                        except Exception:
+                            pass    # duplicate — safe to ignore
                 conn.commit()
                 return new_id
             except Exception as e:
@@ -496,6 +524,58 @@ def calibration_by(*, group_col: str, horizon_days: int,
     out["win_rate"] = (out["win_rate"] * 100).round(1)
     out["wilson_lower_win"] = (out["wilson_lower_win"] * 100).round(1)
     return out.sort_values("n", ascending=False)
+
+
+def tag_calibration(*, horizon_days: int, min_n: int = 5) -> pd.DataFrame:
+    """
+    Per-signal-tag win rate + mean forward return at `horizon_days`.
+
+    Joins verdict_signal_tags → verdict_log → verdict_forward_returns so
+    the same forward-return numbers already computed for verdict-level
+    calibration are re-used per tag. Filters to tags with n >= min_n
+    to avoid noisy rankings on singleton signals.
+    """
+    ensure_schema()
+    ret_col   = f"ret_{horizon_days}d"
+    nifty_col = f"nifty_ret_{horizon_days}d"
+    try:
+        sql = _store._q(f"""
+            SELECT t.tag,
+                   v.id AS log_id,
+                   r.{ret_col}   AS ret_val,
+                   r.{nifty_col} AS n_ret_val
+            FROM verdict_signal_tags t
+            JOIN verdict_log v ON v.id = t.verdict_log_id
+            JOIN verdict_forward_returns r ON r.verdict_log_id = v.id
+            WHERE r.{ret_col} IS NOT NULL
+        """)
+        with _store._get_conn() as conn:
+            df = pd.read_sql_query(sql, conn)
+    except Exception as e:
+        _log.warning("tag_calibration failed: %s: %s", type(e).__name__, e)
+        return pd.DataFrame()
+
+    if df.empty:
+        return df
+    df["alpha"]  = df["ret_val"] - df["n_ret_val"].fillna(0)
+    df["is_win"] = (df["ret_val"] > 0).astype(int)
+    agg = df.groupby("tag").agg(
+        n=("log_id", "count"),
+        mean_ret=("ret_val", "mean"),
+        median_ret=("ret_val", "median"),
+        mean_alpha=("alpha", "mean"),
+        win_rate=("is_win", "mean"),
+        wins=("is_win", "sum"),
+    ).reset_index()
+    agg["wilson_lower_win"] = agg.apply(
+        lambda r: _wilson_lower(int(r["wins"]), int(r["n"])), axis=1)
+    agg = agg[agg["n"] >= min_n]
+    agg["mean_ret"]   = agg["mean_ret"].round(2)
+    agg["median_ret"] = agg["median_ret"].round(2)
+    agg["mean_alpha"] = agg["mean_alpha"].round(2)
+    agg["win_rate"]   = (agg["win_rate"] * 100).round(1)
+    agg["wilson_lower_win"] = (agg["wilson_lower_win"] * 100).round(1)
+    return agg.sort_values("wilson_lower_win", ascending=False)
 
 
 def shadow_pnl(*, horizon_days: int = 20) -> pd.DataFrame:
