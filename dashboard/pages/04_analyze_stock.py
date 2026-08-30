@@ -638,6 +638,92 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "FinalVerdict banner failed for %s: %s", ticker, _fv_err)
 
+            # ── 🏦 FII/DII regime context (Analysis-page-consolidation #3) ────
+            # Institutional-flow backdrop for TODAY's verdict. Uses the
+            # fii_dii_daily table populated by the FII/DII Flows page — if that
+            # page has never been visited (empty table), silently skipped.
+            # 5-day cumulative FII + DII (Rs. Cr) with a one-liner regime hint.
+            try:
+                from analysis.fii_dii import load_history as _fd_hist
+                _fd_df = _fd_hist(days=5)
+                if not _fd_df.empty and len(_fd_df) >= 3:
+                    _fii_5 = float(_fd_df["fii_net"].fillna(0).sum())
+                    _dii_5 = float(_fd_df["dii_net"].fillna(0).sum())
+                    if _fii_5 > 0 and _dii_5 > 0:
+                        _rg = ("🟢 **Broad participation** — FII + DII both net "
+                               "buyers this week. Rallies persist in this regime.")
+                    elif _fii_5 < 0 and _dii_5 > 0:
+                        _rg = ("🟠 **Domestic-supported dip** — FII selling absorbed "
+                               "by DII. Buy quality on pullbacks; avoid high-beta.")
+                    elif _fii_5 < 0 and _dii_5 < 0:
+                        _rg = ("🔴 **Distribution** — both selling. Historically "
+                               "precedes weakness; hold, don't add.")
+                    elif _fii_5 > 0 and _dii_5 < 0:
+                        _rg = ("🟡 **DII profit-taking rally** — FII buying vs DII "
+                               "selling. Rallies tend shallower; keep stops tight.")
+                    else:
+                        _rg = "⚪ **Mixed** — no clear institutional-flow signal."
+                    st.info(
+                        f"{_rg}  \n"
+                        f"5-day cumulative: FII ₹{_fii_5:+,.0f} Cr · DII ₹{_dii_5:+,.0f} Cr. "
+                        f"Full context on the **🏦 FII / DII Flows** page.",
+                    )
+            except Exception as _fd_regime_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "FII/DII regime context failed for %s: %s", ticker, _fd_regime_e)
+
+            # ── 🧠 Thesis freshness alarm (Analysis-page-consolidation #4) ────
+            # The Deep Dive page stores past deep-dive writeups per ticker under
+            # kv key deep_dive_history:{ticker}. Surface the AGE of the newest
+            # entry here so the user knows whether their long-term thesis has
+            # been reviewed recently — critical for a 10-yr holder.
+            try:
+                import trade_store as _tstore
+                import datetime as _dt_al
+                _dd_hist_key = f"deep_dive_history:{ticker}"
+                _dd_hist = _tstore.kv_get(_dd_hist_key, default=None, user_id="default") or []
+                if _dd_hist:
+                    _newest = _dd_hist[-1]
+                    _gen_at = _newest.get("generated_at", "")
+                    try:
+                        _gen_dt = _dt_al.datetime.fromisoformat(_gen_at)
+                        _age_days = (_dt_al.datetime.now() - _gen_dt).days
+                    except Exception:
+                        _age_days = None
+                    if _age_days is not None:
+                        _label = _newest.get("doc_period_label") or "Untitled batch"
+                        if _age_days <= 90:
+                            _fresh_msg = (f"✅ **Thesis fresh** — last Deep Dive **{_age_days} days ago** "
+                                          f"({_label}).")
+                            _fresh_color = "success"
+                        elif _age_days <= 180:
+                            _fresh_msg = (f"🟡 **Thesis ageing** — last Deep Dive **{_age_days} days ago** "
+                                          f"({_label}). Consider refreshing after next results.")
+                            _fresh_color = "warning"
+                        else:
+                            _fresh_msg = (f"🔴 **Thesis stale** — last Deep Dive **{_age_days} days ago** "
+                                          f"({_label}). Refresh before adding to this position.")
+                            _fresh_color = "error"
+                        _fresh_msg += " Refresh via the **📑 Deep Dive Analysis** page."
+                        if _fresh_color == "success":
+                            st.success(_fresh_msg)
+                        elif _fresh_color == "warning":
+                            st.warning(_fresh_msg)
+                        else:
+                            st.error(_fresh_msg)
+                else:
+                    st.caption(
+                        "💡 No structured Deep Dive saved for this ticker yet. "
+                        "The **📑 Deep Dive Analysis** page generates a research "
+                        "prompt you can run in Claude with your own AR / concall PDFs, "
+                        "then paste the result back to save it with a date."
+                    )
+            except Exception as _fresh_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "Thesis freshness check failed for %s: %s", ticker, _fresh_e)
+
             # ── 📈 Verdict trend for THIS ticker (Analysis-page-consolidation #1) ─
             # Uses verdict_ledger data captured on every prior analysis of this
             # ticker. Shows conviction + composite_score over time so the user
