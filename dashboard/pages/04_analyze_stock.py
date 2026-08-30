@@ -735,16 +735,30 @@ if analyze_btn or _prefill_active or (
                             horizon=_hz,
                         )
 
-                    # Map the 5-way verdict onto a 3-way posture so the strip
-                    # reads as ONE glance-answer. STRONG BUY/BUY → Positive,
-                    # WATCH/HOLD → Neutral, AVOID → Negative.
-                    _posture_map = {
-                        "STRONG BUY": ("Positive", "#26a69a"),
-                        "BUY":        ("Positive", "#4CAF50"),
-                        "WATCH":      ("Neutral",  "#2196F3"),
-                        "HOLD":       ("Neutral",  "#9E9E9E"),
-                        "AVOID":      ("Negative", "#ef5350"),
-                    }
+                    # 5-way posture map (was 3-way). User asked for the full
+                    # gradient — Strong Positive / Positive / Neutral / Negative
+                    # / Strong Negative — so the STRONG BUY vs BUY (or AVOID vs
+                    # HOLD) distinction the underlying engine already produces
+                    # isn't collapsed away at the display step. Conviction
+                    # thresholds split BUY into two bands: conviction ≥ 75 is
+                    # STRONG POSITIVE, otherwise POSITIVE. AVOID splits by
+                    # symmetric conviction ≤ 25 for STRONG NEGATIVE.
+                    def _posture_for(_hzv):
+                        _v = _hzv.verdict
+                        _c = int(getattr(_hzv, "conviction", 50) or 50)
+                        if _v == "STRONG BUY" or (_v == "BUY" and _c >= 75):
+                            return ("Strong Positive", "#00d4aa")
+                        if _v == "BUY":
+                            return ("Positive", "#4CAF50")
+                        if _v == "WATCH":
+                            return ("Neutral", "#2196F3")
+                        if _v == "HOLD":
+                            return ("Neutral", "#9E9E9E")
+                        if _v == "AVOID" and _c <= 25:
+                            return ("Strong Negative", "#c62828")
+                        if _v == "AVOID":
+                            return ("Negative", "#ef5350")
+                        return ("Neutral", "#8899bb")
                     _hz_labels = {
                         "short":  ("Short-term",  "days–weeks"),
                         "medium": ("Medium-term", "1–6 months"),
@@ -760,7 +774,7 @@ if analyze_btn or _prefill_active or (
                     _hz_cols = st.columns(3)
                     for _i, _hz in enumerate(("short", "medium", "long")):
                         _hzv = _hz_verdicts[_hz]
-                        _posture, _color = _posture_map.get(_hzv.verdict, ("Neutral", "#9E9E9E"))
+                        _posture, _color = _posture_for(_hzv)
                         _hz_title, _hz_range = _hz_labels[_hz]
                         _is_focus = (_hz == _fv_horizon)
                         _border = ("2px solid " + _color) if _is_focus else "1px solid #263148"
@@ -1198,11 +1212,12 @@ if analyze_btn or _prefill_active or (
                           "not a buy signal."
                     ),
                 )
-                if _rg_val is not None:
-                    from dashboard.shared.disclosures import (
-                        render_revenue_growth_evidence as _rg_evidence,
-                    )
-                    _rg_evidence()
+                # (Removed: "🔬 Revenue growth has been the strongest
+                # return-predictive signal … 2022–2025 validation …" blurb —
+                # a static marketing string that read as stale once its own
+                # date drifted out of the current year. The metric already
+                # has the same context in its help= tooltip; no need to
+                # repeat it as a footnote on every page load.)
 
                 # FIX A2: live drift caption only fires when market is actually open
                 try:
@@ -1263,14 +1278,36 @@ if analyze_btn or _prefill_active or (
                         "side; a run to target still net-positive after typical slippage."
                     )
 
-                # FIX HZ1: holding period this setup was scored for — was
-                # missing entirely, making the action label ("BUY" etc.) an
-                # open-ended idea with no sense of when to reassess.
+                # UX-FIX (stale-date): the previous "reassess after {cs.valid_until}"
+                # caption baked a scoring-time date into cs and NEVER refreshed —
+                # loading the same ticker a week later still showed the OLD
+                # reassess date. Compute the horizon window LIVE from today so
+                # it always reads correctly no matter when the page is opened,
+                # and phrase it as "reassess by <weekday, date>" so the user
+                # doesn't have to translate an ISO date in their head.
                 if getattr(cs, "horizon", ""):
-                    st.caption(
-                        f"⏱ **Horizon:** {cs.horizon}"
-                        + (f" — reassess after **{cs.valid_until}**" if getattr(cs, "valid_until", "") else "")
-                    )
+                    _hz_window_days = {
+                        "Intraday":   1,
+                        "Swing":      10,
+                        "Positional": 35,
+                        "Long-term":  120,
+                    }
+                    _hz_lbl = str(cs.horizon)
+                    _hz_days = None
+                    for _k, _d in _hz_window_days.items():
+                        if _k.lower() in _hz_lbl.lower():
+                            _hz_days = _d
+                            break
+                    if _hz_days:
+                        import datetime as _hz_dt
+                        _reassess = _hz_dt.date.today() + _hz_dt.timedelta(days=_hz_days)
+                        st.caption(
+                            f"⏱ **Horizon:** {cs.horizon} — reassess by "
+                            f"**{_reassess.strftime('%a, %d %b %Y')}** "
+                            f"(≈ {_hz_days}d from today)."
+                        )
+                    else:
+                        st.caption(f"⏱ **Horizon:** {cs.horizon}")
 
                 st.markdown(
                     f'<div class="{_action_color(cs.action)}">'
@@ -1492,17 +1529,39 @@ if analyze_btn or _prefill_active or (
                             unsafe_allow_html=True,
                         )
 
-            _as_c1, _as_c2, _as_c3, _as_c4 = st.columns([1, 1, 1, 3])
+            # LAYOUT-REORDER: Paper Trade popover promoted to here — right
+            # under the Multi-Signal Confirmation block — because that's the
+            # moment the user has all the info to decide: score, verdict,
+            # horizon fit, entry/SL/target, R:R, weekly trend, MA position,
+            # earnings window. Previously it lived after the Chart + News,
+            # forcing a long scroll past sections the user had already read.
+            _pt_col, _pt_info = st.columns([1, 3])
+            with _pt_col:
+                _paper_trade_popover(
+                    ticker,
+                    entry   = cs.entry,
+                    sl      = cs.stop_loss,
+                    tp      = cs.target,
+                    reason  = f"{cs.action} score={cs.score:.0f}: {cs.headline}",
+                    key     = f"as_ptpop_{ticker}",
+                    label   = "📌 Paper Trade This Signal",
+                )
+            with _pt_info:
+                st.info(
+                    "📌 **Paper Trading** lets you test this signal without real money. "
+                    "Track it in the **📂 Paper Trades** page to see if the model's calls are accurate."
+                )
+
+            # Utility row (Watchlist / Re-Analyze — Paper Trade removed, its
+            # popover above replaces the navigate-to-page shortcut that used
+            # to live here).
+            _as_c1, _as_c2, _as_c3 = st.columns([1, 1, 4])
             if _as_c1.button("➕ Watchlist", key=f"as_wl_{ticker}", width="stretch"):
                 _wl = st.session_state.setdefault("watchlist", [])
                 if ticker not in _wl:
                     _wl.append(ticker)
                 st.toast(f"{ticker.replace('.NS','')} added to watchlist ✓")
-            if _as_c2.button("📝 Paper Trade", key=f"as_pt_{ticker}", width="stretch"):
-                st.session_state["_goto_page"]        = "📂 Paper Trades"
-                st.session_state["pt_prefill_ticker"] = ticker
-                st.rerun()
-            if _as_c3.button("🔄 Re-Analyze", key=f"as_re_{ticker}", width="stretch"):
+            if _as_c2.button("🔄 Re-Analyze", key=f"as_re_{ticker}", width="stretch"):
                 # FIX MKT3: was a blanket st.cache_data.clear() — wiped every
                 # other page's cached data too (Top Picks, watchlist scans,
                 # etc.), not just this ticker's analysis. load_ticker_df is
@@ -1617,12 +1676,28 @@ if analyze_btn or _prefill_active or (
                         _s = str(_f.get("sentiment", "")).lower()
                         _dot = ("🔴" if _s == "negative"
                                 else "🟡" if _s == "neutral" else "🟢")
-                        _msg = str(_f.get("message") or _f.get("headline") or "")[:200]
+                        _msg = str(_f.get("headline") or _f.get("message") or "")[:220]
                         _cat = str(_f.get("category") or "")
+                        _src = str(_f.get("source") or "")
+                        _date = str(_f.get("date") or "")
+                        # UX-FIX: flag detail was a bare one-liner with no way
+                        # to jump to the source story. QualitativeFlag carries
+                        # the URL in `.detail` (set from the news/RSS "link"
+                        # field). Render the headline as a clickable link when
+                        # a URL is present, and show the source + date so
+                        # users can see who reported it and when.
+                        _link = str(_f.get("detail") or "").strip()
+                        _has_link = _link.startswith(("http://", "https://"))
+                        _title_md = (f"[{_msg}]({_link})" if _has_link else _msg)
+                        _meta_bits = []
+                        if _cat:  _meta_bits.append(_cat)
+                        if _src:  _meta_bits.append(_src)
+                        if _date: _meta_bits.append(_date)
+                        _meta = " · ".join(_meta_bits)
                         st.markdown(
-                            f"- {_dot} **{_msg}**  \n"
+                            f"- {_dot} **{_title_md}**  \n"
                             f"  <span style='font-size:11px;color:#8899bb'>"
-                            f"{_cat}</span>",
+                            f"{_meta}</span>",
                             unsafe_allow_html=True,
                         )
 
@@ -1655,24 +1730,8 @@ if analyze_btn or _prefill_active or (
             # sizing warning now lives in the score-hero column, next to the
             # RR metric itself.)
 
-            # ── FIX A1: Paper trade via popover (was direct paper_open_trade call) ──
-            st.markdown("---")
-            _pbt_col, _pbt_info = st.columns([1, 3])
-            with _pbt_col:
-                _paper_trade_popover(
-                    ticker,
-                    entry   = cs.entry,
-                    sl      = cs.stop_loss,
-                    tp      = cs.target,
-                    reason  = f"{cs.action} score={cs.score:.0f}: {cs.headline}",
-                    key     = f"as_ptpop_{ticker}",
-                    label   = "📌 Paper Trade This Signal",
-                )
-            with _pbt_info:
-                st.info(
-                    "📌 **Paper Trading** lets you test this signal without real money. "
-                    "Track it in the **📂 Paper Trades** page to see if the model's calls are accurate."
-                )
+            # (Paper Trade popover moved UP to right below Multi-Signal
+            # Confirmation — see the Paper Trade block earlier on the page.)
 
             # ── Investment Thesis (structured) ─────────────────────────────
             # LAYOUT-REORDER: Thesis is the "WHY" — it belongs BEFORE the
@@ -1716,26 +1775,64 @@ if analyze_btn or _prefill_active or (
                 )
                 st.caption(_th.verdict_rationale)
 
-                def _factor_list(_factors, _empty):
+                # UX-FIX: Bull / Bear / Risks used to render as three walls of
+                # dash-bullet text — no color coding, no visual weight, easy
+                # to skim past. Chip-card layout below: each factor becomes a
+                # coloured card (green = bull, red = bear, amber = risk) with
+                # the source tag as a subtle pill, so the user sees the shape
+                # of the thesis at a glance instead of reading paragraphs.
+                _CHIP_STYLES = {
+                    "bull": ("#0d2a1a", "#26a69a", "🟢"),
+                    "bear": ("#2a0d0d", "#ef5350", "🔴"),
+                    "risk": ("#2a1f0a", "#ffa726", "⚠️"),
+                }
+                def _factor_chips(_factors, _kind, _empty):
                     if not _factors:
                         st.caption(_empty); return
+                    _bg, _border, _icon = _CHIP_STYLES[_kind]
                     for _f in _factors:
+                        _pill = (
+                            f'<span style="background:#0a1220;color:#8899bb;'
+                            f'padding:1px 8px;border-radius:10px;font-size:10px;'
+                            f'letter-spacing:0.5px">{_f.source}</span>'
+                            if getattr(_f, "source", "") else ""
+                        )
                         st.markdown(
-                            f"- {_f.text}  \n"
-                            f"  <span style='color:#8899bb;font-size:0.85rem'>"
-                            f"· {_f.source}: {_f.evidence}</span>",
+                            f'<div style="background:{_bg};border-left:3px solid {_border};'
+                            f'border-radius:6px;padding:8px 12px;margin:4px 0">'
+                            f'<div style="color:#eee;font-size:13px;line-height:1.4">'
+                            f'{_icon} {_f.text}</div>'
+                            f'<div style="margin-top:4px;font-size:11px;color:#8899bb">'
+                            f'{_pill} <span style="margin-left:6px">{getattr(_f, "evidence", "")}</span></div>'
+                            f'</div>',
                             unsafe_allow_html=True,
                         )
 
                 _tc1, _tc2 = st.columns(2)
                 with _tc1:
-                    st.markdown("**🟢 Bull case**")
-                    _factor_list(_th.bull_factors, "No bull factors triggered.")
+                    st.markdown(
+                        '<div style="color:#26a69a;font-weight:700;'
+                        'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                        'margin-bottom:4px">🟢 Bull case</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _factor_chips(_th.bull_factors, "bull", "No bull factors triggered.")
                 with _tc2:
-                    st.markdown("**🔴 Bear case**")
-                    _factor_list(_th.bear_factors, "No bear factors triggered.")
-                st.markdown("**⚠️ Key risks**")
-                _factor_list(_th.key_risks, "No specific risks flagged by the rules.")
+                    st.markdown(
+                        '<div style="color:#ef5350;font-weight:700;'
+                        'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                        'margin-bottom:4px">🔴 Bear case</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _factor_chips(_th.bear_factors, "bear", "No bear factors triggered.")
+                st.markdown(
+                    '<div style="color:#ffa726;font-weight:700;'
+                    'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                    'margin:12px 0 4px 0">⚠️ Key risks</div>',
+                    unsafe_allow_html=True,
+                )
+                _factor_chips(_th.key_risks, "risk",
+                              "No specific risks flagged by the rules.")
                 for _tn in getattr(_th, "notes", []) or []:
                     st.info("ℹ️ " + _tn)
                 st.caption(
@@ -1770,11 +1867,46 @@ if analyze_btn or _prefill_active or (
                     )
 
                 def _f_show(_col, _r):
+                    # UX-FIX: the "confidence: high" caption was misread as
+                    # "these numbers are trustworthy / this stock is good" —
+                    # but it means "we have enough YEARS of data to compute
+                    # this metric confidently", i.e. it is DATA-COVERAGE, not
+                    # a quality/goodness signal. A stock with a bad ROE and
+                    # 5 years of data still gets confidence=high. Relabel to
+                    # "data:" and prepend a colour cue that reflects the
+                    # METRIC's own health (green = good, red = poor) so the
+                    # user sees the health of the NUMBER at a glance, and the
+                    # data-completeness separately.
                     if _r.available and _r.value is not None:
                         _txt = f"{_r.value:,.1f}%" if _r.unit == "%" else f"{_r.value:,.2f}x"
-                        _col.metric(_r.metric, _txt)
+                        # Heuristic health thresholds — kept intentionally
+                        # simple; the deep read still lives in the Valuation
+                        # section (P/E ranges) and Fundamental Quality (score).
+                        _health_color = "#8899bb"
+                        _mname = str(_r.metric or "").lower()
+                        if _r.unit == "%":
+                            if "roe" in _mname or "roce" in _mname:
+                                _health_color = ("#26a69a" if _r.value >= 15
+                                                 else "#ffa726" if _r.value >= 8
+                                                 else "#ef5350")
+                            elif "cagr" in _mname:
+                                _health_color = ("#26a69a" if _r.value >= 12
+                                                 else "#ffa726" if _r.value >= 5
+                                                 else "#ef5350")
+                        elif "debt" in _mname:
+                            _health_color = ("#26a69a" if _r.value <= 0.5
+                                             else "#ffa726" if _r.value <= 1.0
+                                             else "#ef5350")
+                        _col.markdown(
+                            f'<div style="font-size:11px;color:#8899bb;'
+                            f'text-transform:uppercase;letter-spacing:0.5px">'
+                            f'{_r.metric}</div>'
+                            f'<div style="font-size:24px;font-weight:700;'
+                            f'color:{_health_color}">{_txt}</div>',
+                            unsafe_allow_html=True,
+                        )
                         _col.caption(
-                            f"confidence: {_r.confidence}"
+                            f"data: {_r.confidence} coverage"
                             + (f" · {_r.reason}" if _r.reason else "")
                         )
                     else:
@@ -1787,10 +1919,9 @@ if analyze_btn or _prefill_active or (
                 _f_show(_fc3, _f_res["roe"])
                 _f_show(_fc4, _f_res["debt_to_equity"])
 
-                from dashboard.shared.disclosures import (
-                    render_revenue_growth_evidence as _f_rg_evidence,
-                )
-                _f_rg_evidence()
+                # (Removed: the same "🔬 Revenue growth …" marketing blurb —
+                # see the identical removal in the score-hero section. The
+                # metric card above already carries the same context.)
 
                 _cagr_results = [
                     r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
@@ -1798,10 +1929,10 @@ if analyze_btn or _prefill_active or (
                 ]
                 if _cagr_results and any(r.confidence in ("medium", "low") for r in _cagr_results):
                     st.caption(
-                        "📊 **Data depth note:** CAGR confidence reflects Yahoo Finance's "
-                        "available history (~4–5 years for most NSE names). "
-                        "\"Medium\" confidence means the trend is directionally reliable "
-                        "but not enough history exists for statistical certainty."
+                        "📊 **Data coverage note:** the *data:* label above measures how many "
+                        "years of history Yahoo Finance returned (~4–5 for most NSE names) — "
+                        "**not** whether the number itself is good. Colour on the value = "
+                        "the metric's own health (green good · amber ok · red weak)."
                     )
 
                 from analysis.sector_classification import classify_sector as _classify
@@ -1821,7 +1952,7 @@ if analyze_btn or _prefill_active or (
                             " · capex-heavy: negative FCF can be a normal investment cycle"
                             if _sp.fcf_capex_caveat else ""
                         )
-                        _rc2.caption(f"confidence: {_rr.confidence}{_cap}")
+                        _rc2.caption(f"data: {_rr.confidence} coverage{_cap}")
                     else:
                         _rc2.metric("Free Cash Flow", "N/A")
                         _rc2.caption(f"⚠️ {_rr.reason}")
@@ -1875,29 +2006,61 @@ if analyze_btn or _prefill_active or (
                     from analysis.fundamentals.valuation_decision import assess_valuation
                     _va_res = _fund_analytics.compute_all(_val_cf)
                     _va     = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
-                    _va_color = {
-                        "high": "#00d4aa", "medium": "#ffa726",
-                        "low":  "#8899bb", "none":   "#8899bb",
-                    }.get(_va.confidence, "#8899bb")
+
+                    # UX-FIX: the old rendering was a small blockquote + a
+                    # trailing "confidence: X" line that read as an admission
+                    # of insufficient data every time. Promote the POSTURE
+                    # itself to a bold colored badge (that IS the assessment),
+                    # then a clean two-panel layout — left: basis + reasons;
+                    # right: caveats + coverage — instead of five stacked
+                    # captions the eye slides past.
+                    _POSTURE_COLORS = {
+                        "SUPPORTED":              ("#00d4aa", "🟢"),
+                        "REASONABLE":             ("#4caf50", "🟢"),
+                        "STRETCHED":              ("#ff9800", "🟡"),
+                        "PRICING_IN_PERFECTION":  ("#ef5350", "🔴"),
+                        "PEG_RICH":               ("#ef5350", "🔴"),
+                        "CYCLICAL_PEAK":          ("#ffa726", "🟡"),
+                        "CYCLICAL_TROUGH":        ("#42a5f5", "🔵"),
+                        "INSUFFICIENT_EVIDENCE":  ("#8899bb", "⚪"),
+                    }
+                    _post = str(_va.posture or "INSUFFICIENT_EVIDENCE")
+                    _pc, _picon = _POSTURE_COLORS.get(
+                        _post, ("#8899bb", "⚪"))
                     st.markdown(
-                        f"> {_va.phrase}  \n"
-                        f"<span style='color:{_va_color}'>confidence: {_va.confidence}</span>",
+                        f'<div style="background:#0d1526;border-left:5px solid {_pc};'
+                        f'border-radius:8px;padding:14px 18px;margin:8px 0">'
+                        f'<div style="font-size:11px;color:#8899bb;letter-spacing:1.5px;'
+                        f'text-transform:uppercase">Valuation posture</div>'
+                        f'<div style="font-size:22px;font-weight:700;color:{_pc};'
+                        f'margin:2px 0 6px 0">{_picon} {_post.replace("_", " ").title()}</div>'
+                        f'<div style="font-size:13px;color:#ddd;line-height:1.5">'
+                        f'{_va.phrase}</div>'
+                        f'</div>',
                         unsafe_allow_html=True,
                     )
-                    if _va.justification and _va.posture != "INSUFFICIENT_EVIDENCE":
-                        st.caption("Basis: " + _va.justification)
-                    if _va.triggered_guard:
-                        st.caption(f"Guard: {_va.triggered_guard}")
-                    for _rz in _va.reasons:
-                        st.caption("• " + _rz)
-                    for _cv in _va.caveats:
-                        st.caption("⚠️ " + _cv)
-                    if _va.confidence_factors:
-                        st.caption("Confidence factors: " + " · ".join(_va.confidence_factors))
-                    st.caption(
-                        "Descriptive only — no buy/sell, no fair/intrinsic value, "
-                        "no cheap/expensive label."
-                    )
+                    _vac1, _vac2 = st.columns(2)
+                    with _vac1:
+                        if _va.justification and _post != "INSUFFICIENT_EVIDENCE":
+                            st.markdown(f"**Basis:** {_va.justification}")
+                        if _va.reasons:
+                            st.markdown("**Reasons:**")
+                            for _rz in _va.reasons:
+                                st.markdown(f"- {_rz}")
+                        if _va.triggered_guard:
+                            st.caption(f"🛡 Guard: {_va.triggered_guard}")
+                    with _vac2:
+                        if _va.caveats:
+                            st.markdown("**Caveats:**")
+                            for _cv in _va.caveats:
+                                st.markdown(f"- ⚠️ {_cv}")
+                        if _va.confidence_factors:
+                            st.caption("Coverage factors: " + " · ".join(_va.confidence_factors))
+                        st.caption(
+                            f"Data coverage for this assessment: **{_va.confidence}**. "
+                            "Descriptive only — no buy/sell, no fair/intrinsic value, "
+                            "no cheap/expensive label."
+                        )
                 except Exception as _va_e:
                     st.caption(f"⚠️ Valuation assessment unavailable: {_va_e}")
             except Exception as _val_e:
@@ -1997,24 +2160,52 @@ if analyze_btn or _prefill_active or (
                     _im2.caption("📈 " + _fit.beta_impact)
                     _im2.caption("⚖️ " + _fit.concentration_impact)
 
-                    def _fit_list(_factors, _empty):
+                    # UX-FIX: mirror the Investment-Thesis chip-card layout
+                    # here so Positive/Negative effects have the same visual
+                    # weight and color coding — user asked for parity.
+                    _FIT_STYLES = {
+                        "pos": ("#0d2a1a", "#26a69a", "✅"),
+                        "neg": ("#2a0d0d", "#ef5350", "❌"),
+                    }
+                    def _fit_chips(_factors, _kind, _empty):
                         if not _factors:
                             st.caption(_empty); return
+                        _bg, _border, _icon = _FIT_STYLES[_kind]
                         for _f in _factors:
+                            _pill = (
+                                f'<span style="background:#0a1220;color:#8899bb;'
+                                f'padding:1px 8px;border-radius:10px;font-size:10px;'
+                                f'letter-spacing:0.5px">{_f.source}</span>'
+                                if getattr(_f, "source", "") else ""
+                            )
                             st.markdown(
-                                f"- {_f.text}  \n"
-                                f"  <span style='color:#8899bb;font-size:0.85rem'>"
-                                f"· {_f.source}: {_f.evidence}</span>",
+                                f'<div style="background:{_bg};border-left:3px solid {_border};'
+                                f'border-radius:6px;padding:8px 12px;margin:4px 0">'
+                                f'<div style="color:#eee;font-size:13px;line-height:1.4">'
+                                f'{_icon} {_f.text}</div>'
+                                f'<div style="margin-top:4px;font-size:11px;color:#8899bb">'
+                                f'{_pill} <span style="margin-left:6px">{getattr(_f, "evidence", "")}</span></div>'
+                                f'</div>',
                                 unsafe_allow_html=True,
                             )
 
                     _fp, _fn = st.columns(2)
                     with _fp:
-                        st.markdown("**✅ Positive effects**")
-                        _fit_list(_fit.positive_effects, "No positive effects flagged.")
+                        st.markdown(
+                            '<div style="color:#26a69a;font-weight:700;'
+                            'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                            'margin-bottom:4px">✅ Positive effects</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _fit_chips(_fit.positive_effects, "pos", "No positive effects flagged.")
                     with _fn:
-                        st.markdown("**❌ Negative effects**")
-                        _fit_list(_fit.negative_effects, "No negative effects flagged.")
+                        st.markdown(
+                            '<div style="color:#ef5350;font-weight:700;'
+                            'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                            'margin-bottom:4px">❌ Negative effects</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _fit_chips(_fit.negative_effects, "neg", "No negative effects flagged.")
 
                     _ps_color = {
                         "Large": "#00d4aa", "Moderate": "#ffa726", "Small": "#ff7043",
