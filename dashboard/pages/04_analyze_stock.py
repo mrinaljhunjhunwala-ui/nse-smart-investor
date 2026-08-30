@@ -823,6 +823,105 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "checklist expander failed for %s: %s", ticker, _chk_e)
 
+            # ── 📅 Next catalyst window (Analysis consolidation #7) ──────────
+            # Earnings date + "is a new entry within N days a gamble?" from
+            # data.events. Long-term holders care less about this than swing
+            # traders but it's a useful "wait for post-result" nudge.
+            try:
+                from data.events import get_earnings_date as _get_ed, earnings_within_days as _ewd
+                import datetime as _dt_ev
+                _ed = _get_ed(ticker)
+                if _ed is not None:
+                    _days_to = (_ed.date() - _dt_ev.date.today()).days
+                    if _days_to < 0:
+                        _cat_msg = f"📅 Last results: {_ed.date().isoformat()} ({-_days_to} days ago)."
+                        st.caption(_cat_msg)
+                    elif _days_to <= 7:
+                        st.warning(
+                            f"⚠️ **Earnings in {_days_to} days ({_ed.date().isoformat()})** — "
+                            "IV usually rises into the print, and gap ±5-20% on results day is "
+                            "common. Prefer waiting for post-result confirmation before adding.",
+                        )
+                    elif _days_to <= 30:
+                        st.info(
+                            f"📅 **Earnings in {_days_to} days ({_ed.date().isoformat()})** — "
+                            "watch for pre-result run-up / drift; size accordingly.",
+                        )
+                    else:
+                        st.caption(f"📅 Next earnings: {_ed.date().isoformat()} "
+                                   f"({_days_to} days away). No immediate event risk.")
+            except Exception as _cat_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "next-catalyst render failed for %s: %s", ticker, _cat_e)
+
+            # ── 👥 Peer snapshot (Analysis consolidation #6) ────────────────
+            # Show 4-5 sector peers with their composite score so the user
+            # sees whether they're picking the strongest or weakest name in
+            # the sector. Cheap: reuses the app's own score_stock, capped at
+            # 5 peers and a 6s timeout so the page never hangs.
+            try:
+                from strategies.sector_rotation import SECTORS as _SEC_MAP
+                from analysis.score import score_stock as _score_stock_peer
+                from concurrent.futures import ThreadPoolExecutor as _TPE, wait as _fwait2
+                _peer_sec = None
+                for _s, _ts in _SEC_MAP.items():
+                    if ticker in _ts:
+                        _peer_sec = _s
+                        break
+                if _peer_sec:
+                    _peers = [t for t in _SEC_MAP[_peer_sec] if t != ticker][:5]
+                    if _peers:
+                        with st.expander(f"👥 {_peer_sec} peers ({len(_peers)}) — score comparison",
+                                         expanded=False):
+                            def _peer_row(_t):
+                                try:
+                                    _cs2 = _score_stock_peer(_t, period="1y")
+                                    return {"Ticker": _t.replace(".NS", ""),
+                                            "Price ₹": round(_cs2.price, 2),
+                                            "Score /90": round(_cs2.score, 1),
+                                            "Grade": _cs2.grade,
+                                            "Action": _cs2.action}
+                                except Exception:
+                                    return {"Ticker": _t.replace(".NS", ""),
+                                            "Price ₹": None, "Score /90": None,
+                                            "Grade": "—", "Action": "n/a"}
+                            _tpool = _TPE(max_workers=5)
+                            try:
+                                _futs = {_tpool.submit(_peer_row, t): t for t in _peers}
+                                _done, _pending = _fwait2(list(_futs.keys()), timeout=8)
+                                _rows = []
+                                for _f in _done:
+                                    try:
+                                        _rows.append(_f.result(timeout=0))
+                                    except Exception:
+                                        pass
+                            finally:
+                                _tpool.shutdown(wait=False, cancel_futures=True)
+                            # Include the current ticker row for reference
+                            _rows.insert(0, {"Ticker": ticker.replace(".NS", "") + " ← this",
+                                             "Price ₹": round(cs.price, 2),
+                                             "Score /90": round(cs.score, 1),
+                                             "Grade": cs.grade, "Action": cs.action})
+                            import pandas as _pd_pr
+                            _pd_df = _pd_pr.DataFrame(_rows).sort_values(
+                                "Score /90", ascending=False, na_position="last")
+                            st.dataframe(_pd_df, hide_index=True, width="stretch")
+                            # One-line take on rank within sector
+                            _live_scores = [r["Score /90"] for r in _rows
+                                            if r["Score /90"] is not None]
+                            if len(_live_scores) >= 2:
+                                _my_rank = sum(1 for s in _live_scores if s > cs.score) + 1
+                                st.caption(
+                                    f"**{ticker.replace('.NS','')} ranks #{_my_rank} of "
+                                    f"{len(_live_scores)}** on composite score within {_peer_sec}. "
+                                    "Higher-scoring peers may be a better use of the same sector conviction."
+                                )
+            except Exception as _peer_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "peer snapshot failed for %s: %s", ticker, _peer_e)
+
             # ── Score hero section ─────────────────────────────────────────
             st.markdown("---")
             hero_col, detail_col = st.columns([1, 2])
