@@ -19,7 +19,7 @@ import logging
 import warnings
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from datetime import datetime
 
 _log = logging.getLogger("trading.signals")
@@ -615,6 +615,150 @@ def check_momentum_signal(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Screen 6: VCP (Volatility Contraction Pattern — Minervini)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Mark Minervini's SEPA / VCP setup, adapted to daily bars with pandas-only
+# math (no talib dependency). Not a signal our composite screens produce —
+# it looks for the OPPOSITE profile of "oversold bounce": a Stage-2 uptrend
+# in the middle of a quiet, contracting base right at the pivot.
+#
+# The 5-component score (0-100) matches Minervini's checklist:
+#   * Trend       (25) — price > 200SMA, 50SMA > 200SMA, both rising
+#   * Contraction (25) — recent 25-day range is < 65% of prior 25-day range
+#   * Vol dry-up  (20) — last-20d avg volume < base 60-100d avg × 0.85
+#   * Pivot near  (15) — within 12% of the 52-week high (pivot proximity)
+#   * Relative    (15) — 3-month return > NIFTY 3-month return (RS positive)
+#
+# Anything below 60 fails the screen. NIFTY reference is read from the
+# same fetcher cache the app already uses; missing NIFTY reduces the max
+# score by 15 rather than failing the setup.
+_VCP_MIN_SCORE = 60
+
+
+def _nifty_3m_return() -> Optional[float]:
+    """3-month % change of NIFTY 50 for the relative-strength component.
+    Cached alongside every other fetch (5-min TTL). Returns None on error."""
+    try:
+        nf = fetch_single("^NSEI", period="6mo")
+        if nf is None or len(nf) < 60:
+            return None
+        return float((nf["Close"].iloc[-1] / nf["Close"].iloc[-63] - 1.0) * 100)
+    except Exception:
+        return None
+
+
+def check_vcp(df: pd.DataFrame) -> Optional[Dict]:
+    """
+    VCP (Minervini) — Stage-2 uptrend + tight base + volume dry-up + at pivot.
+    Returns a signal dict on score ≥ _VCP_MIN_SCORE, None otherwise.
+
+    Uses only columns add_all_indicators already produces (Close, High, Low,
+    Volume, SMA_50, SMA_200, ATR). No new indicator required.
+    """
+    if df is None or len(df) < 220:      # need 200SMA + 20 bars of base
+        return None
+
+    cur   = df.iloc[-1]
+    price = float(cur["Close"])
+    sma50 = cur.get("SMA_50",  np.nan)
+    sma200= cur.get("SMA_200", np.nan)
+    atr   = cur.get("ATR",     np.nan)
+    if any(pd.isna(v) for v in [sma50, sma200, atr]):
+        return None
+
+    score:    float          = 0.0
+    reasons:  List[str]      = []
+    details:  Dict[str, Any] = {}
+
+    # 1) Trend (25) — Stage-2: above both MAs; 50 > 200; both sloping up
+    sma50_slope_up  = float(df["SMA_50"].iloc[-1])  > float(df["SMA_50"].iloc[-20])
+    sma200_slope_up = float(df["SMA_200"].iloc[-1]) > float(df["SMA_200"].iloc[-40])
+    if price > sma50 > sma200 and sma50_slope_up and sma200_slope_up:
+        score += 25
+        reasons.append("Stage-2 uptrend")
+        details["stage"] = "2"
+    else:
+        return None                       # Stage-2 is a hard prerequisite
+
+    # 2) Contraction (25) — recent 25d range vs prior 25d range
+    recent = df.iloc[-25:]
+    prior  = df.iloc[-50:-25]
+    recent_range = (recent["High"].max() - recent["Low"].min()) / price
+    prior_range  = (prior["High"].max()  - prior["Low"].min())  / price
+    if prior_range > 0:
+        contraction = recent_range / prior_range
+        details["contraction_ratio"] = round(float(contraction), 3)
+        if contraction <= 0.55:
+            score += 25; reasons.append(f"Tight base ({contraction*100:.0f}%)")
+        elif contraction <= 0.70:
+            score += 18; reasons.append(f"Contracting ({contraction*100:.0f}%)")
+        elif contraction <= 0.85:
+            score += 10
+
+    # 3) Volume dry-up (20) — last-20d avg volume < base 60-100d avg × 0.85
+    if "Volume" in df.columns:
+        vol_recent = float(df["Volume"].iloc[-20:].mean())
+        vol_base   = float(df["Volume"].iloc[-100:-20].mean())
+        if vol_base > 0:
+            ratio = vol_recent / vol_base
+            details["vol_dryup_ratio"] = round(ratio, 3)
+            if ratio <= 0.65:
+                score += 20; reasons.append("Volume dry-up strong")
+            elif ratio <= 0.85:
+                score += 12; reasons.append("Volume dry-up")
+
+    # 4) Pivot proximity (15) — within 12% of 52w high
+    high_52w = float(df["High"].tail(_52W_BARS).max())
+    pct_from = (high_52w - price) / max(high_52w, 1) * 100
+    details["pct_from_52h"] = round(pct_from, 2)
+    if pct_from <= 5:
+        score += 15; reasons.append(f"At pivot (−{pct_from:.1f}%)")
+    elif pct_from <= 12:
+        score += 10; reasons.append(f"Near pivot (−{pct_from:.1f}%)")
+
+    # 5) Relative strength vs NIFTY (15)
+    try:
+        r3m = float((price / float(df["Close"].iloc[-63]) - 1.0) * 100) \
+              if len(df) >= 63 else None
+    except Exception:
+        r3m = None
+    n3m = _nifty_3m_return()
+    if r3m is not None:
+        details["ret_3m_pct"]   = round(r3m, 2)
+    if n3m is not None:
+        details["nifty_3m_pct"] = round(n3m, 2)
+    if r3m is not None and n3m is not None:
+        if r3m - n3m >= 10:
+            score += 15; reasons.append(f"RS strong (+{r3m-n3m:.1f}% vs NIFTY)")
+        elif r3m > n3m:
+            score += 8;  reasons.append(f"RS positive (+{r3m-n3m:.1f}% vs NIFTY)")
+    elif r3m is not None and r3m > 0:
+        # NIFTY unavailable — soft-credit an absolute-positive 3m return
+        score += 5; reasons.append(f"3m return +{r3m:.1f}% (NIFTY n/a)")
+
+    if score < _VCP_MIN_SCORE:
+        return None
+
+    # Pivot buy zone: high of the last 5 sessions (Minervini's typical entry)
+    pivot = float(df["High"].tail(5).max())
+    sl    = min(float(df["Low"].tail(20).min()), price - 2.0 * atr)
+    tp    = price + 3.0 * (price - sl)
+    return {
+        "action":    "BUY",
+        "screen":    "VCP",
+        "price":     round(price, 2),
+        "pivot":     round(pivot, 2),
+        "sl":        round(sl, 2),
+        "tp":        round(tp, 2),
+        "vcp_score": round(score, 1),
+        "reason":    f"VCP {score:.0f}/100: " + " · ".join(reasons),
+        "details":   details,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Multi-screen scan  (main entry point)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -636,6 +780,7 @@ _DASHBOARD_SINGLE_SCREEN_FNS = {
     "pullback_SMA50":  lambda d: check_pullback_to_sma(d, "SMA_50"),
     "fibonacci":       lambda d: check_fibonacci_pullback(d),
     "momentum_leader": lambda d: check_momentum_leader(d),
+    "vcp":             lambda d: check_vcp(d),
 }
 
 

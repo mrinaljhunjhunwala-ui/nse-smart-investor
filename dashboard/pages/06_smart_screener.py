@@ -69,7 +69,13 @@ with sc2:
     screen_choice = st.selectbox(
         "Screen type",
         ["All 4 screens", "Oversold Bounce", "Momentum Leaders",
-         "Breakouts", "Pullback to SMA"],
+         "Breakouts", "Pullback to SMA", "VCP (Minervini)"],
+        help=(
+            "VCP = Volatility Contraction Pattern (Mark Minervini). Finds "
+            "the OPPOSITE of oversold: Stage-2 uptrend, tight base, volume "
+            "dry-up, right at the pivot. Very selective — expect fewer "
+            "matches than the other screens."
+        ),
     )
     screen_map = {
         "All 4 screens": "all",
@@ -81,6 +87,7 @@ with sc2:
                                                   # of check_momentum_leader().
         "Breakouts": "breakout",
         "Pullback to SMA": "pullback_SMA20",
+        "VCP (Minervini)": "vcp",
     }
     screen_key = screen_map[screen_choice]
 with sc3:
