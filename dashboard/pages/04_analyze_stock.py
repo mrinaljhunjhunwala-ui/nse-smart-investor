@@ -119,6 +119,82 @@ except Exception as _as_reg_err:
     logging.getLogger("dashboard.analyze_stock").debug(
         "regime badge render failed: %s", _as_reg_err)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MARKET CONTEXT strip — one labelled row of market-WIDE signals that used to
+# be scattered across three different scroll depths on this page: the regime
+# badge above (Nifty regime), the FII/DII 5-day flow block ~800 lines down,
+# and the VIX Regime metric inside the score hero. Consolidating them here
+# under an explicit "market-wide, same for every stock" label kills the "is
+# this per-stock or per-market?" confusion the user raised for the Range /
+# regime badge.
+#
+# Cached 30 min — FII/DII data only updates once per day at NSE bhavcopy time,
+# and the regime doesn't flip intraday either, so re-computing on every rerun
+# is pure waste.
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=1800, show_spinner=False)
+def _market_context_row():
+    """Cheap dict of the three market-wide signals: fii_5d, dii_5d, regime_msg."""
+    _row = {"fii_5d": None, "dii_5d": None, "regime_msg": None,
+            "regime_severity": "neutral"}
+    try:
+        from analysis.fii_dii import load_history as _mc_fd
+        _fd_df = _mc_fd(days=5)
+        if not _fd_df.empty and len(_fd_df) >= 3:
+            _fii_5 = float(_fd_df["fii_net"].fillna(0).sum())
+            _dii_5 = float(_fd_df["dii_net"].fillna(0).sum())
+            _row["fii_5d"] = _fii_5
+            _row["dii_5d"] = _dii_5
+            if _fii_5 > 0 and _dii_5 > 0:
+                _row["regime_msg"] = ("Broad participation — FII + DII both net "
+                                       "buyers this week. Rallies persist in this regime.")
+                _row["regime_severity"] = "green"
+            elif _fii_5 < 0 and _dii_5 > 0:
+                _row["regime_msg"] = ("Domestic-supported dip — FII selling absorbed "
+                                       "by DII. Buy quality on pullbacks; avoid high-beta.")
+                _row["regime_severity"] = "amber"
+            elif _fii_5 < 0 and _dii_5 < 0:
+                _row["regime_msg"] = ("Distribution — both selling. Historically "
+                                       "precedes weakness; hold, don't add.")
+                _row["regime_severity"] = "red"
+            elif _fii_5 > 0 and _dii_5 < 0:
+                _row["regime_msg"] = ("DII profit-taking rally — FII buying vs DII "
+                                       "selling. Rallies tend shallower; keep stops tight.")
+                _row["regime_severity"] = "amber"
+            else:
+                _row["regime_msg"] = "Mixed — no clear institutional-flow signal."
+    except Exception:
+        pass
+    return _row
+
+try:
+    _mc = _market_context_row()
+    _sev_color = {"green": "#26a69a", "amber": "#f9a825",
+                  "red":   "#ef5350", "neutral": "#8899bb"}[_mc["regime_severity"]]
+    st.markdown(
+        '<div style="background:#0d1526;border:1px solid #263148;border-radius:8px;'
+        'padding:8px 14px;margin:6px 0 10px 0">'
+        '<div style="font-size:10px;color:#5b8def;letter-spacing:1.5px;'
+        'text-transform:uppercase;font-weight:600;margin-bottom:4px">'
+        '🌐 Market context · same for every stock, not ticker-specific</div>'
+        + (
+            f'<span style="font-size:12px;color:#ddd">'
+            f'<b style="color:{_sev_color}">FII 5d</b> ₹{_mc["fii_5d"]:+,.0f} Cr &nbsp;·&nbsp; '
+            f'<b style="color:{_sev_color}">DII 5d</b> ₹{_mc["dii_5d"]:+,.0f} Cr &nbsp;·&nbsp; '
+            f'{_mc["regime_msg"]}</span>'
+            if _mc["fii_5d"] is not None
+            else '<span style="font-size:12px;color:#8899bb">'
+                 'FII/DII flows unavailable — visit the 🏦 FII / DII Flows page '
+                 'once to populate the local table.</span>'
+        )
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+except Exception as _mc_err:
+    import logging
+    logging.getLogger("dashboard.analyze_stock").debug(
+        "market context strip render failed: %s", _mc_err)
+
 # FIX ANL-XREF — the per-ticker analytics surface is spread across a few pages
 # (this one, Quality Watch, Deep Dive) and the reason they each exist isn't
 # obvious from the sidebar labels. Explicit map here so someone starting on
@@ -796,40 +872,10 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "FinalVerdict banner failed for %s: %s", ticker, _fv_err)
 
-            # ── 🏦 FII/DII regime context (Analysis-page-consolidation #3) ────
-            # Institutional-flow backdrop for TODAY's verdict. Uses the
-            # fii_dii_daily table populated by the FII/DII Flows page — if that
-            # page has never been visited (empty table), silently skipped.
-            # 5-day cumulative FII + DII (Rs. Cr) with a one-liner regime hint.
-            try:
-                from analysis.fii_dii import load_history as _fd_hist
-                _fd_df = _fd_hist(days=5)
-                if not _fd_df.empty and len(_fd_df) >= 3:
-                    _fii_5 = float(_fd_df["fii_net"].fillna(0).sum())
-                    _dii_5 = float(_fd_df["dii_net"].fillna(0).sum())
-                    if _fii_5 > 0 and _dii_5 > 0:
-                        _rg = ("🟢 **Broad participation** — FII + DII both net "
-                               "buyers this week. Rallies persist in this regime.")
-                    elif _fii_5 < 0 and _dii_5 > 0:
-                        _rg = ("🟠 **Domestic-supported dip** — FII selling absorbed "
-                               "by DII. Buy quality on pullbacks; avoid high-beta.")
-                    elif _fii_5 < 0 and _dii_5 < 0:
-                        _rg = ("🔴 **Distribution** — both selling. Historically "
-                               "precedes weakness; hold, don't add.")
-                    elif _fii_5 > 0 and _dii_5 < 0:
-                        _rg = ("🟡 **DII profit-taking rally** — FII buying vs DII "
-                               "selling. Rallies tend shallower; keep stops tight.")
-                    else:
-                        _rg = "⚪ **Mixed** — no clear institutional-flow signal."
-                    st.info(
-                        f"{_rg}  \n"
-                        f"5-day cumulative: FII ₹{_fii_5:+,.0f} Cr · DII ₹{_dii_5:+,.0f} Cr. "
-                        f"Full context on the **🏦 FII / DII Flows** page.",
-                    )
-            except Exception as _fd_regime_e:
-                import logging
-                logging.getLogger("dashboard.analyze_stock").debug(
-                    "FII/DII regime context failed for %s: %s", ticker, _fd_regime_e)
+            # (FII/DII regime context moved to the top-of-page Market Context
+            # strip — it's a market-wide signal identical for every ticker, so
+            # showing it inside the per-ticker analyze block was redundant and
+            # made the page feel "same regime message everywhere".)
 
             # ── 🧠 Thesis freshness alarm (Analysis-page-consolidation #4) ────
             # The Deep Dive page stores past deep-dive writeups per ticker under
@@ -1199,6 +1245,24 @@ if analyze_btn or _prefill_active or (
                 )
                 tc4.metric("Risk : Reward", f"{cs.risk_reward:.1f} : 1")
 
+                # RR AUDIT: flag setups where R:R is under the common 1.5:1
+                # sizing threshold. The Action strip below (since removed) used
+                # to hint at this by colouring the RR chip; making it explicit
+                # here — right next to the number — matches the user ask to
+                # "check the trading plan in terms of Rewards:Risk".
+                if cs.risk_reward < 1.5:
+                    st.caption(
+                        f"⚠️ **R:R = {cs.risk_reward:.1f}:1** — below the 1.5:1 "
+                        "swing-trade minimum. Either wait for a tighter entry "
+                        "(reduces stop distance) or a higher target, or **halve size** "
+                        "if you're taking this setup on conviction from other gates."
+                    )
+                elif cs.risk_reward < 2.0:
+                    st.caption(
+                        f"R:R = {cs.risk_reward:.1f}:1 — acceptable but on the tight "
+                        "side; a run to target still net-positive after typical slippage."
+                    )
+
                 # FIX HZ1: holding period this setup was scored for — was
                 # missing entirely, making the action label ("BUY" etc.) an
                 # open-ended idea with no sense of when to reassess.
@@ -1216,67 +1280,52 @@ if analyze_btn or _prefill_active or (
                     unsafe_allow_html=True,
                 )
 
-            # ── Qualitative flags (QF2) ─────────────────────────────────────
-            # Deliberately full-width, outside hero_col/detail_col, and
-            # deliberately AFTER the score card — this is context alongside
-            # the score, never blended into cs.score itself.
-            try:
-                render_flag_strip(ticker)
-                # SPEED FIX: mark this ticker's flags cache warm so the Final
-                # Verdict banner (rendered above, but re-evaluated on the next
-                # rerun) can include the flags gate without waiting on a fresh
-                # NSE/News scrape — the strip above just did that work.
-                st.session_state[f"_as_flags_warm::{ticker}"] = True
-            except Exception as _qf_e:
-                import logging
-                logging.getLogger("dashboard.analyze_stock").debug(
-                    "Qualitative flags panel failed for %s: %s", ticker, _qf_e
+                # PLAIN ENGLISH — folded into the score-hero detail column
+                # (previously duplicated further down in a "💬 In plain English"
+                # panel that repeated the same entry/SL/target numbers already
+                # shown as metrics above). One canonical place, near the top,
+                # where the user actually reads first.
+                st.markdown(
+                    f'<div class="glass-panel" style="margin-top:10px;padding:12px 16px">'
+                    f'<div style="font-size:11px;color:#ff9500;font-weight:700;'
+                    f'text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">'
+                    f'💬 In plain English</div>'
+                    f'<div style="font-size:14px;line-height:1.6;color:#e0e0e0">'
+                    f'{_plain_english(cs.action, cs.entry, cs.stop_loss, cs.target, cs.risk_reward)}'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
                 )
 
-            # ── Action strip ───────────────────────────────────────────────
-            _as_colors = {
-                "BUY":          ("#0a2a1a", "#26a69a"),
-                "CAUTIOUS BUY": ("#0d2210", "#4caf50"),
-                "HOLD":         ("#2a2a00", "#f9a825"),
-                "WATCHLIST":    ("#0d1f3c", "#2196F3"),
-                "EXIT":         ("#2a0a0a", "#ef5350"),
-            }
-            _as_bg, _as_border = _as_colors.get(cs.action, ("#1a1a2e", "#2196F3"))
-            _as_rr_ok    = cs.risk_reward >= 1.5
-            _as_rr_color = "#26a69a" if _as_rr_ok else "#f9a825"
+            # (Standalone Qualitative-Flags strip removed — it was a parallel
+            # feed from NSE + Google News + RSS that duplicated the News
+            # section below. Flags are now merged INTO the News section:
+            # summary badge + expander with active-flag detail, one section
+            # instead of two.)
 
-            st.markdown(
-                f'<div style="background:{_as_bg};border-left:6px solid {_as_border};'
-                f'border-radius:8px;padding:16px 22px;margin:14px 0 6px 0">'
-                f'<span style="font-size:22px;font-weight:700">'
-                f'{_action_emoji(cs.action)} Signal: '
-                f'<span style="color:{_as_border}">{_display_label(cs.action)}</span></span>'
-                f'<span style="font-size:13px;color:#bbb;margin-left:16px">'
-                f'Score {cs.score:.0f}/100</span><br>'
-                f'<span style="font-size:13px;color:#ccc">'
-                f'Entry <b style="color:#fff">₹{cs.entry:,.2f}</b> &nbsp;·&nbsp; '
-                f'Stop <b style="color:#ef5350">₹{cs.stop_loss:,.2f}</b> '
-                f'<span style="color:#888">(-{(cs.price-cs.stop_loss)/cs.price*100:.1f}%)</span> &nbsp;·&nbsp; '
-                f'Target <b style="color:#26a69a">₹{cs.target:,.2f}</b> '
-                f'<span style="color:#888">(+{(cs.target-cs.price)/cs.price*100:.1f}%)</span> &nbsp;·&nbsp; '
-                f'R:R <b style="color:{_as_rr_color}">{cs.risk_reward:.1f}:1</b>'
-                f'</span></div>',
-                unsafe_allow_html=True,
-            )
-
-            st.markdown(
-                f'<div class="glass-panel" style="margin:8px 0 14px 0;padding:14px 18px">'
-                f'<div style="font-size:11px;color:#ff9500;font-weight:700;'
-                f'text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">💬 In plain English</div>'
-                f'<div style="font-size:14px;line-height:1.7;color:#e0e0e0">'
-                f'{_plain_english(cs.action, cs.entry, cs.stop_loss, cs.target, cs.risk_reward)}'
-                f'</div></div>',
-                unsafe_allow_html=True,
-            )
+            # (Removed: standalone "Signal:" action strip + separate "💬 In
+            # plain English" panel. Both duplicated content already shown in
+            # the score-hero card above — Signal/Score/Entry/SL/Target/RR live
+            # as metrics inside detail_col, and the plain-English blurb has
+            # been folded into the same column. One canonical block, no
+            # scrolling required to read the same data twice.)
 
             # ── Multi-signal confirmation ──────────────────────────────────
             with st.spinner("Running deep confirmation…"):
                 _dc = _deep_confirmation(ticker)
+
+            # LAYOUT-REORDER: compute the liquidity context here too, so the
+            # Investment Thesis section (moved up to run BEFORE Fundamentals
+            # / Valuation / Liquidity render, since it's the "why", they're
+            # the "context") can reference it. The Liquidity render block
+            # further down reuses this same object — no double computation.
+            _liq_ctx = None
+            try:
+                from analysis.liquidity import compute_liquidity as _cl_early
+                _liq_ctx = _cl_early(df)
+            except Exception as _liq_early_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "early liquidity compute failed for %s: %s", ticker, _liq_early_e)
 
             _wk_map = {
                 "uptrend":  ("🟢 Uptrend",  "#00d4aa"),
@@ -1349,6 +1398,40 @@ if analyze_btn or _prefill_active or (
             _delta_c = "#00d4aa" if _conf_delta >= 0 else "#ff4757"
             _delta_s = f"{_conf_delta:+d}" if _conf_delta else "±0"
 
+            # MULTI-SIGNAL COMPLETION: the panel used to show 4 confirmations
+            # (weekly trend · relative strength · earnings · signal agreement)
+            # and felt incomplete because it missed two of the FIRST things a
+            # trader eyes on a chart — where price sits relative to its 50-day
+            # and 200-day moving averages. Both come free from `df` already in
+            # scope (SMA_50/SMA_200 are computed in the price loader), so no
+            # extra network calls.
+            _ma50_txt, _ma50_c = "—", "#8899bb"
+            _ma200_txt, _ma200_c = "—", "#8899bb"
+            try:
+                _px = float(latest["Close"])
+                _sma50 = float(latest.get("SMA_50", float("nan")))
+                _sma200 = float(latest.get("SMA_200", float("nan")))
+                if _sma50 == _sma50:   # NaN check
+                    _pct50 = (_px / _sma50 - 1) * 100
+                    if _pct50 >= 2:
+                        _ma50_txt = f"🟢 Above ({_pct50:+.1f}%)"; _ma50_c = "#00d4aa"
+                    elif _pct50 <= -2:
+                        _ma50_txt = f"🔴 Below ({_pct50:+.1f}%)"; _ma50_c = "#ff4757"
+                    else:
+                        _ma50_txt = f"🟡 At ({_pct50:+.1f}%)";    _ma50_c = "#ff9500"
+                if _sma200 == _sma200:
+                    _pct200 = (_px / _sma200 - 1) * 100
+                    if _pct200 >= 2:
+                        _ma200_txt = f"🟢 Above ({_pct200:+.1f}%)"; _ma200_c = "#00d4aa"
+                    elif _pct200 <= -2:
+                        _ma200_txt = f"🔴 Below ({_pct200:+.1f}%)"; _ma200_c = "#ff4757"
+                    else:
+                        _ma200_txt = f"🟡 At ({_pct200:+.1f}%)";    _ma200_c = "#ff9500"
+            except Exception as _ma_err:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "multi-signal MA cell derivation failed for %s: %s", ticker, _ma_err)
+
             st.markdown(
                 f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.06);'
                 f'border-radius:12px;padding:14px 18px;margin-bottom:12px">'
@@ -1377,6 +1460,10 @@ if analyze_btn or _prefill_active or (
                 f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">'
                 + (f'{_bull} of {_tot} bullish' if _confirmation_available else '—') +
                 f'</div></div>'
+                f'<div><div style="font-size:10px;color:#4a5568">PRICE VS 50DMA</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_ma50_c}">{_ma50_txt}</div></div>'
+                f'<div><div style="font-size:10px;color:#4a5568">PRICE VS 200DMA</div>'
+                f'<div style="font-size:14px;font-weight:700;color:{_ma200_c}">{_ma200_txt}</div></div>'
                 f'</div>'
                 + (
                     f'<div style="font-size:11px;color:#8899bb;margin-top:8px">'
@@ -1424,27 +1511,40 @@ if analyze_btn or _prefill_active or (
                 load_ticker_df.clear()
                 st.rerun()
 
-            # ── Technical indicators ───────────────────────────────────────
+            # ── Technical indicators (behind an expander now) ──────────────
+            # These 6 numbers (RSI/ADX/ATR/Vol/Stoch/VWAP%) were previously
+            # rendered as a full-width metric row that DUPLICATED the readings
+            # the pre-trade checklist above already interprets in plain English
+            # (RSI zone, ADX trend-strength, volume surge, MTF alignment). The
+            # raw values are useful for a chart-reading user but not for the
+            # everyday read — so they now live behind an expander, keeping the
+            # main scroll clean while remaining one click away.
             st.markdown("---")
-            ti_cols = st.columns(6)
-            indicators_display = [
-                ("RSI (14)",  f"{latest.get('RSI', 0):.1f}",
-                 "Oversold (<30)"   if latest.get("RSI", 50) < 30
-                 else "Overbought (>70)" if latest.get("RSI", 50) > 70
-                 else "Normal"),
-                ("ADX",       f"{latest.get('ADX', 0):.1f}",
-                 "Trending (>25)" if latest.get("ADX", 0) > 25 else "Ranging"),
-                ("ATR",       f"₹{latest.get('ATR', 0):.1f}", "Daily move range"),
-                ("Vol Ratio", f"{latest.get('Volume_Ratio', 0):.2f}x",
-                 "High volume" if latest.get("Volume_Ratio", 1) > 1.5 else "Normal"),
-                ("Stoch K",   f"{latest.get('Stoch_K', 50):.1f}",
-                 "Oversold" if latest.get("Stoch_K", 50) < 20
-                 else "Overbought" if latest.get("Stoch_K", 50) > 80 else ""),
-                ("VWAP %",   f"{latest.get('VWAP_Pct', 0):+.1f}%",
-                 "Above VWAP" if latest.get("VWAP_Pct", 0) > 0 else "Below VWAP"),
-            ]
-            for (lbl, val, note), col in zip(indicators_display, ti_cols):
-                col.metric(lbl, val, note)
+            with st.expander("🔬 Raw technical indicators (RSI · ADX · ATR · Vol · Stoch · VWAP%)",
+                             expanded=False):
+                ti_cols = st.columns(6)
+                indicators_display = [
+                    ("RSI (14)",  f"{latest.get('RSI', 0):.1f}",
+                     "Oversold (<30)"   if latest.get("RSI", 50) < 30
+                     else "Overbought (>70)" if latest.get("RSI", 50) > 70
+                     else "Normal"),
+                    ("ADX",       f"{latest.get('ADX', 0):.1f}",
+                     "Trending (>25)" if latest.get("ADX", 0) > 25 else "Ranging"),
+                    ("ATR",       f"₹{latest.get('ATR', 0):.1f}", "Daily move range"),
+                    ("Vol Ratio", f"{latest.get('Volume_Ratio', 0):.2f}x",
+                     "High volume" if latest.get("Volume_Ratio", 1) > 1.5 else "Normal"),
+                    ("Stoch K",   f"{latest.get('Stoch_K', 50):.1f}",
+                     "Oversold" if latest.get("Stoch_K", 50) < 20
+                     else "Overbought" if latest.get("Stoch_K", 50) > 80 else ""),
+                    ("VWAP %",   f"{latest.get('VWAP_Pct', 0):+.1f}%",
+                     "Above VWAP" if latest.get("VWAP_Pct", 0) > 0 else "Below VWAP"),
+                ]
+                for (lbl, val, note), col in zip(indicators_display, ti_cols):
+                    col.metric(lbl, val, note)
+                st.caption(
+                    "Raw values — the **🎯 Pre-trade checklist** expander further up "
+                    "translates each of these into a pass/fail read against the setup."
+                )
 
             pat_cols   = [c for c in df.columns if c.startswith("Pat_")]
             active_pats = [
@@ -1465,9 +1565,67 @@ if analyze_btn or _prefill_active or (
             st.plotly_chart(build_price_chart(df_chart, ticker, period=period),
                             width="stretch")
 
-            # ── News feed ──────────────────────────────────────────────────
+            # ── News & Flags (merged) ─────────────────────────────────────
+            # Flags used to render as a standalone strip further up the page,
+            # sourced from the SAME feeds (NSE corp announcements + Google
+            # News + NSE RSS) that this News section reads — so the user got
+            # essentially the same headlines twice. Merged into one section:
+            #   • summary badge line: N flags active · red/amber/green count
+            #   • expander with the flag detail (headline, category, sentiment)
+            #   • the news list below (unchanged)
             st.markdown("---")
-            st.subheader(f"📰 Latest News — {get_display_name(ticker)}")
+            st.subheader(f"📰 News & Flags — {get_display_name(ticker)}")
+
+            # Flag summary strip (from the same 6h-cached helper the pre-fix
+            # standalone strip used). SPEED FIX: setting the warm marker here
+            # lets the Final-Verdict banner include the flag gate on the NEXT
+            # rerun of the same ticker without a fresh scrape.
+            _flag_dicts = []
+            try:
+                from dashboard.shared.flags_ui import get_cached_flags as _news_gcf
+                _flag_dicts = _news_gcf(
+                    ticker, company_name=getattr(cs, "company_name", None)) or []
+                st.session_state[f"_as_flags_warm::{ticker}"] = True
+            except Exception as _fl_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "flags fetch (news section) failed for %s: %s", ticker, _fl_e)
+
+            if _flag_dicts:
+                _sev_counts = {"red": 0, "amber": 0, "green": 0}
+                for _f in _flag_dicts:
+                    _s = str(_f.get("sentiment", "")).lower()
+                    if _s == "negative": _sev_counts["red"]   += 1
+                    elif _s == "neutral":  _sev_counts["amber"] += 1
+                    elif _s == "positive": _sev_counts["green"] += 1
+                _top_color = ("#ef5350" if _sev_counts["red"]
+                              else "#f9a825" if _sev_counts["amber"] else "#26a69a")
+                st.markdown(
+                    f'<div style="background:#0d1526;border-left:4px solid {_top_color};'
+                    f'border-radius:6px;padding:10px 14px;margin-bottom:10px">'
+                    f'<b style="color:{_top_color};font-size:13px">'
+                    f'🚩 {len(_flag_dicts)} qualitative flag'
+                    f'{"s" if len(_flag_dicts) != 1 else ""} active</b> '
+                    f'<span style="font-size:12px;color:#aaa">'
+                    f'· 🔴 {_sev_counts["red"]} · 🟡 {_sev_counts["amber"]} '
+                    f'· 🟢 {_sev_counts["green"]}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                with st.expander("See flag detail", expanded=False):
+                    for _f in _flag_dicts[:10]:
+                        _s = str(_f.get("sentiment", "")).lower()
+                        _dot = ("🔴" if _s == "negative"
+                                else "🟡" if _s == "neutral" else "🟢")
+                        _msg = str(_f.get("message") or _f.get("headline") or "")[:200]
+                        _cat = str(_f.get("category") or "")
+                        st.markdown(
+                            f"- {_dot} **{_msg}**  \n"
+                            f"  <span style='font-size:11px;color:#8899bb'>"
+                            f"{_cat}</span>",
+                            unsafe_allow_html=True,
+                        )
+
             with st.spinner("Loading news…"):
                 from utils.news import get_stock_news as _gsn
                 articles = _gsn(ticker, max_articles=6)
@@ -1486,29 +1644,16 @@ if analyze_btn or _prefill_active or (
                         f'{art["publisher"]} · {art["time"]} · *{impact}*</span>',
                         unsafe_allow_html=True,
                     )
-            else:
-                st.info("No recent news found for this stock.")
+            elif not _flag_dicts:
+                st.info("No recent news or qualitative flags found for this stock.")
 
-            # ── Trading summary box ────────────────────────────────────────
-            st.markdown("---")
-            action_c = _action_color(cs.action)
-            atr      = float(df["ATR"].iloc[-1]) if "ATR" in df.columns else cs.price * 0.02
-            st.markdown(
-                f'<div class="{action_c}" style="padding:16px">'
-                f'<b style="font-size:16px">Trading Plan — {ticker.replace(".NS","")}</b><br><br>'
-                f'<b>Signal:</b> {_action_emoji(cs.action)} {cs.action}&nbsp;&nbsp;'
-                f'<b>Score:</b> {cs.score:.0f}/100 [{cs.grade}]<br>'
-                f'<b>Entry zone:</b> ₹{cs.entry:,.2f} — ₹{cs.entry * 1.01:,.2f}<br>'
-                f'<b>Stop-loss:</b> ₹{cs.stop_loss:,.2f} '
-                f'<span style="color:#aaa;font-size:12px">'
-                f'(~{abs(cs.entry - cs.stop_loss)/cs.entry*100:.1f}% below entry, '
-                f'~1× ATR = ₹{atr:.1f})</span><br>'
-                f'<b>Target:</b> ₹{cs.target:,.2f} '
-                f'<span style="color:#aaa;font-size:12px">(R:R = {cs.risk_reward:.1f}:1)</span><br><br>'
-                f'<i>{cs.headline}</i>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+            # (Removed: "Trading Plan" box — the THIRD copy of the same
+            # Signal/Score/Entry/SL/Target/RR block, after the score hero and
+            # the deleted Action strip. The only content unique to it was the
+            # "Entry zone ₹X — ₹Y" band (entry × 1.01) and the ATR footnote;
+            # both are trivial and already implied by the metric cards. R:R
+            # sizing warning now lives in the score-hero column, next to the
+            # RR metric itself.)
 
             # ── FIX A1: Paper trade via popover (was direct paper_open_trade call) ──
             st.markdown("---")
@@ -1528,6 +1673,78 @@ if analyze_btn or _prefill_active or (
                     "📌 **Paper Trading** lets you test this signal without real money. "
                     "Track it in the **📂 Paper Trades** page to see if the model's calls are accurate."
                 )
+
+            # ── Investment Thesis (structured) ─────────────────────────────
+            # LAYOUT-REORDER: Thesis is the "WHY" — it belongs BEFORE the
+            # Fundamentals / Valuation / Liquidity blocks, which are the
+            # "CONTEXT" that feeds it. The Portfolio Fit block below then reads
+            # the same `_th` object (unchanged), so the semantic ordering is
+            # now: verdict → why (Thesis) → context (F/V/L) → fit.
+            st.markdown("---")
+            st.subheader("🧭 Investment Thesis (structured)")
+            st.caption(
+                "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
+                "single verdict. Every point is traceable to its source. Not investment advice."
+            )
+            _th = None
+            try:
+                # SPEED FIX: route through the page-level cached full-thesis
+                # helper so reruns of the SAME ticker (period toggle, popover
+                # open, checkbox flip) are instant. Fingerprint the dc + liq
+                # inputs with a cheap hashable summary so a materially-different
+                # input invalidates the cache; the full objects come from
+                # session_state so st.cache_data can hash the key.
+                st.session_state["_as_cs_snap"]  = cs
+                st.session_state["_as_dc_snap"]  = _dc
+                st.session_state["_as_liq_snap"] = _liq_ctx
+                _dc_total = None
+                if isinstance(_dc, dict):
+                    _dc_total = _dc.get("total")
+                _liq_tier = getattr(_liq_ctx, "liquidity_tier", None)
+                _th = _cached_thesis_full(ticker, cs.score, cs.action,
+                                          _dc_total, _liq_tier)
+                _v_color = {
+                    "Strong Positive": "#00d4aa", "Positive": "#2ecc71",
+                    "Neutral":         "#8899bb",  "Negative": "#ff7043",
+                    "Strong Negative": "#ff4757",
+                }.get(_th.verdict, "#8899bb")
+                st.markdown(
+                    f"<div style='font-size:1.15rem'>Verdict: "
+                    f"<b style='color:{_v_color}'>{_th.verdict}</b> "
+                    f"<span style='color:#8899bb'>(score {_th.verdict_score:+d})</span></div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(_th.verdict_rationale)
+
+                def _factor_list(_factors, _empty):
+                    if not _factors:
+                        st.caption(_empty); return
+                    for _f in _factors:
+                        st.markdown(
+                            f"- {_f.text}  \n"
+                            f"  <span style='color:#8899bb;font-size:0.85rem'>"
+                            f"· {_f.source}: {_f.evidence}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                _tc1, _tc2 = st.columns(2)
+                with _tc1:
+                    st.markdown("**🟢 Bull case**")
+                    _factor_list(_th.bull_factors, "No bull factors triggered.")
+                with _tc2:
+                    st.markdown("**🔴 Bear case**")
+                    _factor_list(_th.bear_factors, "No bear factors triggered.")
+                st.markdown("**⚠️ Key risks**")
+                _factor_list(_th.key_risks, "No specific risks flagged by the rules.")
+                for _tn in getattr(_th, "notes", []) or []:
+                    st.info("ℹ️ " + _tn)
+                st.caption(
+                    "Contributing subsystems: "
+                    + (", ".join(_th.inputs_present) or "none available")
+                    + ". Phase A1/D1 — explainable, sector-aware rules; no AI/LLM narration."
+                )
+            except Exception as _th_e:
+                st.caption(f"⚠️ Thesis unavailable: {_th_e}")
 
             # ── Fundamentals ───────────────────────────────────────────────
             st.markdown("---")
@@ -1687,12 +1904,15 @@ if analyze_btn or _prefill_active or (
                 st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
 
             # ── Liquidity Context ──────────────────────────────────────────
+            # NOTE: _liq_ctx is computed EARLIER (right after _dc) so the
+            # Investment Thesis section can consume it; this render block just
+            # displays what was already computed. Do not re-compute here.
             st.markdown("---")
             st.subheader("💧 Liquidity Context")
-            _liq_ctx = None
             try:
-                from analysis.liquidity import compute_liquidity, format_turnover
-                _liq_ctx = compute_liquidity(df)
+                from analysis.liquidity import format_turnover
+                if _liq_ctx is None:
+                    raise RuntimeError("liquidity context not available (see log)")
                 _lt_color = {
                     "High": "#00d4aa", "Medium": "#2ecc71",
                     "Low":  "#ffa726", "Illiquid": "#ff4757",
@@ -1724,72 +1944,10 @@ if analyze_btn or _prefill_active or (
             except Exception as _liq_e:
                 st.caption(f"⚠️ Liquidity context unavailable: {_liq_e}")
 
-            # ── Investment Thesis ──────────────────────────────────────────
-            st.markdown("---")
-            st.subheader("🧭 Investment Thesis (structured)")
-            st.caption(
-                "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
-                "single verdict. Every point is traceable to its source. Not investment advice."
-            )
-            _th = None
-            try:
-                # SPEED FIX: route through the page-level cached full-thesis
-                # helper so reruns of the SAME ticker (period toggle, popover
-                # open, checkbox flip) are instant. Fingerprint the dc + liq
-                # inputs with a cheap hashable summary so a materially-different
-                # input invalidates the cache; the full objects come from
-                # session_state so st.cache_data can hash the key.
-                st.session_state["_as_cs_snap"]  = cs
-                st.session_state["_as_dc_snap"]  = _dc
-                st.session_state["_as_liq_snap"] = _liq_ctx
-                _dc_total = None
-                if isinstance(_dc, dict):
-                    _dc_total = _dc.get("total")
-                _liq_tier = getattr(_liq_ctx, "liquidity_tier", None)
-                _th = _cached_thesis_full(ticker, cs.score, cs.action,
-                                          _dc_total, _liq_tier)
-                _v_color = {
-                    "Strong Positive": "#00d4aa", "Positive": "#2ecc71",
-                    "Neutral":         "#8899bb",  "Negative": "#ff7043",
-                    "Strong Negative": "#ff4757",
-                }.get(_th.verdict, "#8899bb")
-                st.markdown(
-                    f"<div style='font-size:1.15rem'>Verdict: "
-                    f"<b style='color:{_v_color}'>{_th.verdict}</b> "
-                    f"<span style='color:#8899bb'>(score {_th.verdict_score:+d})</span></div>",
-                    unsafe_allow_html=True,
-                )
-                st.caption(_th.verdict_rationale)
-
-                def _factor_list(_factors, _empty):
-                    if not _factors:
-                        st.caption(_empty); return
-                    for _f in _factors:
-                        st.markdown(
-                            f"- {_f.text}  \n"
-                            f"  <span style='color:#8899bb;font-size:0.85rem'>"
-                            f"· {_f.source}: {_f.evidence}</span>",
-                            unsafe_allow_html=True,
-                        )
-
-                _tc1, _tc2 = st.columns(2)
-                with _tc1:
-                    st.markdown("**🟢 Bull case**")
-                    _factor_list(_th.bull_factors, "No bull factors triggered.")
-                with _tc2:
-                    st.markdown("**🔴 Bear case**")
-                    _factor_list(_th.bear_factors, "No bear factors triggered.")
-                st.markdown("**⚠️ Key risks**")
-                _factor_list(_th.key_risks, "No specific risks flagged by the rules.")
-                for _tn in getattr(_th, "notes", []) or []:
-                    st.info("ℹ️ " + _tn)
-                st.caption(
-                    "Contributing subsystems: "
-                    + (", ".join(_th.inputs_present) or "none available")
-                    + ". Phase A1/D1 — explainable, sector-aware rules; no AI/LLM narration."
-                )
-            except Exception as _th_e:
-                st.caption(f"⚠️ Thesis unavailable: {_th_e}")
+            # (Investment Thesis section moved UP to just before Fundamentals
+            # — see the "🧭 Investment Thesis" block earlier on the page. Kept
+            # the local variable `_th` in scope so the Portfolio Fit block
+            # below can still consume the candidate thesis.)
 
             # ── Portfolio Fit — FIX A5 + A9: cached, reads manual holdings ──
             st.markdown("---")
