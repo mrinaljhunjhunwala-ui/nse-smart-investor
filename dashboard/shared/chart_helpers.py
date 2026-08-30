@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import plotly.io as pio
 from plotly.subplots import make_subplots
+from typing import Optional
 import streamlit as st
 # FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
 # RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
@@ -205,11 +206,19 @@ def compute_market_breadth(tickers: tuple):
 # Shared chart builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
+def build_price_chart(df: pd.DataFrame, ticker: str,
+                      period: Optional[str] = None) -> go.Figure:
     """
     4-panel trading chart: Price (candlestick + SMAs + BB) / Volume / RSI / MACD.
     Matches the layout of professional trading terminals.
+
+    `period` — the chart period the caller is showing ("1d"/"5d"/"1m"/"6m"/"ytd"/
+    "max"). When it's a SHORT window (≤ 1M) the 200-day SMA is dropped because it
+    is either flat off-screen or fills only a fraction of the visible range —
+    visual noise, not signal. Passing `period=None` keeps the legacy behaviour
+    (always plot every SMA we have) so other callers stay unchanged.
     """
+    _hide_sma200 = str(period or "").lower() in {"1d", "5d", "1m"}
     fig = make_subplots(
         rows=4, cols=1, shared_xaxes=True,
         row_heights=[0.52, 0.14, 0.17, 0.17],
@@ -239,6 +248,8 @@ def build_price_chart(df: pd.DataFrame, ticker: str) -> go.Figure:
         ), row=1, col=1)
 
     for sma, color in [("SMA_20", "#FF9800"), ("SMA_50", "#2196F3"), ("SMA_200", "#9C27B0")]:
+        if sma == "SMA_200" and _hide_sma200:
+            continue   # dropped for ≤ 1M chart windows — see docstring
         if sma in df.columns:
             fig.add_trace(go.Scatter(
                 x=df.index, y=df[sma], name=sma,

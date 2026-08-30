@@ -296,6 +296,15 @@ _ui_period = st.radio(
     key="analyze_period",
 )
 period = _AS_PERIOD_MAP[_ui_period]
+# UX-CLARITY: users were reading the chart period as if it re-scored the stock.
+# It does not — get_composite_score(), Final Verdict, Thesis, Valuation and the
+# Horizon Fit strip all use a FIXED analytics lookback. This picker only changes
+# what window of the chart you see. Say it plainly, right next to the picker.
+st.caption(
+    "*Chart window only.* The score, verdict, horizon fit and every metric "
+    "below use a fixed analytics lookback — changing this radio only re-slices "
+    "the chart."
+)
 
 _mt_clean, _mt_err = _validate_ticker(manual_ticker)
 if _mt_err:
@@ -622,6 +631,88 @@ if analyze_btn or _prefill_active or (
                     f'</div></div>',
                     unsafe_allow_html=True,
                 )
+
+                # ── HORIZON FIT STRIP ───────────────────────────────────────
+                # User ask: "the stock is good right now in which terms?" —
+                # answer all three horizons at once instead of making them
+                # toggle a picker. Reuses the same subsystem inputs we already
+                # gathered for the banner above; combine() is pure Python so
+                # calling it three times is essentially free. Each cell shows
+                # the horizon's verdict as one of three postures — Positive /
+                # Neutral / Negative — with the driving reason underneath. The
+                # picker above still exists as the "focus" horizon, and the
+                # matching cell gets a thicker border so the two views agree.
+                try:
+                    _hz_verdicts = {}
+                    for _hz in ("short", "medium", "long"):
+                        _hz_verdicts[_hz] = _fv_combine(
+                            composite_score=cs.score,
+                            composite_action=cs.action,
+                            tqs=_fv_tqs,
+                            quality_score=_fv_quality_score,
+                            quality_flags=_fv_quality_flags,
+                            valuation_posture=_fv_valuation,
+                            valuation_guard=_fv_val_guard,
+                            valuation_guard_reason=_fv_val_reason,
+                            thesis_verdict=_fv_thesis_verdict,
+                            thesis_score=_fv_thesis_score,
+                            horizon=_hz,
+                        )
+
+                    # Map the 5-way verdict onto a 3-way posture so the strip
+                    # reads as ONE glance-answer. STRONG BUY/BUY → Positive,
+                    # WATCH/HOLD → Neutral, AVOID → Negative.
+                    _posture_map = {
+                        "STRONG BUY": ("Positive", "#26a69a"),
+                        "BUY":        ("Positive", "#4CAF50"),
+                        "WATCH":      ("Neutral",  "#2196F3"),
+                        "HOLD":       ("Neutral",  "#9E9E9E"),
+                        "AVOID":      ("Negative", "#ef5350"),
+                    }
+                    _hz_labels = {
+                        "short":  ("Short-term",  "days–weeks"),
+                        "medium": ("Medium-term", "1–6 months"),
+                        "long":   ("Long-term",   "1 year+"),
+                    }
+                    st.markdown(
+                        '<div style="font-size:12px;color:#aaa;letter-spacing:1.5px;'
+                        'text-transform:uppercase;margin:6px 0 4px 0">'
+                        'Horizon fit — is this stock good right now, and for how long?'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                    _hz_cols = st.columns(3)
+                    for _i, _hz in enumerate(("short", "medium", "long")):
+                        _hzv = _hz_verdicts[_hz]
+                        _posture, _color = _posture_map.get(_hzv.verdict, ("Neutral", "#9E9E9E"))
+                        _hz_title, _hz_range = _hz_labels[_hz]
+                        _is_focus = (_hz == _fv_horizon)
+                        _border = ("2px solid " + _color) if _is_focus else "1px solid #263148"
+                        _hz_cols[_i].markdown(
+                            f'<div style="background:#0d1526;border:{_border};'
+                            f'border-radius:10px;padding:12px 14px;height:100%">'
+                            f'<div style="font-size:11px;color:#8899bb;letter-spacing:1px;'
+                            f'text-transform:uppercase">{_hz_title} · {_hz_range}</div>'
+                            f'<div style="font-size:20px;font-weight:700;color:{_color};'
+                            f'margin:2px 0">{_posture}</div>'
+                            f'<div style="font-size:11px;color:#888">'
+                            f'Verdict: <b style="color:#ddd">{_hzv.verdict}</b> · '
+                            f'conviction {_hzv.conviction}/100</div>'
+                            f'<div style="font-size:12px;color:#ccc;margin-top:6px;'
+                            f'line-height:1.35">{_hzv.primary_reason}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    st.caption(
+                        f"↑ Same subsystem inputs as the verdict banner above, re-weighted "
+                        f"per horizon. The picker sets the *focus* horizon "
+                        f"(highlighted). *Independent of chart period.*"
+                    )
+                except Exception as _hz_err:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "Horizon-fit strip failed for %s: %s", ticker, _hz_err)
+
                 # ── VERDICT LEDGER — silent auto-log (Tier 1 #1/#2) ─────────
                 # Every FinalVerdict the user sees on this page is persisted so
                 # we can compute forward returns and calibration later. Idempotent
@@ -1371,7 +1462,8 @@ if analyze_btn or _prefill_active or (
             # ── Chart ──────────────────────────────────────────────────────
             st.markdown("---")
             st.subheader("📊 Price Chart")
-            st.plotly_chart(build_price_chart(df_chart, ticker), width="stretch")
+            st.plotly_chart(build_price_chart(df_chart, ticker, period=period),
+                            width="stretch")
 
             # ── News feed ──────────────────────────────────────────────────
             st.markdown("---")
