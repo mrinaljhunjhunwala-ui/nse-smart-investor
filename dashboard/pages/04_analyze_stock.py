@@ -144,6 +144,71 @@ from dashboard.shared.disclosures import (
 _render_regime_note()
 _render_score_methodology()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPEED FIX (post FV-enrichment slowdown): the Final-Verdict banner at the top
+# of the page and the Investment-Thesis section near the bottom each call
+# generate_thesis()/assess_valuation() with slightly different inputs. On the
+# SAME rerun both fire; on rerun of the SAME TICKER the whole page reruns and
+# both fire again. The underlying fundamentals TTL cache (24h) makes the fetch
+# cheap after the first hit, but the rule engines themselves are not free.
+#
+# These helpers memoise thesis + valuation-decision at the page level, keyed
+# on ticker + a small fingerprint that captures the input flavour (banner uses
+# composite only; bottom uses composite + deep + liquidity). Result: a rerun
+# of the same ticker (period change, popover open, checkbox toggle) is instant
+# on both surfaces, and the two thesis calls in a single run cache-hit each
+# other whenever their input fingerprint matches.
+# ─────────────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_thesis_banner(ticker: str, cs_score: float, cs_action: str):
+    """Banner-flavour thesis (composite only). Cached per (ticker, cs)."""
+    from analysis.thesis import generate_thesis, build_inputs
+    # cs is required by build_inputs; the caller passes the object separately
+    # and we reconstruct via st.session_state to avoid an un-hashable arg.
+    _cs = st.session_state.get("_as_cs_snap")
+    return generate_thesis(build_inputs(ticker, composite=_cs))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_thesis_full(ticker: str, cs_score: float, cs_action: str,
+                        dc_total, liq_tier):
+    """Bottom-flavour thesis (composite + deep + liquidity). dc_total / liq_tier
+    are cheap hashable fingerprints — the full objects come from session_state
+    so streamlit's cache_data can hash the key."""
+    from analysis.thesis import generate_thesis, build_inputs
+    _cs  = st.session_state.get("_as_cs_snap")
+    _dc  = st.session_state.get("_as_dc_snap")
+    _liq = st.session_state.get("_as_liq_snap")
+    return generate_thesis(build_inputs(ticker, composite=_cs, deep=_dc, liquidity=_liq))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_valuation(ticker: str, sector: str | None,
+                      company_name: str | None = None):
+    """Cached valuation-decision. Reuses the fundamentals TTL cache under it.
+
+    Uses the SAME wiring as the (now-fixed) banner block below:
+      * sector_classification.classify_sector (NOT get_sector_profile — that
+        alias never existed and made the try-block silently return "insufficient
+        evidence" for every ticker before the FV-BANNER-IMPORT fix)
+      * fundamentals.analytics.compute_all → assess_valuation (analytics=None
+        was the FV-BANNER-ANALYTICS bug — PEG/ROE-check inputs were missing so
+        the engine abstained on every ticker)
+    """
+    from analysis.fundamentals.valuation import build_valuation_context
+    from analysis.fundamentals.valuation_decision import assess_valuation
+    from analysis.sector_classification import classify_sector
+    from analysis.fundamentals import analytics as _fa
+    _cf = _fund_service().get_fundamentals(ticker)
+    if _cf is None:
+        return None, None
+    _spv = classify_sector(sector, name=company_name) if sector else None
+    _val = build_valuation_context(_cf, sector_profile=_spv)
+    _an  = _fa.compute_all(_cf)
+    _va  = assess_valuation(_val, _an, _spv, cf=_cf)
+    return _va, _cf
+
 # FIX A8: consume a ticker handed off from My Portfolio (or elsewhere) via
 # session_state — must happen BEFORE the search widgets render so the
 # selectbox/text_input default values stay untouched (we don't fight the
@@ -411,50 +476,41 @@ if analyze_btn or _prefill_active or (
                 _fv_thesis_score   = None
                 _fv_quality_score  = None
                 _fv_quality_flags  = None
+                _fv_th = None
+                _fv_cf = None
+                # SPEED FIX: route through page-level cached helpers so the
+                # SAME banner on a rerun (period change, popover open, checkbox
+                # toggle) is instant, and the fundamentals TTL cache is the
+                # only thing that touches the network on a cold ticker.
+                st.session_state["_as_cs_snap"] = cs   # for _cached_thesis_*
                 try:
-                    from analysis.fundamentals.valuation import build_valuation_context as _bvc
-                    from analysis.fundamentals.valuation_decision import assess_valuation as _av
-                    # FIX FV-BANNER-IMPORT — sector_classification exposes
-                    # `classify_sector`, not `get_sector_profile`. The old alias
-                    # raised ImportError → the whole try block silently swallowed
-                    # it → gate showed "Valuation data unavailable" for every
-                    # ticker. Same bug applied identically for BAJHIND + the
-                    # Nifty 50 large-caps (Yahoo had the multiples, the code
-                    # never got to read them).
-                    from analysis.sector_classification import classify_sector as _classify
-                    from analysis.fundamentals import analytics as _fv_fa
-                    _fv_cf = _fund_service().get_fundamentals(ticker)
-                    if _fv_cf is not None:
-                        _fv_spv = _classify(cs.sector,
-                                            name=getattr(cs, "company_name", None))
-                        _fv_val = _bvc(_fv_cf, sector_profile=_fv_spv)
-                        # FIX FV-BANNER-ANALYTICS — passing analytics=None made
-                        # assess_valuation return INSUFFICIENT_EVIDENCE for every
-                        # ticker (no PEG, no ROE-check inputs). Compute the same
-                        # analytics the Valuation section below uses so the
-                        # banner reads a REAL posture (SUPPORTED/REASONABLE/…).
-                        _fv_analytics = _fv_fa.compute_all(_fv_cf)
-                        _fv_va  = _av(_fv_val, _fv_analytics, _fv_spv, cf=_fv_cf)
-                        if _fv_va and getattr(_fv_va, "posture", None):
-                            _fv_valuation  = _fv_va.posture
-                            # When the engine intentionally abstained, capture the
-                            # guard code + justification so the banner can explain
-                            # WHY (e.g. cyclical trough) instead of the generic
-                            # "insufficient evidence". Wired through combine().
-                            _fv_val_guard  = getattr(_fv_va, "triggered_guard", None)
-                            _fv_val_reason = getattr(_fv_va, "justification", None)
+                    # SPEED FIX + FV-BANNER-{IMPORT,ANALYTICS}: route through the
+                    # cached helper — it applies BOTH bug fixes (classify_sector
+                    # instead of the non-existent get_sector_profile, and passing
+                    # a real analytics dict so the engine doesn't abstain on
+                    # every ticker) and memoises the whole computation, so a
+                    # rerun of the same ticker is instant.
+                    _fv_va, _fv_cf = _cached_valuation(
+                        ticker, cs.sector,
+                        company_name=getattr(cs, "company_name", None),
+                    )
+                    if _fv_va and getattr(_fv_va, "posture", None):
+                        _fv_valuation  = _fv_va.posture
+                        # When the engine intentionally abstained, capture the
+                        # guard code + justification so the banner can explain
+                        # WHY (e.g. cyclical trough) instead of the generic
+                        # "insufficient evidence". Wired through combine().
+                        _fv_val_guard  = getattr(_fv_va, "triggered_guard", None)
+                        _fv_val_reason = getattr(_fv_va, "justification", None)
                 except Exception as _fv_val_e:
                     import logging
                     logging.getLogger("dashboard.analyze_stock").debug(
                         "FinalVerdict valuation fetch failed for %s: %s", ticker, _fv_val_e)
                 try:
-                    from analysis.thesis import generate_thesis as _gt, build_inputs as _bti
-                    # FIX FV-BANNER-KWARG — build_inputs takes `composite=`, not
-                    # `cs=`. The old call raised TypeError → caught silently →
-                    # thesis gate showed "Thesis engine not run" for every
-                    # ticker on the FinalVerdict banner.
-                    _fv_th_inputs = _bti(ticker, composite=cs)
-                    _fv_th = _gt(_fv_th_inputs)
+                    # SPEED FIX + FV-BANNER-KWARG: cached helper already passes
+                    # composite=cs (the fix from origin/main), and memoises so a
+                    # rerun of the same ticker skips the engine entirely.
+                    _fv_th = _cached_thesis_banner(ticker, cs.score, cs.action)
                     if _fv_th:
                         _fv_thesis_verdict = getattr(_fv_th, "verdict", None)
                         _fv_thesis_score   = getattr(_fv_th, "verdict_score", None)
@@ -463,11 +519,24 @@ if analyze_btn or _prefill_active or (
                     logging.getLogger("dashboard.analyze_stock").debug(
                         "FinalVerdict thesis fetch failed for %s: %s", ticker, _fv_th_e)
                 try:
-                    # Use the already-cached list-of-dicts helper the flags
-                    # strip below (render_flag_strip) uses. Derive severity
-                    # from the highest-priority flag: any red > any amber > green.
+                    # SPEED FIX: qualitative-flags fetch does a live NSE + Google
+                    # News + RSS scrape on cache miss (~2–3s wall-clock) — that
+                    # is the biggest single cold-render cost the FV enrichment
+                    # introduced. The flag strip further down the page fires the
+                    # SAME get_cached_flags call anyway, so on a cold ticker we
+                    # skip it in the banner (banner renders with flags-gate
+                    # unknown → confidence downgrades from high to medium, which
+                    # is honest) and only include it once the strip has warmed
+                    # the 6h cache; the next rerun of the same ticker (period
+                    # change, popover open) then gets the full 5-gate verdict
+                    # essentially for free.
+                    _flags_warm_key = f"_as_flags_warm::{ticker}"
                     from dashboard.shared.flags_ui import get_cached_flags as _gcf
-                    _fv_flag_dicts = _gcf(ticker, company_name=getattr(cs, "company_name", None)) or []
+                    _fv_flag_dicts = (
+                        _gcf(ticker, company_name=getattr(cs, "company_name", None)) or []
+                        if st.session_state.get(_flags_warm_key)
+                        else []
+                    )
                     if _fv_flag_dicts:
                         _sevs = {str(f.get("sentiment", "")).lower() for f in _fv_flag_dicts}
                         # QualitativeFlag.FlagSentiment uses "negative"/"positive"/"neutral";
@@ -1062,6 +1131,11 @@ if analyze_btn or _prefill_active or (
             # the score, never blended into cs.score itself.
             try:
                 render_flag_strip(ticker)
+                # SPEED FIX: mark this ticker's flags cache warm so the Final
+                # Verdict banner (rendered above, but re-evaluated on the next
+                # rerun) can include the flags gate without waiting on a fresh
+                # NSE/News scrape — the strip above just did that work.
+                st.session_state[f"_as_flags_warm::{ticker}"] = True
             except Exception as _qf_e:
                 import logging
                 logging.getLogger("dashboard.analyze_stock").debug(
@@ -1567,10 +1641,21 @@ if analyze_btn or _prefill_active or (
             )
             _th = None
             try:
-                from analysis.thesis import generate_thesis, build_inputs
-                _th = generate_thesis(
-                    build_inputs(ticker, composite=cs, deep=_dc, liquidity=_liq_ctx)
-                )
+                # SPEED FIX: route through the page-level cached full-thesis
+                # helper so reruns of the SAME ticker (period toggle, popover
+                # open, checkbox flip) are instant. Fingerprint the dc + liq
+                # inputs with a cheap hashable summary so a materially-different
+                # input invalidates the cache; the full objects come from
+                # session_state so st.cache_data can hash the key.
+                st.session_state["_as_cs_snap"]  = cs
+                st.session_state["_as_dc_snap"]  = _dc
+                st.session_state["_as_liq_snap"] = _liq_ctx
+                _dc_total = None
+                if isinstance(_dc, dict):
+                    _dc_total = _dc.get("total")
+                _liq_tier = getattr(_liq_ctx, "liquidity_tier", None)
+                _th = _cached_thesis_full(ticker, cs.score, cs.action,
+                                          _dc_total, _liq_tier)
                 _v_color = {
                     "Strong Positive": "#00d4aa", "Positive": "#2ecc71",
                     "Neutral":         "#8899bb",  "Negative": "#ff7043",
