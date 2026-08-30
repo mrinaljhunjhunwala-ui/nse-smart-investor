@@ -22,10 +22,32 @@ test suite) so this is a fast, always-on guardrail — not a slow smoke test.
 from __future__ import annotations
 
 import math
+import socket
 
 import numpy as np
 import pandas as pd
 import pytest
+
+
+# ── Module-scoped network isolation (matches test_pages_smoke.py pattern) ────
+# check_vcp calls _nifty_3m_return() → fetch_single("^NSEI"), and left
+# unblocked in CI it either succeeds (Yahoo cache) or fails after a 6-10s
+# per-tier timeout — either way it makes the test flaky. Blocking the socket
+# forces the deterministic "cached failure → None" path in both the A and B
+# calls, so parity holds by construction rather than by luck.
+@pytest.fixture(scope="module", autouse=True)
+def _no_network():
+    def _blocked(*args, **kwargs):
+        raise OSError("network blocked for signal parity test")
+    orig_connect = socket.socket.connect
+    orig_create  = socket.create_connection
+    socket.socket.connect    = _blocked
+    socket.create_connection = _blocked
+    try:
+        yield
+    finally:
+        socket.socket.connect    = orig_connect
+        socket.create_connection = orig_create
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -69,7 +69,13 @@ def test_all_pages_present():
     # adding 20_deep_dive.py (net +1) — same cancel-out pattern as above.
     # This assertion will read 19 (not 18) until 10_oi_options.py is manually
     # deleted from the repo — Claude cannot delete files from GitHub directly.
-    assert len(_PAGES) == 18, f"expected 18 pages, found {len(_PAGES)}: {_IDS}"
+    #
+    # 2026-08-30 sprint (calibration/FII-DII): +2 pages
+    #   * 21_verdict_calibration.py (Tier 1 #1/#2/#3 — verdict ledger + calibration)
+    #   * 22_fii_dii_flows.py       (Tier 2 #6 — FII/DII flow tracker)
+    # Renumbered from 18/19 to avoid collision with existing 18_tqs_scanner.py
+    # and 19_quality_watch.py. Both are wired into dashboard/shared/nav.py.
+    assert len(_PAGES) == 20, f"expected 20 pages, found {len(_PAGES)}: {_IDS}"
 
 
 @pytest.mark.smoke
