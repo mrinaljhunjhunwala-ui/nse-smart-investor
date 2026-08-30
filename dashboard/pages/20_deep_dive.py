@@ -57,13 +57,14 @@ st.caption(
 )
 
 # FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
-with st.expander("↔️ Also see: Analyze Stock · Quality Watch · Swing Checklist", expanded=False):
+with st.expander("↔️ Also see: Analyze Stock · Quality Watch", expanded=False):
     st.markdown(
         "Deep Dive assembles the FULL research prompt for an off-app Claude "
         "conversation (bring your own PDFs). If you just want the app's own "
         "quick take: **Analyze Stock**. If you want a hold-quality lens: "
-        "**Quality Watch**. If you're already convinced and want to check an "
-        "entry: **Swing Checklist**."
+        "**Quality Watch**. If you're already convinced and want to check the "
+        "entry setup, use the **🎯 Pre-trade go/no-go** expander inside "
+        "**Analyze Stock** (folded in from the old Swing Checklist page)."
     )
 
 _DD_KV_USER = "default"   # matches trade_store's default single-user convention

@@ -75,7 +75,11 @@ def test_all_pages_present():
     #   * 22_fii_dii_flows.py       (Tier 2 #6 — FII/DII flow tracker)
     # Renumbered from 18/19 to avoid collision with existing 18_tqs_scanner.py
     # and 19_quality_watch.py. Both are wired into dashboard/shared/nav.py.
-    assert len(_PAGES) == 20, f"expected 20 pages, found {len(_PAGES)}: {_IDS}"
+    #
+    # 2026-08-30 sprint (Analysis-page consolidation): −1 page
+    #   * 13_swing_checklist.py removed — its 8-factor go/no-go was folded
+    #     into 04_analyze_stock.py via dashboard/shared/checklist_ui.py.
+    assert len(_PAGES) == 19, f"expected 19 pages, found {len(_PAGES)}: {_IDS}"
 
 
 @pytest.mark.smoke

@@ -20,7 +20,9 @@ _NAV_GROUPS: dict = {
     "Markets":   ["Market Live", "Overview", "Quality Watch", "FII / DII Flows"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener"],
-    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score",
+    # Swing Checklist folded into Analyze Stock as an expander
+    # (Analysis-page-consolidation #5). The standalone page is removed.
+    "Analysis":  ["Analyze Stock", "Backtest", "Trend Quality Score",
                   "Deep Dive Analysis", "Verdict Calibration"],
     "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
 }
@@ -38,7 +40,6 @@ _PAGE_EMOJI: dict = {
     "Tomorrow's Watchlist": "📅",
     "Analyze Stock":   "🔍",
     "Backtest":        "🧪",
-    "Swing Checklist": "✅",
     "Position Sizer":  "📐",
     "Angel One":       "🔗",
     "Investor Guide":  "📖",
@@ -61,7 +62,6 @@ _PAGE_FULL_NAME: dict = {
     "Tomorrow's Watchlist": "📅 Tomorrow's Watchlist",
     "Analyze Stock":   "🔍 Analyze Stock",
     "Backtest":        "🧪 Backtest",
-    "Swing Checklist": "✅ Swing Checklist",
     "Position Sizer":  "📐 Position Sizer",
     "Angel One":       "🔗 Angel One",
     "Investor Guide":  "📖 Investor Guide",
@@ -96,7 +96,6 @@ _PAGE_FILE = {
     # "Max Pain Calculator" / "PCR Zone Reference" tabs.
     "Intraday Trader": "pages/11_intraday_trader.py",
     "Position Sizer":  "pages/12_position_sizer.py",
-    "Swing Checklist": "pages/13_swing_checklist.py",
     "My Watchlist":    "pages/14_my_watchlist.py",
     "Investor Guide":  "pages/15_investor_guide.py",
     "Angel One":       "pages/16_angel_one.py",

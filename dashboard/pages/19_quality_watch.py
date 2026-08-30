@@ -77,12 +77,13 @@ st.caption(
 )
 
 # FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
-with st.expander("↔️ Also see: Analyze Stock · Deep Dive · Swing Checklist", expanded=False):
+with st.expander("↔️ Also see: Analyze Stock · Deep Dive", expanded=False):
     st.markdown(
         "Quality Watch answers \"is this a good name to sit in\". For \"how "
         "does the setup look right now\" go to **Analyze Stock**; for the full "
-        "structural + valuation + thesis breakdown go to **Deep Dive**; for "
-        "a pre-trade go/no-go checklist go to **Swing Checklist**."
+        "structural + valuation + thesis breakdown go to **Deep Dive**. "
+        "The 8-factor swing-trade go/no-go now lives as an expander inside "
+        "**Analyze Stock**."
     )
 
 _POSTURE_COLOR = {

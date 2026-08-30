@@ -1,10 +1,12 @@
 """
 dashboard/pages/18_tqs_scanner.py
-Trend Quality Score (TQS) — Scanner + Deep Dive page.
+Trend Quality Score (TQS) — Universe Scanner.
 
-Two modes:
-  1. Scanner  — score a universe of tickers, rank by TQS, show heatmap
-  2. Deep Dive — single stock: pillar breakdown, time-series chart, key indicators
+Score a universe of tickers by TQS, rank them, show a sortable table +
+heatmap. The single-stock DEEP DIVE mode this page used to have was folded
+into 04_analyze_stock.py's "🌊 TQS breakdown" expander (Analysis
+consolidation #2) so a user gets both the composite verdict AND the TQS
+pillar decomposition in one place — no need to visit two pages.
 """
 
 import os
@@ -89,14 +91,10 @@ GRADE_COLOUR = {
 }
 
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_scan, tab_deep = st.tabs(["🔍 Scanner", "🔬 Deep Dive"])
-
-
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 1 — SCANNER
+# UNIVERSE SCANNER (Deep Dive tab moved into Analyze Stock — see file docstring)
 # ═════════════════════════════════════════════════════════════════════════════
-with tab_scan:
+if True:  # top-level guard kept minimal so the following block stays indented as before
     st.subheader("Universe Scanner")
 
     # FIX TQS1 — this page previously had no way to scan a real universe at
@@ -304,202 +302,3 @@ with tab_scan:
         st.info("Input your universe parameters and select 'Run Scan' above to process trend scores.")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 2 — DEEP DIVE
-# ═════════════════════════════════════════════════════════════════════════════
-with tab_deep:
-    st.subheader("Single Stock Deep Dive")
-
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        # Retrieve the user's active watchlist from session state
-        watchlist_tickers = st.session_state.get("watchlist", [])
-
-        # FIX TQS1 (companion) — previously only ever offered the watchlist
-        # + the same 20 hardcoded DEFAULT_TICKERS, regardless of what
-        # universe was scanned in the Scanner tab. If a scan has been run,
-        # surface those tickers here too (there's already a manual
-        # custom-ticker override below for anything not listed, so this
-        # dropdown is a convenience, not a hard restriction — but matching
-        # it to the last scan makes the two tabs feel connected instead of
-        # the Scanner supporting hundreds of tickers while Deep Dive's
-        # dropdown still only ever offers the same 20).
-        _scanned_tickers = (
-            list(st.session_state["tqs_scan"]["ticker"])
-            if "tqs_scan" in st.session_state and not st.session_state["tqs_scan"].empty
-            else []
-        )
-        available_tickers = list(dict.fromkeys(watchlist_tickers + _scanned_tickers + DEFAULT_TICKERS))
-
-        # 1. Dropdown Selector
-        dd_ticker_selected = st.selectbox("Select Ticker", options=available_tickers, index=0)
-        
-        # 2. Autocomplete override
-        custom_ticker = st.text_input(
-            "Or enter a custom ticker (e.g. WIPRO.NS)", 
-            value="", 
-            placeholder="Type here to override dropdown selection"
-        ).upper().strip()
-        
-        # Resolve the active ticker: use custom input if populated, else the dropdown
-        dd_ticker = custom_ticker if custom_ticker else dd_ticker_selected
-
-    with col2:
-        dd_period = st.selectbox("History", ["1y", "2y", "5y"], index=1, key="dd_period")
-    with col3:
-        st.write("")
-        st.write("")
-        run_deep = st.button("▶ Analyse", use_container_width=True, type="primary")
-
-    if run_deep and dd_ticker:
-        with st.spinner(f"Scoring {dd_ticker}…"):
-            try:
-                df_raw  = fetch_data(dd_ticker, period=dd_period)
-                df_ind  = add_indicators(df_raw)
-                df_tqs  = _score_all_pillars(df_ind).dropna(subset=["TQS"])
-                latest  = score_ticker(dd_ticker, period=dd_period)
-                st.session_state["tqs_deep"] = (df_tqs, latest)
-            except Exception as e:
-                st.error(f"Could not score {dd_ticker}: {e}")
-
-    if "tqs_deep" in st.session_state:
-        df_tqs, r = st.session_state["tqs_deep"]
-
-        # ── Scorecard header ──────────────────────────────────────────────────
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("TQS", f"{r.tqs:.1f} / 90")
-        c2.metric("Grade", r.grade())
-        c3.metric("Signal", r.signal())
-        c4.metric("RSI", f"{r.rsi:.1f}")
-        c5.metric("ADX", f"{r.adx:.1f}")
-
-        st.divider()
-
-        # ── Pillar gauges ─────────────────────────────────────────────────────
-        st.markdown("**Pillar breakdown**")
-        cols = st.columns(4)
-        pillar_data = [
-            ("P1 Trend Strength",    r.p1, "#3b82f6"),
-            ("P2 Trend Persistence", r.p2, "#10b981"),
-            ("P3 Momentum Quality",  r.p3, "#f59e0b"),
-            ("P4 Tech Confirmation", r.p4, "#8b5cf6"),
-        ]
-        for col, (label, score, colour) in zip(cols, pillar_data):
-            fig_g = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=score,
-                title={"text": label, "font": {"size": 12}},
-                gauge={
-                    "axis": {"range": [0, 22.5], "tickfont": {"size": 10}},
-                    "bar":  {"color": colour},
-                    "steps": [
-                        {"range": [0, 7.5],   "color": "rgba(241, 245, 249, 0.5)"},
-                        {"range": [7.5, 15],  "color": "rgba(226, 232, 240, 0.5)"},
-                        {"range": [15, 22.5], "color": "rgba(203, 213, 225, 0.5)"},
-                    ],
-                },
-                number={"suffix": "/22.5", "font": {"size": 16}},
-            ))
-            fig_g.update_layout(
-                height=180, 
-                margin=dict(t=30, b=10, l=15, r=15),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)"
-            )
-            col.plotly_chart(fig_g, use_container_width=True)
-
-        # ── TQS time-series chart ─────────────────────────────────────────────
-        st.markdown("**TQS over time**")
-        fig_ts = go.Figure()
-
-        fig_ts.add_trace(go.Scatter(
-            x=df_tqs.index, y=df_tqs["TQS"],
-            name="TQS", line=dict(color="#3b82f6", width=2),
-            fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
-        ))
-
-        # Reference bands
-        for y_val, label, colour in [
-            (75, "Strong Trend", "#16a34a"),
-            (60, "Trending",     "#65a30d"),
-            (45, "Neutral",      "#ca8a04"),
-            (30, "Weak",         "#ea580c"),
-        ]:
-            fig_ts.add_hline(
-                y=y_val, line_dash="dot", line_color=colour, line_width=1,
-                annotation_text=label, annotation_position="right",
-                annotation_font_color=colour,
-            )
-
-        fig_ts.update_layout(
-            xaxis_title="Date", yaxis_title="TQS",
-            yaxis_range=[0, 95],
-            legend=dict(orientation="h"),
-            margin=dict(t=20, b=40, l=10, r=10),
-            height=360,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)"
-        )
-        st.plotly_chart(fig_ts, use_container_width=True)
-
-        # ── Pillar time-series ────────────────────────────────────────────────
-        st.markdown("**Pillar scores over time**")
-        fig_p = go.Figure()
-        for col_name, label, colour in [
-            ("P1_Strength",     "P1 Strength",    "#3b82f6"),
-            ("P2_Persistence",  "P2 Persistence", "#10b981"),
-            ("P3_Momentum",     "P3 Momentum",    "#f59e0b"),
-            ("P4_Confirmation", "P4 Volume",      "#8b5cf6"),
-        ]:
-            if col_name in df_tqs.columns:
-                fig_p.add_trace(go.Scatter(
-                    x=df_tqs.index, y=df_tqs[col_name],
-                    name=label, line=dict(color=colour, width=1.5),
-                ))
-        fig_p.update_layout(
-            xaxis_title="Date", yaxis_title="Pillar Score",
-            yaxis_range=[0, 24],
-            legend=dict(orientation="h"),
-            margin=dict(t=20, b=40, l=10, r=10),
-            height=300,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)"
-        )
-        st.plotly_chart(fig_p, use_container_width=True)
-
-        # ── Key indicator table ───────────────────────────────────────────────
-        st.markdown("**Latest indicator values**")
-        
-        # Safe checks for metric validation
-        rsi_val = getattr(r, 'rsi', 50.0)
-        adx_val = getattr(r, 'adx', 20.0)
-        sharpe_val = getattr(r, 'sharpe_20', 0.0)
-        obv_val = getattr(r, 'obv_z', 0.0)
-
-        ind_data = {
-            "Indicator":  ["RSI-14", "ADX-14", "Sharpe 20d", "OBV Z-score"],
-            "Value":      [f"{rsi_val:.1f}", f"{adx_val:.1f}",
-                           f"{sharpe_val:.2f}", f"{obv_val:.2f}"],
-            "Interpretation": [
-                "55–70 = steady grind (best zone)" if 55 <= rsi_val <= 70
-                else "Overbought — caution" if rsi_val > 80
-                else "Oversold" if rsi_val < 30 else "Neutral",
-                "Strong trend (>30)" if adx_val > 30
-                else "Trend present (>25)" if adx_val > 25 else "No clear trend",
-                "Strong risk-adj momentum (>1.5)" if sharpe_val > 1.5
-                else "Positive" if sharpe_val > 0 else "Negative momentum",
-                "Accumulation (>1)" if obv_val > 1
-                else "Distribution (<-1)" if obv_val < -1 else "Neutral",
-            ],
-        }
-        st.dataframe(pd.DataFrame(ind_data), use_container_width=True, hide_index=True)
-
-        # ── Download ──────────────────────────────────────────────────────────
-        st.download_button(
-            "⬇ Download TQS history CSV",
-            data=df_tqs.reset_index().to_csv(index=False),
-            file_name=f"tqs_{dd_ticker}.csv",
-            mime="text/csv",
-        )
-    else:
-        st.info("Select a stock from the dropdown above or enter a custom symbol, then click 'Analyse'.")
