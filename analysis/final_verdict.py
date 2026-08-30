@@ -206,13 +206,21 @@ def _gate_quality(quality_score: Optional[float],
                 + (f" (score {quality_score:.0f}/100)" if quality_score else ""))
 
 
-def _gate_valuation(posture: Optional[str]) -> GateEvaluation:
+def _gate_valuation(posture: Optional[str],
+                    guard: Optional[str] = None,
+                    guard_reason: Optional[str] = None) -> GateEvaluation:
     """
     Valuation posture gate — DAMPER not veto.
 
     "DEMANDING_*" postures reduce conviction; they never suppress a signal
     outright, because a demanding valuation on a real trending winner can
     still be a valid trade (the DAMP is your position-sizing discipline).
+
+    INSUFFICIENT_EVIDENCE is not a bug — the valuation engine deliberately
+    abstains on cyclical peaks/troughs, negative earnings, and newly-listed
+    stocks (see valuation_decision._refuse). When we know WHY it abstained
+    (guard), surface that so the user reads "cyclical trough — multiples not
+    meaningful" instead of the ambiguous "insufficient evidence".
     """
     if not posture:
         return GateEvaluation(
@@ -220,9 +228,30 @@ def _gate_valuation(posture: Optional[str]) -> GateEvaluation:
             message="Valuation data unavailable.")
 
     if posture == "INSUFFICIENT_EVIDENCE":
+        # Human-readable label per known abstention reason. These match the
+        # `guard` strings emitted by valuation_decision._refuse() at the
+        # top of assess().
+        _guard_labels = {
+            "H1-negative-earnings": "Negative or zero earnings — no earnings multiple to assess.",
+            "H2-negative-equity":   "Negative shareholders' equity — book multiples not meaningful.",
+            "H3-missing-metric":    "Core valuation metric (P/E or P/B + ROE) unavailable.",
+            "H4-insurance":         "Insurer — valued on embedded value (P/EV), not exposed here.",
+            "H5-newly-listed":      "Under 2 yrs of earnings history — too new to assess.",
+            "H6-implausible":       "P/E implausibly high — earnings likely distorted (one-off charge / trough).",
+            "G1-cyclical-peak":     "Possible cyclical peak — multiples likely to compress; abstain.",
+            "TR-cyclical-trough":   "Possible cyclical trough — depressed earnings distort P/E; abstain.",
+            "growth-lens-off":      "Growth lens off — PEG unusable; multiples require judgement.",
+        }
+        pretty = _guard_labels.get(guard or "")
+        if pretty:
+            msg = f"Valuation intentionally skipped — {pretty}"
+        elif guard_reason:
+            msg = f"Valuation intentionally skipped — {guard_reason}"
+        else:
+            msg = ("Valuation intentionally skipped — profile not amenable to a "
+                   "multiple-based read (cyclical / newly-listed / negative earnings).")
         return GateEvaluation(
-            name="valuation", passed=None, effect="none",
-            message="Insufficient evidence for valuation posture.")
+            name="valuation", passed=None, effect="none", message=msg)
 
     if posture.startswith("DEMANDING"):
         return GateEvaluation(
@@ -472,15 +501,17 @@ def _base_conviction(horizon: str,
 
 
 def combine(*,
-            composite_score:   Optional[float] = None,
-            composite_action:  Optional[str]   = None,
-            tqs:               Optional[float] = None,
-            quality_score:     Optional[float] = None,
-            quality_flags:     Optional[Dict]  = None,
-            valuation_posture: Optional[str]   = None,
-            thesis_verdict:    Optional[str]   = None,
-            thesis_score:      Optional[int]   = None,
-            horizon:           str             = "medium",
+            composite_score:      Optional[float] = None,
+            composite_action:     Optional[str]   = None,
+            tqs:                  Optional[float] = None,
+            quality_score:        Optional[float] = None,
+            quality_flags:        Optional[Dict]  = None,
+            valuation_posture:    Optional[str]   = None,
+            valuation_guard:      Optional[str]   = None,
+            valuation_guard_reason: Optional[str] = None,
+            thesis_verdict:       Optional[str]   = None,
+            thesis_score:         Optional[int]   = None,
+            horizon:              str             = "medium",
             ) -> FinalVerdict:
     """
     Combine every subsystem's output into ONE verdict.
@@ -499,7 +530,9 @@ def combine(*,
 
     tech = _gate_technical(composite_score, composite_action)
     qual = _gate_quality(quality_score, quality_flags)
-    valu = _gate_valuation(valuation_posture)
+    valu = _gate_valuation(valuation_posture,
+                            guard=valuation_guard,
+                            guard_reason=valuation_guard_reason)
     thes = _gate_thesis(thesis_verdict, thesis_score)
     trnd = _gate_trend_quality(tqs)
     gates = [tech, qual, valu, thes, trnd]

@@ -17,10 +17,11 @@ import trade_store as _store
 
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
-    "Markets":   ["Market Live", "Overview", "Quality Watch"],
+    "Markets":   ["Market Live", "Overview", "Quality Watch", "FII / DII Flows"],
     "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener"],
-    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score", "Deep Dive Analysis"],
+    "Analysis":  ["Analyze Stock", "Backtest", "Swing Checklist", "Trend Quality Score",
+                  "Deep Dive Analysis", "Verdict Calibration"],
     "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
 }
 
@@ -43,6 +44,8 @@ _PAGE_EMOJI: dict = {
     "Investor Guide":  "📖",
     "Trend Quality Score": "📊", # <-- Added Page Emoji
     "Deep Dive Analysis": "📑",
+    "Verdict Calibration": "📏",
+    "FII / DII Flows":     "🏦",
 }
 
 _PAGE_FULL_NAME: dict = {
@@ -64,6 +67,8 @@ _PAGE_FULL_NAME: dict = {
     "Investor Guide":  "📖 Investor Guide",
     "Trend Quality Score": "📊 Trend Quality Score", # <-- Added Full Display Name
     "Deep Dive Analysis": "📑 Deep Dive Analysis",
+    "Verdict Calibration": "📏 Verdict Calibration",
+    "FII / DII Flows":     "🏦 FII / DII Flows",
 }
 
 _group_icons: dict = {
@@ -99,6 +104,9 @@ _PAGE_FILE = {
     "Trend Quality Score": "pages/18_tqs_scanner.py", # <-- Added File Route Mapping
     "Quality Watch":   "pages/19_quality_watch.py",  # NEW: Long-Term Holds + Quality Watch
     "Deep Dive Analysis": "pages/20_deep_dive.py",
+    # 2026-08-30 sprint: durable-persistence-backed learning pages
+    "Verdict Calibration": "pages/21_verdict_calibration.py",
+    "FII / DII Flows":     "pages/22_fii_dii_flows.py",
 }
 
 

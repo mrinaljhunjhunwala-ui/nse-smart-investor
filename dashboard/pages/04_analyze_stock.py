@@ -407,6 +407,8 @@ if analyze_btn or _prefill_active or (
                 # confidence tracking then downgrades from "high" to "medium"
                 # or "low" honestly.
                 _fv_valuation = None
+                _fv_val_guard  = None      # populated when posture is INSUFFICIENT_EVIDENCE
+                _fv_val_reason = None
                 _fv_thesis_verdict = None
                 _fv_thesis_score   = None
                 _fv_quality_score  = None
@@ -436,7 +438,13 @@ if analyze_btn or _prefill_active or (
                         _fv_analytics = _fv_fa.compute_all(_fv_cf)
                         _fv_va  = _av(_fv_val, _fv_analytics, _fv_spv, cf=_fv_cf)
                         if _fv_va and getattr(_fv_va, "posture", None):
-                            _fv_valuation = _fv_va.posture
+                            _fv_valuation  = _fv_va.posture
+                            # When the engine intentionally abstained, capture the
+                            # guard code + justification so the banner can explain
+                            # WHY (e.g. cyclical trough) instead of the generic
+                            # "insufficient evidence". Wired through combine().
+                            _fv_val_guard  = getattr(_fv_va, "triggered_guard", None)
+                            _fv_val_reason = getattr(_fv_va, "justification", None)
                 except Exception as _fv_val_e:
                     import logging
                     logging.getLogger("dashboard.analyze_stock").debug(
@@ -512,6 +520,8 @@ if analyze_btn or _prefill_active or (
                     quality_score=_fv_quality_score,
                     quality_flags=_fv_quality_flags,
                     valuation_posture=_fv_valuation,
+                    valuation_guard=_fv_val_guard,
+                    valuation_guard_reason=_fv_val_reason,
                     thesis_verdict=_fv_thesis_verdict,
                     thesis_score=_fv_thesis_score,
                     horizon=_fv_horizon,
