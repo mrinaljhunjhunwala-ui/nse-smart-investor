@@ -809,6 +809,20 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "TQS pillar breakdown failed for %s: %s", ticker, _tqs_pill_e)
 
+            # ── 🎯 8-factor pre-trade checklist (Analysis consolidation #5) ──
+            # Absorbs the standalone Swing Checklist page (13_swing_checklist.py).
+            # Uses the same 8 rules (VIX / SMA200 / MA stack / RSI zone / ADX /
+            # MTF alignment / Sector top-3 / Volume) but rendered inline so the
+            # user doesn't have to visit a separate page to get the go/no-go.
+            # The standalone page will be dropped once this is verified live.
+            try:
+                from dashboard.shared.checklist_ui import render_checklist_expander
+                render_checklist_expander(ticker, df, df_weekly=None, expanded=False)
+            except Exception as _chk_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "checklist expander failed for %s: %s", ticker, _chk_e)
+
             # ── Score hero section ─────────────────────────────────────────
             st.markdown("---")
             hero_col, detail_col = st.columns([1, 2])
