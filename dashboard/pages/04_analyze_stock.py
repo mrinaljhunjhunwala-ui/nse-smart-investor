@@ -638,6 +638,91 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "FinalVerdict banner failed for %s: %s", ticker, _fv_err)
 
+            # ── 📈 Verdict trend for THIS ticker (Analysis-page-consolidation #1) ─
+            # Uses verdict_ledger data captured on every prior analysis of this
+            # ticker. Shows conviction + composite_score over time so the user
+            # can see whether today's verdict is a fresh flip or a persistent
+            # signal. Silently skipped when the ledger is empty for this ticker.
+            try:
+                from analysis.verdict_ledger import load_ledger as _vl_hist
+                _vl_df = _vl_hist(ticker=ticker, limit=90)
+                if not _vl_df.empty and len(_vl_df) >= 2:
+                    import plotly.graph_objects as _go2
+                    import pandas as _pd2
+                    _vl_df = _vl_df.sort_values("logged_at")
+                    _vl_df["_dt"] = _pd2.to_datetime(_vl_df["logged_at"], errors="coerce")
+                    with st.expander(f"📈 Verdict history for {ticker.replace('.NS','')} "
+                                     f"({len(_vl_df)} entries)", expanded=False):
+                        _vfig = _go2.Figure()
+                        _vfig.add_trace(_go2.Scatter(
+                            x=_vl_df["_dt"], y=_vl_df["conviction"], mode="lines+markers",
+                            name="Conviction /100", line=dict(color="#26a69a", width=2)))
+                        if "composite_score" in _vl_df.columns:
+                            _vfig.add_trace(_go2.Scatter(
+                                x=_vl_df["_dt"], y=_vl_df["composite_score"], mode="lines",
+                                name="Composite /90", line=dict(color="#42a5f5", width=1.5, dash="dot")))
+                        _vfig.update_layout(
+                            height=260, margin=dict(l=40, r=20, t=20, b=30),
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+                            xaxis_title="", yaxis_title="",
+                        )
+                        st.plotly_chart(_vfig, width="stretch")
+
+                        # One-liner interpretation of stability vs today
+                        _latest_conv = float(_vl_df["conviction"].iloc[-1])
+                        _mean_prior  = float(_vl_df["conviction"].iloc[:-1].mean()) \
+                            if len(_vl_df) > 1 else _latest_conv
+                        _delta = _latest_conv - _mean_prior
+                        if abs(_delta) < 5:
+                            _msg = "✅ Verdict has been **stable** for this stock — today's read is consistent with prior sessions."
+                        elif _delta > 0:
+                            _msg = f"📈 Verdict is **improving** — today's conviction is {_delta:+.0f} pts above the {len(_vl_df)-1}-session average."
+                        else:
+                            _msg = f"📉 Verdict is **deteriorating** — today's conviction is {_delta:+.0f} pts below the {len(_vl_df)-1}-session average."
+                        st.caption(_msg + " Ledger captured silently on every prior open of this page.")
+            except Exception as _vl_hist_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "verdict history render failed for %s: %s", ticker, _vl_hist_e)
+
+            # ── 🌊 TQS 4-pillar breakdown (Analysis-page-consolidation #2) ────
+            # The TQS scanner page has a Deep Dive tab that decomposes TQS into
+            # its four pillars (Strength / Persistence / Momentum / Confirmation).
+            # We already fetched the TQSResult for the banner at the top of this
+            # block (_fv_tqs_res). Surface the pillar breakdown here so users
+            # don't need to visit a second page to see WHY TQS is what it is.
+            try:
+                if _fv_tqs_res is not None:
+                    _p1 = float(getattr(_fv_tqs_res, "p1", 0.0))
+                    _p2 = float(getattr(_fv_tqs_res, "p2", 0.0))
+                    _p3 = float(getattr(_fv_tqs_res, "p3", 0.0))
+                    _p4 = float(getattr(_fv_tqs_res, "p4", 0.0))
+                    with st.expander(f"🌊 TQS breakdown — {_fv_tqs:.0f}/90 "
+                                     f"({getattr(_fv_tqs_res, 'signal', lambda: '')()})"
+                                     if _fv_tqs is not None else "🌊 TQS breakdown",
+                                     expanded=False):
+                        _pc1, _pc2, _pc3, _pc4 = st.columns(4)
+                        _pc1.metric("Strength /22.5",    f"{_p1:.1f}",
+                                    help="Trend backbone — SMA stack, price above 200SMA, ADX regime.")
+                        _pc2.metric("Persistence /22.5", f"{_p2:.1f}",
+                                    help="How LONG the trend has held — days above 50SMA, sequence of higher-highs.")
+                        _pc3.metric("Momentum /22.5",    f"{_p3:.1f}",
+                                    help="Rate of change — RSI regime, MACD histogram, Sharpe 20-day.")
+                        _pc4.metric("Confirmation /22.5", f"{_p4:.1f}",
+                                    help="Volume / breadth confirmation — OBV z-score, volume regime.")
+                        _weakest = min(_p1, _p2, _p3, _p4)
+                        _weak_name = {_p1: "Strength", _p2: "Persistence",
+                                      _p3: "Momentum", _p4: "Confirmation"}[_weakest]
+                        st.caption(
+                            f"Weakest pillar: **{_weak_name}** at {_weakest:.1f}/22.5. "
+                            "The composite TQS score in the banner above is the sum of all four."
+                        )
+            except Exception as _tqs_pill_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "TQS pillar breakdown failed for %s: %s", ticker, _tqs_pill_e)
+
             # ── Score hero section ─────────────────────────────────────────
             st.markdown("---")
             hero_col, detail_col = st.columns([1, 2])
