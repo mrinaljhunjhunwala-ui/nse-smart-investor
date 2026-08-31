@@ -565,24 +565,39 @@ def _nifty50_gainers_ticker(n: int = 12) -> list:
 def _top_picks_ticker(n: int = 12) -> list:
     """Top N Top-Picks BUY candidates for Command Centre's ticker strip,
     each priced live via one parallel batch call. Score-ranked order (same
-    as get_top_picks()), not re-sorted by today's % change."""
-    from utils.live_price import get_live_prices_batch as _batch
+    as get_top_picks()), not re-sorted by today's % change.
 
+    FIX TP-LIVE-SHARE: previously called get_live_prices_batch() directly with
+    ONLY this strip's 12 tickers, producing a cache entry that could not be
+    reused by the Buy/Sell cards section further down the page (whose call to
+    _picks_live_prices uses the union of buys+sells — a different tuple key,
+    ergo a separate network fetch). Both fire on the same ~60s cadence during
+    market hours, so the app was paying two full batch-quote round-trips per
+    minute for overlapping tickers. Now the strip calls _picks_live_prices
+    with the SAME union tuple the section will request, so both consumers
+    hit exactly one shared cache entry. The strip still displays only the top
+    n buys — it just doesn't waste the section's future fetch.
+    """
     try:
         picks = get_top_picks()
     except Exception as _e:
         _log.debug("cache._top_picks_ticker: get_top_picks failed: %s", _e)
         return []
 
-    buys = ((picks or {}).get("buys") or [])[:n]
-    if not buys:
+    buys_all = (picks or {}).get("buys") or []
+    sells_all = (picks or {}).get("sells") or []
+    if not buys_all:
         return []
 
-    tickers = [b["ticker"] for b in buys]
-    raw = _batch(tickers, max_workers=20)
+    # Union tuple matches what _render_top_picks_section builds in
+    # 02_command_centre.py (see FIX CC-LIVE1 there) — same order, same
+    # dedupe, so this hits the same _picks_live_prices cache entry.
+    union = tuple(sorted({b["ticker"] for b in buys_all} |
+                         {s["ticker"] for s in sells_all}))
+    raw = _picks_live_prices(union)
 
     rows = []
-    for b in buys:
+    for b in buys_all[:n]:
         d = (raw or {}).get(b["ticker"])
         if not d:
             continue
@@ -886,6 +901,50 @@ _TOP_PICKS_KV_KEY  = "top_picks_snapshot"
 _TOP_PICKS_KV_USER = "_system"          # not per-user — one shared scan result
 _TOP_PICKS_MAX_AGE_SECONDS = 1200       # 20 min — tolerates one missed 15-min cron tick
 
+def _persisted_top_picks_snapshot() -> dict | None:
+    """Cheap peek at the Postgres KV snapshot written by scripts/warm_top_picks.py.
+
+    Returns the snapshot dict (with "source"="persisted" and "generated_at"
+    fields attached) if a fresh one exists, else None. Does NOT fall back to
+    a live scan — that's get_top_picks()'s job. Use this when the caller
+    wants to know cheaply whether a warm snapshot is available BEFORE
+    deciding whether to block on a live scan or spawn a background thread
+    (e.g. the Command Centre fragment's decision to show its "~2 minute
+    cold scan" banner should be gated on this returning None, not just on
+    session_state being empty).
+
+    Extracted from get_top_picks() so both paths use identical parsing and
+    freshness logic — a change to _TOP_PICKS_MAX_AGE_SECONDS or the KV shape
+    now only needs to happen here.
+    """
+    try:
+        snap = _store.kv_get(_TOP_PICKS_KV_KEY, user_id=_TOP_PICKS_KV_USER)
+    except Exception as _e:
+        _log.warning("cache._persisted_top_picks_snapshot: kv_get failed: %s", _e)
+        return None
+    if not (snap and isinstance(snap, dict)):
+        return None
+    _gen_at = snap.get("generated_at")
+    if not _gen_at:
+        return None
+    try:
+        _age = (datetime.datetime.now() -
+                datetime.datetime.fromisoformat(_gen_at)).total_seconds()
+    except Exception as _parse_e:
+        _log.debug("cache._persisted_top_picks_snapshot: bad generated_at %r: %s",
+                   _gen_at, _parse_e)
+        return None
+    if _age > _TOP_PICKS_MAX_AGE_SECONDS:
+        return None
+    data = snap.get("data")
+    if not (isinstance(data, dict) and "buys" in data):
+        return None
+    out = dict(data)
+    out["source"] = "persisted"
+    out["generated_at"] = _gen_at
+    return out
+
+
 def get_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple = ()) -> dict:
     """
     Fast-path wrapper around _home_top_picks().
@@ -902,31 +961,14 @@ def get_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple =
     15 min in market hours — see .github/workflows/warm-top-picks.yml) and
     writes a fresh scan result to trade_store (shared Postgres — reachable
     from both the Action and the deployed app, unlike st.cache_data or
-    SQLite). This function reads that snapshot first; only if it's missing or
-    older than _TOP_PICKS_MAX_AGE_SECONDS does it fall back to a live scan,
-    so a missed/late cron run still degrades gracefully instead of breaking.
+    SQLite). This function reads that snapshot first (via
+    _persisted_top_picks_snapshot); only if it's missing or older than
+    _TOP_PICKS_MAX_AGE_SECONDS does it fall back to a live scan, so a
+    missed/late cron run still degrades gracefully instead of breaking.
     """
-    try:
-        snap = _store.kv_get(_TOP_PICKS_KV_KEY, user_id=_TOP_PICKS_KV_USER)
-        if snap and isinstance(snap, dict):
-            _gen_at = snap.get("generated_at")
-            _age = None
-            if _gen_at:
-                try:
-                    _age = (datetime.datetime.now() -
-                            datetime.datetime.fromisoformat(_gen_at)).total_seconds()
-                except Exception as _parse_e:
-                    _log.debug("cache.get_top_picks: bad generated_at %r: %s", _gen_at, _parse_e)
-            if _age is not None and _age <= _TOP_PICKS_MAX_AGE_SECONDS:
-                data = snap.get("data")
-                if isinstance(data, dict) and "buys" in data:
-                    data = dict(data)
-                    data["source"] = "persisted"
-                    data["generated_at"] = _gen_at
-                    return data
-    except Exception as _e:
-        _log.warning("cache.get_top_picks: persisted snapshot read failed, falling back "
-                     "to live scan: %s", _e)
+    snap = _persisted_top_picks_snapshot()
+    if snap is not None:
+        return snap
 
     result = _home_top_picks(vix_regime=vix_regime, n=n, sector_ranks=sector_ranks)
     result = dict(result)

@@ -16,6 +16,7 @@ from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
     get_top_picks,
+    _persisted_top_picks_snapshot,   # FIX TP-FAST1 / FIX TP-NOOP1
     _top_picks_ticker,
     _score_watchlist,
     _sector_ranks_tuple,
@@ -421,7 +422,24 @@ def _picks_background_fetch(vix_regime: str, sector_ranks: tuple) -> None:
         # (_home_top_picks, unchanged) if that snapshot is missing or stale.
         result = get_top_picks(vix_regime=vix_regime, sector_ranks=sector_ranks)
         st.session_state[_PICKS_KEY] = result
-        st.session_state[f"{_PICKS_KEY}_ts"] = datetime.datetime.now()
+        # FIX TP-NOOP1: record the snapshot's generated_at (when available)
+        # so the next fragment tick can detect "snapshot unchanged" and skip
+        # the whole refresh instead of spawning another bg thread every 5 min.
+        # Live-scan results carry no generated_at — set to None so any future
+        # persisted snapshot will look "different" and load in.
+        _gen_at = result.get("generated_at") if isinstance(result, dict) else None
+        st.session_state[f"{_PICKS_KEY}_gen_at"] = _gen_at
+        # Anchor _ts to the snapshot's true generation time when available,
+        # so the "Top Picks last updated" chip reflects when the scan
+        # actually ran (not the round-trip time on this thread).
+        if _gen_at:
+            try:
+                st.session_state[f"{_PICKS_KEY}_ts"] = (
+                    datetime.datetime.fromisoformat(_gen_at))
+            except Exception:
+                st.session_state[f"{_PICKS_KEY}_ts"] = datetime.datetime.now()
+        else:
+            st.session_state[f"{_PICKS_KEY}_ts"] = datetime.datetime.now()
         st.session_state[f"{_PICKS_KEY}_error"] = None
     except Exception as _e:
         st.session_state[f"{_PICKS_KEY}_error"] = str(_e)
@@ -459,9 +477,10 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         st.markdown("### 🔥 Today's Top Picks — NSE Scan")
         st.caption("Strongest and weakest **trend-quality** setups today. "
                    "Scores rank trend health — they are **not a forecast of returns**. "
-                   "The pick list itself refreshes every 5 min during market hours; prices "
-                   "on each card tick live (~60s) in between. Old picks stay on screen "
-                   "while a refresh runs in the background.")
+                   "The pick list is regenerated every ~15 min by a scheduled scan and this page "
+                   "picks up each new snapshot within seconds; prices on each card tick live "
+                   "(~60s) in between. Old picks stay on screen while a refresh runs in the "
+                   "background.")
     with _tp_h2:
         st.write("")
         _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
@@ -493,12 +512,61 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         _fetching = False
         _is_stale = True
 
+    # ── FIX TP-FAST1 + FIX TP-NOOP1 — cheap snapshot peek before any bg work ──
+    # Previously EVERY refresh (first render, and every 5 min thereafter) went
+    # straight to the bg-thread path, which:
+    #   (a) on first render, showed a scary "~2 minutes" banner even though the
+    #       persisted snapshot returns in ~1 s from Postgres, and
+    #   (b) on every 5-min tick, flashed the "🔄 Refreshing…" banner and paid
+    #       a DB round-trip even though the warmer only advances the snapshot
+    #       every 15 min — so 2 in 3 refreshes had nothing new to fetch.
+    #
+    # Fix: peek at the persisted snapshot's generated_at directly. If it hasn't
+    # advanced since we last loaded it, no-op the whole refresh (no bg thread,
+    # no banner). If it HAS advanced, load it synchronously — a Postgres KV
+    # read is fast enough to do on the main thread. Only the true slow path
+    # (Scan Now, or persisted snapshot genuinely missing / older than
+    # _TOP_PICKS_MAX_AGE_SECONDS in trade_store) still spawns the bg thread
+    # and shows the "~2 minutes" banner. This makes the common case both
+    # faster (no bg thread ceremony) and quieter (no misleading banners).
+    _prev_gen_at = st.session_state.get(f"{_PICKS_KEY}_gen_at")
+    _needs_bg_scan = False
     if _run_picks:
-        # "Scan Now" always forces a fresh background fetch — but the cards
-        # already on screen are left untouched until it completes.
-        _is_stale = True
+        # User forced: skip the peek and go straight to the slow live-scan
+        # path (Scan Now is the escape hatch for "the snapshot looks stale
+        # even though the warmer says otherwise").
+        _needs_bg_scan = True
+    elif _is_stale:
+        _snap_peek = _persisted_top_picks_snapshot()
+        _snap_gen = _snap_peek.get("generated_at") if _snap_peek else None
+        if _snap_peek is None:
+            # No persisted snapshot at all (or it's older than the tolerance
+            # window) — this is the real slow path. Bg thread + banner.
+            _needs_bg_scan = True
+        elif _snap_gen and _snap_gen == _prev_gen_at:
+            # Snapshot unchanged since our last load — no work to do. Push our
+            # local _ts forward so we don't re-peek every 20s fragment tick.
+            st.session_state[f"{_PICKS_KEY}_ts"] = _now
+            _last_ts = _now
+            _is_stale = False
+        else:
+            # Snapshot advanced — swap it in synchronously. No bg thread, no
+            # "refreshing…" banner flash, cards update in one clean render.
+            st.session_state[_PICKS_KEY] = _snap_peek
+            st.session_state[f"{_PICKS_KEY}_gen_at"] = _snap_gen
+            # Anchor _ts to the snapshot's real generation time (not local
+            # render time) so the "Top Picks last updated" chip below shows
+            # when the scan actually ran, not when we happened to read it.
+            try:
+                st.session_state[f"{_PICKS_KEY}_ts"] = (
+                    datetime.datetime.fromisoformat(_snap_gen))
+            except Exception:
+                st.session_state[f"{_PICKS_KEY}_ts"] = _now
+            st.session_state[f"{_PICKS_KEY}_error"] = None
+            _last_ts = st.session_state[f"{_PICKS_KEY}_ts"]
+            _is_stale = False
 
-    if _is_stale and not _fetching:
+    if _needs_bg_scan and not _fetching:
         st.session_state[f"{_PICKS_KEY}_fetching"] = True
         st.session_state[f"{_PICKS_KEY}_fetch_started"] = _now
         _bg_thread = threading.Thread(
@@ -546,14 +614,25 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             unsafe_allow_html=True,
         )
     elif _last_ts:
+        # FIX TP-NOOP1: the freshness chip now shows the snapshot's actual
+        # generation time (from the warmer's generated_at, when the picks came
+        # from the persisted snapshot) rather than the moment this session
+        # happened to load them. Copy updated to match reality: the warmer
+        # advances the snapshot every ~15 min in market hours, and the page
+        # picks up the new one on its next 20s fragment tick — the old copy
+        # ("auto-refreshes every 5 min") was true of the fragment cadence,
+        # not of when the cards actually change.
+        _src = (_picks or {}).get("source") if isinstance(_picks, dict) else None
+        _src_label = "live scan" if _src == "live_scan" else "scheduled scan"
         st.markdown(
             f'<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
             f'padding:7px 14px;margin-bottom:10px;display:flex;justify-content:space-between;'
             f'align-items:center">'
-            f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last updated: '
-            f'<b>{_last_ts.strftime("%H:%M:%S")}</b></span>'
-            f'<span style="font-size:11px;color:#555">Auto-refreshes every 5 min · '
-            f'tap Scan Now to force refresh</span>'
+            f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last scored: '
+            f'<b>{_last_ts.strftime("%H:%M:%S")}</b> '
+            f'<span style="color:#777">({_src_label})</span></span>'
+            f'<span style="font-size:11px;color:#555">Scan refreshes every ~15 min · '
+            f'tap Scan Now to force a live rescan</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
