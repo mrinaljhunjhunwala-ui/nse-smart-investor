@@ -503,8 +503,20 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     # (crashed, killed, or — before the ScriptRunContext fix above — a
     # NoSessionContext error) without ever resetting the flag. Self-heal
     # instead of showing "scanning…" forever.
+    #
+    # FIX TP-WATCHDOG1: raised 180 → 300 s. The user-facing copy in the
+    # first-scan banner says the live scan "can take ~2 minutes", and the
+    # underlying _home_top_picks worst case observed at 745 tickers × 16
+    # workers on a bad Angel-throttle day is closer to 3 min, not 2. At the
+    # old 180 s threshold a slow-but-healthy live scan could be falsely
+    # marked "stalled and was reset automatically" while the bg thread was
+    # still working — then it would land seconds later against session_state
+    # already flipped to a fresh scan attempt, causing a needless second
+    # 2-min scan on top of the one that would have succeeded. 300 s comfortably
+    # brackets the real worst case while still self-healing a genuinely dead
+    # thread within a fragment tick or two.
     _fetch_started = st.session_state.get(f"{_PICKS_KEY}_fetch_started")
-    if _fetching and _fetch_started and (_now - _fetch_started).total_seconds() > 180:
+    if _fetching and _fetch_started and (_now - _fetch_started).total_seconds() > 300:
         st.session_state[f"{_PICKS_KEY}_fetching"] = False
         st.session_state[f"{_PICKS_KEY}_error"] = (
             "Previous scan attempt stalled and was reset automatically."
