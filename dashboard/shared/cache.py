@@ -736,13 +736,42 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: t
     out: dict = {}
     if not tickers:
         return out
+
+    # FIX WL-SNAP1: serve as many tickers as possible from the persisted
+    # all-scored snapshot (written every 15 min by scripts/warm_top_picks.py
+    # — same run as the top-picks snapshot). Watchlists are almost always a
+    # subset of the niftytotalmarket universe the warmer already scores, so
+    # the typical case is zero live work. Live scoring only fires for
+    # tickers not covered by the snapshot (e.g. an off-universe symbol the
+    # user has added by hand, or when the snapshot is stale/missing).
+    #
+    # Correctness note: the snapshot's score dict was produced by the SAME
+    # _score_to_dict path _one() below uses (just with extended=True), so
+    # every field callers read here (ticker/price/score/grade/action/
+    # headline/entry/sl/tp/rr) is present with identical semantics. The
+    # extra extended fields on snapshot entries (sector/narrative/etc.) are
+    # a superset and safely ignored by callers that don't need them.
+    _snap = _persisted_all_scores_snapshot()
+    _pending: list = []
+    if _snap:
+        for tk in tickers:
+            if tk in _snap:
+                out[tk] = _snap[tk]
+            else:
+                _pending.append(tk)
+    else:
+        _pending = list(tickers)
+
+    if not _pending:
+        return out
+
     try:
-        with _cf.ThreadPoolExecutor(max_workers=min(8, max(1, len(tickers)))) as ex:
-            for tk, sc in ex.map(_one, tickers):
+        with _cf.ThreadPoolExecutor(max_workers=min(8, max(1, len(_pending)))) as ex:
+            for tk, sc in ex.map(_one, _pending):
                 out[tk] = sc
     except Exception as _e:
         _log.debug("cache.%s degraded: %s", "_score_watchlist", _e)
-        for tk in tickers:
+        for tk in _pending:
             _tk, _sc = _one(tk)
             out[_tk] = _sc
     return out
@@ -916,7 +945,20 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
         "n_unavailable": _n_unavail,
         "vix_regime": vix_regime,
     }
-    return {"buys": buys, "sells": sells[:n], "meta": meta}
+    # FIX WL-SNAP1: return the FULL scored map (ticker -> score_dict) for
+    # every ticker the scan produced a valid score for, so watchlist scoring
+    # (which is almost always a subset of niftytotalmarket) can be served
+    # instantly from this same 15-min scan instead of paying its own live
+    # scoring cost. Kept out of `meta` to avoid inflating the top-picks
+    # snapshot readers touch every render — the warmer writes this to a
+    # separate KV entry that only _persisted_all_scores_snapshot reads.
+    _all_scored = {
+        s["ticker"]: s for s in results
+        if s.get("ticker")
+        and s.get("score", 0) > 0
+        and s.get("action", "") not in ("UNAVAILABLE", "DATA_UNAVAILABLE")
+    }
+    return {"buys": buys, "sells": sells[:n], "meta": meta, "all_scored": _all_scored}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -925,6 +967,11 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
 _TOP_PICKS_KV_KEY  = "top_picks_snapshot"
 _TOP_PICKS_KV_USER = "_system"          # not per-user — one shared scan result
 _TOP_PICKS_MAX_AGE_SECONDS = 1200       # 20 min — tolerates one missed 15-min cron tick
+
+# FIX WL-SNAP1: separate KV entry for the full scored map. Kept out of the
+# top-picks snapshot so the small/fast reads on that path aren't slowed by
+# hauling ~745 tickers worth of extended score dicts around every render.
+_ALL_SCORES_KV_KEY = "all_scored_snapshot"
 
 def _persisted_top_picks_snapshot() -> dict | None:
     """Cheap peek at the Postgres KV snapshot written by scripts/warm_top_picks.py.
@@ -968,6 +1015,45 @@ def _persisted_top_picks_snapshot() -> dict | None:
     out["source"] = "persisted"
     out["generated_at"] = _gen_at
     return out
+
+
+def _persisted_all_scores_snapshot() -> dict | None:
+    """Cheap peek at the full-universe score map written by the warmer.
+
+    Returns {ticker: score_dict} for every ticker the last scheduled scan
+    produced a valid score for, else None if the snapshot is missing or
+    older than _TOP_PICKS_MAX_AGE_SECONDS. Same freshness contract as
+    _persisted_top_picks_snapshot — they're written together by
+    scripts/warm_top_picks.py in the same run, so if one is fresh the
+    other will be too.
+
+    Consumers should treat a returned entry as authoritative for that
+    ticker on the ~15-min timescale of the scheduled scan and fall back
+    to live scoring ONLY for tickers not present in the map.
+    """
+    try:
+        snap = _store.kv_get(_ALL_SCORES_KV_KEY, user_id=_TOP_PICKS_KV_USER)
+    except Exception as _e:
+        _log.warning("cache._persisted_all_scores_snapshot: kv_get failed: %s", _e)
+        return None
+    if not (snap and isinstance(snap, dict)):
+        return None
+    _gen_at = snap.get("generated_at")
+    if not _gen_at:
+        return None
+    try:
+        _age = (datetime.datetime.now() -
+                datetime.datetime.fromisoformat(_gen_at)).total_seconds()
+    except Exception as _parse_e:
+        _log.debug("cache._persisted_all_scores_snapshot: bad generated_at %r: %s",
+                   _gen_at, _parse_e)
+        return None
+    if _age > _TOP_PICKS_MAX_AGE_SECONDS:
+        return None
+    data = snap.get("data")
+    if not isinstance(data, dict):
+        return None
+    return data
 
 
 def get_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple = ()) -> dict:

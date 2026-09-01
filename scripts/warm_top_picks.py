@@ -61,6 +61,7 @@ def main() -> int:
             _home_top_picks,
             _TOP_PICKS_KV_KEY,
             _TOP_PICKS_KV_USER,
+            _ALL_SCORES_KV_KEY,   # FIX WL-SNAP1
             get_vix_info,
             _sector_ranks_tuple,
         )
@@ -118,18 +119,45 @@ def main() -> int:
         _vix.get("regime", "?"),
     )
 
+    _gen_at = datetime.datetime.now().isoformat()
+
+    # FIX WL-SNAP1: pull the full-universe scored map out of the result and
+    # persist it to a separate KV entry. This is what powers the watchlist
+    # fast-path (dashboard/shared/cache._persisted_all_scores_snapshot) so
+    # a My Watchlist page load whose tickers are all in the niftytotalmarket
+    # universe pays zero live-scoring cost. Kept in a separate KV entry so
+    # top-picks readers (called every render on Command Centre) don't drag
+    # this larger payload around.
+    _all_scored = result.pop("all_scored", {}) if isinstance(result, dict) else {}
+
     snapshot = {
         "data": result,
-        "generated_at": datetime.datetime.now().isoformat(),
+        "generated_at": _gen_at,
         "scan_seconds": round(_elapsed, 1),
     }
     ok = store.kv_set(_TOP_PICKS_KV_KEY, snapshot, user_id=_TOP_PICKS_KV_USER)
     if ok:
-        _log.info("warm_top_picks: persisted snapshot to trade_store (backend=%s)",
+        _log.info("warm_top_picks: persisted top-picks snapshot to trade_store (backend=%s)",
                   store.backend_name())
     else:
-        _log.error("warm_top_picks: kv_set FAILED — snapshot not persisted this run "
-                   "(app will fall back to a live scan)")
+        _log.error("warm_top_picks: top-picks kv_set FAILED — snapshot not persisted "
+                   "this run (app will fall back to a live scan)")
+
+    # Second write: the full scored map. Failure here is non-fatal — the app
+    # already degrades gracefully by falling back to live per-ticker scoring
+    # for any watchlist entry not covered by this snapshot.
+    all_scored_snapshot = {
+        "data": _all_scored,
+        "generated_at": _gen_at,
+        "n_scored": len(_all_scored),
+    }
+    ok2 = store.kv_set(_ALL_SCORES_KV_KEY, all_scored_snapshot, user_id=_TOP_PICKS_KV_USER)
+    if ok2:
+        _log.info("warm_top_picks: persisted all-scored map (%d tickers) to trade_store",
+                  len(_all_scored))
+    else:
+        _log.error("warm_top_picks: all-scored kv_set FAILED — watchlist page will fall "
+                   "back to live per-ticker scoring this cycle")
     return 0
 
 
