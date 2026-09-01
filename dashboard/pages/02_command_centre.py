@@ -622,23 +622,84 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         # picks up the new one on its next 20s fragment tick — the old copy
         # ("auto-refreshes every 5 min") was true of the fragment cadence,
         # not of when the cards actually change.
+        # FIX TP-VIX1: also surface the vix_regime the scan was scored under,
+        # so it's obvious the picks reflect the market regime at scan time
+        # (which may lag the live regime by up to ~15 min).
         _src = (_picks or {}).get("source") if isinstance(_picks, dict) else None
         _src_label = "live scan" if _src == "live_scan" else "scheduled scan"
+        _snap_regime = ((_picks or {}).get("meta", {}) or {}).get("vix_regime")
+        _regime_html = (
+            f' <span style="color:#777">· regime <b style="color:#bbb">{_snap_regime}</b></span>'
+            if _snap_regime else ""
+        )
         st.markdown(
             f'<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
             f'padding:7px 14px;margin-bottom:10px;display:flex;justify-content:space-between;'
             f'align-items:center">'
             f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last scored: '
             f'<b>{_last_ts.strftime("%H:%M:%S")}</b> '
-            f'<span style="color:#777">({_src_label})</span></span>'
+            f'<span style="color:#777">({_src_label})</span>{_regime_html}</span>'
             f'<span style="font-size:11px;color:#555">Scan refreshes every ~15 min · '
             f'tap Scan Now to force a live rescan</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
+    # ── FIX TP-VIX1: warn on regime mismatch ──
+    # If VIX has flipped between when the snapshot was scored and now, the
+    # picks (esp. their allow_buy gating and any regime-sensitive scoring)
+    # may no longer be appropriate. This is deliberately a soft warning, not
+    # an auto-rescan — the warmer will catch up within one 15-min tick, and
+    # the escape hatch is "Scan Now" which is one click away below.
+    _snap_meta_for_regime = (_picks or {}).get("meta", {}) or {}
+    _snap_regime = _snap_meta_for_regime.get("vix_regime")
+    _current_regime = vix_regime
+    if (_snap_regime and _current_regime and _snap_regime != _current_regime):
+        # Only actually flag it as a mismatch worth warning about if either
+        # side is one of the risk-off regimes — a normal↔calm drift is not
+        # meaningful for the scoring model (allow_buy is identical for both).
+        _risk_off = {"fear", "panic"}
+        _material = (_snap_regime in _risk_off) != (_current_regime in _risk_off)
+        if _material:
+            st.markdown(
+                f'<div style="background:#2a1a00;border:1px solid #4a3a00;border-radius:8px;'
+                f'padding:8px 14px;margin-bottom:10px">'
+                f'<span style="font-size:12px;color:#ffb300">⚠ VIX regime has shifted since '
+                f'the last scan (was <b>{_snap_regime}</b>, now <b>{_current_regime}</b>). '
+                f'The picks below were scored under the earlier regime. The scheduled scan '
+                f'will catch up within ~15 min — or tap <b>Scan Now</b> above to force a '
+                f'live rescan under the current regime.</span></div>',
+                unsafe_allow_html=True,
+            )
+
     # ── FIX TP1 (page side) — honest "no strong picks" banner + tier-aware cards ──
     _picks_meta = _picks.get("meta", {})
+
+    # ── FIX TP-HEALTH1: scan-health chip when data-fetch degraded ──
+    # _home_top_picks now records n_scanned / n_scored_ok / n_unavailable in
+    # meta. When the unavailable fraction crosses UNAVAIL_WARN_FRACTION, show
+    # a small chip so users understand a short Buy Candidates column reflects
+    # a data-source problem (Stooq breaker open, Yahoo throttle, Angel token
+    # expired), not a genuinely quiet market. Threshold is deliberate: below
+    # ~10 % is normal noise (illiquid tail names, new listings without SMA200
+    # history, etc.) and would just add banner fatigue.
+    _UNAVAIL_WARN_FRACTION = 0.10
+    _n_scanned    = int(_picks_meta.get("n_scanned", 0) or 0)
+    _n_unavail    = int(_picks_meta.get("n_unavailable", 0) or 0)
+    if _n_scanned > 0 and (_n_unavail / _n_scanned) >= _UNAVAIL_WARN_FRACTION:
+        _pct = 100.0 * _n_unavail / _n_scanned
+        st.markdown(
+            f'<div style="background:#2a1a00;border:1px solid #4a3a00;border-radius:8px;'
+            f'padding:8px 14px;margin-bottom:10px">'
+            f'<span style="font-size:12px;color:#ffb300">⚠ Data quality alert: '
+            f'<b>{_n_unavail}/{_n_scanned}</b> tickers ({_pct:.1f}%) were unavailable this '
+            f'scan — the pick list below is drawn from the remaining '
+            f'<b>{_n_scanned - _n_unavail}</b>. A source (Stooq / Yahoo / Angel) may be '
+            f'throttled or degraded; picks are still valid but the universe is narrower '
+            f'than usual.</span></div>',
+            unsafe_allow_html=True,
+        )
+
     if _picks_meta.get("no_strong_picks"):
         st.markdown(
             '<div style="background:#1a1200;border:1px solid #4a3a00;border-radius:8px;'

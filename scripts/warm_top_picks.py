@@ -97,11 +97,25 @@ def main() -> int:
         _log.error("warm_top_picks: scan failed, nothing persisted this run: %s", e)
         return 0
     _elapsed = (datetime.datetime.now() - _t0).total_seconds()
+    # FIX TP-HEALTH1: include scan-health counts (n_scanned / n_scored_ok /
+    # n_unavailable) and the vix_regime the scan ran under, so a degraded run
+    # is visible in the Actions log without needing to open the app. e.g.
+    # "buys=3 sells=1 scanned=745 ok=612 unavailable=133 (17.9%) regime=fear"
+    # would immediately flag a Stooq/Yahoo/Angel outage even though the
+    # snapshot itself still gets written (empty-ish, but written).
+    _meta = result.get("meta", {}) if isinstance(result, dict) else {}
+    _n_scan = int(_meta.get("n_scanned", 0) or 0)
+    _n_ok   = int(_meta.get("n_scored_ok", 0) or 0)
+    _n_un   = int(_meta.get("n_unavailable", 0) or 0)
+    _un_pct = (100.0 * _n_un / _n_scan) if _n_scan else 0.0
     _log.info(
-        "warm_top_picks: scan done in %.1fs — buys=%d sells=%d",
+        "warm_top_picks: scan done in %.1fs — buys=%d sells=%d scanned=%d "
+        "ok=%d unavailable=%d (%.1f%%) regime=%s",
         _elapsed,
         len(result.get("buys", [])),
         len(result.get("sells", [])),
+        _n_scan, _n_ok, _n_un, _un_pct,
+        _vix.get("regime", "?"),
     )
 
     snapshot = {

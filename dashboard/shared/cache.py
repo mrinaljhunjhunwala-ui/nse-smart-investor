@@ -859,6 +859,16 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
         _log.debug("cache.%s degraded: %s", "_home_top_picks", _e)
         results = [_one(tk) for tk in _UNIV]
 
+    # FIX TP-HEALTH1: track per-scan counts so the app (and warmer logs) can
+    # tell "no picks because market is quiet" apart from "no picks because
+    # 40 % of the universe failed to score". Previously _home_top_picks
+    # silently dropped every failed ticker and returned a shorter list with
+    # no signal, so Stooq/Yahoo/Angel degradations only surfaced when a user
+    # noticed the Buy Candidates column had shrunk. Counts now flow through
+    # meta and are rendered as a small chip on Command Centre when the
+    # unavailable-fraction crosses UNAVAIL_WARN_FRACTION.
+    _n_scanned = len(results)
+    _n_unavail = 0
     for s in results:
         act = s.get("action", "")
         sc  = s.get("score", 0)
@@ -866,6 +876,7 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
         # score=0 with action=DATA_UNAVAILABLE when data fetch fails. Previously
         # score <= 0 guard was missing the DATA_UNAVAILABLE string check fully.
         if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
+            _n_unavail += 1
             continue
         # Long side: STRONG BUY / BUY / WATCHLIST all surface so we always
         # have enough candidates. Cards show each stock's true action label.
@@ -890,7 +901,21 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
 
     buys = buys[:n]
     _n_strong = sum(1 for b in buys if b.get("tier") == "strong")
-    meta = {"no_strong_picks": _n_strong == 0, "n_strong_buys": _n_strong}
+    _n_ok = _n_scanned - _n_unavail
+    # FIX TP-VIX1: stamp the input vix_regime onto the payload so callers can
+    # see WHICH regime the picks were scored under. This matters because the
+    # persisted snapshot (written every 15 min) is served regardless of the
+    # caller's current vix_regime, so if VIX flips calm→fear intraday the
+    # served picks may reflect the old regime for up to 20 min. Recording it
+    # lets the page show "scored under: calm regime" and warn on mismatch.
+    meta = {
+        "no_strong_picks": _n_strong == 0,
+        "n_strong_buys": _n_strong,
+        "n_scanned": _n_scanned,
+        "n_scored_ok": _n_ok,
+        "n_unavailable": _n_unavail,
+        "vix_regime": vix_regime,
+    }
     return {"buys": buys, "sells": sells[:n], "meta": meta}
 
 
