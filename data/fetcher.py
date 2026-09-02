@@ -366,15 +366,28 @@ def _fetch_yahoo_direct(ticker: str, period: str = "1y", interval: str = "1d") -
         err = data.get("chart", {}).get("error", {})
         raise ValueError(f"Yahoo chart API error for {ticker}: {err}")
 
-    r0         = result[0]
+    # Defensive parse — flagged by data-provenance-auditor 2026-09-02. Yahoo can
+    # rename / reshape `indicators.quote` without notice; previously any drift
+    # here raised a bare KeyError from `r0["indicators"]["quote"][0]` and got
+    # swallowed by callers. Now we surface a clear ValueError naming the drift.
+    r0         = result[0] if result else None
+    if r0 is None:
+        raise ValueError(f"Yahoo chart API: empty result list for {ticker}")
     timestamps = r0.get("timestamp", [])
-    quote      = r0["indicators"]["quote"][0]
+    _indicators = r0.get("indicators") or {}
+    _quote_list = _indicators.get("quote") or []
+    if not _quote_list:
+        raise ValueError(
+            f"Yahoo schema drift for {ticker}: missing indicators.quote "
+            "(expected a non-empty list). Provider may have renamed the field."
+        )
+    quote      = _quote_list[0] or {}
 
     if not timestamps:
         raise ValueError(f"Yahoo chart API returned no timestamps for {ticker}")
 
     # Prefer adjclose when available (same as auto_adjust=True in yfinance)
-    adjclose_list = (r0["indicators"].get("adjclose") or [{}])[0].get("adjclose")
+    adjclose_list = (_indicators.get("adjclose") or [{}])[0].get("adjclose")
     close_list    = adjclose_list if adjclose_list else quote.get("close", [])
 
     # For intraday intervals keep full datetime; for daily use date-only

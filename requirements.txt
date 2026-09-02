@@ -47,3 +47,8 @@ psycopg2-binary>=2.9.0,<3.0
 # ── Optional: live broker integrations ───────────────────────────────────────
 # kiteconnect>=4.2.0     # Zerodha Kite Connect
 # smartapi-python>=1.3.8 # Angel One SmartAPI (not needed — we use direct urllib)
+
+# ── Dev / lint tooling (used by CI and the .claude/hooks/lint_python.py hook) ─
+# Config lives in pyproject.toml → [tool.ruff]. Replaces flake8 (retired
+# 2026-09-02); ~100x faster and bundles pyflakes + pycodestyle + isort.
+ruff>=0.6.0,<1.0
