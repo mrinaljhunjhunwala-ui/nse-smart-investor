@@ -2243,3 +2243,22 @@ if analyze_btn or _prefill_active or (
                 st.error(f"Analysis failed: {e}")
                 import traceback
                 st.code(traceback.format_exc())
+
+
+# ── AI Co-Pilot panel ─────────────────────────────────────────────────────────
+# Implements the three-layer prompt architecture from the ai-copilot-context
+# skill (.claude/skills/ai-copilot-context/SKILL.md): static persona → live
+# dashboard state → conversation. Panel gracefully hides itself when
+# GROQ_API_KEY is not set. Never allowed to crash the page.
+try:
+    from dashboard.shared.ai import (
+        collect_for_analyze_stock,
+        render_chat_panel,
+    )
+
+    _copilot_sym = ticker.replace(".NS", "") if ticker else ""
+    if _copilot_sym:
+        _copilot_inputs = collect_for_analyze_stock(_copilot_sym)
+        render_chat_panel(_copilot_sym, _copilot_inputs)
+except Exception as _copilot_err:
+    st.caption(f"AI co-pilot not rendered: {_copilot_err}")

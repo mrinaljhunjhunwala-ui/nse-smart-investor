@@ -63,6 +63,69 @@ def apply_design():
         """<style>
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
+    /* ── SPRINT 1.1: Design tokens as CSS custom properties ─────────────────
+       Single source of truth for palette, radius, and shadow. Every rule
+       below and every page-level inline style SHOULD source colour from
+       these vars — audit found ~8 parallel greens (#16c784, #26a69a,
+       #00d4aa, #3ddc84 …) drifting page-to-page. New rule: no raw hex in
+       page files. See docs/UI_AUDIT_2026-09.md → Cluster B. ─────────────── */
+    :root {
+      /* Surfaces */
+      --ground:    #09090b;
+      --surface:   #131316;
+      --sunken:    #0e0e10;
+      --rail:      #0a0a0c;
+      --hairline:  rgba(255,255,255,.08);
+      --hairline-soft: rgba(255,255,255,.05);
+
+      /* Ink */
+      --ink:       #edeef0;
+      --ink-mid:   #c8cad0;
+      --dim:       #8b8d93;
+      --faint:     #55575e;
+
+      /* Signal — reserved strictly for buy/sell/warn semantics */
+      --bull:      #16c784;
+      --bear:      #ff4d4d;
+      --amber:     #f2a93b;
+
+      /* Accent — one hue for all interactive/brand chrome */
+      --accent:    #2fd1e0;
+      --accent-hi: #5cdce8;
+
+      /* Purple/blue kept for categorical fills only (charts, sector tags) */
+      --violet:    #c77dff;
+      --azure:     #5a8fd6;
+
+      /* Semantic aliases (map onto signal, so pages read intent, not hue) */
+      --pos:       var(--bull);
+      --neg:       var(--bear);
+      --warn:      var(--amber);
+      --info:      var(--accent);
+
+      /* Regime colours — same three severities, aliased for narrative */
+      --regime-good:  var(--bull);
+      --regime-mixed: var(--amber);
+      --regime-bad:   var(--bear);
+      --regime-none:  var(--faint);
+
+      /* Tinted backgrounds (12% overlays, used on cards + pills) */
+      --tint-bull:   rgba(22,199,132,.12);
+      --tint-bear:   rgba(255,77,77,.12);
+      --tint-amber:  rgba(242,169,59,.12);
+      --tint-accent: rgba(47,209,224,.12);
+      --tint-violet: rgba(199,125,255,.12);
+
+      /* Radius */
+      --r-sharp:  6px;   /* tables, inputs, ticker tape */
+      --r-base:   10px;  /* cards, metrics */
+      --r-soft:   18px;  /* hero / glass panels */
+
+      /* Type */
+      --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+    }
+
     /* ── Hide Streamlit's auto-generated pages/ nav (custom nav lives in
           render_sidebar). Belt-and-suspenders with showSidebarNavigation=false. ── */
     [data-testid="stSidebarNav"] { display: none !important; }
