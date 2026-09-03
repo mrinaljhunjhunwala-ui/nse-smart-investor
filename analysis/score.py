@@ -203,6 +203,8 @@ class CompositeScore:
     rsi:                float        = 50.0    # FIX WL1: raw RSI(14), already computed — just unsurfaced
     return_1d:          float        = 0.0     # FIX WL1: 1-day % change, already available from df
     rs_score:           Optional[float] = None # FIX RS1: RS_Score vs Nifty (0-100 percentile), None when benchmark unavailable
+    positioning_score:  Optional[float] = None # FIX POS1: Positioning pillar (0-10, F&O + flag ON); None otherwise
+    is_fno:             bool            = False # FIX POS1: True when the ticker is F&O-eligible per data.fno_universe
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -219,6 +221,8 @@ class CompositeScore:
             "horizon": self.horizon, "valid_until": self.valid_until,
             "rsi": self.rsi, "return_1d": self.return_1d,
             "rs_score": self.rs_score,
+            "positioning": self.positioning_score,
+            "is_fno": self.is_fno,
         }
 
 
@@ -721,6 +725,103 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Sub-scorer: Positioning  (10 pts, F&O + flag ON only)
+# Recommendation 6 design 6a of docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _positioning_pillar_enabled() -> bool:
+    """Env flag gating the whole pillar. Same opt-in discipline as Rec 5.
+
+    Default OFF. Setting NSE_USE_POSITIONING_PILLAR to any truthy value
+    activates the 5-pillar 35+20+15+10+10=90 shape on F&O-eligible tickers.
+    Non-F&O tickers keep the legacy 4-pillar 40+25+15+10=90 shape in either
+    state; the flag is not enough on its own — F&O eligibility is required
+    because the pillar's inputs (OI regime, PCR, max pain, FII index-futs)
+    literally do not exist for non-F&O names.
+    """
+    _v = _regime_os.environ.get("NSE_USE_POSITIONING_PILLAR", "").strip().lower()
+    return _v in {"1", "true", "yes", "on"}
+
+
+# Neutral midpoints used when a data pipeline for a sub-input is not yet
+# online. Rationale: shipping the pillar with all-zero defaults would
+# systematically demote F&O names once the flag is on, before the data
+# even arrives. Neutrals mean a "no positioning read" is treated the same
+# as "everything is average" — matches the "unknown" bucket convention
+# used for VIX regime, sector rank and (in Rec 3) SL bounds.
+_POS_OI_REGIME_MAP = {
+    "long_buildup":    3.0,   # fresh longs on rising price
+    "short_covering":  2.0,   # weak bears exiting on rising price
+    "long_unwinding":  1.0,   # weak bulls exiting on falling price
+    "short_buildup":   0.0,   # fresh shorts on falling price
+}
+
+
+def _score_positioning(
+    oi_regime:              Optional[str]   = None,
+    pcr:                    Optional[float] = None,
+    max_pain_distance_pct:  Optional[float] = None,
+    fii_deriv_net_cr:       Optional[float] = None,
+) -> Tuple[float, Dict]:
+    """Positioning pillar (10 pts) — F&O eligibility + opt-in flag only.
+
+    Sub-scores (all graceful when data absent, defaulting to their neutral
+    midpoint so unknown reads never systematically penalise a name):
+
+      OI regime         (3 pts)  long_buildup / short_covering /
+                                 long_unwinding / short_buildup
+      PCR               (2 pts)  extreme reads are contrarian
+      Max pain distance (2 pts)  price near max pain = pinning risk
+      FII deriv (idx)   (3 pts)  sign of net index-futures position
+
+    Ships in this landing with all four sub-inputs default-None (data
+    pipelines are queued as follow-ups per docs/POSITIONING_INTEGRATION_2026-09.md).
+    Each pipeline lands as its own commit and lights up its sub-score.
+    """
+    pts: Dict[str, float] = {}
+
+    # OI regime
+    pts["oi_regime"] = _POS_OI_REGIME_MAP.get((oi_regime or "").lower(), 1.5)
+
+    # PCR: <0.6 extreme complacency (bearish); 0.6-0.9 mildly bullish;
+    # 0.9-1.2 healthy; 1.2-1.5 mild fear; >1.5 extreme fear (contrarian
+    # bullish). Neutral default 1.0 of 2.
+    if pcr is None:
+        pts["pcr"] = 1.0
+    elif pcr < 0.6:  pts["pcr"] = 0.5
+    elif pcr < 0.9:  pts["pcr"] = 1.5
+    elif pcr <= 1.2: pts["pcr"] = 1.5
+    elif pcr <= 1.5: pts["pcr"] = 1.0
+    else:            pts["pcr"] = 2.0
+
+    # Max pain distance %: near expiry, price tends to pin toward max pain.
+    # Far from pin gives options-writers room; on-pin has more chop risk.
+    if max_pain_distance_pct is None:
+        pts["max_pain"] = 1.0
+    elif abs(max_pain_distance_pct) < 1.0:  pts["max_pain"] = 0.5
+    elif abs(max_pain_distance_pct) < 3.0:  pts["max_pain"] = 1.0
+    else:                                    pts["max_pain"] = 1.5
+
+    # FII net index-futures position in Rs Cr. Positive = FII net long
+    # index futures (bullish); negative = net short (bearish). Thresholds
+    # are ballpark; will be re-tuned after 60 days of production data.
+    if fii_deriv_net_cr is None:
+        pts["fii_deriv"] = 1.5
+    elif fii_deriv_net_cr > 5000:   pts["fii_deriv"] = 3.0
+    elif fii_deriv_net_cr > 0:      pts["fii_deriv"] = 2.0
+    elif fii_deriv_net_cr > -5000:  pts["fii_deriv"] = 1.0
+    else:                            pts["fii_deriv"] = 0.0
+
+    pts["_oi_regime_input"]        = oi_regime
+    pts["_pcr_input"]              = pcr
+    pts["_max_pain_pct_input"]     = max_pain_distance_pct
+    pts["_fii_deriv_net_cr_input"] = fii_deriv_net_cr
+
+    total = pts["oi_regime"] + pts["pcr"] + pts["max_pain"] + pts["fii_deriv"]
+    return round(min(total, 10.0), 2), pts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Entry / SL / TP
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1144,6 +1245,7 @@ def score_dataframe(
     flows_info:   Optional[Dict] = None,
     delivery_info: Optional[Dict] = None,
     regime_label: Optional[str] = None,
+    positioning_info: Optional[Dict] = None,
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
@@ -1170,7 +1272,46 @@ def score_dataframe(
     momentum_fallback = mom_detail.get("is_fallback", False)
     patterns          = pat_detail.get("patterns", [])
 
-    total  = round(min(max(tech_pts + mom_pts + vol_pts + sent_pts, 0), 90.0), 1)
+    # ── FIX POS1 (2026-09-03) — Positioning pillar aggregation ─────────────
+    # Recommendation 6 design 6a: F&O-eligible tickers with the opt-in flag
+    # set aggregate as 35+20+15+10+10=90 (technical and momentum rescaled
+    # down to make room for the new pillar). Everything else — non-F&O
+    # tickers OR flag off — aggregates as the legacy 40+25+15+10=90.
+    # Guardrail 5 change ratified by user 2026-09-03; nse-app-guardrails
+    # SKILL.md §5 updated in this landing.
+    from data.fno_universe import is_fno_eligible as _is_fno
+    _fno_flag  = _is_fno(ticker)
+    _pi        = positioning_info or {}
+    # Pillar activates only when the flag is ON, ticker is F&O-eligible,
+    # AND at least one positioning input has real data. This prevents the
+    # -1.8 pt systematic bias that would otherwise hit every F&O name the
+    # moment the flag flips but before the data pipelines are online.
+    _has_pos_data  = any(_pi.get(k) is not None for k in
+                         ("oi_regime", "pcr", "max_pain_distance_pct",
+                          "fii_deriv_net_cr"))
+    _positioning_on  = _positioning_pillar_enabled() and _fno_flag and _has_pos_data
+    positioning_pts: float = 0.0
+    positioning_detail: Dict = {"pillar_active": False, "is_fno": _fno_flag}
+    if _positioning_on:
+        positioning_pts, positioning_detail = _score_positioning(
+            oi_regime             = _pi.get("oi_regime"),
+            pcr                   = _pi.get("pcr"),
+            max_pain_distance_pct = _pi.get("max_pain_distance_pct"),
+            fii_deriv_net_cr      = _pi.get("fii_deriv_net_cr"),
+        )
+        positioning_detail["pillar_active"] = True
+        positioning_detail["is_fno"]        = True
+        # Rescale technical (40 -> 35) and momentum (25 -> 20). Sub-scorer
+        # outputs are UNCHANGED; the rescale happens only at aggregation
+        # so tests and callers reading tech/mom sub-scores directly stay
+        # calibrated against their original 40/25 caps.
+        _tech_scaled = tech_pts * (35.0 / 40.0)
+        _mom_scaled  = mom_pts  * (20.0 / 25.0)
+        total = round(min(max(_tech_scaled + _mom_scaled + vol_pts + sent_pts
+                              + positioning_pts, 0), 90.0), 1)
+    else:
+        total  = round(min(max(tech_pts + mom_pts + vol_pts + sent_pts, 0), 90.0), 1)
+
     grade  = _grade(total)
     action = _action(total)
 
@@ -1245,6 +1386,8 @@ def score_dataframe(
         rsi               = rsi_val,
         return_1d         = return_1d_val,
         rs_score          = _rs_val,
+        positioning_score = positioning_pts if _positioning_on else None,
+        is_fno            = _fno_flag,
         entry             = entry,
         stop_loss         = sl,
         target            = tp,
