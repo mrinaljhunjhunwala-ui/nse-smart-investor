@@ -553,7 +553,28 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15,
 # Entry / SL / TP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float, float, float]:
+_SL_BOUNDS_BY_REGIME = {
+    # FIX SL-REGIME (2026-09-03) — Ships Recommendation 3 from
+    # docs/COMPOSITE_SCORE_SHAPE_REVIEW.md. ATR is a rolling 14-bar volatility
+    # measure; when VIX shifts regime, the same ATR multiple represents a
+    # very different amount of realized noise. Fixed [1.2, 3.0] bounds
+    # whipsaw longs out in panic and give lazy room in complacency. Bounds
+    # widen with regime volatility; mid_mult (fallback when swing_low is
+    # too far out) tracks the midpoint. Not a scoring change (Guardrail 5
+    # unaffected) — only SL / target-risk / R:R move.
+    "complacency": (1.0, 1.75, 2.5),   # low-VIX: tighten
+    "normal":      (1.2, 2.0,  3.0),   # unchanged baseline
+    "elevated":    (1.3, 2.2,  3.2),
+    "fear":        (1.5, 2.5,  3.5),
+    "panic":       (1.7, 2.75, 3.8),   # high-VIX: give room
+    "unknown":     (1.2, 2.0,  3.0),   # match baseline
+}
+
+
+def _compute_entry_levels(
+    df: pd.DataFrame, score: float,
+    vix_regime: Optional[str] = None,
+) -> Tuple[float, float, float, float]:
     """
     Structure-aware stop + volatility-calibrated target.
     Entry = current close (live price injected later in score_stock if Angel One connected).
@@ -577,14 +598,22 @@ def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float,
     if atr <= 0 or pd.isna(atr):
         atr = price * 0.02
 
+    # FIX SL-REGIME: bounds now scale with VIX regime — see _SL_BOUNDS_BY_REGIME
+    # docstring above for rationale. Unknown / no-regime-passed keeps the
+    # historical (1.2, 2.0, 3.0) baseline for backwards-compat with callers
+    # that never wired regime through (tests with synthetic frames included).
+    _min_m, _mid_m, _max_m = _SL_BOUNDS_BY_REGIME.get(
+        (vix_regime or "unknown").lower(), _SL_BOUNDS_BY_REGIME["unknown"]
+    )
+
     lows      = df["Low"].tail(10).dropna()
-    swing_low = float(lows.min()) if len(lows) else price - 2.0 * atr
+    swing_low = float(lows.min()) if len(lows) else price - _mid_m * atr
     sl        = swing_low - 0.25 * atr
 
-    max_risk = 3.0 * atr
-    min_risk = 1.2 * atr
+    max_risk = _max_m * atr
+    min_risk = _min_m * atr
     if price - sl > max_risk:
-        sl = price - 2.0 * atr
+        sl = price - _mid_m * atr
     if price - sl < min_risk:
         sl = price - min_risk
 
@@ -940,7 +969,9 @@ def score_dataframe(
     grade  = _grade(total)
     action = _action(total)
 
-    entry, sl, tp, rr = _compute_entry_levels(df, total)
+    entry, sl, tp, rr = _compute_entry_levels(
+        df, total, vix_regime=vix_info.get("regime", "normal")
+    )
     horizon_label, horizon_days = _pick_horizon(tech_pts, mom_pts)
     valid_until = (datetime.now() + timedelta(days=horizon_days)).date().isoformat()
 

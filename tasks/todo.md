@@ -357,7 +357,10 @@ _See `docs/FLOWS_INTEGRATION_2026-09.md` for the reviewer writeup._
 
 ---
 
-### Task 3.5: Regime-adaptive stop-loss bounds
+### Task 3.5: Regime-adaptive stop-loss bounds  ✅ SHIPPED 2026-09-03 · commit pending
+
+_See `docs/SL_REGIME_2026-09.md` for the reviewer writeup._
+
 **Description:** `_compute_entry_levels()` currently uses fixed 1.2–3.0×ATR stop bounds. Scale by VIX percentile: low-VIX 1.0–2.5×, high-VIX 1.5–3.5×.
 
 **Acceptance criteria:**
