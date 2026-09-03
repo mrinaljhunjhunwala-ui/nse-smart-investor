@@ -392,7 +392,25 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
 # Sub-scorer: Volume  (15 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
+def _score_volume(df: pd.DataFrame,
+                  delivery_info: Optional[Dict] = None) -> Tuple[float, Dict]:
+    """Volume pillar (15 pts).
+
+    Two modes, gated on `delivery_info` availability:
+
+    Legacy (backwards-compat, delivery_info=None) — 15 pts split as
+        vol_ratio:10 + obv:5
+
+    With delivery — 15 pts split as
+        vol_ratio:8 + delivery_pct:4 + obv:3
+    Rationale: NSE bhavcopy delivery % is the closest thing retail India has
+    to a Level-2 institutional print. High delivery on rising price is
+    institutional accumulation; high delivery on falling price is
+    distribution; low delivery on a sharp up-move is intraday froth that
+    tends to unwind. Guardrail 5 shape unchanged (Volume stays 15 pts of 90).
+
+    Ships Recommendation 4 from docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+    """
     cur        = df.iloc[-1]
     vol_ratio  = _num(cur, "Volume_Ratio", 1.0)   # FIX SCORE-NAN
     close      = float(cur["Close"])
@@ -400,22 +418,74 @@ def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
     up_day     = close >= open_price
 
     pts: Dict[str, float] = {}
+    _use_delivery = (
+        isinstance(delivery_info, dict)
+        and delivery_info.get("today") is not None
+        and delivery_info.get("mean")  is not None
+    )
 
+    # ── vol_ratio: same bucketing shape, top rescaled from 10 to 8 when
+    # delivery is available (Guardrail 5: pillar stays 15 pts).
     if vol_ratio > 2.5:   raw_vol = 10.0
     elif vol_ratio > 1.8: raw_vol = 8.0
     elif vol_ratio > 1.2: raw_vol = 6.0
     elif vol_ratio > 0.8: raw_vol = 4.0
     else:                 raw_vol = 1.0
-    pts["vol_ratio"] = raw_vol if up_day else max(1.0, raw_vol * 0.4)
+    _vol_after_dir = raw_vol if up_day else max(1.0, raw_vol * 0.4)
+    if _use_delivery:
+        # Scale 10-pt shape down to 8: multiply by 0.8, cap at 8.
+        pts["vol_ratio"] = round(min(_vol_after_dir * 0.8, 8.0), 2)
+    else:
+        pts["vol_ratio"] = _vol_after_dir
 
+    # ── OBV slope: same shape, top rescaled from 5 to 3 when delivery is
+    # available.
     if "OBV" in df.columns and len(df) >= 10:
         obv_recent = df["OBV"].iloc[-10:].values.astype(float)
         slope      = float(np.polyfit(range(10), obv_recent, 1)[0])
-        pts["obv"] = 5.0 if slope > 0 else (2.0 if abs(slope) < abs(obv_recent.mean()) * 0.001 else 0.0)
+        _obv_raw = 5.0 if slope > 0 else (2.0 if abs(slope) < abs(obv_recent.mean()) * 0.001 else 0.0)
     else:
-        pts["obv"] = 2.0
+        _obv_raw = 2.0
+    if _use_delivery:
+        pts["obv"] = round(min(_obv_raw * 0.6, 3.0), 2)   # 5 -> 3
+    else:
+        pts["obv"] = _obv_raw
 
-    total = pts["vol_ratio"] + pts["obv"]
+    # ── Delivery % sub-score (FIX DELIV1, 2026-09-03) — 4 pts when
+    # delivery snapshot is present.
+    if _use_delivery:
+        today = float(delivery_info["today"])
+        mean  = float(delivery_info["mean"])
+        z     = delivery_info.get("zscore")
+        # Absolute level: what fraction of trades are actually taken to demat.
+        # 40% is roughly the market-cap-weighted large-cap norm; above 60% is
+        # institutional footprint, below 20% is pure intraday churn.
+        if   today >= 60: abs_pts = 2.5
+        elif today >= 45: abs_pts = 2.0
+        elif today >= 30: abs_pts = 1.0
+        elif today >= 20: abs_pts = 0.5
+        else:              abs_pts = 0.0
+        # Direction vs the stock's own 60-day mean — separates
+        # accumulation (today > mean) from distribution / intraday froth.
+        if z is None:      dir_pts = 0.75           # std=0 pathological: neutral
+        elif z >  1.0:     dir_pts = 1.5           # sharply above own mean
+        elif z >  0.25:    dir_pts = 1.0           # above mean
+        elif z > -0.25:    dir_pts = 0.75          # near mean
+        elif z > -1.0:     dir_pts = 0.25          # below mean
+        else:              dir_pts = 0.0           # sharp under-delivery
+        _deliv_pts = round(min(abs_pts + dir_pts, 4.0), 2)
+        pts["delivery"]           = _deliv_pts
+        pts["delivery_today"]     = round(today, 2)
+        pts["delivery_mean"]      = round(mean, 2)
+        pts["delivery_z"]         = z
+        pts["delivery_n"]         = int(delivery_info.get("n", 0))
+        pts["delivery_available"] = True
+        # Divergence flag — surfaced in narrative by _build_narrative()
+        pts["delivery_divergence"] = bool(up_day and vol_ratio > 1.5 and z is not None and z < -1.0)
+    else:
+        pts["delivery_available"] = False
+
+    total = pts["vol_ratio"] + pts["obv"] + (pts.get("delivery", 0.0) if _use_delivery else 0.0)
     return round(min(total, 15.0), 2), pts
 
 
@@ -870,6 +940,38 @@ def _build_narrative(
             f"a warning sign that some selling may follow."
         )
 
+    # Sentence 4b: Delivery % (FIX DELIV1) — only when the delivery snapshot
+    # is present in vol_pts. Two branches: normal read vs divergence flag.
+    if vol_pts.get("delivery_available"):
+        _dt_today = vol_pts.get("delivery_today")
+        _dt_mean  = vol_pts.get("delivery_mean")
+        _dt_z     = vol_pts.get("delivery_z")
+        _dt_n     = vol_pts.get("delivery_n", 0)
+        if vol_pts.get("delivery_divergence"):
+            parts.append(
+                f"Delivery % is only {_dt_today:.0f}% today vs the {_dt_n}-day mean "
+                f"of {_dt_mean:.0f}% ({_dt_z:+.1f}sigma) — the volume surge is "
+                f"largely intraday, not institutional accumulation. Frothy moves "
+                f"on low delivery tend to unwind."
+            )
+        elif _dt_today is not None and _dt_z is not None:
+            if _dt_z > 1.0:
+                parts.append(
+                    f"Delivery % is {_dt_today:.0f}% today, sharply above the "
+                    f"{_dt_n}-day mean of {_dt_mean:.0f}% ({_dt_z:+.1f}sigma) — "
+                    f"institutional accumulation footprint."
+                )
+            elif _dt_today >= 45 and _dt_z > 0.25:
+                parts.append(
+                    f"Delivery % is {_dt_today:.0f}% today vs the {_dt_n}-day mean "
+                    f"of {_dt_mean:.0f}% — above-normal institutional participation."
+                )
+            elif _dt_today < 25 and _dt_z < -0.5:
+                parts.append(
+                    f"Delivery % is {_dt_today:.0f}% today ({_dt_z:+.1f}sigma below the "
+                    f"{_dt_n}-day mean) — dominated by intraday traders, thin real conviction."
+                )
+
     # Sentence 5: Entry / SL / TP
     sl_pct = (sl / price - 1) * 100
     tp_pct = (tp / price - 1) * 100
@@ -939,6 +1041,7 @@ def score_dataframe(
     n_sectors:    int = 15,
     dispersion:   Optional[float] = None,
     flows_info:   Optional[Dict] = None,
+    delivery_info: Optional[Dict] = None,
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
@@ -957,7 +1060,7 @@ def score_dataframe(
 
     tech_pts,  tech_detail = _score_technical(df)
     mom_pts,   mom_detail  = _score_momentum(df)
-    vol_pts,   vol_detail  = _score_volume(df)
+    vol_pts,   vol_detail  = _score_volume(df, delivery_info=delivery_info)
     pat_detail             = _detect_patterns(df)
     sent_pts,  sent_detail = _score_sentiment(vix_info, sector_rank, n_sectors,
                                               flows_info=flows_info)
@@ -1134,6 +1237,19 @@ def score_stock(
             sector=sector, vix_regime="unknown", sector_rank=sector_rank,
         )
 
+    # FIX DELIV1 (2026-09-03) — load NSE bhavcopy delivery snapshot so the
+    # Volume pillar can consume delivery % as a 4-pt sub-score inside its
+    # 15-pt total. Best-effort: an empty local cache (fresh DB, bhavcopy
+    # cron hasn't run yet) returns None, and _score_volume falls back to
+    # its legacy vol_ratio:10 + obv:5 split. See docs/DELIVERY_INTEGRATION_2026-09.md.
+    delivery_info: Optional[Dict] = None
+    try:
+        from data.nse_delivery import get_snapshot as _delv_snap
+        delivery_info = _delv_snap(canonical, lookback=60)
+    except Exception as _dv_e:
+        _log.debug("NSE delivery snapshot unavailable for %s: %s: %s",
+                   canonical, type(_dv_e).__name__, _dv_e)
+
     # FIX FLOWS1 (2026-09-03) — load FII/DII 5-day cash-market flows so the
     # Sentiment pillar can consume the sign. load_history() reads from the
     # trade_store cache the fii_dii cron populates; a miss here (no data yet,
@@ -1160,6 +1276,7 @@ def score_stock(
         sector=sector,
         n_sectors=n_sectors,
         flows_info=flows_info,
+        delivery_info=delivery_info,
     )
 
     # Update entry to live price if Angel One is configured

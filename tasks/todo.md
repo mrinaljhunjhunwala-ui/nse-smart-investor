@@ -337,7 +337,10 @@ _See `docs/FLOWS_INTEGRATION_2026-09.md` for the reviewer writeup._
 
 ---
 
-### Task 3.4: NSE delivery % as Volume pillar input
+### Task 3.4: NSE delivery % as Volume pillar input  ✅ SHIPPED 2026-09-03 · commit pending
+
+_See `docs/DELIVERY_INTEGRATION_2026-09.md` for the reviewer writeup. Follow-ups: bhavcopy cron + backfill script + UI column (queued)._
+
 **Description:** Volume stays 15 pts. Add `data/nse_delivery.py` (bhavcopy delivery file). Internal split becomes `vol_ratio:8 + delivery_pct:4 + obv:3`.
 
 **Acceptance criteria:**
