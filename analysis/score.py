@@ -202,6 +202,7 @@ class CompositeScore:
     valid_until:        str          = ""      # FIX HZ1: ISO date — pick considered stale after this
     rsi:                float        = 50.0    # FIX WL1: raw RSI(14), already computed — just unsurfaced
     return_1d:          float        = 0.0     # FIX WL1: 1-day % change, already available from df
+    rs_score:           Optional[float] = None # FIX RS1: RS_Score vs Nifty (0-100 percentile), None when benchmark unavailable
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -217,6 +218,7 @@ class CompositeScore:
             "momentum_fallback": self.momentum_fallback,
             "horizon": self.horizon, "valid_until": self.valid_until,
             "rsi": self.rsi, "return_1d": self.return_1d,
+            "rs_score": self.rs_score,
         }
 
 
@@ -349,7 +351,40 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
     pts["_r60d"] = round(r60d, 2) if has_r60 else None
     pts["r60d_available"] = has_r60
 
-    total = pts["r5d"] + pts["r20d"] + pts["r60d"]
+    abs_total = pts["r5d"] + pts["r20d"] + pts["r60d"]
+
+    # ── FIX RS1 (2026-09-03) — Relative Strength vs Nifty ───────────────────
+    # Absolute returns reward beta in bull tapes and punish defensives in
+    # bear tapes. The 5-year efficacy study (docs/SCORE_EFFICACY_REPORT.md)
+    # tied the 62 → 46% BUY-hit-rate drop between train (trending) and
+    # holdout (mean-reverting) partly to this. IBD-style RS_Score (0-100
+    # percentile rank of the stock/Nifty ratio's 52-week distribution) is
+    # already computed by utils.indicators.add_relative_strength() and
+    # written to the df as RS_Score before this function is called (see
+    # score_stock). When present, the Momentum pillar's 25 pts split as
+    # abs_returns:15 + rs_vs_nifty:10 — same total, same shape (Guardrail
+    # §5 unchanged). When absent (test frames with synthetic data, single-
+    # ticker ad-hoc scoring without a benchmark fetch), the full 25 pts
+    # stay on absolute momentum for backwards-compat.
+    #
+    # This lands Task 3.1 from tasks/plan.md and Recommendation 1 from
+    # docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+    rs_score = _num(df.iloc[-1], "RS_Score", float("nan"))
+    if math.isnan(rs_score):
+        pts["rs_available"] = False
+        total = abs_total
+    else:
+        # Scale absolute component 25 → 15
+        abs_scaled = abs_total * (15.0 / 25.0)
+        # RS component: linear map 0-100 → 0-10, per _bonus_rs() convention
+        # in research/score_variants_rs.py which studied exactly this shape.
+        rs_pts = round(float(np.clip(rs_score, 0.0, 100.0)) / 100.0 * 10.0, 2)
+        pts["rs_available"] = True
+        pts["rs_score"]     = round(rs_score, 1)
+        pts["rs_pts"]       = rs_pts
+        pts["abs_scaled"]   = round(abs_scaled, 2)
+        total = abs_scaled + rs_pts
+
     return round(min(total, 25.0), 2), pts
 
 
@@ -707,6 +742,31 @@ def _build_narrative(
             f"sellers are currently in control."
         )
 
+    # Sentence 3b: Relative Strength vs Nifty (FIX RS1) — only rendered when
+    # RS_Score is present on the df (i.e. score_stock fetched a benchmark).
+    _rs_val = mom_pts.get("rs_score")
+    if _rs_val is not None:
+        if _rs_val >= 80:
+            parts.append(
+                f"Relative strength vs Nifty is exceptional ({_rs_val:.0f}/100 percentile) "
+                f"— outperforming the broad market decisively over the trailing year."
+            )
+        elif _rs_val >= 60:
+            parts.append(
+                f"Relative strength vs Nifty is strong ({_rs_val:.0f}/100 percentile) "
+                f"— leading the broader market."
+            )
+        elif _rs_val >= 40:
+            parts.append(
+                f"Relative strength vs Nifty is neutral ({_rs_val:.0f}/100 percentile) "
+                f"— tracking the broad market rather than leading it."
+            )
+        else:
+            parts.append(
+                f"Relative strength vs Nifty is weak ({_rs_val:.0f}/100 percentile) "
+                f"— lagging the broad market; any absolute-return uptick here is beta, not skill."
+            )
+
     # Sentence 4: Volume + pattern
     if vol > 1.5 and bull_pats:
         parts.append(
@@ -804,6 +864,15 @@ def score_dataframe(
     # cheap to derive from the df already in scope here — no extra fetch.
     _cur = df.iloc[-1]
     rsi_val = float(_cur.get("RSI", 50))
+    # FIX RS1: surface RS_Score on CompositeScore when present. None keeps
+    # backwards-compat for callers that never enriched with a benchmark.
+    _rs_raw = _cur.get("RS_Score")
+    try:
+        _rs_val = float(_rs_raw) if _rs_raw is not None else None
+        if _rs_val is not None and math.isnan(_rs_val):
+            _rs_val = None
+    except (TypeError, ValueError):
+        _rs_val = None
     _closes_1d = df["Close"].tail(2)
     return_1d_val = (
         float(_closes_1d.pct_change().iloc[-1]) * 100
@@ -853,6 +922,7 @@ def score_dataframe(
         valid_until       = valid_until,
         rsi               = rsi_val,
         return_1d         = return_1d_val,
+        rs_score          = _rs_val,
         entry             = entry,
         stop_loss         = sl,
         target            = tp,
@@ -919,6 +989,20 @@ def score_stock(
     try:
         df = _fetch_single(canonical, period=period)
         df = _add_all_indicators(df, groups=_SCORE_INDICATOR_GROUPS)
+
+        # FIX RS1 (2026-09-03) — enrich with RS vs Nifty so _score_momentum
+        # can use the abs:15 + RS:10 split. Best-effort: a benchmark-fetch
+        # failure leaves the df without RS_Score, and momentum falls back
+        # to the 25-pt absolute mode (documented in _score_momentum).
+        try:
+            from utils.indicators import add_relative_strength
+            _bench = _fetch_single("^NSEI", period=period)
+            if _bench is not None and not _bench.empty:
+                df = add_relative_strength(df, _bench)
+        except Exception as _rs_e:
+            _log.debug("RS enrichment skipped for %s: %s: %s",
+                       canonical, type(_rs_e).__name__, _rs_e)
+
         df.dropna(subset=["RSI", "ATR"], inplace=True)
         if len(df) < 30:
             raise ValueError(f"Insufficient data for {canonical}")
