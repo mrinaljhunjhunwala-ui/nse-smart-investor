@@ -1482,6 +1482,31 @@ def score_stock(
             sector=sector, vix_regime="unknown", sector_rank=sector_rank,
         )
 
+    # FIX POS-OI1 (2026-09-03) — feed OI-regime sub-input to the Positioning
+    # pillar (Rec 6 sub-score #1 of 4). Only useful when the ticker is
+    # F&O-eligible AND the daily fno bhavcopy cron has populated at least
+    # two rows for it AND we have today's equity price change. All three
+    # are best-effort; a miss returns positioning_info=None which the
+    # three-way gate in score_dataframe handles as "pillar stays inactive
+    # for this ticker" (no bias).
+    positioning_info: Optional[Dict] = None
+    try:
+        from data.fno_universe import is_fno_eligible as _fno_check
+        if _fno_check(canonical):
+            from data.nse_fno_bhavcopy import get_oi_regime_for_ticker as _oi_reg
+            # Today's price change from the df we already have.
+            _closes = df["Close"].tail(2)
+            _px_pct = (
+                float(_closes.pct_change().iloc[-1]) * 100
+                if len(_closes) == 2 else None
+            )
+            _oi_regime = _oi_reg(canonical, _px_pct)
+            if _oi_regime is not None:
+                positioning_info = {"oi_regime": _oi_regime}
+    except Exception as _pos_e:
+        _log.debug("OI regime unavailable for %s: %s: %s",
+                   canonical, type(_pos_e).__name__, _pos_e)
+
     # FIX REGIME1 (2026-09-03) — best-effort regime snapshot for the
     # opt-in bear-regime momentum dispatch (Rec 5). regime_label stays None
     # when the snapshot fails or the flag is off; _score_momentum keeps
@@ -1539,6 +1564,7 @@ def score_stock(
         flows_info=flows_info,
         delivery_info=delivery_info,
         regime_label=regime_label,
+        positioning_info=positioning_info,
     )
 
     # Update entry to live price if Angel One is configured
