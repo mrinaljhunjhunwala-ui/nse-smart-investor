@@ -381,7 +381,10 @@ _See `docs/SL_REGIME_2026-09.md` for the reviewer writeup._
 
 ---
 
-### Task 3.6: Regime-conditional weight dispatch (opt-in flag)
+### Task 3.6: Regime-conditional weight dispatch (opt-in flag)  ✅ MECHANISM SHIPPED 2026-09-03 · commit pending
+
+_Flag defaults OFF. Flipping the default blocked on running `py -m research.score_variants_regime` end-to-end and confirming flag-on beats flag-off on both halves of the SCORE_EFFICACY sample. See `docs/REGIME_WEIGHTS_2026-09.md` for the reviewer writeup._
+
 **Description:** Two weight sets: trending (current) and mean-reverting. Dispatch by `regime.snapshot_live().label`. Ship as opt-in flag `USE_REGIME_WEIGHTS=True` first, validate on the 5-year window in `research/score_variants_regime.py`, only then flip default.
 
 **Acceptance criteria:**

@@ -291,7 +291,79 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
 # Sub-scorer: Momentum  (25 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
+# ── FIX REGIME1 (2026-09-03) — regime-conditional momentum dispatch flag ──
+# Recommendation 5 of docs/COMPOSITE_SCORE_SHAPE_REVIEW.md. Guarded behind an
+# env var so shipping the *mechanism* doesn't change production scoring: the
+# study that would license flipping the default (research/score_variants_regime.py)
+# has not yet been run end-to-end. When the flag is ON AND the regime is
+# 'bear' (trend_down / risk_off) the absolute-returns half of the Momentum
+# pillar (15 pts under Rec 1) is replaced by a self-normalised 5-day mean-
+# reversion percentile — this is Var M from the variant study, the ONLY one
+# of the three that preserves Guardrail 5 (4 pillars, 40+25+15+10, cap 90).
+# RS component (10 pts) stays unchanged in either mode.
+import os as _regime_os
+
+def _regime_weights_enabled() -> bool:
+    _v = _regime_os.environ.get("NSE_USE_REGIME_WEIGHTS", "").strip().lower()
+    return _v in {"1", "true", "yes", "on"}
+
+# Regime labels analysis.regime.snapshot_live() emits, mapped to the
+# three-way {bull, bear, sideways} the variant study used.
+_BEAR_REGIMES  = {"trend_down", "risk_off", "bear"}
+_BULL_REGIMES  = {"trend_up", "bull"}
+_RANGE_REGIMES = {"range", "sideways"}
+
+
+def _score_momentum_mean_reversion(df: pd.DataFrame) -> Tuple[float, Dict]:
+    """
+    Bear-regime alternative to _score_momentum_absolute. Returns (pts_0_15, detail).
+
+    Score = inverted percentile rank of the stock's trailing-5-day return
+    within its own trailing 252-day distribution of 5-day returns, scaled to
+    0..15. Low recent 5d return -> high reversal score. Self-normalised so no
+    cross-sectional lookahead. Direct implementation of Var M from
+    research/score_variants_regime.py.
+    """
+    close = df["Close"]
+    r5d = close.pct_change(5).dropna()
+    if len(r5d) < 30:
+        # Not enough history for a self-percentile — return neutral half.
+        return 7.5, {"mr_note": "insufficient history for 5d reversal percentile",
+                     "mr_available": False}
+    window = r5d.tail(252)
+    today  = float(window.iloc[-1])
+    prior  = window.iloc[:-1]
+    if len(prior) < 20:
+        return 7.5, {"mr_note": "insufficient history",
+                     "mr_available": False}
+    # Percentile of today within prior: 0.0 = worst in window, 1.0 = best.
+    # Invert so weakest 5d returns pay the most points (mean-reversion bet).
+    pct = float((prior < today).sum()) / float(len(prior))
+    inv = 1.0 - pct
+    pts = round(inv * 15.0, 2)
+    return pts, {
+        "mr_available":   True,
+        "mr_r5d_pct":     round(pct, 3),
+        "mr_r5d_today":   round(today * 100, 2),
+    }
+
+
+def _score_momentum(df: pd.DataFrame,
+                    regime_label: Optional[str] = None) -> Tuple[float, Dict]:
+    """
+    Momentum pillar (25 pts).
+
+    Default computation (production):
+      abs_returns (0-15, or 0-25 legacy when RS_Score absent) + rs_vs_nifty (0-10).
+
+    When NSE_USE_REGIME_WEIGHTS env var is truthy AND regime_label is 'bear'
+    (trend_down / risk_off), the abs_returns half is replaced by a 5-day
+    mean-reversion percentile (Var M from score_variants_regime.py). RS
+    component stays. Guardrail 5 shape unchanged (Momentum stays 25 pts).
+
+    Flag defaults OFF — flipping requires the study run per Task 3.6 in
+    tasks/plan.md.
+    """
     if len(df) < 25:
         # Not enough history — return neutral 50% and flag it so the caller
         # can add a disclaimer to the narrative.
@@ -370,10 +442,34 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
     # This lands Task 3.1 from tasks/plan.md and Recommendation 1 from
     # docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
     rs_score = _num(df.iloc[-1], "RS_Score", float("nan"))
-    if math.isnan(rs_score):
-        pts["rs_available"] = False
-        total = abs_total
-    else:
+    _rs_available = not math.isnan(rs_score)
+
+    # ── FIX REGIME1 — Var M dispatch (bear + flag only) ───────────────────
+    # In bear regime with the opt-in flag set, replace the abs_returns half
+    # of the pillar with a 5d mean-reversion percentile. RS stays if
+    # available. When RS is absent (test frames, ad-hoc scoring), Var M
+    # still runs and gives the full 15 pts to mean-reversion; the remaining
+    # 10 pts of the 25 stay unfilled (backwards-compat with the "abs alone
+    # is 25 pts" legacy shape breaks here by design — this is bear-regime
+    # opt-in, opting into it means opting into Var M).
+    _regime_bear = (regime_label or "").lower() in _BEAR_REGIMES
+    _use_var_m   = _regime_bear and _regime_weights_enabled()
+
+    if _use_var_m:
+        mr_pts, mr_detail = _score_momentum_mean_reversion(df)
+        pts.update(mr_detail)
+        pts["variant"]  = "M_bear_mean_reversion"
+        pts["regime"]   = regime_label
+        if _rs_available:
+            rs_pts = round(float(np.clip(rs_score, 0.0, 100.0)) / 100.0 * 10.0, 2)
+            pts["rs_available"] = True
+            pts["rs_score"]     = round(rs_score, 1)
+            pts["rs_pts"]       = rs_pts
+            total = mr_pts + rs_pts
+        else:
+            pts["rs_available"] = False
+            total = mr_pts   # 0-15 only; 10 pts unfilled in ad-hoc RS-less mode
+    elif _rs_available:
         # Scale absolute component 25 → 15
         abs_scaled = abs_total * (15.0 / 25.0)
         # RS component: linear map 0-100 → 0-10, per _bonus_rs() convention
@@ -383,7 +479,12 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
         pts["rs_score"]     = round(rs_score, 1)
         pts["rs_pts"]       = rs_pts
         pts["abs_scaled"]   = round(abs_scaled, 2)
+        pts["variant"]      = "base_abs_plus_rs"
         total = abs_scaled + rs_pts
+    else:
+        pts["rs_available"] = False
+        pts["variant"]      = "legacy_abs_only"
+        total = abs_total
 
     return round(min(total, 25.0), 2), pts
 
@@ -1042,6 +1143,7 @@ def score_dataframe(
     dispersion:   Optional[float] = None,
     flows_info:   Optional[Dict] = None,
     delivery_info: Optional[Dict] = None,
+    regime_label: Optional[str] = None,
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
@@ -1059,7 +1161,7 @@ def score_dataframe(
         vix_info = {"regime": "normal", "vix": None, "allow_buy": True}
 
     tech_pts,  tech_detail = _score_technical(df)
-    mom_pts,   mom_detail  = _score_momentum(df)
+    mom_pts,   mom_detail  = _score_momentum(df, regime_label=regime_label)
     vol_pts,   vol_detail  = _score_volume(df, delivery_info=delivery_info)
     pat_detail             = _detect_patterns(df)
     sent_pts,  sent_detail = _score_sentiment(vix_info, sector_rank, n_sectors,
@@ -1237,6 +1339,22 @@ def score_stock(
             sector=sector, vix_regime="unknown", sector_rank=sector_rank,
         )
 
+    # FIX REGIME1 (2026-09-03) — best-effort regime snapshot for the
+    # opt-in bear-regime momentum dispatch (Rec 5). regime_label stays None
+    # when the snapshot fails or the flag is off; _score_momentum keeps
+    # its default behavior in either case. Env-var opt-in prevents this
+    # from changing production output until the 5-year variant study is
+    # run (see docs/REGIME_WEIGHTS_2026-09.md).
+    regime_label: Optional[str] = None
+    if _regime_weights_enabled():
+        try:
+            from analysis.regime import snapshot_live as _reg_snap
+            _rsnap = _reg_snap()
+            regime_label = getattr(_rsnap, "label", None)
+        except Exception as _rg_e:
+            _log.debug("regime snapshot unavailable for %s: %s: %s",
+                       canonical, type(_rg_e).__name__, _rg_e)
+
     # FIX DELIV1 (2026-09-03) — load NSE bhavcopy delivery snapshot so the
     # Volume pillar can consume delivery % as a 4-pt sub-score inside its
     # 15-pt total. Best-effort: an empty local cache (fresh DB, bhavcopy
@@ -1277,6 +1395,7 @@ def score_stock(
         n_sectors=n_sectors,
         flows_info=flows_info,
         delivery_info=delivery_info,
+        regime_label=regime_label,
     )
 
     # Update entry to live price if Angel One is configured
