@@ -761,7 +761,7 @@ def _score_positioning(
     oi_regime:              Optional[str]   = None,
     pcr:                    Optional[float] = None,
     max_pain_distance_pct:  Optional[float] = None,
-    fii_deriv_net_cr:       Optional[float] = None,
+    fii_deriv_net:          Optional[float] = None,
 ) -> Tuple[float, Dict]:
     """Positioning pillar (10 pts) — F&O eligibility + opt-in flag only.
 
@@ -802,20 +802,23 @@ def _score_positioning(
     elif abs(max_pain_distance_pct) < 3.0:  pts["max_pain"] = 1.0
     else:                                    pts["max_pain"] = 1.5
 
-    # FII net index-futures position in Rs Cr. Positive = FII net long
-    # index futures (bullish); negative = net short (bearish). Thresholds
-    # are ballpark; will be re-tuned after 60 days of production data.
-    if fii_deriv_net_cr is None:
+    # FII net index-futures position, in CONTRACTS (not rupees — NSE
+    # publishes contract counts; conversion to rupees would need lot-size
+    # + price and adds no signal). Positive = FII net long index futs
+    # (bullish); negative = net short (bearish). Thresholds calibrated to
+    # the typical 2023-26 range (~ -100k to +100k contracts); will be
+    # re-tuned after 60 days of production data.
+    if fii_deriv_net is None:
         pts["fii_deriv"] = 1.5
-    elif fii_deriv_net_cr > 5000:   pts["fii_deriv"] = 3.0
-    elif fii_deriv_net_cr > 0:      pts["fii_deriv"] = 2.0
-    elif fii_deriv_net_cr > -5000:  pts["fii_deriv"] = 1.0
+    elif fii_deriv_net >  30_000:   pts["fii_deriv"] = 3.0
+    elif fii_deriv_net >       0:   pts["fii_deriv"] = 2.0
+    elif fii_deriv_net > -30_000:   pts["fii_deriv"] = 1.0
     else:                            pts["fii_deriv"] = 0.0
 
     pts["_oi_regime_input"]        = oi_regime
     pts["_pcr_input"]              = pcr
     pts["_max_pain_pct_input"]     = max_pain_distance_pct
-    pts["_fii_deriv_net_cr_input"] = fii_deriv_net_cr
+    pts["_fii_deriv_net_input"]    = fii_deriv_net
 
     total = pts["oi_regime"] + pts["pcr"] + pts["max_pain"] + pts["fii_deriv"]
     return round(min(total, 10.0), 2), pts
@@ -1288,7 +1291,7 @@ def score_dataframe(
     # moment the flag flips but before the data pipelines are online.
     _has_pos_data  = any(_pi.get(k) is not None for k in
                          ("oi_regime", "pcr", "max_pain_distance_pct",
-                          "fii_deriv_net_cr"))
+                          "fii_deriv_net"))
     _positioning_on  = _positioning_pillar_enabled() and _fno_flag and _has_pos_data
     positioning_pts: float = 0.0
     positioning_detail: Dict = {"pillar_active": False, "is_fno": _fno_flag}
@@ -1297,7 +1300,7 @@ def score_dataframe(
             oi_regime             = _pi.get("oi_regime"),
             pcr                   = _pi.get("pcr"),
             max_pain_distance_pct = _pi.get("max_pain_distance_pct"),
-            fii_deriv_net_cr      = _pi.get("fii_deriv_net_cr"),
+            fii_deriv_net         = _pi.get("fii_deriv_net"),
         )
         positioning_detail["pillar_active"] = True
         positioning_detail["is_fno"]        = True
@@ -1501,10 +1504,27 @@ def score_stock(
                 if len(_closes) == 2 else None
             )
             _oi_regime = _oi_reg(canonical, _px_pct)
+            # Positioning dict gets populated even with a single input;
+            # the three-way gate in score_dataframe then activates the
+            # pillar for this ticker.
+            _pi_acc: Dict = {}
             if _oi_regime is not None:
-                positioning_info = {"oi_regime": _oi_regime}
+                _pi_acc["oi_regime"] = _oi_regime
+            # FII deriv net is UNIVERSE-LEVEL — one value for all F&O
+            # tickers on a given day. Cheap to load per ticker (single
+            # DB read + LRU-style cache implicit in the trade_store).
+            try:
+                from data.nse_fii_deriv import get_latest_fut_idx_net
+                _fii_net = get_latest_fut_idx_net()
+                if _fii_net is not None:
+                    _pi_acc["fii_deriv_net"] = _fii_net
+            except Exception as _fii_e:
+                _log.debug("FII deriv net unavailable: %s: %s",
+                           type(_fii_e).__name__, _fii_e)
+            if _pi_acc:
+                positioning_info = _pi_acc
     except Exception as _pos_e:
-        _log.debug("OI regime unavailable for %s: %s: %s",
+        _log.debug("positioning inputs unavailable for %s: %s: %s",
                    canonical, type(_pos_e).__name__, _pos_e)
 
     # FIX REGIME1 (2026-09-03) — best-effort regime snapshot for the
