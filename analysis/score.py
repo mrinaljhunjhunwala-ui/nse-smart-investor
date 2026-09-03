@@ -466,31 +466,86 @@ def _detect_patterns(df: pd.DataFrame) -> Dict:
 # Sub-scorer: Sentiment  (10 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15) -> Tuple[float, Dict]:
+def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15,
+                     flows_info: Optional[Dict] = None) -> Tuple[float, Dict]:
+    """Sentiment pillar (10 pts).
+
+    Two modes, gated on `flows_info` availability:
+
+    Legacy (backwards-compat, flows_info is None) — the 10 pts split as
+        vix:6 + sector_rank:4
+    which is how every caller before FIX FLOWS1 (2026-09-03) worked.
+
+    With flows (flows_info dict from analysis.fii_dii.load_history) — the
+    10 pts split as
+        vix:5 + sector_rank:3 + fii_dii_flows:2
+    Rationale: FII/DII cash-market net-buy/sell is the single largest
+    driver of same-week Nifty direction on Indian equities — the app
+    already computes and displays it on Analyze Stock's market-context
+    strip, but the composite score was blind to it. Guardrail 5 shape
+    unchanged (Sentiment stays 10 pts of the 90).
+
+    Ships Recommendation 2 from docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+    """
     regime = (vix_info or {}).get("regime", "normal")
     pts: Dict[str, float] = {}
 
-    vix_pts_map = {
-        "complacency": 5.0,
-        "normal":      6.0,
-        "elevated":    4.0,
-        "fear":        2.0,
-        "panic":       0.0,
-        "unknown":     3.0,
-    }
-    pts["vix"] = vix_pts_map.get(regime, 3.0)
+    _flows_available = (
+        isinstance(flows_info, dict)
+        and flows_info.get("fii_5d") is not None
+        and flows_info.get("dii_5d") is not None
+    )
 
-    # Sector rank thresholds derived from n_sectors — not hardcoded
-    top_third = n_sectors // 3
-    mid_third = 2 * n_sectors // 3
-    if sector_rank <= top_third:
-        pts["sector"] = 4.0
-    elif sector_rank <= mid_third:
-        pts["sector"] = 2.0
+    if _flows_available:
+        # Split 5/3/2 — see docstring. VIX map preserves the old 6-pt map's
+        # relative shape then rescales so the max is 5 (normal) instead of 6.
+        vix_pts_map = {
+            "complacency": 4.0, "normal": 5.0, "elevated": 3.0,
+            "fear":        1.5, "panic":  0.0, "unknown":  2.5,
+        }
+        pts["vix"] = vix_pts_map.get(regime, 2.5)
+
+        top_third = n_sectors // 3
+        mid_third = 2 * n_sectors // 3
+        if sector_rank <= top_third:   pts["sector"] = 3.0
+        elif sector_rank <= mid_third: pts["sector"] = 1.5
+        else:                           pts["sector"] = 0.0
+
+        # Flows: sign of 5-day (FII + DII) net cash-market
+        _fii = float(flows_info.get("fii_5d") or 0.0)
+        _dii = float(flows_info.get("dii_5d") or 0.0)
+        if _fii > 0 and _dii > 0:
+            pts["flows"] = 2.0   # broad participation — persistent rallies
+        elif _fii < 0 and _dii < 0:
+            pts["flows"] = 0.0   # distribution — usually precedes weakness
+        elif _fii < 0 and _dii > 0:
+            pts["flows"] = 1.5   # domestic-supported dip — tradeable pullback
+        elif _fii > 0 and _dii < 0:
+            pts["flows"] = 1.0   # DII profit-taking rally — shallower legs
+        else:
+            pts["flows"] = 1.0   # mixed / one leg is zero
+        pts["flows_available"] = True
+        pts["fii_5d"] = round(_fii, 1)
+        pts["dii_5d"] = round(_dii, 1)
+
+        total = pts["vix"] + pts["sector"] + pts["flows"]
     else:
-        pts["sector"] = 0.0
+        # Legacy mode — unchanged from pre-2026-09-03 behavior
+        vix_pts_map = {
+            "complacency": 5.0, "normal": 6.0, "elevated": 4.0,
+            "fear":        2.0, "panic":  0.0, "unknown":  3.0,
+        }
+        pts["vix"] = vix_pts_map.get(regime, 3.0)
 
-    total = pts["vix"] + pts["sector"]
+        top_third = n_sectors // 3
+        mid_third = 2 * n_sectors // 3
+        if sector_rank <= top_third:   pts["sector"] = 4.0
+        elif sector_rank <= mid_third: pts["sector"] = 2.0
+        else:                           pts["sector"] = 0.0
+
+        pts["flows_available"] = False
+        total = pts["vix"] + pts["sector"]
+
     return round(min(total, 10.0), 2), pts
 
 
@@ -627,7 +682,10 @@ def _build_narrative(
     entry: float, sl: float, tp: float, rr: float,
     sector: str, vix_regime: str, sector_rank: int, n_sectors: int,
     momentum_fallback: bool,
+    sent_pts: Optional[Dict] = None,   # FIX FLOWS1: flow sentence gated on this
 ) -> Tuple[str, str]:
+    if sent_pts is None:
+        sent_pts = {}
 
     cur        = df.iloc[-1]
     price      = float(cur["Close"])
@@ -811,6 +869,31 @@ def _build_narrative(
     )
     parts.append(f"{vix_txt} {sector_txt}")
 
+    # Sentence 7: FII/DII 5-day flows (FIX FLOWS1) — only when available.
+    # The sub-scorer records the two sums on `pts["fii_5d"] / dii_5d`; we
+    # read them off the sentiment detail dict passed via `sent_pts` in
+    # score_dataframe. Keep this to one sentence so the narrative stays
+    # readable; the full flow analysis lives on the FII/DII Flows page.
+    if sent_pts.get("flows_available"):
+        _f = sent_pts.get("fii_5d", 0.0)
+        _d = sent_pts.get("dii_5d", 0.0)
+        if _f > 0 and _d > 0:
+            _flow_txt = ("FII and DII are both net buyers over the last 5 sessions "
+                         "— broad institutional participation, a tailwind.")
+        elif _f < 0 and _d < 0:
+            _flow_txt = ("FII and DII are both net sellers over the last 5 sessions "
+                         "— institutional distribution, a headwind.")
+        elif _f < 0 and _d > 0:
+            _flow_txt = ("FII selling absorbed by DII buying (5-day) — a domestic-supported "
+                         "dip, historically a tradeable pullback rather than a trend break.")
+        elif _f > 0 and _d < 0:
+            _flow_txt = ("FII buying with DII taking profits (5-day) — rallies in this regime "
+                         "tend to be shallower; keep stops tight.")
+        else:
+            _flow_txt = None
+        if _flow_txt:
+            parts.append(_flow_txt)
+
     return headline, " ".join(parts)
 
 
@@ -826,6 +909,7 @@ def score_dataframe(
     sector:       str = "Other",
     n_sectors:    int = 15,
     dispersion:   Optional[float] = None,
+    flows_info:   Optional[Dict] = None,
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
@@ -846,7 +930,8 @@ def score_dataframe(
     mom_pts,   mom_detail  = _score_momentum(df)
     vol_pts,   vol_detail  = _score_volume(df)
     pat_detail             = _detect_patterns(df)
-    sent_pts,  sent_detail = _score_sentiment(vix_info, sector_rank, n_sectors)
+    sent_pts,  sent_detail = _score_sentiment(vix_info, sector_rank, n_sectors,
+                                              flows_info=flows_info)
 
     momentum_fallback = mom_detail.get("is_fallback", False)
     patterns          = pat_detail.get("patterns", [])
@@ -887,6 +972,7 @@ def score_dataframe(
         sector=sector, vix_regime=vix_info.get("regime", "normal"),
         sector_rank=sector_rank, n_sectors=n_sectors,
         momentum_fallback=momentum_fallback,
+        sent_pts=sent_detail,   # FIX FLOWS1: flow sentence needs the detail dict
     )
 
     # FIX REGIME-DISP-SCORE — append the low-dispersion caution to the
@@ -1017,12 +1103,32 @@ def score_stock(
             sector=sector, vix_regime="unknown", sector_rank=sector_rank,
         )
 
+    # FIX FLOWS1 (2026-09-03) — load FII/DII 5-day cash-market flows so the
+    # Sentiment pillar can consume the sign. load_history() reads from the
+    # trade_store cache the fii_dii cron populates; a miss here (no data yet,
+    # DB unreachable) is best-effort: flows_info stays None and _score_sentiment
+    # falls back to its legacy 6/4 split (documented in that function).
+    flows_info: Optional[Dict] = None
+    try:
+        from analysis.fii_dii import load_history as _fd_load
+        _fd = _fd_load(days=5)
+        if _fd is not None and not _fd.empty and len(_fd) >= 3:
+            flows_info = {
+                "fii_5d": float(_fd["fii_net"].fillna(0).sum()),
+                "dii_5d": float(_fd["dii_net"].fillna(0).sum()),
+                "n_days": int(len(_fd)),
+            }
+    except Exception as _fl_e:
+        _log.debug("FII/DII flows unavailable for scoring: %s: %s",
+                   type(_fl_e).__name__, _fl_e)
+
     result = score_dataframe(
         df=df, ticker=canonical,
         vix_info=vix_info,
         sector_rank=sector_rank,
         sector=sector,
         n_sectors=n_sectors,
+        flows_info=flows_info,
     )
 
     # Update entry to live price if Angel One is configured

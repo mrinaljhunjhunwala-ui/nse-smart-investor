@@ -297,7 +297,10 @@ _See `docs/RS_INTEGRATION_2026-09.md` for the reviewer writeup._
 
 ---
 
-### Task 3.2: FII/DII 5d flow sign, inside Sentiment pillar
+### Task 3.2: FII/DII 5d flow sign, inside Sentiment pillar  ✅ SHIPPED 2026-09-03 · commit pending
+
+_See `docs/FLOWS_INTEGRATION_2026-09.md` for the reviewer writeup._
+
 **Description:** Sentiment stays 10 pts. Internal split becomes `vix_regime:5 + sector_rank:3 + flows:2`. Flow score reads from `analysis/fii_dii.load_history(days=5)`.
 
 **Acceptance criteria:**
