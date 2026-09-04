@@ -153,7 +153,10 @@ Refactor Command Centre paper-trades overview (`dashboard/pages/02_command_centr
 
 ---
 
-### Task 1.6: Pre-commit CSS-hex lint
+### Task 1.6: Pre-commit CSS-hex lint  ✅ SHIPPED 2026-09-04 · commit pending
+
+_.claude/hooks/block_page_hex.py + settings.json wiring. Surfaces 96 raw hex literals in Command Centre alone — matches the audit; Task 1.2 (hex→tokens migration) can now proceed with drift protection._
+
 **Description:** Add a pre-commit hook (or extend the existing `.claude/hooks/`) that fails when a raw hex literal appears in a file under `dashboard/pages/`. Comments allowed via `# noqa: hex` suffix.
 
 **Acceptance criteria:**
