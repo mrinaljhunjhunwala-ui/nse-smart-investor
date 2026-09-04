@@ -482,6 +482,29 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "verdict card render failed: %s", _vc_err)
 
+            # ── AI Co-Pilot panel (moved 2026-09-04) ─────────────────────
+            # Was at the bottom of the file behind ~2260 lines of page
+            # content, inside a collapsed expander. Users reasonably said
+            # "AI chatbot not showing" - they never scrolled that far or
+            # clicked the expander. Rendered here right after the Verdict
+            # Card so it's visible above the fold; the panel itself opens
+            # by default when GROQ_API_KEY is set (see panel.py's expanded=
+            # kwarg default). Try/except-wrapped so a co-pilot failure
+            # never crashes the page.
+            try:
+                from dashboard.shared.ai import (
+                    collect_for_analyze_stock as _ai_collect,
+                    render_chat_panel as _ai_panel,
+                )
+                _ai_sym = ticker.replace(".NS", "") if ticker else ""
+                if _ai_sym:
+                    _ai_inputs = _ai_collect(_ai_sym)
+                    _ai_panel(_ai_sym, _ai_inputs)
+            except Exception as _ai_err:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "AI co-pilot panel render failed: %s", _ai_err)
+
             # Live price
             _an_live = None
             try:
@@ -2276,11 +2299,10 @@ if analyze_btn or _prefill_active or (
                 st.code(traceback.format_exc())
 
 
-# ── AI Co-Pilot panel ─────────────────────────────────────────────────────────
-# Implements the three-layer prompt architecture from the ai-copilot-context
-# skill (.claude/skills/ai-copilot-context/SKILL.md): static persona → live
-# dashboard state → conversation. Panel gracefully hides itself when
-# GROQ_API_KEY is not set. Never allowed to crash the page.
+# ── AI Co-Pilot panel — moved higher, see the block right after the Verdict
+# Card near the top of the page (2026-09-04). This bottom placement stays
+# for the case where the top block failed to render (guard-only, expander
+# collapsed) so the diagnostic is still reachable at the foot of the page.
 try:
     from dashboard.shared.ai import (
         collect_for_analyze_stock,
@@ -2290,6 +2312,8 @@ try:
     _copilot_sym = ticker.replace(".NS", "") if ticker else ""
     if _copilot_sym:
         _copilot_inputs = collect_for_analyze_stock(_copilot_sym)
-        render_chat_panel(_copilot_sym, _copilot_inputs)
+        render_chat_panel(_copilot_sym, _copilot_inputs,
+                          heading="AI Co-Pilot (bottom fallback)",
+                          expanded=False)
 except Exception as _copilot_err:
     st.caption(f"AI co-pilot not rendered: {_copilot_err}")

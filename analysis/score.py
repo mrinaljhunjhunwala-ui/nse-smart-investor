@@ -989,26 +989,58 @@ def _compute_entry_levels(
     return round(price, 2), round(sl, 2), round(tp, 2), rr
 
 
-def _pick_horizon(tech_pts: float, mom_pts: float) -> Tuple[str, int]:
-    """
-    FIX HZ1: every score-driven page (Top Picks, Analyze Stock, Watchlist,
-    Quality Watch) handed back an action label (STRONG BUY / BUY / etc.)
-    with no sense of how long that setup is actually good for — flagged as
-    "too vague" when deciding when to book or walk away. A momentum-heavy
-    score describes a shorter-lived push that tends to mean-revert; a
-    technical/trend-heavy score (higher structural weight, less reliance on
-    the momentum sub-score) describes a more durable setup. This doesn't
-    invent new signals — it just labels which of the two the composite
-    score is already leaning on, using the same tech_pts/mom_pts already
-    computed for this ticker.
+def _pick_horizon(tech_pts: float, mom_pts: float,
+                  vix_regime: Optional[str] = None,
+                  score: Optional[float] = None) -> Tuple[str, int]:
+    """FIX HZ2 (2026-09-04) — granular horizon based on momentum share,
+    VIX regime and score strength.
 
-    Returns (label, calendar_days_until_stale) — the latter feeds
-    CompositeScore.valid_until so a pick can visibly go stale instead of
-    sitting on screen looking current indefinitely.
+    Previously this was a binary flip between "Swing (3–10 trading days)"
+    and "Positional (2–6 weeks)" — every stock in the app read one of
+    exactly two labels forever, which is what the user reported as "the
+    horizon is the same for all stocks". Not a bug in the sense of a
+    crash, but a bug in that the label carried no per-stock information.
+
+    New shape:
+      * mom/(tech+mom) ratio picks one of four base windows
+      * VIX regime shortens (fear / panic) or extends (complacency) the
+        window — high vol tape resolves faster, low vol tape gives room
+      * Very low score (<40) forces a "Watch only" label — the composite
+        isn't strong enough to justify a directional horizon at all
+
+    Backwards-compat: vix_regime + score default to None; when both are
+    None the function returns one of the four base labels only (no VIX /
+    score modifiers), still more varied than the old binary switch.
     """
-    if mom_pts >= tech_pts:
-        return "Swing (3–10 trading days)", 14
-    return "Positional (2–6 weeks)", 42
+    # Very low conviction — no meaningful trade horizon.
+    if score is not None and score < 40:
+        return "Watch only – conviction too low for a horizon", 7
+
+    total = float(tech_pts) + float(mom_pts)
+    if total <= 0:
+        return "Watch – no clear timeframe", 7
+    mom_ratio = float(mom_pts) / total
+
+    # Base window from momentum-to-total ratio.
+    if mom_ratio >= 0.65:
+        label, days = "Fast swing (2–5 trading days)", 7
+    elif mom_ratio >= 0.55:
+        label, days = "Swing (5–10 trading days)", 14
+    elif mom_ratio >= 0.45:
+        label, days = "Positional (2–4 weeks)", 28
+    else:
+        label, days = "Trend hold (4–8 weeks)", 56
+
+    # VIX regime modifier — high vol -> shorter window; complacency -> longer.
+    reg = (vix_regime or "").lower()
+    if reg in {"fear", "panic"}:
+        days = max(3, int(round(days * 0.7)))
+        label = f"{label} (high-VIX: window shortened)"
+    elif reg == "complacency":
+        days = int(round(days * 1.25))
+        label = f"{label} (low-VIX: window extended)"
+
+    return label, days
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1377,7 +1409,13 @@ def score_dataframe(
     entry, sl, tp, rr = _compute_entry_levels(
         df, total, vix_regime=vix_info.get("regime", "normal")
     )
-    horizon_label, horizon_days = _pick_horizon(tech_pts, mom_pts)
+    # FIX HZ2 (2026-09-04): pass regime + score so the horizon is per-stock
+    # varied instead of a binary label.
+    horizon_label, horizon_days = _pick_horizon(
+        tech_pts, mom_pts,
+        vix_regime=vix_info.get("regime"),
+        score=total,
+    )
     valid_until = (datetime.now() + timedelta(days=horizon_days)).date().isoformat()
 
     # FIX WL1: RSI/1-day-return were never exposed on CompositeScore, even
