@@ -113,30 +113,32 @@ try:
             _pto_wins = int((_pnl_series > 0).sum())
     _pto_wr = (_pto_wins / _pto_tot * 100) if _pto_tot else 0.0
 
-    _u_clr = "#00d4aa" if _pto_unreal >= 0 else "#ff4757"
-    _r_clr = "#00d4aa" if _pto_real   >= 0 else "#ff4757"
-    _wr_clr = "#00d4aa" if _pto_wr >= 50 else ("#ff9500" if _pto_wr >= 35 else "#ff4757")
-
-    def _pto_cell(_lbl, _val, _clr="#f0f4ff", _sub=""):
-        return (f'<div style="flex:1;text-align:center;padding:6px 10px">'
-                f'<div style="font-size:10px;color:#4a5568;text-transform:uppercase;'
-                f'letter-spacing:1px">{_lbl}</div>'
-                f'<div style="font-size:22px;font-weight:800;color:{_clr}">{_val}</div>'
-                + (f'<div style="font-size:11px;color:#8899bb">{_sub}</div>' if _sub else "")
-                + '</div>')
-
+    # Task 1.3: this block used a bespoke _pto_cell helper + a raw
+    # .glass-panel wrapper with drifting hex ("#f0f4ff", "#4a5568",
+    # "#5a6a8a", "#8899bb"). Migrated to the shared panel() + stat()
+    # components so it renders in the same visual language as every
+    # other card in the app and pulls color from CSS custom properties.
+    from dashboard.shared.ui_components import panel as _panel, stat as _stat
+    _u_tone = "bull" if _pto_unreal >= 0 else "bear"
+    _r_tone = "bull" if _pto_real   >= 0 else "bear"
+    _wr_tone = ("bull" if _pto_wr >= 50 else
+                "amber" if _pto_wr >= 35 else "bear")
+    _pto_body = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
+        'gap:14px 22px">'
+        + _stat("Open Positions", f"{_pto_n}", tone="neutral", align="center")
+        + _stat("Unrealised P&amp;L", f"Rs.{_pto_unreal:+,.0f}",
+                sub="live prices", tone=_u_tone, align="center")
+        + _stat("Realised P&amp;L", f"Rs.{_pto_real:+,.0f}",
+                sub=f"{_pto_tot} closed", tone=_r_tone, align="center")
+        + _stat("Win Rate", f"{_pto_wr:.0f}%",
+                sub=(f"{_pto_wins}/{_pto_tot} wins" if _pto_tot else "no closed trades"),
+                tone=_wr_tone, align="center")
+        + '</div>'
+    )
     st.markdown(
-        '<div class="glass-panel" style="margin-bottom:14px;padding:10px 8px">'
-        '<div style="font-size:11px;font-weight:700;color:#5a6a8a;text-transform:uppercase;'
-        'letter-spacing:1.2px;padding:0 10px 4px">📊 Paper Trades Overview</div>'
-        '<div style="display:flex;flex-wrap:wrap">'
-        + _pto_cell("Open Positions", f"{_pto_n}")
-        + _pto_cell("Unrealised P&amp;L", f"₹{_pto_unreal:+,.0f}", _u_clr, "live prices")
-        + _pto_cell("Realised P&amp;L", f"₹{_pto_real:+,.0f}", _r_clr,
-                    f"{_pto_tot} closed")
-        + _pto_cell("Win Rate", f"{_pto_wr:.0f}%", _wr_clr,
-                    f"{_pto_wins}/{_pto_tot} wins" if _pto_tot else "no closed trades")
-        + '</div></div>',
+        _panel(_pto_body, kind="glass", tone="neutral",
+               title="Paper Trades Overview", margin="0 0 14px 0"),
         unsafe_allow_html=True,
     )
 except Exception as _pto_e:

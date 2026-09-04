@@ -451,6 +451,36 @@ if analyze_btn or _prefill_active or (
                 )
                 st.stop()
 
+            # ── Task 1.4: Verdict Card hero ─────────────────────────────────
+            # Audit's #1 finding: "So what should I do?" was never the loudest
+            # thing on this page. Rendered above the existing score/chart/
+            # narrative sections so the answer lands before the evidence.
+            # Portfolio position pulled from load_manual_holdings when the
+            # user holds this ticker — no extra fetch.
+            try:
+                from dashboard.shared.ui_components import verdict_card as _verdict_card
+                _pctx = None
+                try:
+                    _holdings = load_manual_holdings()
+                    if _holdings is not None and not _holdings.empty:
+                        _short = ticker.replace(".NS", "")
+                        _row = _holdings[_holdings["ticker"].str.replace(".NS", "", regex=False) == _short]
+                        if not _row.empty:
+                            _pctx = {
+                                "shares_held": int(_row.iloc[0].get("quantity", 0) or 0),
+                                "avg_price":   float(_row.iloc[0].get("avg_price", 0) or 0.0),
+                            }
+                except Exception as _hp_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "portfolio ctx for verdict card unavailable: %s", _hp_e)
+                st.markdown(_verdict_card(cs, portfolio_ctx=_pctx),
+                            unsafe_allow_html=True)
+            except Exception as _vc_err:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "verdict card render failed: %s", _vc_err)
+
             # Live price
             _an_live = None
             try:

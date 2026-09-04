@@ -90,7 +90,10 @@ _Generated 2026-09-02 from `tasks/plan.md`. Update the checkboxes as each task l
 
 ---
 
-### Task 1.3: `panel()` and `stat()` shared components
+### Task 1.3: `panel()` and `stat()` shared components  ✅ SHIPPED 2026-09-04 · commit pending
+
+_Both added to `dashboard/shared/ui_components.py`; Command Centre paper-trades overview refactored as the first consumer. Sources every color from CSS custom-property tokens (Task 1.6 lint enforced)._
+
 **Description:** Introduce two components in `dashboard/shared/ui_components.py`:
 - `panel(kind, tone, title, body_html)` – replaces the three ad-hoc card variants (`.card-*`, inline glass-panel divs, `_pto_cell` helper).
 - `stat(label, value, delta=None, spark_series=None)` – replaces the Streamlit `st.metric` / `.metric-box` / `_pto_cell` triple.
@@ -114,7 +117,10 @@ Refactor Command Centre paper-trades overview (`dashboard/pages/02_command_centr
 
 ---
 
-### Task 1.4: Verdict Card hero on Analyze Stock
+### Task 1.4: Verdict Card hero on Analyze Stock  ✅ SHIPPED 2026-09-04 · commit pending
+
+_`verdict_card()` in `dashboard/shared/ui_components.py`; wired at the top of Analyze Stock right after the UNAVAILABLE-sentinel guard. Renders action + conviction (0/90) + entry/stop/target/R:R + suggested share count (from 1% risk budget) + optional secondary row for RS score, positioning, and the user's existing position._
+
 **Description:** New component `verdict_card(cs, portfolio_ctx)` shown at the top of Analyze Stock. Displays action, conviction (0-100), horizon, size in ₹ (from Position Sizer defaults), R multiple. Push disclosures behind an ⓘ affordance next to the score.
 
 **Acceptance criteria:**
