@@ -339,27 +339,101 @@ def parse_option_chain(payload: Dict, symbol: str,
 # Fetcher — with session priming
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _make_session() -> requests.Session:
-    s = requests.Session()
+# FIX OC-WAF (2026-09-04): NSE's /api/option-chain-equities endpoint now
+# actively returns `{}` (2 bytes, HTTP 200) to plain-requests callers even
+# after Referer + cookie priming. Confirmed via multi-approach probing:
+#   * python-requests with all Chrome headers            -> {}
+#   * curl_cffi impersonate=chrome124 with full cookies  -> {}
+#   * nsepython (community library with workarounds)     -> {}
+# NSE has fully locked this endpoint from scripted access. Working paths:
+#   1. curl_cffi + browser TLS fingerprint + AJAX headers may occasionally
+#      work when the session first fetches option-chain landing HTML and
+#      then hits the API within seconds. We try this path first.
+#   2. Manual cookie paste: user opens option-chain page in Chrome, copies
+#      the `nseappid` cookie value, saves to .streamlit/secrets.toml under
+#      [nse] cookie = "..." — the session then uses it verbatim. Cookies
+#      typically last 24-48h before needing a re-paste.
+#   3. Playwright (heavy dep) — a real headless browser that solves the
+#      Akamai challenge. Not shipped here to avoid the ~150MB dependency;
+#      queue as follow-up work if the two paths above prove insufficient.
+#
+# On {} response we now log a clear DIAGNOSTIC (not a bare "empty payload")
+# telling the operator which of the escape hatches to try.
+
+_HAS_CURL_CFFI = False
+try:
+    from curl_cffi import requests as _cf_requests  # type: ignore
+    _HAS_CURL_CFFI = True
+except ImportError:
+    pass
+
+
+def _read_manual_cookie() -> Optional[str]:
+    """Return a Cookie: header string set by the operator in
+    .streamlit/secrets.toml under `[nse] cookie = "..."`. None when absent.
+    """
+    try:
+        import streamlit as st  # local import — module stays streamlit-free
+        nse = st.secrets.get("nse")
+        if isinstance(nse, dict):
+            v = nse.get("cookie")
+            if v:
+                return str(v)
+    except Exception:
+        pass
+    return None
+
+
+def _make_session():
+    """Build the best session available for the option-chain API.
+
+    Prefers curl_cffi (browser TLS fingerprint mimicry) when installed;
+    falls back to plain requests otherwise. Primes with a multi-page GET
+    sequence so Akamai sets its full cookie set (AKA_A2 + _abck + ak_bmsc +
+    bm_sz + bm_mi + bm_sv). Manually-pasted `nseappid` cookie is merged in
+    when present in secrets.toml.
+    """
+    if _HAS_CURL_CFFI:
+        s = _cf_requests.Session(impersonate="chrome124")
+    else:
+        s = requests.Session()
     s.headers.update({
-        "User-Agent":       _UA,
-        "Accept":           "application/json,text/plain,*/*",
-        "Accept-Language":  "en-US,en;q=0.9",
-        "Referer":          "https://www.nseindia.com/option-chain",
+        "User-Agent":               _UA,
+        "Accept":                   "application/json,text/plain,*/*",
+        "Accept-Language":          "en-US,en;q=0.9",
+        "Referer":                  "https://www.nseindia.com/option-chain",
+        "sec-ch-ua":                '"Chromium";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile":         "?0",
+        "sec-ch-ua-platform":       '"Windows"',
+        "sec-fetch-dest":           "empty",
+        "sec-fetch-mode":           "cors",
+        "sec-fetch-site":           "same-origin",
+        "x-requested-with":         "XMLHttpRequest",
     })
-    # Prime the cookie jar. Without this NSE returns HTML for the API call.
+    # Multi-step cookie prime — hit homepage + option-chain page, brief pause
+    # in between so Akamai's JS-set cookies land.
+    try:
+        s.get("https://www.nseindia.com/", timeout=_TIMEOUT)
+    except Exception as e:
+        _log.debug("prime homepage failed: %s", e)
     try:
         s.get(_PRIME_URL, timeout=_TIMEOUT)
     except Exception as e:
-        _log.debug("session prime failed (proceeding anyway): %s", e)
+        _log.debug("prime option-chain failed: %s", e)
+
+    # Merge any operator-supplied cookie header
+    manual = _read_manual_cookie()
+    if manual:
+        s.headers["Cookie"] = manual
     return s
 
 
-def fetch_chain(symbol: str,
-                session: Optional[requests.Session] = None) -> Dict:
-    """
-    Fetch and JSON-decode the raw option chain for one symbol. Raises
-    named ValueError on 404, HTML-not-JSON, or empty body.
+def fetch_chain(symbol: str, session=None) -> Dict:
+    """Fetch and JSON-decode the raw option chain for one symbol.
+
+    Raises named ValueError on 404, HTML-not-JSON, empty body, or the
+    tell-tale `{}` WAF-blocked response (with a diagnostic pointing to
+    the two escape hatches).
     """
     sess = session or _make_session()
     url = _API_TPL.format(sym=symbol.upper().replace(".NS", ""))
@@ -367,16 +441,28 @@ def fetch_chain(symbol: str,
     if r.status_code == 404:
         raise ValueError(f"option chain: 404 for {symbol} — not F&O-eligible?")
     r.raise_for_status()
-    text = r.text or ""
-    if not text.strip():
+    # curl_cffi returns bytes; requests returns str via .text.
+    body = r.content if hasattr(r, "content") else (r.text or "").encode("utf-8")
+    if not body.strip():
         raise ValueError(f"option chain: empty response body for {symbol}")
-    if text.lstrip().startswith("<"):
+    if body.lstrip().startswith(b"<"):
         raise ValueError(
             f"NSE returned HTML (not JSON) for option chain of {symbol} — "
-            f"probable rate-limit or WAF challenge. Body: {text[:120]!r}"
+            f"probable rate-limit or WAF challenge. Body: {body[:120]!r}"
+        )
+    # The tell-tale WAF-block: HTTP 200 but body is literal `{}`.
+    if body.strip() in {b"{}", b"[]"}:
+        raise ValueError(
+            f"NSE option-chain endpoint returned {body.strip().decode()!r} for "
+            f"{symbol} — this is the WAF-blocked response NSE serves to "
+            f"scripted callers as of ~2026-09. Escape hatches: (1) install "
+            f"curl_cffi if not already (`pip install curl_cffi`); (2) open "
+            f"https://www.nseindia.com/option-chain in Chrome, copy the "
+            f"Cookie header, save to .streamlit/secrets.toml as `[nse] "
+            f"cookie = \"...\"`. See data/nse_option_chain.py FIX OC-WAF."
         )
     try:
-        return json.loads(text)
+        return json.loads(body)
     except json.JSONDecodeError as e:
         raise ValueError(
             f"option chain: JSON decode failed for {symbol}: {e}"

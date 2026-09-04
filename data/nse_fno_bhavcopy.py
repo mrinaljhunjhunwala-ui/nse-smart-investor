@@ -43,6 +43,7 @@ import csv
 import datetime as _dt
 import io
 import logging
+import zipfile
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -142,14 +143,22 @@ def _persist(rows: List[Dict]) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _bhavcopy_url(date: _dt.date) -> str:
-    """Current NSE F&O bhavcopy filename (as of 2025-26 schema).
+    """Current NSE F&O bhavcopy filename (verified 2026-09-04).
+
+    Note: this is a .zip containing a single .csv, not a bare .csv.
+    _fetch_bhavcopy unzips in memory before returning the CSV text.
 
     NSE has renamed this file several times. If it 404s across recent
-    weekdays, check the latest NSE archives page and update.
+    weekdays, check the latest NSE archives page and update. Legacy
+    formats attempted historically:
+      * .../BhavCopy_NSE_FO_0_0_0_{ymd}_F_0000.csv          (no .zip)
+      * .../fo_bhavdata_full_{ddmmyyyy}.csv                 (retired)
+      * .../fo{DDMMYYYY}bhav.csv.zip                         (pre-2024)
+      * archives.nseindia.com/content/historical/DERIVATIVES/YYYY/MON/  (deep)
     """
     ymd = date.strftime("%Y%m%d")
     return (f"https://nsearchives.nseindia.com/content/fo/"
-            f"BhavCopy_NSE_FO_0_0_0_{ymd}_F_0000.csv")
+            f"BhavCopy_NSE_FO_0_0_0_{ymd}_F_0000.csv.zip")
 
 
 def _parse_bhavcopy(csv_text: str, target_date: _dt.date) -> List[Dict]:
@@ -228,11 +237,35 @@ def _fetch_bhavcopy(date: _dt.date) -> str:
             f"the filename again — see _bhavcopy_url docstring."
         )
     r.raise_for_status()
-    text = r.text or ""
+
+    # FIX FNO-ZIP (2026-09-04): NSE serves this bhavcopy as a .zip
+    # containing a single .csv. Older versions of this fetcher expected a
+    # bare .csv and returned r.text, which was raw zip bytes decoded as
+    # latin-1 — the parser then saw garbage and aggregated 0 rows.
+    body = r.content or b""
+    if body[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(io.BytesIO(body)) as zf:
+                names = [n for n in zf.namelist()
+                         if n.lower().endswith(".csv")]
+                if not names:
+                    raise ValueError(
+                        f"NSE fno bhavcopy zip for {date.isoformat()} contains "
+                        f"no CSV entry (members: {zf.namelist()[:5]})"
+                    )
+                with zf.open(names[0]) as inner:
+                    return inner.read().decode("utf-8", errors="replace")
+        except zipfile.BadZipFile as e:
+            raise ValueError(
+                f"NSE fno bhavcopy for {date.isoformat()}: PK header but "
+                f"bad zip: {e}"
+            )
+    # Non-zip response — sniff for CSV vs HTML challenge
+    text = body.decode("utf-8", errors="replace")
     if text.lstrip().startswith("<"):
         raise ValueError(
-            f"NSE returned HTML (not CSV) for {url} — probable rate-limit or "
-            f"WAF challenge. Body starts: {text[:120]!r}"
+            f"NSE returned HTML (not CSV/zip) for {url} — probable "
+            f"rate-limit or WAF challenge. Body starts: {text[:120]!r}"
         )
     return text
 
