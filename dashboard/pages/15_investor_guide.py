@@ -26,7 +26,8 @@ render_sidebar(current="Investor Guide")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("📖 Investor Guide — How to Read This Dashboard")
+st.title("Investor Guide – How to Read This Dashboard")
+
 st.markdown(
     "This guide explains every signal, score, and term used in the NSE Smart Investor platform.  \n"
     "Read this once and you will understand exactly what every number means and when to act."

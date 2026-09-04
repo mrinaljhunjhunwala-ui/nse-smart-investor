@@ -35,7 +35,8 @@ render_sidebar(current="Intraday Trader")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("⚡ Intraday Trader")
+st.title("Intraday Trader")
+
 st.markdown(
     "Real-time intraday tools — Gap Scanner, CPR Levels, ORB Setup, "
     "live Supertrend/VWAP signals on 5m/15m charts, and Options strategy/OI tools.  \n"

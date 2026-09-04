@@ -45,7 +45,8 @@ apply_design()
 render_sidebar(current="Deep Dive Analysis")
 render_top_bar()
 
-st.title("📑 Deep Dive Analysis")
+st.title("Deep Dive Analysis")
+
 st.caption(
     "Get a structured, blunt equity-research read on one stock — fundamentals, "
     "management tone, valuation, technical structure, risks, and a final verdict. "

@@ -86,7 +86,8 @@ render_sidebar(current="Analyze Stock")
 render_top_bar()
 
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("🔍 Analyze Any NSE Stock")
+st.title("Analyze Any NSE Stock")
+
 st.markdown(
     "Search by company name or ticker — get a full **trend-quality score**, "
     "chart, stop-loss, and plain-English read of the setup."

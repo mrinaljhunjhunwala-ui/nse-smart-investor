@@ -112,7 +112,8 @@ apply_design()
 render_sidebar(current="My Portfolio")
 render_top_bar()
 
-st.title("🏠 My Portfolio")
+st.title("My Portfolio")
+
 st.markdown(
     "Your holdings health check — live prices, trend-quality scores, and plain English guidance for each stock."
 )

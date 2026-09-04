@@ -42,7 +42,8 @@ render_sidebar(current="Command Centre")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("🎯 Command Centre")
+st.title("Command Centre")
+
 st.caption("Market conditions · open positions needing action · watchlist decisions — no digging required.")
 
 # ── 0. MORNING SUMMARY CARD — your daily brief ─────────────────────────────

@@ -143,7 +143,10 @@ _`verdict_card()` in `dashboard/shared/ui_components.py`; wired at the top of An
 
 ---
 
-### Task 1.5: Emoji cleanup in headings
+### Task 1.5: Emoji cleanup in headings  ✅ SHIPPED 2026-09-04 · commit pending
+
+_19 decorative emoji stripped from `st.title()` across all pages; four em-dashes normalised to en-dash per house style §21. Semantic emoji elsewhere (regime dots, ▲/▼ arrows, state chips) intentionally kept._
+
 **Description:** Retire decorative emoji from H1/H2 across all 20 pages. Keep semantic emoji (▲ ▼ for direction; regime dots) untouched.
 
 **Acceptance criteria:**

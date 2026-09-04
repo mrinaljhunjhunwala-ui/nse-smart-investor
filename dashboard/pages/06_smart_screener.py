@@ -19,7 +19,8 @@ render_sidebar(current="Smart Screener")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("🔎 Smart Stock Screener")
+st.title("Smart Stock Screener")
+
 st.markdown(
     "Scan the NSE universe using 4 proven screens — oversold bounce, "
     "momentum leaders, breakouts, and pullback entries.  \n"

@@ -37,7 +37,8 @@ render_sidebar(current="My Watchlist")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("⭐ My Watchlist")
+st.title("My Watchlist")
+
 st.markdown("Save stocks you're tracking. Scores and prices update automatically.")
 
 # SQLite-backed watchlist (same DB as paper trades)
