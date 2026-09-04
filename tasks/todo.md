@@ -71,7 +71,10 @@ _Generated 2026-09-02 from `tasks/plan.md`. Update the checkboxes as each task l
 
 ## Phase 1 · UI foundation
 
-### Task 1.2: Migrate Command Centre + Analyze Stock off inline hex
+### Task 1.2: Migrate Command Centre + Analyze Stock off inline hex  ✅ SHIPPED 2026-09-04 · commit pending
+
+_302 raw hex literals across the two pages migrated to `var(--token)` references. `page-hex-lint` clean, page-smoke green. Migration script preserved in scratchpad in case another page needs the same treatment._
+
 **Description:** Two loudest pages. Replace every raw hex literal with `var(--token)`. Where a page uses `#26a69a` / `#00d4aa` etc. the mapping goes to `--bull`; `#ff4757` / `#ef5350` to `--bear`; `#FFC107` / `#f9a825` to `--amber`; `#5b8def` / `#0d1526` etc. re-evaluated case by case.
 
 **Acceptance criteria:**

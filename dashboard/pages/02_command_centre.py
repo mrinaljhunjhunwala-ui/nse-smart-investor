@@ -66,17 +66,17 @@ _mb_focus = {
     "normal":      ("🟢", "Calm conditions — trade your setups normally"),
     "complacency": ("😴", "Very calm — tighten stops, stay selective"),
 }.get(_mb_reg, ("•", "Trade your plan"))
-_mb_pos_txt = (f"You have <b style='color:#ff9500'>{_mb_open}</b> open paper position"
+_mb_pos_txt = (f"You have <b style='color:var(--amber)'>{_mb_open}</b> open paper position"
                f"{'s' if _mb_open != 1 else ''}." if _mb_open else
                "No open paper positions.")
 st.markdown(
     f'<div class="glass-panel" style="margin-bottom:14px;display:flex;'
     f'justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">'
-    f'<div><div style="font-size:20px;font-weight:800;color:#f0f4ff">☀️ {_mb_greet}, Mrinal</div>'
-    f'<div style="font-size:12px;color:#8899bb;margin-top:2px">{_mb_date}</div></div>'
+    f'<div><div style="font-size:20px;font-weight:800;color:var(--ink)">☀️ {_mb_greet}, Mrinal</div>'
+    f'<div style="font-size:12px;color:var(--dim);margin-top:2px">{_mb_date}</div></div>'
     f'<div style="text-align:right">'
-    f'<div style="font-size:13px;color:#e0e0e0">{_mb_focus[0]} {_mb_focus[1]}</div>'
-    f'<div style="font-size:12px;color:#8899bb;margin-top:3px">{_mb_pos_txt} '
+    f'<div style="font-size:13px;color:var(--ink-mid)">{_mb_focus[0]} {_mb_focus[1]}</div>'
+    f'<div style="font-size:12px;color:var(--dim);margin-top:3px">{_mb_pos_txt} '
     f'Scroll for today\'s picks &amp; watchlist.</div></div>'
     f'</div>',
     unsafe_allow_html=True,
@@ -114,8 +114,8 @@ try:
     _pto_wr = (_pto_wins / _pto_tot * 100) if _pto_tot else 0.0
 
     # Task 1.3: this block used a bespoke _pto_cell helper + a raw
-    # .glass-panel wrapper with drifting hex ("#f0f4ff", "#4a5568",
-    # "#5a6a8a", "#8899bb"). Migrated to the shared panel() + stat()
+    # .glass-panel wrapper with drifting hex ("var(--ink)", "var(--faint)",
+    # "var(--faint)", "var(--dim)"). Migrated to the shared panel() + stat()
     # components so it renders in the same visual language as every
     # other card in the app and pulls color from CSS custom properties.
     from dashboard.shared.ui_components import panel as _panel, stat as _stat
@@ -170,43 +170,43 @@ except Exception as _e:
     st.caption(f"⚠️ Couldn't load Nifty trend ({_e}) — market pulse may be incomplete.")
 
 _VIX_LBL = {
-    "complacency": ("#FFC107", "😴", "COMPLACENT"), "normal":  ("#26a69a", "🟢", "CALM"),
-    "elevated":    ("#FF9800", "🟡", "ELEVATED"),   "fear":    ("#ef5350", "🔴", "HIGH FEAR"),
-    "panic":       ("#b71c1c", "🚨", "PANIC"),      "unknown": ("#9e9e9e", "❓", "UNKNOWN"),
+    "complacency": ("var(--amber)", "😴", "COMPLACENT"), "normal":  ("var(--bull)", "🟢", "CALM"),
+    "elevated":    ("var(--amber)", "🟡", "ELEVATED"),   "fear":    ("var(--bear)", "🔴", "HIGH FEAR"),
+    "panic":       ("var(--bear)", "🚨", "PANIC"),      "unknown": ("var(--dim)", "❓", "UNKNOWN"),
 }
 _NT_LBL = {
-    "uptrend":  ("#26a69a", "📈", "UPTREND"),  "downtrend": ("#ef5350", "📉", "DOWNTREND"),
-    "sideways": ("#FFC107", "↔️", "SIDEWAYS"), "unknown":   ("#9e9e9e", "❓", "NO DATA"),
+    "uptrend":  ("var(--bull)", "📈", "UPTREND"),  "downtrend": ("var(--bear)", "📉", "DOWNTREND"),
+    "sideways": ("var(--amber)", "↔️", "SIDEWAYS"), "unknown":   ("var(--dim)", "❓", "NO DATA"),
 }
 _vc, _vi, _vl = _VIX_LBL.get(_cc_vix_r, _VIX_LBL["unknown"])
 _nc, _ni, _nl = _NT_LBL.get(_cc_nifty_trend, _NT_LBL["unknown"])
 
 if _cc_vix_r == "normal" and _cc_nifty_trend == "uptrend":
-    _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "#0a2a1a", "#26a69a"
+    _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "var(--sunken)", "var(--bull)"
 elif _cc_vix_r in ("fear", "panic") or _cc_nifty_trend == "downtrend":
-    _verd, _vbg, _vbdr = "🔴 Weak / fearful market — avoid new buys, protect capital", "#2a0a0a", "#ef5350"
+    _verd, _vbg, _vbdr = "🔴 Weak / fearful market — avoid new buys, protect capital", "var(--sunken)", "var(--bear)"
 elif _cc_vix_r == "complacency":
-    _verd, _vbg, _vbdr = "😴 Market too calm — be selective, tighten stops", "#2a2000", "#FFC107"
+    _verd, _vbg, _vbdr = "😴 Market too calm — be selective, tighten stops", "var(--sunken)", "var(--amber)"
 else:
-    _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "#1a1a0a", "#FFC107"
+    _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "var(--sunken)", "var(--amber)"
 
 st.markdown(
     f'<div style="display:flex;gap:12px;margin-bottom:4px">'
-    f'<div style="flex:1;background:#0d1f3c;border-left:5px solid {_vc};border-radius:10px;padding:14px 16px">'
-    f'<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">India VIX</div>'
+    f'<div style="flex:1;background:var(--surface);border-left:5px solid {_vc};border-radius:10px;padding:14px 16px">'
+    f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">India VIX</div>'
     f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
-    f'<div style="font-size:12px;color:#bbb;margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
+    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
     f'</div>'
-    f'<div style="flex:1;background:#0d1f3c;border-left:5px solid {_nc};border-radius:10px;padding:14px 16px">'
-    f'<div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Nifty 50</div>'
+    f'<div style="flex:1;background:var(--surface);border-left:5px solid {_nc};border-radius:10px;padding:14px 16px">'
+    f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Nifty 50</div>'
     f'<div style="font-size:20px;font-weight:700;color:{_nc}">{_ni} {_nl}</div>'
-    f'<div style="font-size:12px;color:#bbb;margin-top:3px">'
+    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">'
     f'{f"{_cc_nifty_val:,.0f}" if _cc_nifty_val else "—"}'
     f'{f"&nbsp;({_cc_nifty_5d:+.1f}% 5d)" if _cc_nifty_val else ""}</div>'
     f'</div>'
     f'<div style="flex:2;background:{_vbg};border-left:5px solid {_vbdr};border-radius:10px;'
     f'padding:14px 16px;display:flex;align-items:center">'
-    f'<div style="font-size:16px;font-weight:600;color:#fff">{_verd}</div>'
+    f'<div style="font-size:16px;font-weight:600;color:var(--ink)">{_verd}</div>'
     f'</div>'
     f'</div>',
     unsafe_allow_html=True,
@@ -216,19 +216,19 @@ _mood_vix = {"complacency": 85, "normal": 65, "elevated": 45,
 _mood_nty = {"uptrend": 80, "sideways": 50, "downtrend": 20,
              "unknown": 50}.get(_cc_nifty_trend, 50)
 _mood = int(round((_mood_vix + _mood_nty) / 2))
-if   _mood < 20: _mood_lbl, _mood_c = "Extreme Fear", "#ff1744"
-elif _mood < 40: _mood_lbl, _mood_c = "Fear", "#ff4757"
-elif _mood < 60: _mood_lbl, _mood_c = "Neutral", "#FFC107"
-elif _mood < 80: _mood_lbl, _mood_c = "Greed", "#26a69a"
-else:            _mood_lbl, _mood_c = "Extreme Greed", "#00e5cc"
+if   _mood < 20: _mood_lbl, _mood_c = "Extreme Fear", "var(--bear)"
+elif _mood < 40: _mood_lbl, _mood_c = "Fear", "var(--bear)"
+elif _mood < 60: _mood_lbl, _mood_c = "Neutral", "var(--amber)"
+elif _mood < 80: _mood_lbl, _mood_c = "Greed", "var(--bull)"
+else:            _mood_lbl, _mood_c = "Extreme Greed", "var(--bull)"
 st.markdown(
-    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);border-radius:10px;'
+    f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);border-radius:10px;'
     f'padding:12px 18px;margin-top:8px;display:flex;align-items:center;gap:16px">'
-    f'<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;min-width:96px">Market Mood</div>'
+    f'<div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;min-width:96px">Market Mood</div>'
     f'<div style="flex:1;position:relative;height:10px;border-radius:6px;'
-    f'background:linear-gradient(90deg,#ff1744,#ff4757,#FFC107,#26a69a,#00e5cc)">'
+    f'background:linear-gradient(90deg,var(--bear),var(--bear),var(--amber),var(--bull),var(--bull))">'
     f'<div style="position:absolute;left:{_mood}%;top:-5px;transform:translateX(-50%);'
-    f'width:20px;height:20px;border-radius:50%;background:{_mood_c};border:3px solid #0d1526;'
+    f'width:20px;height:20px;border-radius:50%;background:{_mood_c};border:3px solid var(--surface);'
     f'box-shadow:0 0 8px {_mood_c}"></div></div>'
     f'<div style="min-width:130px;text-align:right">'
     f'<span style="font-size:20px;font-weight:800;color:{_mood_c}">{_mood}</span>'
@@ -322,9 +322,9 @@ def _render_top_picks_ticker() -> None:
 
     if not _tk_rows:
         st.markdown(
-            "<div style='background:#0a0a0a;border-top:2px solid #26a69a;"
-            "border-bottom:2px solid #26a69a;border-radius:6px;padding:9px 16px;"
-            "font-size:12px;color:#26a69a'>🎯 TOP PICKS — no buy candidates "
+            "<div style='background:var(--rail);border-top:2px solid var(--bull);"
+            "border-bottom:2px solid var(--bull);border-radius:6px;padding:9px 16px;"
+            "font-size:12px;color:var(--bull)'>🎯 TOP PICKS — no buy candidates "
             "right now.</div>",
             unsafe_allow_html=True,
         )
@@ -333,12 +333,12 @@ def _render_top_picks_ticker() -> None:
     def _chip(_r: dict) -> str:
         _lbl = _r["ticker"].replace(".NS", "")
         _up  = (_r["chg_pct"] or 0) >= 0
-        _cc  = "#3ddc84" if _up else "#ef5350"
+        _cc  = "var(--bull)" if _up else "var(--bear)"
         _arr = "▲" if _up else "▼"
         return (
             f'<span style="display:inline-block;margin-right:34px;white-space:nowrap">'
-            f'<span style="color:#eee;font-weight:700;font-size:13px">{_lbl}</span>'
-            f'<span style="color:#888;font-size:12px"> ₹{_r["price"]:,.1f} </span>'
+            f'<span style="color:var(--ink-mid);font-weight:700;font-size:13px">{_lbl}</span>'
+            f'<span style="color:var(--dim);font-size:12px"> ₹{_r["price"]:,.1f} </span>'
             f'<span style="color:{_cc};font-weight:700;font-size:13px">'
             f'{_arr}{abs(_r["chg_pct"]):.2f}%</span></span>'
         )
@@ -348,12 +348,12 @@ def _render_top_picks_ticker() -> None:
     _tape_html = "".join(_chip(r) for r in _tk_rows) * 2
 
     st.markdown(
-        f'<div style="background:#0a0a0a;border-top:2px solid #26a69a;'
-        f'border-bottom:2px solid #26a69a;border-radius:6px;'
+        f'<div style="background:var(--rail);border-top:2px solid var(--bull);'
+        f'border-bottom:2px solid var(--bull);border-radius:6px;'
         f'display:flex;align-items:center;overflow:hidden">'
-        f'<span style="flex-shrink:0;padding:9px 14px;color:#26a69a;'
+        f'<span style="flex-shrink:0;padding:9px 14px;color:var(--bull);'
         f'font-size:10px;font-weight:700;letter-spacing:1px;'
-        f'border-right:1px solid #143a34;white-space:nowrap">'
+        f'border-right:1px solid var(--sunken);white-space:nowrap">'
         f'🎯 TOP PICKS<br>BUY CANDIDATES</span>'
         f'<div style="flex:1;overflow:hidden;position:relative;padding:9px 0">'
         f'<div style="white-space:nowrap;width:max-content;'
@@ -621,9 +621,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
 
     if _fetching:
         st.markdown(
-            '<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
+            '<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
             'padding:6px 14px;margin-bottom:10px">'
-            '<span style="font-size:12px;color:#4caf7d">🔄 Refreshing in the background — '
+            '<span style="font-size:12px;color:var(--bull)">🔄 Refreshing in the background — '
             'current picks below stay as-is until the new scan lands.</span></div>',
             unsafe_allow_html=True,
         )
@@ -643,17 +643,17 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         _src_label = "live scan" if _src == "live_scan" else "scheduled scan"
         _snap_regime = ((_picks or {}).get("meta", {}) or {}).get("vix_regime")
         _regime_html = (
-            f' <span style="color:#777">· regime <b style="color:#bbb">{_snap_regime}</b></span>'
+            f' <span style="color:var(--dim)">· regime <b style="color:var(--ink-mid)">{_snap_regime}</b></span>'
             if _snap_regime else ""
         )
         st.markdown(
-            f'<div style="background:#0d2a1a;border:1px solid #1a4a2a;border-radius:8px;'
+            f'<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
             f'padding:7px 14px;margin-bottom:10px;display:flex;justify-content:space-between;'
             f'align-items:center">'
-            f'<span style="font-size:12px;color:#4caf7d">📊 Top Picks last scored: '
+            f'<span style="font-size:12px;color:var(--bull)">📊 Top Picks last scored: '
             f'<b>{_last_ts.strftime("%H:%M:%S")}</b> '
-            f'<span style="color:#777">({_src_label})</span>{_regime_html}</span>'
-            f'<span style="font-size:11px;color:#555">Scan refreshes every ~15 min · '
+            f'<span style="color:var(--dim)">({_src_label})</span>{_regime_html}</span>'
+            f'<span style="font-size:11px;color:var(--faint)">Scan refreshes every ~15 min · '
             f'tap Scan Now to force a live rescan</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -676,9 +676,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         _material = (_snap_regime in _risk_off) != (_current_regime in _risk_off)
         if _material:
             st.markdown(
-                f'<div style="background:#2a1a00;border:1px solid #4a3a00;border-radius:8px;'
+                f'<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
                 f'padding:8px 14px;margin-bottom:10px">'
-                f'<span style="font-size:12px;color:#ffb300">⚠ VIX regime has shifted since '
+                f'<span style="font-size:12px;color:var(--amber)">⚠ VIX regime has shifted since '
                 f'the last scan (was <b>{_snap_regime}</b>, now <b>{_current_regime}</b>). '
                 f'The picks below were scored under the earlier regime. The scheduled scan '
                 f'will catch up within ~15 min — or tap <b>Scan Now</b> above to force a '
@@ -703,9 +703,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     if _n_scanned > 0 and (_n_unavail / _n_scanned) >= _UNAVAIL_WARN_FRACTION:
         _pct = 100.0 * _n_unavail / _n_scanned
         st.markdown(
-            f'<div style="background:#2a1a00;border:1px solid #4a3a00;border-radius:8px;'
+            f'<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
             f'padding:8px 14px;margin-bottom:10px">'
-            f'<span style="font-size:12px;color:#ffb300">⚠ Data quality alert: '
+            f'<span style="font-size:12px;color:var(--amber)">⚠ Data quality alert: '
             f'<b>{_n_unavail}/{_n_scanned}</b> tickers ({_pct:.1f}%) were unavailable this '
             f'scan — the pick list below is drawn from the remaining '
             f'<b>{_n_scanned - _n_unavail}</b>. A source (Stooq / Yahoo / Angel) may be '
@@ -716,9 +716,9 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
 
     if _picks_meta.get("no_strong_picks"):
         st.markdown(
-            '<div style="background:#1a1200;border:1px solid #4a3a00;border-radius:8px;'
+            '<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
             'padding:10px 14px;margin-bottom:10px">'
-            '<span style="font-size:13px;color:#ffb300">⚠️ <b>No strong BUY-grade setups '
+            '<span style="font-size:13px;color:var(--amber)">⚠️ <b>No strong BUY-grade setups '
             'in today\'s scan.</b> The names below are the closest watchlist-grade '
             'candidates — none currently meet the bar for a confident new entry. '
             'Consider waiting for a cleaner setup.</span></div>',
@@ -764,12 +764,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                            f'GRADE {_grade_tag}</span>') if _grade_tag else ""
 
             _is_watch_tier = _b.get("tier") == "watch"
-            _card_border = "#FF9800" if _is_watch_tier else "#26a69a"
-            _card_grad   = ("linear-gradient(135deg,#2a2000,#332b0a)" if _is_watch_tier
-                            else "linear-gradient(135deg,#0a2a1a,#0f3320)")
-            _score_color = "#FF9800" if _is_watch_tier else "#26a69a"
+            _card_border = "var(--amber)" if _is_watch_tier else "var(--bull)"
+            _card_grad   = ("linear-gradient(135deg,var(--sunken),var(--sunken))" if _is_watch_tier
+                            else "linear-gradient(135deg,var(--sunken),var(--sunken))")
+            _score_color = "var(--amber)" if _is_watch_tier else "var(--bull)"
             _tier_badge  = (
-                '<span style="background:#FF980022;color:#FF9800;border:1px solid #FF9800;'
+                '<span style="background:var(--tint-amber);color:var(--amber);border:1px solid var(--amber);'
                 'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
                 'WATCHLIST-GRADE</span>'
             ) if _is_watch_tier else ""
@@ -783,10 +783,10 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             try:
                 _fv = _compose_fv_for_card(_b, tqs=None)
                 _fv_pill_colors = {
-                    "STRONG BUY": "#26a69a", "BUY": "#4CAF50", "WATCH": "#2196F3",
-                    "HOLD": "#9E9E9E", "AVOID": "#ef5350",
+                    "STRONG BUY": "var(--bull)", "BUY": "var(--bull)", "WATCH": "var(--accent)",
+                    "HOLD": "var(--dim)", "AVOID": "var(--bear)",
                 }
-                _pc = _fv_pill_colors.get(_fv.verdict, "#9E9E9E")
+                _pc = _fv_pill_colors.get(_fv.verdict, "var(--dim)")
                 _fv_pill = (
                     f'<span style="background:{_pc}22;color:{_pc};border:1px solid {_pc};'
                     f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px" '
@@ -815,34 +815,34 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             )
             if _b_lp:
                 _b_up = (_b_lp.get("chg_pct") or 0) >= 0
-                _b_pc = "#3ddc84" if _b_up else "#ef5350"
+                _b_pc = "var(--bull)" if _b_up else "var(--bear)"
                 _b_live_span = (
                     f'<span style="color:{_b_pc};font-weight:700">₹{_b_lp["price"]:,.2f} '
                     f'{"▲" if _b_up else "▼"}{abs(_b_lp.get("chg_pct") or 0):.2f}%</span>'
-                    f' <span style="color:#666">live</span>'
+                    f' <span style="color:var(--faint)">live</span>'
                 )
                 if _b_lvl["reanchored"]:
                     _b_live_span += (
-                        f' <span style="color:#ffb300"> · re-anchored '
+                        f' <span style="color:var(--amber)"> · re-anchored '
                         f'({_b_lvl["drift_pct"]:+.1f}% drift from scored entry)</span>'
                     )
             else:
-                _b_live_span = '<span style="color:#666">(last close — live price unavailable)</span>'
+                _b_live_span = '<span style="color:var(--faint)">(last close — live price unavailable)</span>'
 
             _b_rr_html = ""
             if _b_lvl["entry"] and _b_lvl["sl"] and _b_lvl["tp"]:
                 _rr_gross = _b_lvl["rr"]
                 _rr_net   = _b_lvl["rr_net"]
                 _b_rr_html = (
-                    f'<div style="font-size:11px;color:#888;margin-top:2px">'
-                    f'R:R <span style="color:#fff">{_rr_gross:.1f}:1</span> gross, '
-                    f'<span style="color:#ffb300">{_rr_net:.1f}:1 net of ~{_COST_ROUNDTRIP_PCT:.2f}% costs</span></div>'
+                    f'<div style="font-size:11px;color:var(--dim);margin-top:2px">'
+                    f'R:R <span style="color:var(--ink)">{_rr_gross:.1f}:1</span> gross, '
+                    f'<span style="color:var(--amber)">{_rr_net:.1f}:1 net of ~{_COST_ROUNDTRIP_PCT:.2f}% costs</span></div>'
                 )
 
             # Freshness stamps — score time and live-price time
             _b_scored_at = st.session_state.get(f"{_PICKS_KEY}_ts")
             _stamp_html = (
-                f'<div style="font-size:10px;color:#555;margin-top:3px">'
+                f'<div style="font-size:10px;color:var(--faint);margin-top:3px">'
                 f'📊 Scored at {_b_scored_at.strftime("%H:%M") if _b_scored_at else "unknown"}'
                 f' · 💹 Live price {"as of now" if _b_lp else "unavailable"}'
                 f'</div>'
@@ -852,17 +852,17 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div style="background:{_card_grad};'
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span><span style="font-size:16px;font-weight:700;color:#fff">{_bl}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
+                f'<span><span style="font-size:16px;font-weight:700;color:var(--ink)">{_bl}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
                 f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
-                f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_b["headline"]}</div>'
-                + (f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_b["headline"]}</div>'
+                + (f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
                    f'Entry ₹{_b_lvl["entry"]:,.2f} · SL ₹{_b_lvl["sl"]:,.2f} · TP ₹{_b_lvl["tp"]:,.2f} '
                    f'{_b_live_span}</div>'
                    if _b_lvl["entry"] else "")
                 + _b_rr_html
-                + (f'<div style="font-size:11px;color:#6a8caf;margin-top:2px">'
+                + (f'<div style="font-size:11px;color:var(--azure);margin-top:2px">'
                    f'⏱ {_b.get("horizon")}'
                    + (f' · {_horizon_countdown(_b.get("valid_until"))}' if _b.get("valid_until") else '')
                    + '</div>'
@@ -894,23 +894,23 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _sv_lp = _pk_live.get(_sv["ticker"])
             if _sv_lp:
                 _sv_up = (_sv_lp.get("chg_pct") or 0) >= 0
-                _sv_pc = "#3ddc84" if _sv_up else "#ef5350"
+                _sv_pc = "var(--bull)" if _sv_up else "var(--bear)"
                 _sv_live_html = (
                     f'<div style="font-size:11px;margin-top:4px">'
                     f'<span style="color:{_sv_pc};font-weight:700">₹{_sv_lp["price"]:,.2f} '
                     f'{"▲" if _sv_up else "▼"}{abs(_sv_lp.get("chg_pct") or 0):.2f}%</span> '
-                    f'<span style="color:#666">live</span></div>'
+                    f'<span style="color:var(--faint)">live</span></div>'
                 )
             else:
                 _sv_live_html = ""
             st.markdown(
-                f'<div style="background:linear-gradient(135deg,#2a0a0a,#330f0f);'
-                f'border-left:4px solid #ef5350;border-radius:10px;padding:11px 14px;margin-bottom:6px">'
+                f'<div style="background:linear-gradient(135deg,var(--sunken),var(--sunken));'
+                f'border-left:4px solid var(--bear);border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span style="font-size:16px;font-weight:700;color:#fff">{_svl}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:#ef5350">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+                f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_svl}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
                 f'</div>'
-                f'<div style="font-size:12px;color:#bbb;margin-top:3px">{_sv["headline"]}</div>'
+                f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{_sv["headline"]}</div>'
                 f'{_sv_live_html}'
                 + '</div>',
                 unsafe_allow_html=True,
@@ -1000,11 +1000,11 @@ def _render_open_positions_section():
             st.markdown("**⚠️ These positions need your attention:**")
     
         for _pos in _cc_alerts + _cc_normal_pos:
-            _pbdr = {"target_hit": "#26a69a", "sl_hit": "#ef5350", "big_move": "#FF9800",
-                     "normal": "#2196F3"}.get(_pos["status"], "#2196F3")
-            _pbg  = {"target_hit": "#0a2a1a", "sl_hit": "#2a0a0a",  "big_move": "#1a1200",
-                     "normal": "#0d1f3c"}.get(_pos["status"], "#0d1f3c")
-            _purc = "#26a69a" if _pos["unr"] >= 0 else "#ef5350"
+            _pbdr = {"target_hit": "var(--bull)", "sl_hit": "var(--bear)", "big_move": "var(--amber)",
+                     "normal": "var(--accent)"}.get(_pos["status"], "var(--accent)")
+            _pbg  = {"target_hit": "var(--sunken)", "sl_hit": "var(--sunken)",  "big_move": "var(--sunken)",
+                     "normal": "var(--surface)"}.get(_pos["status"], "var(--surface)")
+            _purc = "var(--bull)" if _pos["unr"] >= 0 else "var(--bear)"
             _palert = {
                 "target_hit": f"🎯 Target hit — close to lock in profit",
                 "sl_hit":     f"🚨 Stop-loss breached — consider exiting to limit loss",
@@ -1017,14 +1017,14 @@ def _render_open_positions_section():
                     f'<div style="background:{_pbg};border-left:5px solid {_pbdr};'
                     f'border-radius:10px;padding:11px 15px;margin-bottom:6px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<div><span style="font-size:16px;font-weight:700;color:#fff">'
+                    f'<div><span style="font-size:16px;font-weight:700;color:var(--ink)">'
                     f'{_pos["ticker"].replace(".NS","")}</span>'
-                    f'<span style="font-size:11px;color:#888;margin-left:8px">📂 {_pos["account"]}</span>'
-                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
+                    f'<span style="font-size:11px;color:var(--dim);margin-left:8px">📂 {_pos["account"]}</span>'
+                    f'<span style="font-size:12px;color:var(--dim);margin-left:8px">'
                     f'Entry ₹{_pos["ep"]:,.2f} → Now ₹{_pos["cur"]:,.2f}</span></div>'
                     f'<div style="font-size:16px;font-weight:700;color:{_purc}">'
                     f'₹{_pos["unr"]:+,.0f} ({_pos["unr_pct"]:+.1f}%)</div></div>'
-                    + (f'<div style="font-size:13px;color:#ddd;margin-top:4px">{_palert}</div>' if _palert else '')
+                    + (f'<div style="font-size:13px;color:var(--ink-mid);margin-top:4px">{_palert}</div>' if _palert else '')
                     + '</div>',
                     unsafe_allow_html=True,
                 )

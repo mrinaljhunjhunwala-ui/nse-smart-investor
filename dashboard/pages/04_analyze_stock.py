@@ -169,21 +169,21 @@ def _market_context_row():
 
 try:
     _mc = _market_context_row()
-    _sev_color = {"green": "#26a69a", "amber": "#f9a825",
-                  "red":   "#ef5350", "neutral": "#8899bb"}[_mc["regime_severity"]]
+    _sev_color = {"green": "var(--bull)", "amber": "var(--amber)",
+                  "red":   "var(--bear)", "neutral": "var(--dim)"}[_mc["regime_severity"]]
     st.markdown(
-        '<div style="background:#0d1526;border:1px solid #263148;border-radius:8px;'
+        '<div style="background:var(--surface);border:1px solid var(--hairline);border-radius:8px;'
         'padding:8px 14px;margin:6px 0 10px 0">'
-        '<div style="font-size:10px;color:#5b8def;letter-spacing:1.5px;'
+        '<div style="font-size:10px;color:var(--accent);letter-spacing:1.5px;'
         'text-transform:uppercase;font-weight:600;margin-bottom:4px">'
         '🌐 Market context · same for every stock, not ticker-specific</div>'
         + (
-            f'<span style="font-size:12px;color:#ddd">'
+            f'<span style="font-size:12px;color:var(--ink-mid)">'
             f'<b style="color:{_sev_color}">FII 5d</b> ₹{_mc["fii_5d"]:+,.0f} Cr &nbsp;·&nbsp; '
             f'<b style="color:{_sev_color}">DII 5d</b> ₹{_mc["dii_5d"]:+,.0f} Cr &nbsp;·&nbsp; '
             f'{_mc["regime_msg"]}</span>'
             if _mc["fii_5d"] is not None
-            else '<span style="font-size:12px;color:#8899bb">'
+            else '<span style="font-size:12px;color:var(--dim)">'
                  'FII/DII flows unavailable — visit the 🏦 FII / DII Flows page '
                  'once to populate the local table.</span>'
         )
@@ -709,30 +709,30 @@ if analyze_btn or _prefill_active or (
                     horizon=_fv_horizon,
                 )
                 _fv_colors = {
-                    "STRONG BUY": "#26a69a",
-                    "BUY":        "#4CAF50",
-                    "WATCH":      "#2196F3",
-                    "HOLD":       "#9E9E9E",
-                    "AVOID":      "#ef5350",
+                    "STRONG BUY": "var(--bull)",
+                    "BUY":        "var(--bull)",
+                    "WATCH":      "var(--accent)",
+                    "HOLD":       "var(--dim)",
+                    "AVOID":      "var(--bear)",
                 }
-                _fv_bg = _fv_colors.get(_fv.verdict, "#9E9E9E")
+                _fv_bg = _fv_colors.get(_fv.verdict, "var(--dim)")
                 st.markdown("---")
                 st.markdown(
-                    f'<div style="background:linear-gradient(135deg,#0d1526,#1a2540);'
+                    f'<div style="background:linear-gradient(135deg,var(--surface),var(--sunken));'
                     f'border-left:6px solid {_fv_bg};border-radius:10px;'
                     f'padding:16px 20px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap">'
                     f'<div>'
-                    f'<div style="font-size:12px;color:#aaa;letter-spacing:1.5px;text-transform:uppercase">'
+                    f'<div style="font-size:12px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase">'
                     f'Final verdict · {_fv.horizon.title()}-term · {_fv.confidence.title()} confidence</div>'
                     f'<div style="font-size:32px;font-weight:700;color:{_fv_bg};margin:4px 0">'
                     f'{_fv.verdict}</div>'
-                    f'<div style="font-size:14px;color:#ddd">{_fv.primary_reason}</div>'
+                    f'<div style="font-size:14px;color:var(--ink-mid)">{_fv.primary_reason}</div>'
                     f'</div>'
                     f'<div style="text-align:right">'
-                    f'<div style="font-size:12px;color:#aaa">Conviction</div>'
-                    f'<div style="font-size:28px;font-weight:700;color:#fff">{_fv.conviction}</div>'
-                    f'<div style="font-size:11px;color:#888">/ 100</div>'
+                    f'<div style="font-size:12px;color:var(--dim)">Conviction</div>'
+                    f'<div style="font-size:28px;font-weight:700;color:var(--ink)">{_fv.conviction}</div>'
+                    f'<div style="font-size:11px;color:var(--dim)">/ 100</div>'
                     f'</div>'
                     f'</div></div>',
                     unsafe_allow_html=True,
@@ -777,25 +777,25 @@ if analyze_btn or _prefill_active or (
                         _v = _hzv.verdict
                         _c = int(getattr(_hzv, "conviction", 50) or 50)
                         if _v == "STRONG BUY" or (_v == "BUY" and _c >= 75):
-                            return ("Strong Positive", "#00d4aa")
+                            return ("Strong Positive", "var(--bull)")
                         if _v == "BUY":
-                            return ("Positive", "#4CAF50")
+                            return ("Positive", "var(--bull)")
                         if _v == "WATCH":
-                            return ("Neutral", "#2196F3")
+                            return ("Neutral", "var(--accent)")
                         if _v == "HOLD":
-                            return ("Neutral", "#9E9E9E")
+                            return ("Neutral", "var(--dim)")
                         if _v == "AVOID" and _c <= 25:
-                            return ("Strong Negative", "#c62828")
+                            return ("Strong Negative", "var(--bear)")
                         if _v == "AVOID":
-                            return ("Negative", "#ef5350")
-                        return ("Neutral", "#8899bb")
+                            return ("Negative", "var(--bear)")
+                        return ("Neutral", "var(--dim)")
                     _hz_labels = {
                         "short":  ("Short-term",  "days–weeks"),
                         "medium": ("Medium-term", "1–6 months"),
                         "long":   ("Long-term",   "1 year+"),
                     }
                     st.markdown(
-                        '<div style="font-size:12px;color:#aaa;letter-spacing:1.5px;'
+                        '<div style="font-size:12px;color:var(--dim);letter-spacing:1.5px;'
                         'text-transform:uppercase;margin:6px 0 4px 0">'
                         'Horizon fit — is this stock good right now, and for how long?'
                         '</div>',
@@ -807,18 +807,18 @@ if analyze_btn or _prefill_active or (
                         _posture, _color = _posture_for(_hzv)
                         _hz_title, _hz_range = _hz_labels[_hz]
                         _is_focus = (_hz == _fv_horizon)
-                        _border = ("2px solid " + _color) if _is_focus else "1px solid #263148"
+                        _border = ("2px solid " + _color) if _is_focus else "1px solid var(--hairline)"
                         _hz_cols[_i].markdown(
-                            f'<div style="background:#0d1526;border:{_border};'
+                            f'<div style="background:var(--surface);border:{_border};'
                             f'border-radius:10px;padding:12px 14px;height:100%">'
-                            f'<div style="font-size:11px;color:#8899bb;letter-spacing:1px;'
+                            f'<div style="font-size:11px;color:var(--dim);letter-spacing:1px;'
                             f'text-transform:uppercase">{_hz_title} · {_hz_range}</div>'
                             f'<div style="font-size:20px;font-weight:700;color:{_color};'
                             f'margin:2px 0">{_posture}</div>'
-                            f'<div style="font-size:11px;color:#888">'
-                            f'Verdict: <b style="color:#ddd">{_hzv.verdict}</b> · '
+                            f'<div style="font-size:11px;color:var(--dim)">'
+                            f'Verdict: <b style="color:var(--ink-mid)">{_hzv.verdict}</b> · '
                             f'conviction {_hzv.conviction}/100</div>'
-                            f'<div style="font-size:12px;color:#ccc;margin-top:6px;'
+                            f'<div style="font-size:12px;color:var(--ink-mid);margin-top:6px;'
                             f'line-height:1.35">{_hzv.primary_reason}</div>'
                             f'</div>',
                             unsafe_allow_html=True,
@@ -990,11 +990,11 @@ if analyze_btn or _prefill_active or (
                         _vfig = _go2.Figure()
                         _vfig.add_trace(_go2.Scatter(
                             x=_vl_df["_dt"], y=_vl_df["conviction"], mode="lines+markers",
-                            name="Conviction /100", line=dict(color="#26a69a", width=2)))
+                            name="Conviction /100", line=dict(color="var(--bull)", width=2)))
                         if "composite_score" in _vl_df.columns:
                             _vfig.add_trace(_go2.Scatter(
                                 x=_vl_df["_dt"], y=_vl_df["composite_score"], mode="lines",
-                                name="Composite /90", line=dict(color="#42a5f5", width=1.5, dash="dot")))
+                                name="Composite /90", line=dict(color="var(--accent)", width=1.5, dash="dot")))
                         _vfig.update_layout(
                             height=260, margin=dict(l=40, r=20, t=20, b=30),
                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -1181,9 +1181,9 @@ if analyze_btn or _prefill_active or (
                 st.markdown(
                     f'<div class="{card_c}" style="text-align:center;padding:24px">'
                     f'<div class="ticker-label">{ticker.replace(".NS","")}</div>'
-                    f'<div style="font-size:14px;color:#aaa">₹{cs.price:,.2f}</div>'
+                    f'<div style="font-size:14px;color:var(--dim)">₹{cs.price:,.2f}</div>'
                     f'<div class="score-big" style="color:{grade_c}">{cs.score:.0f}</div>'
-                    f'<div style="font-size:13px;color:#aaa">out of 100</div>'
+                    f'<div style="font-size:13px;color:var(--dim)">out of 100</div>'
                     f'<div style="font-size:28px;font-weight:700;color:{grade_c};margin:8px 0">'
                     f'Grade: {cs.grade}</div>'
                     f'<div class="signal-big">{emoji} {cs.action}</div>'
@@ -1201,14 +1201,14 @@ if analyze_btn or _prefill_active or (
                     _max = {"Technical (40)": 40, "Momentum (25)": 25,
                             "Volume (15)": 15,    "Sentiment (10)": 10}[label]
                     pct       = val / _max * 100
-                    bar_color = "#26a69a" if pct >= 60 else "#f9a825" if pct >= 35 else "#ef5350"
+                    bar_color = "var(--bull)" if pct >= 60 else "var(--amber)" if pct >= 35 else "var(--bear)"
                     st.markdown(
                         f'<div style="display:flex;align-items:center;margin:3px 0;">'
-                        f'<span style="width:160px;font-size:12px;color:#ccc">{label}</span>'
-                        f'<div style="flex:1;background:#333;border-radius:4px;height:10px">'
+                        f'<span style="width:160px;font-size:12px;color:var(--ink-mid)">{label}</span>'
+                        f'<div style="flex:1;background:var(--sunken);border-radius:4px;height:10px">'
                         f'<div style="width:{pct:.0f}%;background:{bar_color};'
                         f'border-radius:4px;height:10px"></div></div>'
-                        f'<span style="width:42px;text-align:right;font-size:12px;color:#ccc">'
+                        f'<span style="width:42px;text-align:right;font-size:12px;color:var(--ink-mid)">'
                         f'{val:.0f}</span></div>',
                         unsafe_allow_html=True,
                     )
@@ -1354,10 +1354,10 @@ if analyze_btn or _prefill_active or (
                 # where the user actually reads first.
                 st.markdown(
                     f'<div class="glass-panel" style="margin-top:10px;padding:12px 16px">'
-                    f'<div style="font-size:11px;color:#ff9500;font-weight:700;'
+                    f'<div style="font-size:11px;color:var(--amber);font-weight:700;'
                     f'text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">'
                     f'💬 In plain English</div>'
-                    f'<div style="font-size:14px;line-height:1.6;color:#e0e0e0">'
+                    f'<div style="font-size:14px;line-height:1.6;color:var(--ink-mid)">'
                     f'{_plain_english(cs.action, cs.entry, cs.stop_loss, cs.target, cs.risk_reward)}'
                     f'</div></div>',
                     unsafe_allow_html=True,
@@ -1395,13 +1395,13 @@ if analyze_btn or _prefill_active or (
                     "early liquidity compute failed for %s: %s", ticker, _liq_early_e)
 
             _wk_map = {
-                "uptrend":  ("🟢 Uptrend",  "#00d4aa"),
-                "downtrend":("🔴 Downtrend","#ff4757"),
-                "sideways": ("🟡 Sideways", "#ff9500"),
-                None:       ("—",           "#8899bb"),
+                "uptrend":  ("🟢 Uptrend",  "var(--bull)"),
+                "downtrend":("🔴 Downtrend","var(--bear)"),
+                "sideways": ("🟡 Sideways", "var(--amber)"),
+                None:       ("—",           "var(--dim)"),
             }
-            _wk_txt, _wk_c = _wk_map.get(_dc["weekly"], ("—", "#8899bb"))
-            _rs_c   = "#00d4aa" if (_dc["rs_pct"] or 0) > 0 else "#ff4757"
+            _wk_txt, _wk_c = _wk_map.get(_dc["weekly"], ("—", "var(--dim)"))
+            _rs_c   = "var(--bull)" if (_dc["rs_pct"] or 0) > 0 else "var(--bear)"
             _rs_txt = (
                 f'{_dc["rel_strength"].title()} ({_dc["rs_pct"]:+.1f}% vs Nifty)'
                 if _dc["rel_strength"]
@@ -1412,19 +1412,19 @@ if analyze_btn or _prefill_active or (
             _ed_days = _dc["earnings_days"]
             if _ed_days is not None and _ed_days < 0:
                 _ed_txt = f"Results {abs(_ed_days)}d ago"
-                _ed_c   = "#8899bb"                            # neutral — event passed
+                _ed_c   = "var(--dim)"                            # neutral — event passed
             elif _ed_days is not None and 0 <= _ed_days <= 7:
                 _ed_txt = f"⚠️ Results in {_ed_days}d — avoid fresh buys"
-                _ed_c   = "#ff4757"
+                _ed_c   = "var(--bear)"
             elif _ed_days is not None and 0 <= _ed_days <= 21:
                 _ed_txt = f"Results in {_ed_days}d"
-                _ed_c   = "#ff9500"
+                _ed_c   = "var(--amber)"
             elif _ed_days is not None:
                 _ed_txt = f"Results in {_ed_days}d (clear)"
-                _ed_c   = "#00d4aa"
+                _ed_c   = "var(--bull)"
             else:
                 _ed_txt = "Unknown"
-                _ed_c   = "#8899bb"
+                _ed_c   = "var(--dim)"
 
             # FIX A3: guard against _dc["total"] being None or 0
             _bull = _dc.get("bull", 0)
@@ -1435,7 +1435,7 @@ if analyze_btn or _prefill_active or (
             _conf_delta, _conf_reasons = 0, []
             if _confirmation_available:
                 _agr_pct = _bull / _tot * 100
-                _agr_c   = "#00d4aa" if _agr_pct >= 67 else "#ff9500" if _agr_pct >= 40 else "#ff4757"
+                _agr_c   = "var(--bull)" if _agr_pct >= 67 else "var(--amber)" if _agr_pct >= 40 else "var(--bear)"
 
                 if _dc["weekly"] == "uptrend":
                     _conf_delta += 4;  _conf_reasons.append("+4 weekly uptrend")
@@ -1457,12 +1457,12 @@ if analyze_btn or _prefill_active or (
             else:
                 # FIX A3: confirmation unavailable — use raw score, no adjustment
                 _agr_pct    = 0
-                _agr_c      = "#8899bb"
+                _agr_c      = "var(--dim)"
                 _conviction = cs.score
                 _conf_delta = 0
 
-            _cv_c    = "#00d4aa" if _conviction >= 65 else "#ff9500" if _conviction >= 45 else "#ff4757"
-            _delta_c = "#00d4aa" if _conf_delta >= 0 else "#ff4757"
+            _cv_c    = "var(--bull)" if _conviction >= 65 else "var(--amber)" if _conviction >= 45 else "var(--bear)"
+            _delta_c = "var(--bull)" if _conf_delta >= 0 else "var(--bear)"
             _delta_s = f"{_conf_delta:+d}" if _conf_delta else "±0"
 
             # MULTI-SIGNAL COMPLETION: the panel used to show 4 confirmations
@@ -1472,8 +1472,8 @@ if analyze_btn or _prefill_active or (
             # and 200-day moving averages. Both come free from `df` already in
             # scope (SMA_50/SMA_200 are computed in the price loader), so no
             # extra network calls.
-            _ma50_txt, _ma50_c = "—", "#8899bb"
-            _ma200_txt, _ma200_c = "—", "#8899bb"
+            _ma50_txt, _ma50_c = "—", "var(--dim)"
+            _ma200_txt, _ma200_c = "—", "var(--dim)"
             try:
                 _px = float(latest["Close"])
                 _sma50 = float(latest.get("SMA_50", float("nan")))
@@ -1481,67 +1481,67 @@ if analyze_btn or _prefill_active or (
                 if _sma50 == _sma50:   # NaN check
                     _pct50 = (_px / _sma50 - 1) * 100
                     if _pct50 >= 2:
-                        _ma50_txt = f"🟢 Above ({_pct50:+.1f}%)"; _ma50_c = "#00d4aa"
+                        _ma50_txt = f"🟢 Above ({_pct50:+.1f}%)"; _ma50_c = "var(--bull)"
                     elif _pct50 <= -2:
-                        _ma50_txt = f"🔴 Below ({_pct50:+.1f}%)"; _ma50_c = "#ff4757"
+                        _ma50_txt = f"🔴 Below ({_pct50:+.1f}%)"; _ma50_c = "var(--bear)"
                     else:
-                        _ma50_txt = f"🟡 At ({_pct50:+.1f}%)";    _ma50_c = "#ff9500"
+                        _ma50_txt = f"🟡 At ({_pct50:+.1f}%)";    _ma50_c = "var(--amber)"
                 if _sma200 == _sma200:
                     _pct200 = (_px / _sma200 - 1) * 100
                     if _pct200 >= 2:
-                        _ma200_txt = f"🟢 Above ({_pct200:+.1f}%)"; _ma200_c = "#00d4aa"
+                        _ma200_txt = f"🟢 Above ({_pct200:+.1f}%)"; _ma200_c = "var(--bull)"
                     elif _pct200 <= -2:
-                        _ma200_txt = f"🔴 Below ({_pct200:+.1f}%)"; _ma200_c = "#ff4757"
+                        _ma200_txt = f"🔴 Below ({_pct200:+.1f}%)"; _ma200_c = "var(--bear)"
                     else:
-                        _ma200_txt = f"🟡 At ({_pct200:+.1f}%)";    _ma200_c = "#ff9500"
+                        _ma200_txt = f"🟡 At ({_pct200:+.1f}%)";    _ma200_c = "var(--amber)"
             except Exception as _ma_err:
                 import logging
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "multi-signal MA cell derivation failed for %s: %s", ticker, _ma_err)
 
             st.markdown(
-                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.06);'
+                f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.06);'
                 f'border-radius:12px;padding:14px 18px;margin-bottom:12px">'
-                f'<div style="font-size:11px;color:#5b8def;font-weight:700;'
+                f'<div style="font-size:11px;color:var(--accent);font-weight:700;'
                 f'text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">'
                 f'🔬 Multi-Signal Confirmation</div>'
                 f'<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">'
                 # Conviction score
                 f'<div style="border-right:1px solid rgba(255,255,255,.08);padding-right:18px">'
-                f'<div style="font-size:10px;color:#4a5568">CONVICTION</div>'
+                f'<div style="font-size:10px;color:var(--faint)">CONVICTION</div>'
                 f'<div style="font-size:24px;font-weight:800;color:{_cv_c}">{_conviction:.0f}'
-                f'<span style="font-size:12px;color:#8899bb"> /100</span></div>'
+                f'<span style="font-size:12px;color:var(--dim)"> /100</span></div>'
                 + (
                     f'<div style="font-size:10px;color:{_delta_c}">base {cs.score:.0f} · {_delta_s} confirmation</div>'
                     if _confirmation_available
-                    else '<div style="font-size:10px;color:#8899bb">confirmation unavailable</div>'
+                    else '<div style="font-size:10px;color:var(--dim)">confirmation unavailable</div>'
                 ) +
                 f'</div>'
-                f'<div><div style="font-size:10px;color:#4a5568">WEEKLY TREND</div>'
+                f'<div><div style="font-size:10px;color:var(--faint)">WEEKLY TREND</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_wk_c}">{_wk_txt}</div></div>'
-                f'<div><div style="font-size:10px;color:#4a5568">RELATIVE STRENGTH</div>'
+                f'<div><div style="font-size:10px;color:var(--faint)">RELATIVE STRENGTH</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_rs_c}">{_rs_txt}</div></div>'
-                f'<div><div style="font-size:10px;color:#4a5568">EARNINGS</div>'
+                f'<div><div style="font-size:10px;color:var(--faint)">EARNINGS</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_ed_c}">{_ed_txt}</div></div>'
-                f'<div><div style="font-size:10px;color:#4a5568">SIGNAL AGREEMENT</div>'
+                f'<div><div style="font-size:10px;color:var(--faint)">SIGNAL AGREEMENT</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">'
                 + (f'{_bull} of {_tot} bullish' if _confirmation_available else '—') +
                 f'</div></div>'
-                f'<div><div style="font-size:10px;color:#4a5568">PRICE VS 50DMA</div>'
+                f'<div><div style="font-size:10px;color:var(--faint)">PRICE VS 50DMA</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_ma50_c}">{_ma50_txt}</div></div>'
-                f'<div><div style="font-size:10px;color:#4a5568">PRICE VS 200DMA</div>'
+                f'<div><div style="font-size:10px;color:var(--faint)">PRICE VS 200DMA</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_ma200_c}">{_ma200_txt}</div></div>'
                 f'</div>'
                 + (
-                    f'<div style="font-size:11px;color:#8899bb;margin-top:8px">'
+                    f'<div style="font-size:11px;color:var(--dim);margin-top:8px">'
                     f'Conviction adjustments: {" · ".join(_conf_reasons)}</div>'
                     if _conf_reasons
                     else (
-                        '<div style="font-size:11px;color:#8899bb;margin-top:8px">'
+                        '<div style="font-size:11px;color:var(--dim);margin-top:8px">'
                         'No adjustment — confirmation signals are neutral.</div>'
                         if _confirmation_available
                         else
-                        '<div style="font-size:11px;color:#8899bb;margin-top:8px">'
+                        '<div style="font-size:11px;color:var(--dim);margin-top:8px">'
                         'Deep confirmation unavailable — conviction equals base score.</div>'
                     )
                 )
@@ -1554,7 +1554,7 @@ if analyze_btn or _prefill_active or (
                 with st.expander(f"🔎 See all {_tot} signals", expanded=False):
                     for _sname, _sok in _dc.get("signals", []):
                         st.markdown(
-                            f'<div style="font-size:13px;color:#ccc;padding:2px 0">'
+                            f'<div style="font-size:13px;color:var(--ink-mid);padding:2px 0">'
                             f'{"🟢" if _sok else "⚪"} {_sname}</div>',
                             unsafe_allow_html=True,
                         )
@@ -1687,15 +1687,15 @@ if analyze_btn or _prefill_active or (
                     if _s == "negative": _sev_counts["red"]   += 1
                     elif _s == "neutral":  _sev_counts["amber"] += 1
                     elif _s == "positive": _sev_counts["green"] += 1
-                _top_color = ("#ef5350" if _sev_counts["red"]
-                              else "#f9a825" if _sev_counts["amber"] else "#26a69a")
+                _top_color = ("var(--bear)" if _sev_counts["red"]
+                              else "var(--amber)" if _sev_counts["amber"] else "var(--bull)")
                 st.markdown(
-                    f'<div style="background:#0d1526;border-left:4px solid {_top_color};'
+                    f'<div style="background:var(--surface);border-left:4px solid {_top_color};'
                     f'border-radius:6px;padding:10px 14px;margin-bottom:10px">'
                     f'<b style="color:{_top_color};font-size:13px">'
                     f'🚩 {len(_flag_dicts)} qualitative flag'
                     f'{"s" if len(_flag_dicts) != 1 else ""} active</b> '
-                    f'<span style="font-size:12px;color:#aaa">'
+                    f'<span style="font-size:12px;color:var(--dim)">'
                     f'· 🔴 {_sev_counts["red"]} · 🟡 {_sev_counts["amber"]} '
                     f'· 🟢 {_sev_counts["green"]}</span>'
                     f'</div>',
@@ -1726,7 +1726,7 @@ if analyze_btn or _prefill_active or (
                         _meta = " · ".join(_meta_bits)
                         st.markdown(
                             f"- {_dot} **{_title_md}**  \n"
-                            f"  <span style='font-size:11px;color:#8899bb'>"
+                            f"  <span style='font-size:11px;color:var(--dim)'>"
                             f"{_meta}</span>",
                             unsafe_allow_html=True,
                         )
@@ -1745,7 +1745,7 @@ if analyze_btn or _prefill_active or (
                     )
                     st.markdown(
                         f'{icon} **[{art["title"]}]({art["link"]})**  \n'
-                        f'<span style="font-size:11px;color:#aaa">'
+                        f'<span style="font-size:11px;color:var(--dim)">'
                         f'{art["publisher"]} · {art["time"]} · *{impact}*</span>',
                         unsafe_allow_html=True,
                     )
@@ -1793,14 +1793,14 @@ if analyze_btn or _prefill_active or (
                 _th = _cached_thesis_full(ticker, cs.score, cs.action,
                                           _dc_total, _liq_tier)
                 _v_color = {
-                    "Strong Positive": "#00d4aa", "Positive": "#2ecc71",
-                    "Neutral":         "#8899bb",  "Negative": "#ff7043",
-                    "Strong Negative": "#ff4757",
-                }.get(_th.verdict, "#8899bb")
+                    "Strong Positive": "var(--bull)", "Positive": "var(--bull)",
+                    "Neutral":         "var(--dim)",  "Negative": "var(--amber)",
+                    "Strong Negative": "var(--bear)",
+                }.get(_th.verdict, "var(--dim)")
                 st.markdown(
                     f"<div style='font-size:1.15rem'>Verdict: "
                     f"<b style='color:{_v_color}'>{_th.verdict}</b> "
-                    f"<span style='color:#8899bb'>(score {_th.verdict_score:+d})</span></div>",
+                    f"<span style='color:var(--dim)'>(score {_th.verdict_score:+d})</span></div>",
                     unsafe_allow_html=True,
                 )
                 st.caption(_th.verdict_rationale)
@@ -1812,9 +1812,9 @@ if analyze_btn or _prefill_active or (
                 # the source tag as a subtle pill, so the user sees the shape
                 # of the thesis at a glance instead of reading paragraphs.
                 _CHIP_STYLES = {
-                    "bull": ("#0d2a1a", "#26a69a", "🟢"),
-                    "bear": ("#2a0d0d", "#ef5350", "🔴"),
-                    "risk": ("#2a1f0a", "#ffa726", "⚠️"),
+                    "bull": ("var(--sunken)", "var(--bull)", "🟢"),
+                    "bear": ("var(--sunken)", "var(--bear)", "🔴"),
+                    "risk": ("var(--sunken)", "var(--amber)", "⚠️"),
                 }
                 def _factor_chips(_factors, _kind, _empty):
                     if not _factors:
@@ -1822,7 +1822,7 @@ if analyze_btn or _prefill_active or (
                     _bg, _border, _icon = _CHIP_STYLES[_kind]
                     for _f in _factors:
                         _pill = (
-                            f'<span style="background:#0a1220;color:#8899bb;'
+                            f'<span style="background:var(--sunken);color:var(--dim);'
                             f'padding:1px 8px;border-radius:10px;font-size:10px;'
                             f'letter-spacing:0.5px">{_f.source}</span>'
                             if getattr(_f, "source", "") else ""
@@ -1830,9 +1830,9 @@ if analyze_btn or _prefill_active or (
                         st.markdown(
                             f'<div style="background:{_bg};border-left:3px solid {_border};'
                             f'border-radius:6px;padding:8px 12px;margin:4px 0">'
-                            f'<div style="color:#eee;font-size:13px;line-height:1.4">'
+                            f'<div style="color:var(--ink-mid);font-size:13px;line-height:1.4">'
                             f'{_icon} {_f.text}</div>'
-                            f'<div style="margin-top:4px;font-size:11px;color:#8899bb">'
+                            f'<div style="margin-top:4px;font-size:11px;color:var(--dim)">'
                             f'{_pill} <span style="margin-left:6px">{getattr(_f, "evidence", "")}</span></div>'
                             f'</div>',
                             unsafe_allow_html=True,
@@ -1841,7 +1841,7 @@ if analyze_btn or _prefill_active or (
                 _tc1, _tc2 = st.columns(2)
                 with _tc1:
                     st.markdown(
-                        '<div style="color:#26a69a;font-weight:700;'
+                        '<div style="color:var(--bull);font-weight:700;'
                         'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
                         'margin-bottom:4px">🟢 Bull case</div>',
                         unsafe_allow_html=True,
@@ -1849,14 +1849,14 @@ if analyze_btn or _prefill_active or (
                     _factor_chips(_th.bull_factors, "bull", "No bull factors triggered.")
                 with _tc2:
                     st.markdown(
-                        '<div style="color:#ef5350;font-weight:700;'
+                        '<div style="color:var(--bear);font-weight:700;'
                         'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
                         'margin-bottom:4px">🔴 Bear case</div>',
                         unsafe_allow_html=True,
                     )
                     _factor_chips(_th.bear_factors, "bear", "No bear factors triggered.")
                 st.markdown(
-                    '<div style="color:#ffa726;font-weight:700;'
+                    '<div style="color:var(--amber);font-weight:700;'
                     'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
                     'margin:12px 0 4px 0">⚠️ Key risks</div>',
                     unsafe_allow_html=True,
@@ -1912,23 +1912,23 @@ if analyze_btn or _prefill_active or (
                         # Heuristic health thresholds — kept intentionally
                         # simple; the deep read still lives in the Valuation
                         # section (P/E ranges) and Fundamental Quality (score).
-                        _health_color = "#8899bb"
+                        _health_color = "var(--dim)"
                         _mname = str(_r.metric or "").lower()
                         if _r.unit == "%":
                             if "roe" in _mname or "roce" in _mname:
-                                _health_color = ("#26a69a" if _r.value >= 15
-                                                 else "#ffa726" if _r.value >= 8
-                                                 else "#ef5350")
+                                _health_color = ("var(--bull)" if _r.value >= 15
+                                                 else "var(--amber)" if _r.value >= 8
+                                                 else "var(--bear)")
                             elif "cagr" in _mname:
-                                _health_color = ("#26a69a" if _r.value >= 12
-                                                 else "#ffa726" if _r.value >= 5
-                                                 else "#ef5350")
+                                _health_color = ("var(--bull)" if _r.value >= 12
+                                                 else "var(--amber)" if _r.value >= 5
+                                                 else "var(--bear)")
                         elif "debt" in _mname:
-                            _health_color = ("#26a69a" if _r.value <= 0.5
-                                             else "#ffa726" if _r.value <= 1.0
-                                             else "#ef5350")
+                            _health_color = ("var(--bull)" if _r.value <= 0.5
+                                             else "var(--amber)" if _r.value <= 1.0
+                                             else "var(--bear)")
                         _col.markdown(
-                            f'<div style="font-size:11px;color:#8899bb;'
+                            f'<div style="font-size:11px;color:var(--dim);'
                             f'text-transform:uppercase;letter-spacing:0.5px">'
                             f'{_r.metric}</div>'
                             f'<div style="font-size:24px;font-weight:700;'
@@ -2045,26 +2045,26 @@ if analyze_btn or _prefill_active or (
                     # right: caveats + coverage — instead of five stacked
                     # captions the eye slides past.
                     _POSTURE_COLORS = {
-                        "SUPPORTED":              ("#00d4aa", "🟢"),
-                        "REASONABLE":             ("#4caf50", "🟢"),
-                        "STRETCHED":              ("#ff9800", "🟡"),
-                        "PRICING_IN_PERFECTION":  ("#ef5350", "🔴"),
-                        "PEG_RICH":               ("#ef5350", "🔴"),
-                        "CYCLICAL_PEAK":          ("#ffa726", "🟡"),
-                        "CYCLICAL_TROUGH":        ("#42a5f5", "🔵"),
-                        "INSUFFICIENT_EVIDENCE":  ("#8899bb", "⚪"),
+                        "SUPPORTED":              ("var(--bull)", "🟢"),
+                        "REASONABLE":             ("var(--bull)", "🟢"),
+                        "STRETCHED":              ("var(--amber)", "🟡"),
+                        "PRICING_IN_PERFECTION":  ("var(--bear)", "🔴"),
+                        "PEG_RICH":               ("var(--bear)", "🔴"),
+                        "CYCLICAL_PEAK":          ("var(--amber)", "🟡"),
+                        "CYCLICAL_TROUGH":        ("var(--accent)", "🔵"),
+                        "INSUFFICIENT_EVIDENCE":  ("var(--dim)", "⚪"),
                     }
                     _post = str(_va.posture or "INSUFFICIENT_EVIDENCE")
                     _pc, _picon = _POSTURE_COLORS.get(
-                        _post, ("#8899bb", "⚪"))
+                        _post, ("var(--dim)", "⚪"))
                     st.markdown(
-                        f'<div style="background:#0d1526;border-left:5px solid {_pc};'
+                        f'<div style="background:var(--surface);border-left:5px solid {_pc};'
                         f'border-radius:8px;padding:14px 18px;margin:8px 0">'
-                        f'<div style="font-size:11px;color:#8899bb;letter-spacing:1.5px;'
+                        f'<div style="font-size:11px;color:var(--dim);letter-spacing:1.5px;'
                         f'text-transform:uppercase">Valuation posture</div>'
                         f'<div style="font-size:22px;font-weight:700;color:{_pc};'
                         f'margin:2px 0 6px 0">{_picon} {_post.replace("_", " ").title()}</div>'
-                        f'<div style="font-size:13px;color:#ddd;line-height:1.5">'
+                        f'<div style="font-size:13px;color:var(--ink-mid);line-height:1.5">'
                         f'{_va.phrase}</div>'
                         f'</div>',
                         unsafe_allow_html=True,
@@ -2107,9 +2107,9 @@ if analyze_btn or _prefill_active or (
                 if _liq_ctx is None:
                     raise RuntimeError("liquidity context not available (see log)")
                 _lt_color = {
-                    "High": "#00d4aa", "Medium": "#2ecc71",
-                    "Low":  "#ffa726", "Illiquid": "#ff4757",
-                }.get(_liq_ctx.liquidity_tier, "#8899bb")
+                    "High": "var(--bull)", "Medium": "var(--bull)",
+                    "Low":  "var(--amber)", "Illiquid": "var(--bear)",
+                }.get(_liq_ctx.liquidity_tier, "var(--dim)")
                 st.markdown(
                     f"Liquidity tier: <b style='color:{_lt_color}'>{_liq_ctx.liquidity_tier}</b>",
                     unsafe_allow_html=True,
@@ -2174,14 +2174,14 @@ if analyze_btn or _prefill_active or (
                         )
 
                     _fr_color = {
-                        "Strong Fit":     "#00d4aa", "Fit":      "#2ecc71",
-                        "Neutral":        "#8899bb", "Poor Fit": "#ff7043",
-                        "Strong Conflict":"#ff4757",
-                    }.get(_fit.fit_rating, "#8899bb")
+                        "Strong Fit":     "var(--bull)", "Fit":      "var(--bull)",
+                        "Neutral":        "var(--dim)", "Poor Fit": "var(--amber)",
+                        "Strong Conflict":"var(--bear)",
+                    }.get(_fit.fit_rating, "var(--dim)")
                     st.markdown(
                         f"<div style='font-size:1.15rem'>Fit rating: "
                         f"<b style='color:{_fr_color}'>{_fit.fit_rating}</b> "
-                        f"<span style='color:#8899bb'>(score {_fit.fit_score:+d})</span></div>",
+                        f"<span style='color:var(--dim)'>(score {_fit.fit_score:+d})</span></div>",
                         unsafe_allow_html=True,
                     )
                     _im1, _im2 = st.columns(2)
@@ -2194,8 +2194,8 @@ if analyze_btn or _prefill_active or (
                     # here so Positive/Negative effects have the same visual
                     # weight and color coding — user asked for parity.
                     _FIT_STYLES = {
-                        "pos": ("#0d2a1a", "#26a69a", "✅"),
-                        "neg": ("#2a0d0d", "#ef5350", "❌"),
+                        "pos": ("var(--sunken)", "var(--bull)", "✅"),
+                        "neg": ("var(--sunken)", "var(--bear)", "❌"),
                     }
                     def _fit_chips(_factors, _kind, _empty):
                         if not _factors:
@@ -2203,7 +2203,7 @@ if analyze_btn or _prefill_active or (
                         _bg, _border, _icon = _FIT_STYLES[_kind]
                         for _f in _factors:
                             _pill = (
-                                f'<span style="background:#0a1220;color:#8899bb;'
+                                f'<span style="background:var(--sunken);color:var(--dim);'
                                 f'padding:1px 8px;border-radius:10px;font-size:10px;'
                                 f'letter-spacing:0.5px">{_f.source}</span>'
                                 if getattr(_f, "source", "") else ""
@@ -2211,9 +2211,9 @@ if analyze_btn or _prefill_active or (
                             st.markdown(
                                 f'<div style="background:{_bg};border-left:3px solid {_border};'
                                 f'border-radius:6px;padding:8px 12px;margin:4px 0">'
-                                f'<div style="color:#eee;font-size:13px;line-height:1.4">'
+                                f'<div style="color:var(--ink-mid);font-size:13px;line-height:1.4">'
                                 f'{_icon} {_f.text}</div>'
-                                f'<div style="margin-top:4px;font-size:11px;color:#8899bb">'
+                                f'<div style="margin-top:4px;font-size:11px;color:var(--dim)">'
                                 f'{_pill} <span style="margin-left:6px">{getattr(_f, "evidence", "")}</span></div>'
                                 f'</div>',
                                 unsafe_allow_html=True,
@@ -2222,7 +2222,7 @@ if analyze_btn or _prefill_active or (
                     _fp, _fn = st.columns(2)
                     with _fp:
                         st.markdown(
-                            '<div style="color:#26a69a;font-weight:700;'
+                            '<div style="color:var(--bull);font-weight:700;'
                             'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
                             'margin-bottom:4px">✅ Positive effects</div>',
                             unsafe_allow_html=True,
@@ -2230,7 +2230,7 @@ if analyze_btn or _prefill_active or (
                         _fit_chips(_fit.positive_effects, "pos", "No positive effects flagged.")
                     with _fn:
                         st.markdown(
-                            '<div style="color:#ef5350;font-weight:700;'
+                            '<div style="color:var(--bear);font-weight:700;'
                             'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
                             'margin-bottom:4px">❌ Negative effects</div>',
                             unsafe_allow_html=True,
@@ -2238,8 +2238,8 @@ if analyze_btn or _prefill_active or (
                         _fit_chips(_fit.negative_effects, "neg", "No negative effects flagged.")
 
                     _ps_color = {
-                        "Large": "#00d4aa", "Moderate": "#ffa726", "Small": "#ff7043",
-                    }.get(_fit.position_size_guidance, "#8899bb")
+                        "Large": "var(--bull)", "Moderate": "var(--amber)", "Small": "var(--amber)",
+                    }.get(_fit.position_size_guidance, "var(--dim)")
                     st.markdown(
                         f"**Position size guidance:** "
                         f"<b style='color:{_ps_color}'>{_fit.position_size_guidance}</b>",
