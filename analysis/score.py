@@ -1521,6 +1521,20 @@ def score_stock(
             except Exception as _fii_e:
                 _log.debug("FII deriv net unavailable: %s: %s",
                            type(_fii_e).__name__, _fii_e)
+            # PCR + max-pain % come from the same options-chain row (last
+            # DB read per ticker). Both stay None gracefully when the
+            # options-chain cron hasn't fetched this symbol yet.
+            try:
+                from data.nse_option_chain import get_pcr, get_max_pain_pct
+                _pcr_v = get_pcr(canonical)
+                _mp_v  = get_max_pain_pct(canonical)
+                if _pcr_v is not None:
+                    _pi_acc["pcr"] = _pcr_v
+                if _mp_v is not None:
+                    _pi_acc["max_pain_distance_pct"] = _mp_v
+            except Exception as _oc_e:
+                _log.debug("option chain unavailable for %s: %s: %s",
+                           canonical, type(_oc_e).__name__, _oc_e)
             if _pi_acc:
                 positioning_info = _pi_acc
     except Exception as _pos_e:
