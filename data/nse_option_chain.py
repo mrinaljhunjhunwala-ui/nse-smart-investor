@@ -63,7 +63,13 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/122.0 Safari/537.36")
 _TIMEOUT = 15
 _PRIME_URL = "https://www.nseindia.com/option-chain"
-_API_TPL   = "https://www.nseindia.com/api/option-chain-equities?symbol={sym}"
+# FIX OC-V3 (2026-09-04): NSE retired /api/option-chain-equities. The current
+# live option-chain page fetches /api/option-chain-v3 with an explicit
+# expiry parameter; the old endpoint now returns HTTP 200 + `{}` to every
+# caller regardless of cookie state (verified from real Chrome with 2166
+# bytes of Akamai cookies).
+_CONTRACT_INFO_TPL = "https://www.nseindia.com/api/option-chain-contract-info?symbol={sym}"
+_API_TPL           = "https://www.nseindia.com/api/option-chain-v3?type=Equity&symbol={sym}&expiry={expiry}"
 
 _schema_ready_for: Optional[str] = None
 
@@ -273,13 +279,24 @@ def parse_option_chain(payload: Dict, symbol: str,
         return None
 
     # Aggregate CE/PE OI across the nearest expiry only.
+    # FIX OC-V3 (2026-09-04): the v3 endpoint server-side filters by the
+    # expiry we passed in the URL, so every row is already for `nearest`.
+    # The old v2 filter compared row.get("expiryDate") but v3 uses
+    # "expiryDates" (plural) with a different date format ("29-09-2026"
+    # inside CE/PE dicts vs "29-Sep-2026" at the top level). Rather than
+    # match on either shape, trust the server filter: accept any row that
+    # matches EITHER key, OR matches nothing (v3 mode).
     strikes_for_pain: List[Tuple[float, float, float]] = []
     total_ce = 0.0
     total_pe = 0.0
     for row in data:
         if not isinstance(row, dict):
             continue
-        if row.get("expiryDate") != nearest:
+        # Legacy v2 filter — kept for backwards-compat with test fixtures
+        # that still emit `expiryDate` per row. v3 rows lack that key, so
+        # this comparison short-circuits to True and the row is included.
+        _row_expiry = row.get("expiryDate")
+        if _row_expiry is not None and _row_expiry != nearest:
             continue
         strike = row.get("strikePrice")
         try:
@@ -428,45 +445,62 @@ def _make_session():
     return s
 
 
-def fetch_chain(symbol: str, session=None) -> Dict:
-    """Fetch and JSON-decode the raw option chain for one symbol.
-
-    Raises named ValueError on 404, HTML-not-JSON, empty body, or the
-    tell-tale `{}` WAF-blocked response (with a diagnostic pointing to
-    the two escape hatches).
-    """
-    sess = session or _make_session()
-    url = _API_TPL.format(sym=symbol.upper().replace(".NS", ""))
-    r = sess.get(url, timeout=_TIMEOUT)
+def _http_get_json(session, url: str) -> Dict:
+    """Common GET + parse + WAF-block detection. Raises named ValueError."""
+    r = session.get(url, timeout=_TIMEOUT)
     if r.status_code == 404:
-        raise ValueError(f"option chain: 404 for {symbol} — not F&O-eligible?")
+        raise ValueError(f"NSE: 404 for {url}")
     r.raise_for_status()
-    # curl_cffi returns bytes; requests returns str via .text.
     body = r.content if hasattr(r, "content") else (r.text or "").encode("utf-8")
     if not body.strip():
-        raise ValueError(f"option chain: empty response body for {symbol}")
+        raise ValueError(f"NSE: empty response body for {url}")
     if body.lstrip().startswith(b"<"):
         raise ValueError(
-            f"NSE returned HTML (not JSON) for option chain of {symbol} — "
-            f"probable rate-limit or WAF challenge. Body: {body[:120]!r}"
+            f"NSE returned HTML (not JSON) for {url} — probable rate-limit "
+            f"or WAF challenge. Body: {body[:120]!r}"
         )
-    # The tell-tale WAF-block: HTTP 200 but body is literal `{}`.
     if body.strip() in {b"{}", b"[]"}:
         raise ValueError(
-            f"NSE option-chain endpoint returned {body.strip().decode()!r} for "
-            f"{symbol} — this is the WAF-blocked response NSE serves to "
-            f"scripted callers as of ~2026-09. Escape hatches: (1) install "
-            f"curl_cffi if not already (`pip install curl_cffi`); (2) open "
-            f"https://www.nseindia.com/option-chain in Chrome, copy the "
-            f"Cookie header, save to .streamlit/secrets.toml as `[nse] "
-            f"cookie = \"...\"`. See data/nse_option_chain.py FIX OC-WAF."
+            f"NSE returned {body.strip().decode()!r} for {url} — WAF-blocked. "
+            f"Install curl_cffi (`pip install curl_cffi`) or paste a browser "
+            f"Cookie header into .streamlit/secrets.toml under [nse] cookie."
         )
     try:
         return json.loads(body)
     except json.JSONDecodeError as e:
+        raise ValueError(f"NSE: JSON decode failed for {url}: {e}")
+
+
+def fetch_chain(symbol: str, session=None) -> Dict:
+    """Fetch the option chain for one symbol via the v3 endpoint.
+
+    Two-step (FIX OC-V3, 2026-09-04):
+      1) GET /api/option-chain-contract-info?symbol=X -> list of expiries
+      2) GET /api/option-chain-v3?type=Equity&symbol=X&expiry=<nearest>
+    The v3 payload has the same records/data/underlyingValue/expiryDates
+    shape as the retired v2 endpoint, so parse_option_chain() is unchanged.
+
+    Raises named ValueError on any failure mode _http_get_json can raise,
+    or when contract-info returns no future expiries.
+    """
+    sess = session or _make_session()
+    sym = symbol.upper().replace(".NS", "")
+
+    # Step 1: expiries. NSE 2026-09-04 returns
+    # {"expiryDates": [...], "strikePrice": [...]}
+    ci = _http_get_json(sess, _CONTRACT_INFO_TPL.format(sym=sym))
+    ex_dates = ci.get("expiryDates") or []
+    nearest = _nearest_expiry(ex_dates)
+    if not nearest:
         raise ValueError(
-            f"option chain: JSON decode failed for {symbol}: {e}"
+            f"option chain: no future expiry for {sym} "
+            f"(contract-info returned {ex_dates[:3]})"
         )
+
+    # Step 2: chain data for that expiry.
+    return _http_get_json(sess, _API_TPL.format(
+        sym=sym, expiry=nearest.replace(" ", "%20"),
+    ))
 
 
 def fetch_and_persist(symbols: List[str],
