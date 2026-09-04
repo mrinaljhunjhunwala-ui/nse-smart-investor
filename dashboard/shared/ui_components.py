@@ -314,6 +314,16 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
         position_rs = 0.0
 
     # Header: ticker + action pill + grade + horizon
+    # NB: F&O chip is precomputed outside the f-string. Python 3.11 rejects
+    # backslashes inside f-string expressions (PEP 701 relaxed this in 3.12);
+    # CI runs on 3.11 so we keep the escape-free form.
+    fno_chip = (
+        ' · <span style="background:var(--tint-accent);color:var(--accent);'
+        'border:1px solid var(--accent);border-radius:4px;padding:2px 6px;'
+        'font-size:10px;font-weight:600;letter-spacing:.5px">F&amp;O</span>'
+        if is_fno else ""
+    )
+    horizon_txt = horizon or "-"
     header = (
         f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;'
         f'margin-bottom:14px">'
@@ -323,8 +333,8 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
         f'border:1px solid {action_color_};border-radius:6px;padding:4px 12px;'
         f'font-size:13px;font-weight:700;letter-spacing:.5px">{action}</span>'
         f'<span style="color:var(--dim);font-family:var(--font-mono);'
-        f'font-size:12px">Grade {grade} · {horizon or "—"}</span>'
-        f'{" · <span style=\"background:var(--tint-accent);color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;letter-spacing:.5px\">F&O</span>" if is_fno else ""}'
+        f'font-size:12px">Grade {grade} · {horizon_txt}</span>'
+        f'{fno_chip}'
         f'</div>'
     )
 

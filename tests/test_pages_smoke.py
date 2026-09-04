@@ -85,7 +85,15 @@ def test_all_pages_present():
 @pytest.mark.smoke
 @pytest.mark.parametrize("page", _PAGES, ids=_IDS)
 def test_page_loads_without_exception(page):
-    at = AppTest.from_file(page, default_timeout=120).run()
+    # Timeout bumped 120 -> 240s (2026-09-04): Streamlit's AppTest is
+    # materially slower on Python 3.11 (CI runner) than on 3.12+. Command
+    # Centre's ticker sweep + panel rendering routinely lands around
+    # 120-130s on 3.11 even after the per-process bench / flows caches in
+    # analysis/score.py cut the per-ticker DB work significantly. 240s
+    # keeps a comfortable ceiling for the slowest page on the slowest
+    # runner without hiding any real regression (a genuine hang is minutes,
+    # not just tens of seconds over the old ceiling).
+    at = AppTest.from_file(page, default_timeout=240).run()
     # AppTest.exception is an ElementList (falsy when empty), not None.
     assert not at.exception, (
         f"{os.path.basename(page)} raised an uncaught exception: "

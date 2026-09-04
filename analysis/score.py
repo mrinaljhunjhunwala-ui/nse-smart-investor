@@ -128,6 +128,62 @@ def _num(row: "pd.Series", key: str, default: float) -> float:
     return default if math.isnan(f) else f
 
 
+# FIX RS-CACHE (2026-09-04) — process-level cache of the Nifty benchmark df
+# used by the Rec 1 RS enrichment. Keyed on `period` string because callers
+# pass different windows ("2y" default, "1y" from peer scans). Sentinel
+# _MISS distinguishes "not tried yet" from "tried and failed" so a failed
+# fetch on ticker 1 doesn't get retried for tickers 2..N (the actual bug
+# 02_command_centre's 120s smoke timeout on 3.11 was pointing at).
+_BENCH_MISS = object()
+_BENCH_CACHE: Dict[str, object] = {}
+
+
+# FIX FLOWS-CACHE (2026-09-04) — universe-level flows cached per process.
+_FLOWS_CACHE: Dict[str, Optional[Dict]] = {}
+
+
+def _get_flows_cached() -> Optional[Dict]:
+    if "flows" in _FLOWS_CACHE:
+        return _FLOWS_CACHE["flows"]
+    try:
+        from analysis.fii_dii import load_history as _fd_load
+        _fd = _fd_load(days=5)
+        if _fd is not None and not _fd.empty and len(_fd) >= 3:
+            v: Optional[Dict] = {
+                "fii_5d": float(_fd["fii_net"].fillna(0).sum()),
+                "dii_5d": float(_fd["dii_net"].fillna(0).sum()),
+                "n_days": int(len(_fd)),
+            }
+        else:
+            v = None
+    except Exception as e:
+        _log.debug("FII/DII flows cache miss: %s: %s", type(e).__name__, e)
+        v = None
+    _FLOWS_CACHE["flows"] = v
+    return v
+
+
+def _get_bench_cached(period: str):
+    """Return a cached Nifty DataFrame for `period`, or None on failure.
+    None is cached too — subsequent calls in the same process skip the fetch.
+    """
+    if period in _BENCH_CACHE:
+        v = _BENCH_CACHE[period]
+        return None if v is _BENCH_MISS else v
+    try:
+        b = _fetch_single("^NSEI", period=period)  # type: ignore[misc]
+        if b is None or (hasattr(b, "empty") and b.empty):
+            _BENCH_CACHE[period] = _BENCH_MISS
+            return None
+        _BENCH_CACHE[period] = b
+        return b
+    except Exception as e:
+        _log.debug("bench cache: ^NSEI %s fetch failed, caching MISS: %s: %s",
+                   period, type(e).__name__, e)
+        _BENCH_CACHE[period] = _BENCH_MISS
+        return None
+
+
 def _load_deps() -> bool:
     global _DEPS_LOADED, _fetch_single, _get_sector, _resolve_ticker
     global _list_sectors, _add_all_indicators, _get_india_vix_regime
@@ -1462,10 +1518,19 @@ def score_stock(
         # can use the abs:15 + RS:10 split. Best-effort: a benchmark-fetch
         # failure leaves the df without RS_Score, and momentum falls back
         # to the 25-pt absolute mode (documented in _score_momentum).
+        #
+        # FIX RS-CACHE (2026-09-04): the benchmark was being fetched INSIDE
+        # every score_stock() call. Command Centre scans N tickers -> N
+        # ^NSEI fetches. On network-blocked runs (CI page-smoke) each fetch
+        # walks Angel/Stooq/Yahoo with per-provider timeouts -> the smoke
+        # test for 02_command_centre hit its 120s ceiling. Cache the
+        # per-(period) result at module level so we pay at most one fetch
+        # per process per period; a failed fetch is remembered as None so
+        # subsequent tickers short-circuit instead of retrying.
         try:
-            from utils.indicators import add_relative_strength
-            _bench = _fetch_single("^NSEI", period=period)
+            _bench = _get_bench_cached(period)
             if _bench is not None and not _bench.empty:
+                from utils.indicators import add_relative_strength
                 df = add_relative_strength(df, _bench)
         except Exception as _rs_e:
             _log.debug("RS enrichment skipped for %s: %s: %s",
@@ -1492,10 +1557,17 @@ def score_stock(
     # are best-effort; a miss returns positioning_info=None which the
     # three-way gate in score_dataframe handles as "pillar stays inactive
     # for this ticker" (no bias).
+    #
+    # FIX POS-GATE (2026-09-04): also skip the DB reads entirely when the
+    # opt-in flag is off (the default). Command Centre scans many tickers
+    # per render; without this gate we did 3-4 SQL SELECTs per ticker even
+    # though _score_dataframe would then throw the results away. That was
+    # part of what pushed 02_command_centre's smoke past the 120s ceiling
+    # on the slower CI runner.
     positioning_info: Optional[Dict] = None
     try:
         from data.fno_universe import is_fno_eligible as _fno_check
-        if _fno_check(canonical):
+        if _fno_check(canonical) and _positioning_pillar_enabled():
             from data.nse_fno_bhavcopy import get_oi_regime_for_ticker as _oi_reg
             # Today's price change from the df we already have.
             _closes = df["Close"].tail(2)
@@ -1575,19 +1647,11 @@ def score_stock(
     # trade_store cache the fii_dii cron populates; a miss here (no data yet,
     # DB unreachable) is best-effort: flows_info stays None and _score_sentiment
     # falls back to its legacy 6/4 split (documented in that function).
-    flows_info: Optional[Dict] = None
-    try:
-        from analysis.fii_dii import load_history as _fd_load
-        _fd = _fd_load(days=5)
-        if _fd is not None and not _fd.empty and len(_fd) >= 3:
-            flows_info = {
-                "fii_5d": float(_fd["fii_net"].fillna(0).sum()),
-                "dii_5d": float(_fd["dii_net"].fillna(0).sum()),
-                "n_days": int(len(_fd)),
-            }
-    except Exception as _fl_e:
-        _log.debug("FII/DII flows unavailable for scoring: %s: %s",
-                   type(_fl_e).__name__, _fl_e)
+    #
+    # FIX FLOWS-CACHE (2026-09-04): flows are universe-level (one value
+    # applies to every ticker on the same day). Cache at the module level
+    # so Command Centre's ticker sweep does a single DB read, not N.
+    flows_info = _get_flows_cached()
 
     result = score_dataframe(
         df=df, ticker=canonical,
