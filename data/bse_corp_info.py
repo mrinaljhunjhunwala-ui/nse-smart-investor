@@ -169,6 +169,19 @@ def get_corp_info(ticker: str, use_cache: bool = True) -> Dict[str, Any]:
         )
         actions_raw = client.actions(scripcode=scripcode)
 
+        # Defensive schema check — flagged by data-provenance-auditor 2026-09-02.
+        # Previously the `.get("Table") or []` chain silently returned an empty
+        # announcements list whenever the upstream `bse` client reshaped its
+        # response (e.g. dropped the "Table" envelope), making a real API drift
+        # look like "no announcements this month" to the UI. Log a WARNING so
+        # drift is visible in operator logs instead of being invisible.
+        if announcements_raw and isinstance(announcements_raw, dict) \
+                and "Table" not in announcements_raw:
+            _log.warning(
+                "bse_corp_info: %s announcements response missing 'Table' key "
+                "(top-level keys: %s) — possible upstream schema drift.",
+                ticker, list(announcements_raw.keys())[:8],
+            )
         ann_items = (announcements_raw or {}).get("Table") or []
         def _bse_exdate_to_iso(raw: Any) -> str:
             s = str(raw or "").strip()

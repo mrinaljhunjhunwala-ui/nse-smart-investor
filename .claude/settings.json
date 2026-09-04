@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py .claude/hooks/block_sensitive.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py .claude/hooks/lint_python.py"
+          },
+          {
+            "type": "command",
+            "command": "py .claude/hooks/block_page_hex.py"
+          }
+        ]
+      }
+    ]
+  }
+}

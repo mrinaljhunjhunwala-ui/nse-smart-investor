@@ -128,6 +128,62 @@ def _num(row: "pd.Series", key: str, default: float) -> float:
     return default if math.isnan(f) else f
 
 
+# FIX RS-CACHE (2026-09-04) — process-level cache of the Nifty benchmark df
+# used by the Rec 1 RS enrichment. Keyed on `period` string because callers
+# pass different windows ("2y" default, "1y" from peer scans). Sentinel
+# _MISS distinguishes "not tried yet" from "tried and failed" so a failed
+# fetch on ticker 1 doesn't get retried for tickers 2..N (the actual bug
+# 02_command_centre's 120s smoke timeout on 3.11 was pointing at).
+_BENCH_MISS = object()
+_BENCH_CACHE: Dict[str, object] = {}
+
+
+# FIX FLOWS-CACHE (2026-09-04) — universe-level flows cached per process.
+_FLOWS_CACHE: Dict[str, Optional[Dict]] = {}
+
+
+def _get_flows_cached() -> Optional[Dict]:
+    if "flows" in _FLOWS_CACHE:
+        return _FLOWS_CACHE["flows"]
+    try:
+        from analysis.fii_dii import load_history as _fd_load
+        _fd = _fd_load(days=5)
+        if _fd is not None and not _fd.empty and len(_fd) >= 3:
+            v: Optional[Dict] = {
+                "fii_5d": float(_fd["fii_net"].fillna(0).sum()),
+                "dii_5d": float(_fd["dii_net"].fillna(0).sum()),
+                "n_days": int(len(_fd)),
+            }
+        else:
+            v = None
+    except Exception as e:
+        _log.debug("FII/DII flows cache miss: %s: %s", type(e).__name__, e)
+        v = None
+    _FLOWS_CACHE["flows"] = v
+    return v
+
+
+def _get_bench_cached(period: str):
+    """Return a cached Nifty DataFrame for `period`, or None on failure.
+    None is cached too — subsequent calls in the same process skip the fetch.
+    """
+    if period in _BENCH_CACHE:
+        v = _BENCH_CACHE[period]
+        return None if v is _BENCH_MISS else v
+    try:
+        b = _fetch_single("^NSEI", period=period)  # type: ignore[misc]
+        if b is None or (hasattr(b, "empty") and b.empty):
+            _BENCH_CACHE[period] = _BENCH_MISS
+            return None
+        _BENCH_CACHE[period] = b
+        return b
+    except Exception as e:
+        _log.debug("bench cache: ^NSEI %s fetch failed, caching MISS: %s: %s",
+                   period, type(e).__name__, e)
+        _BENCH_CACHE[period] = _BENCH_MISS
+        return None
+
+
 def _load_deps() -> bool:
     global _DEPS_LOADED, _fetch_single, _get_sector, _resolve_ticker
     global _list_sectors, _add_all_indicators, _get_india_vix_regime
@@ -202,6 +258,9 @@ class CompositeScore:
     valid_until:        str          = ""      # FIX HZ1: ISO date — pick considered stale after this
     rsi:                float        = 50.0    # FIX WL1: raw RSI(14), already computed — just unsurfaced
     return_1d:          float        = 0.0     # FIX WL1: 1-day % change, already available from df
+    rs_score:           Optional[float] = None # FIX RS1: RS_Score vs Nifty (0-100 percentile), None when benchmark unavailable
+    positioning_score:  Optional[float] = None # FIX POS1: Positioning pillar (0-10, F&O + flag ON); None otherwise
+    is_fno:             bool            = False # FIX POS1: True when the ticker is F&O-eligible per data.fno_universe
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -217,6 +276,9 @@ class CompositeScore:
             "momentum_fallback": self.momentum_fallback,
             "horizon": self.horizon, "valid_until": self.valid_until,
             "rsi": self.rsi, "return_1d": self.return_1d,
+            "rs_score": self.rs_score,
+            "positioning": self.positioning_score,
+            "is_fno": self.is_fno,
         }
 
 
@@ -289,7 +351,79 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
 # Sub-scorer: Momentum  (25 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
+# ── FIX REGIME1 (2026-09-03) — regime-conditional momentum dispatch flag ──
+# Recommendation 5 of docs/COMPOSITE_SCORE_SHAPE_REVIEW.md. Guarded behind an
+# env var so shipping the *mechanism* doesn't change production scoring: the
+# study that would license flipping the default (research/score_variants_regime.py)
+# has not yet been run end-to-end. When the flag is ON AND the regime is
+# 'bear' (trend_down / risk_off) the absolute-returns half of the Momentum
+# pillar (15 pts under Rec 1) is replaced by a self-normalised 5-day mean-
+# reversion percentile — this is Var M from the variant study, the ONLY one
+# of the three that preserves Guardrail 5 (4 pillars, 40+25+15+10, cap 90).
+# RS component (10 pts) stays unchanged in either mode.
+import os as _regime_os
+
+def _regime_weights_enabled() -> bool:
+    _v = _regime_os.environ.get("NSE_USE_REGIME_WEIGHTS", "").strip().lower()
+    return _v in {"1", "true", "yes", "on"}
+
+# Regime labels analysis.regime.snapshot_live() emits, mapped to the
+# three-way {bull, bear, sideways} the variant study used.
+_BEAR_REGIMES  = {"trend_down", "risk_off", "bear"}
+_BULL_REGIMES  = {"trend_up", "bull"}
+_RANGE_REGIMES = {"range", "sideways"}
+
+
+def _score_momentum_mean_reversion(df: pd.DataFrame) -> Tuple[float, Dict]:
+    """
+    Bear-regime alternative to _score_momentum_absolute. Returns (pts_0_15, detail).
+
+    Score = inverted percentile rank of the stock's trailing-5-day return
+    within its own trailing 252-day distribution of 5-day returns, scaled to
+    0..15. Low recent 5d return -> high reversal score. Self-normalised so no
+    cross-sectional lookahead. Direct implementation of Var M from
+    research/score_variants_regime.py.
+    """
+    close = df["Close"]
+    r5d = close.pct_change(5).dropna()
+    if len(r5d) < 30:
+        # Not enough history for a self-percentile — return neutral half.
+        return 7.5, {"mr_note": "insufficient history for 5d reversal percentile",
+                     "mr_available": False}
+    window = r5d.tail(252)
+    today  = float(window.iloc[-1])
+    prior  = window.iloc[:-1]
+    if len(prior) < 20:
+        return 7.5, {"mr_note": "insufficient history",
+                     "mr_available": False}
+    # Percentile of today within prior: 0.0 = worst in window, 1.0 = best.
+    # Invert so weakest 5d returns pay the most points (mean-reversion bet).
+    pct = float((prior < today).sum()) / float(len(prior))
+    inv = 1.0 - pct
+    pts = round(inv * 15.0, 2)
+    return pts, {
+        "mr_available":   True,
+        "mr_r5d_pct":     round(pct, 3),
+        "mr_r5d_today":   round(today * 100, 2),
+    }
+
+
+def _score_momentum(df: pd.DataFrame,
+                    regime_label: Optional[str] = None) -> Tuple[float, Dict]:
+    """
+    Momentum pillar (25 pts).
+
+    Default computation (production):
+      abs_returns (0-15, or 0-25 legacy when RS_Score absent) + rs_vs_nifty (0-10).
+
+    When NSE_USE_REGIME_WEIGHTS env var is truthy AND regime_label is 'bear'
+    (trend_down / risk_off), the abs_returns half is replaced by a 5-day
+    mean-reversion percentile (Var M from score_variants_regime.py). RS
+    component stays. Guardrail 5 shape unchanged (Momentum stays 25 pts).
+
+    Flag defaults OFF — flipping requires the study run per Task 3.6 in
+    tasks/plan.md.
+    """
     if len(df) < 25:
         # Not enough history — return neutral 50% and flag it so the caller
         # can add a disclaimer to the narrative.
@@ -349,7 +483,69 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
     pts["_r60d"] = round(r60d, 2) if has_r60 else None
     pts["r60d_available"] = has_r60
 
-    total = pts["r5d"] + pts["r20d"] + pts["r60d"]
+    abs_total = pts["r5d"] + pts["r20d"] + pts["r60d"]
+
+    # ── FIX RS1 (2026-09-03) — Relative Strength vs Nifty ───────────────────
+    # Absolute returns reward beta in bull tapes and punish defensives in
+    # bear tapes. The 5-year efficacy study (docs/SCORE_EFFICACY_REPORT.md)
+    # tied the 62 → 46% BUY-hit-rate drop between train (trending) and
+    # holdout (mean-reverting) partly to this. IBD-style RS_Score (0-100
+    # percentile rank of the stock/Nifty ratio's 52-week distribution) is
+    # already computed by utils.indicators.add_relative_strength() and
+    # written to the df as RS_Score before this function is called (see
+    # score_stock). When present, the Momentum pillar's 25 pts split as
+    # abs_returns:15 + rs_vs_nifty:10 — same total, same shape (Guardrail
+    # §5 unchanged). When absent (test frames with synthetic data, single-
+    # ticker ad-hoc scoring without a benchmark fetch), the full 25 pts
+    # stay on absolute momentum for backwards-compat.
+    #
+    # This lands Task 3.1 from tasks/plan.md and Recommendation 1 from
+    # docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+    rs_score = _num(df.iloc[-1], "RS_Score", float("nan"))
+    _rs_available = not math.isnan(rs_score)
+
+    # ── FIX REGIME1 — Var M dispatch (bear + flag only) ───────────────────
+    # In bear regime with the opt-in flag set, replace the abs_returns half
+    # of the pillar with a 5d mean-reversion percentile. RS stays if
+    # available. When RS is absent (test frames, ad-hoc scoring), Var M
+    # still runs and gives the full 15 pts to mean-reversion; the remaining
+    # 10 pts of the 25 stay unfilled (backwards-compat with the "abs alone
+    # is 25 pts" legacy shape breaks here by design — this is bear-regime
+    # opt-in, opting into it means opting into Var M).
+    _regime_bear = (regime_label or "").lower() in _BEAR_REGIMES
+    _use_var_m   = _regime_bear and _regime_weights_enabled()
+
+    if _use_var_m:
+        mr_pts, mr_detail = _score_momentum_mean_reversion(df)
+        pts.update(mr_detail)
+        pts["variant"]  = "M_bear_mean_reversion"
+        pts["regime"]   = regime_label
+        if _rs_available:
+            rs_pts = round(float(np.clip(rs_score, 0.0, 100.0)) / 100.0 * 10.0, 2)
+            pts["rs_available"] = True
+            pts["rs_score"]     = round(rs_score, 1)
+            pts["rs_pts"]       = rs_pts
+            total = mr_pts + rs_pts
+        else:
+            pts["rs_available"] = False
+            total = mr_pts   # 0-15 only; 10 pts unfilled in ad-hoc RS-less mode
+    elif _rs_available:
+        # Scale absolute component 25 → 15
+        abs_scaled = abs_total * (15.0 / 25.0)
+        # RS component: linear map 0-100 → 0-10, per _bonus_rs() convention
+        # in research/score_variants_rs.py which studied exactly this shape.
+        rs_pts = round(float(np.clip(rs_score, 0.0, 100.0)) / 100.0 * 10.0, 2)
+        pts["rs_available"] = True
+        pts["rs_score"]     = round(rs_score, 1)
+        pts["rs_pts"]       = rs_pts
+        pts["abs_scaled"]   = round(abs_scaled, 2)
+        pts["variant"]      = "base_abs_plus_rs"
+        total = abs_scaled + rs_pts
+    else:
+        pts["rs_available"] = False
+        pts["variant"]      = "legacy_abs_only"
+        total = abs_total
+
     return round(min(total, 25.0), 2), pts
 
 
@@ -357,7 +553,25 @@ def _score_momentum(df: pd.DataFrame) -> Tuple[float, Dict]:
 # Sub-scorer: Volume  (15 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
+def _score_volume(df: pd.DataFrame,
+                  delivery_info: Optional[Dict] = None) -> Tuple[float, Dict]:
+    """Volume pillar (15 pts).
+
+    Two modes, gated on `delivery_info` availability:
+
+    Legacy (backwards-compat, delivery_info=None) — 15 pts split as
+        vol_ratio:10 + obv:5
+
+    With delivery — 15 pts split as
+        vol_ratio:8 + delivery_pct:4 + obv:3
+    Rationale: NSE bhavcopy delivery % is the closest thing retail India has
+    to a Level-2 institutional print. High delivery on rising price is
+    institutional accumulation; high delivery on falling price is
+    distribution; low delivery on a sharp up-move is intraday froth that
+    tends to unwind. Guardrail 5 shape unchanged (Volume stays 15 pts of 90).
+
+    Ships Recommendation 4 from docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+    """
     cur        = df.iloc[-1]
     vol_ratio  = _num(cur, "Volume_Ratio", 1.0)   # FIX SCORE-NAN
     close      = float(cur["Close"])
@@ -365,22 +579,74 @@ def _score_volume(df: pd.DataFrame) -> Tuple[float, Dict]:
     up_day     = close >= open_price
 
     pts: Dict[str, float] = {}
+    _use_delivery = (
+        isinstance(delivery_info, dict)
+        and delivery_info.get("today") is not None
+        and delivery_info.get("mean")  is not None
+    )
 
+    # ── vol_ratio: same bucketing shape, top rescaled from 10 to 8 when
+    # delivery is available (Guardrail 5: pillar stays 15 pts).
     if vol_ratio > 2.5:   raw_vol = 10.0
     elif vol_ratio > 1.8: raw_vol = 8.0
     elif vol_ratio > 1.2: raw_vol = 6.0
     elif vol_ratio > 0.8: raw_vol = 4.0
     else:                 raw_vol = 1.0
-    pts["vol_ratio"] = raw_vol if up_day else max(1.0, raw_vol * 0.4)
+    _vol_after_dir = raw_vol if up_day else max(1.0, raw_vol * 0.4)
+    if _use_delivery:
+        # Scale 10-pt shape down to 8: multiply by 0.8, cap at 8.
+        pts["vol_ratio"] = round(min(_vol_after_dir * 0.8, 8.0), 2)
+    else:
+        pts["vol_ratio"] = _vol_after_dir
 
+    # ── OBV slope: same shape, top rescaled from 5 to 3 when delivery is
+    # available.
     if "OBV" in df.columns and len(df) >= 10:
         obv_recent = df["OBV"].iloc[-10:].values.astype(float)
         slope      = float(np.polyfit(range(10), obv_recent, 1)[0])
-        pts["obv"] = 5.0 if slope > 0 else (2.0 if abs(slope) < abs(obv_recent.mean()) * 0.001 else 0.0)
+        _obv_raw = 5.0 if slope > 0 else (2.0 if abs(slope) < abs(obv_recent.mean()) * 0.001 else 0.0)
     else:
-        pts["obv"] = 2.0
+        _obv_raw = 2.0
+    if _use_delivery:
+        pts["obv"] = round(min(_obv_raw * 0.6, 3.0), 2)   # 5 -> 3
+    else:
+        pts["obv"] = _obv_raw
 
-    total = pts["vol_ratio"] + pts["obv"]
+    # ── Delivery % sub-score (FIX DELIV1, 2026-09-03) — 4 pts when
+    # delivery snapshot is present.
+    if _use_delivery:
+        today = float(delivery_info["today"])
+        mean  = float(delivery_info["mean"])
+        z     = delivery_info.get("zscore")
+        # Absolute level: what fraction of trades are actually taken to demat.
+        # 40% is roughly the market-cap-weighted large-cap norm; above 60% is
+        # institutional footprint, below 20% is pure intraday churn.
+        if   today >= 60: abs_pts = 2.5
+        elif today >= 45: abs_pts = 2.0
+        elif today >= 30: abs_pts = 1.0
+        elif today >= 20: abs_pts = 0.5
+        else:              abs_pts = 0.0
+        # Direction vs the stock's own 60-day mean — separates
+        # accumulation (today > mean) from distribution / intraday froth.
+        if z is None:      dir_pts = 0.75           # std=0 pathological: neutral
+        elif z >  1.0:     dir_pts = 1.5           # sharply above own mean
+        elif z >  0.25:    dir_pts = 1.0           # above mean
+        elif z > -0.25:    dir_pts = 0.75          # near mean
+        elif z > -1.0:     dir_pts = 0.25          # below mean
+        else:              dir_pts = 0.0           # sharp under-delivery
+        _deliv_pts = round(min(abs_pts + dir_pts, 4.0), 2)
+        pts["delivery"]           = _deliv_pts
+        pts["delivery_today"]     = round(today, 2)
+        pts["delivery_mean"]      = round(mean, 2)
+        pts["delivery_z"]         = z
+        pts["delivery_n"]         = int(delivery_info.get("n", 0))
+        pts["delivery_available"] = True
+        # Divergence flag — surfaced in narrative by _build_narrative()
+        pts["delivery_divergence"] = bool(up_day and vol_ratio > 1.5 and z is not None and z < -1.0)
+    else:
+        pts["delivery_available"] = False
+
+    total = pts["vol_ratio"] + pts["obv"] + (pts.get("delivery", 0.0) if _use_delivery else 0.0)
     return round(min(total, 15.0), 2), pts
 
 
@@ -431,31 +697,186 @@ def _detect_patterns(df: pd.DataFrame) -> Dict:
 # Sub-scorer: Sentiment  (10 pts)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15) -> Tuple[float, Dict]:
+def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15,
+                     flows_info: Optional[Dict] = None) -> Tuple[float, Dict]:
+    """Sentiment pillar (10 pts).
+
+    Two modes, gated on `flows_info` availability:
+
+    Legacy (backwards-compat, flows_info is None) — the 10 pts split as
+        vix:6 + sector_rank:4
+    which is how every caller before FIX FLOWS1 (2026-09-03) worked.
+
+    With flows (flows_info dict from analysis.fii_dii.load_history) — the
+    10 pts split as
+        vix:5 + sector_rank:3 + fii_dii_flows:2
+    Rationale: FII/DII cash-market net-buy/sell is the single largest
+    driver of same-week Nifty direction on Indian equities — the app
+    already computes and displays it on Analyze Stock's market-context
+    strip, but the composite score was blind to it. Guardrail 5 shape
+    unchanged (Sentiment stays 10 pts of the 90).
+
+    Ships Recommendation 2 from docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+    """
     regime = (vix_info or {}).get("regime", "normal")
     pts: Dict[str, float] = {}
 
-    vix_pts_map = {
-        "complacency": 5.0,
-        "normal":      6.0,
-        "elevated":    4.0,
-        "fear":        2.0,
-        "panic":       0.0,
-        "unknown":     3.0,
-    }
-    pts["vix"] = vix_pts_map.get(regime, 3.0)
+    _flows_available = (
+        isinstance(flows_info, dict)
+        and flows_info.get("fii_5d") is not None
+        and flows_info.get("dii_5d") is not None
+    )
 
-    # Sector rank thresholds derived from n_sectors — not hardcoded
-    top_third = n_sectors // 3
-    mid_third = 2 * n_sectors // 3
-    if sector_rank <= top_third:
-        pts["sector"] = 4.0
-    elif sector_rank <= mid_third:
-        pts["sector"] = 2.0
+    if _flows_available:
+        # Split 5/3/2 — see docstring. VIX map preserves the old 6-pt map's
+        # relative shape then rescales so the max is 5 (normal) instead of 6.
+        vix_pts_map = {
+            "complacency": 4.0, "normal": 5.0, "elevated": 3.0,
+            "fear":        1.5, "panic":  0.0, "unknown":  2.5,
+        }
+        pts["vix"] = vix_pts_map.get(regime, 2.5)
+
+        top_third = n_sectors // 3
+        mid_third = 2 * n_sectors // 3
+        if sector_rank <= top_third:   pts["sector"] = 3.0
+        elif sector_rank <= mid_third: pts["sector"] = 1.5
+        else:                           pts["sector"] = 0.0
+
+        # Flows: sign of 5-day (FII + DII) net cash-market
+        _fii = float(flows_info.get("fii_5d") or 0.0)
+        _dii = float(flows_info.get("dii_5d") or 0.0)
+        if _fii > 0 and _dii > 0:
+            pts["flows"] = 2.0   # broad participation — persistent rallies
+        elif _fii < 0 and _dii < 0:
+            pts["flows"] = 0.0   # distribution — usually precedes weakness
+        elif _fii < 0 and _dii > 0:
+            pts["flows"] = 1.5   # domestic-supported dip — tradeable pullback
+        elif _fii > 0 and _dii < 0:
+            pts["flows"] = 1.0   # DII profit-taking rally — shallower legs
+        else:
+            pts["flows"] = 1.0   # mixed / one leg is zero
+        pts["flows_available"] = True
+        pts["fii_5d"] = round(_fii, 1)
+        pts["dii_5d"] = round(_dii, 1)
+
+        total = pts["vix"] + pts["sector"] + pts["flows"]
     else:
-        pts["sector"] = 0.0
+        # Legacy mode — unchanged from pre-2026-09-03 behavior
+        vix_pts_map = {
+            "complacency": 5.0, "normal": 6.0, "elevated": 4.0,
+            "fear":        2.0, "panic":  0.0, "unknown":  3.0,
+        }
+        pts["vix"] = vix_pts_map.get(regime, 3.0)
 
-    total = pts["vix"] + pts["sector"]
+        top_third = n_sectors // 3
+        mid_third = 2 * n_sectors // 3
+        if sector_rank <= top_third:   pts["sector"] = 4.0
+        elif sector_rank <= mid_third: pts["sector"] = 2.0
+        else:                           pts["sector"] = 0.0
+
+        pts["flows_available"] = False
+        total = pts["vix"] + pts["sector"]
+
+    return round(min(total, 10.0), 2), pts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sub-scorer: Positioning  (10 pts, F&O + flag ON only)
+# Recommendation 6 design 6a of docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _positioning_pillar_enabled() -> bool:
+    """Env flag gating the whole pillar. Same opt-in discipline as Rec 5.
+
+    Default OFF. Setting NSE_USE_POSITIONING_PILLAR to any truthy value
+    activates the 5-pillar 35+20+15+10+10=90 shape on F&O-eligible tickers.
+    Non-F&O tickers keep the legacy 4-pillar 40+25+15+10=90 shape in either
+    state; the flag is not enough on its own — F&O eligibility is required
+    because the pillar's inputs (OI regime, PCR, max pain, FII index-futs)
+    literally do not exist for non-F&O names.
+    """
+    _v = _regime_os.environ.get("NSE_USE_POSITIONING_PILLAR", "").strip().lower()
+    return _v in {"1", "true", "yes", "on"}
+
+
+# Neutral midpoints used when a data pipeline for a sub-input is not yet
+# online. Rationale: shipping the pillar with all-zero defaults would
+# systematically demote F&O names once the flag is on, before the data
+# even arrives. Neutrals mean a "no positioning read" is treated the same
+# as "everything is average" — matches the "unknown" bucket convention
+# used for VIX regime, sector rank and (in Rec 3) SL bounds.
+_POS_OI_REGIME_MAP = {
+    "long_buildup":    3.0,   # fresh longs on rising price
+    "short_covering":  2.0,   # weak bears exiting on rising price
+    "long_unwinding":  1.0,   # weak bulls exiting on falling price
+    "short_buildup":   0.0,   # fresh shorts on falling price
+}
+
+
+def _score_positioning(
+    oi_regime:              Optional[str]   = None,
+    pcr:                    Optional[float] = None,
+    max_pain_distance_pct:  Optional[float] = None,
+    fii_deriv_net:          Optional[float] = None,
+) -> Tuple[float, Dict]:
+    """Positioning pillar (10 pts) — F&O eligibility + opt-in flag only.
+
+    Sub-scores (all graceful when data absent, defaulting to their neutral
+    midpoint so unknown reads never systematically penalise a name):
+
+      OI regime         (3 pts)  long_buildup / short_covering /
+                                 long_unwinding / short_buildup
+      PCR               (2 pts)  extreme reads are contrarian
+      Max pain distance (2 pts)  price near max pain = pinning risk
+      FII deriv (idx)   (3 pts)  sign of net index-futures position
+
+    Ships in this landing with all four sub-inputs default-None (data
+    pipelines are queued as follow-ups per docs/POSITIONING_INTEGRATION_2026-09.md).
+    Each pipeline lands as its own commit and lights up its sub-score.
+    """
+    pts: Dict[str, float] = {}
+
+    # OI regime
+    pts["oi_regime"] = _POS_OI_REGIME_MAP.get((oi_regime or "").lower(), 1.5)
+
+    # PCR: <0.6 extreme complacency (bearish); 0.6-0.9 mildly bullish;
+    # 0.9-1.2 healthy; 1.2-1.5 mild fear; >1.5 extreme fear (contrarian
+    # bullish). Neutral default 1.0 of 2.
+    if pcr is None:
+        pts["pcr"] = 1.0
+    elif pcr < 0.6:  pts["pcr"] = 0.5
+    elif pcr < 0.9:  pts["pcr"] = 1.5
+    elif pcr <= 1.2: pts["pcr"] = 1.5
+    elif pcr <= 1.5: pts["pcr"] = 1.0
+    else:            pts["pcr"] = 2.0
+
+    # Max pain distance %: near expiry, price tends to pin toward max pain.
+    # Far from pin gives options-writers room; on-pin has more chop risk.
+    if max_pain_distance_pct is None:
+        pts["max_pain"] = 1.0
+    elif abs(max_pain_distance_pct) < 1.0:  pts["max_pain"] = 0.5
+    elif abs(max_pain_distance_pct) < 3.0:  pts["max_pain"] = 1.0
+    else:                                    pts["max_pain"] = 1.5
+
+    # FII net index-futures position, in CONTRACTS (not rupees — NSE
+    # publishes contract counts; conversion to rupees would need lot-size
+    # + price and adds no signal). Positive = FII net long index futs
+    # (bullish); negative = net short (bearish). Thresholds calibrated to
+    # the typical 2023-26 range (~ -100k to +100k contracts); will be
+    # re-tuned after 60 days of production data.
+    if fii_deriv_net is None:
+        pts["fii_deriv"] = 1.5
+    elif fii_deriv_net >  30_000:   pts["fii_deriv"] = 3.0
+    elif fii_deriv_net >       0:   pts["fii_deriv"] = 2.0
+    elif fii_deriv_net > -30_000:   pts["fii_deriv"] = 1.0
+    else:                            pts["fii_deriv"] = 0.0
+
+    pts["_oi_regime_input"]        = oi_regime
+    pts["_pcr_input"]              = pcr
+    pts["_max_pain_pct_input"]     = max_pain_distance_pct
+    pts["_fii_deriv_net_input"]    = fii_deriv_net
+
+    total = pts["oi_regime"] + pts["pcr"] + pts["max_pain"] + pts["fii_deriv"]
     return round(min(total, 10.0), 2), pts
 
 
@@ -463,7 +884,28 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15) -> T
 # Entry / SL / TP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float, float, float]:
+_SL_BOUNDS_BY_REGIME = {
+    # FIX SL-REGIME (2026-09-03) — Ships Recommendation 3 from
+    # docs/COMPOSITE_SCORE_SHAPE_REVIEW.md. ATR is a rolling 14-bar volatility
+    # measure; when VIX shifts regime, the same ATR multiple represents a
+    # very different amount of realized noise. Fixed [1.2, 3.0] bounds
+    # whipsaw longs out in panic and give lazy room in complacency. Bounds
+    # widen with regime volatility; mid_mult (fallback when swing_low is
+    # too far out) tracks the midpoint. Not a scoring change (Guardrail 5
+    # unaffected) — only SL / target-risk / R:R move.
+    "complacency": (1.0, 1.75, 2.5),   # low-VIX: tighten
+    "normal":      (1.2, 2.0,  3.0),   # unchanged baseline
+    "elevated":    (1.3, 2.2,  3.2),
+    "fear":        (1.5, 2.5,  3.5),
+    "panic":       (1.7, 2.75, 3.8),   # high-VIX: give room
+    "unknown":     (1.2, 2.0,  3.0),   # match baseline
+}
+
+
+def _compute_entry_levels(
+    df: pd.DataFrame, score: float,
+    vix_regime: Optional[str] = None,
+) -> Tuple[float, float, float, float]:
     """
     Structure-aware stop + volatility-calibrated target.
     Entry = current close (live price injected later in score_stock if Angel One connected).
@@ -487,14 +929,22 @@ def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float,
     if atr <= 0 or pd.isna(atr):
         atr = price * 0.02
 
+    # FIX SL-REGIME: bounds now scale with VIX regime — see _SL_BOUNDS_BY_REGIME
+    # docstring above for rationale. Unknown / no-regime-passed keeps the
+    # historical (1.2, 2.0, 3.0) baseline for backwards-compat with callers
+    # that never wired regime through (tests with synthetic frames included).
+    _min_m, _mid_m, _max_m = _SL_BOUNDS_BY_REGIME.get(
+        (vix_regime or "unknown").lower(), _SL_BOUNDS_BY_REGIME["unknown"]
+    )
+
     lows      = df["Low"].tail(10).dropna()
-    swing_low = float(lows.min()) if len(lows) else price - 2.0 * atr
+    swing_low = float(lows.min()) if len(lows) else price - _mid_m * atr
     sl        = swing_low - 0.25 * atr
 
-    max_risk = 3.0 * atr
-    min_risk = 1.2 * atr
+    max_risk = _max_m * atr
+    min_risk = _min_m * atr
     if price - sl > max_risk:
-        sl = price - 2.0 * atr
+        sl = price - _mid_m * atr
     if price - sl < min_risk:
         sl = price - min_risk
 
@@ -539,26 +989,58 @@ def _compute_entry_levels(df: pd.DataFrame, score: float) -> Tuple[float, float,
     return round(price, 2), round(sl, 2), round(tp, 2), rr
 
 
-def _pick_horizon(tech_pts: float, mom_pts: float) -> Tuple[str, int]:
-    """
-    FIX HZ1: every score-driven page (Top Picks, Analyze Stock, Watchlist,
-    Quality Watch) handed back an action label (STRONG BUY / BUY / etc.)
-    with no sense of how long that setup is actually good for — flagged as
-    "too vague" when deciding when to book or walk away. A momentum-heavy
-    score describes a shorter-lived push that tends to mean-revert; a
-    technical/trend-heavy score (higher structural weight, less reliance on
-    the momentum sub-score) describes a more durable setup. This doesn't
-    invent new signals — it just labels which of the two the composite
-    score is already leaning on, using the same tech_pts/mom_pts already
-    computed for this ticker.
+def _pick_horizon(tech_pts: float, mom_pts: float,
+                  vix_regime: Optional[str] = None,
+                  score: Optional[float] = None) -> Tuple[str, int]:
+    """FIX HZ2 (2026-09-04) — granular horizon based on momentum share,
+    VIX regime and score strength.
 
-    Returns (label, calendar_days_until_stale) — the latter feeds
-    CompositeScore.valid_until so a pick can visibly go stale instead of
-    sitting on screen looking current indefinitely.
+    Previously this was a binary flip between "Swing (3–10 trading days)"
+    and "Positional (2–6 weeks)" — every stock in the app read one of
+    exactly two labels forever, which is what the user reported as "the
+    horizon is the same for all stocks". Not a bug in the sense of a
+    crash, but a bug in that the label carried no per-stock information.
+
+    New shape:
+      * mom/(tech+mom) ratio picks one of four base windows
+      * VIX regime shortens (fear / panic) or extends (complacency) the
+        window — high vol tape resolves faster, low vol tape gives room
+      * Very low score (<40) forces a "Watch only" label — the composite
+        isn't strong enough to justify a directional horizon at all
+
+    Backwards-compat: vix_regime + score default to None; when both are
+    None the function returns one of the four base labels only (no VIX /
+    score modifiers), still more varied than the old binary switch.
     """
-    if mom_pts >= tech_pts:
-        return "Swing (3–10 trading days)", 14
-    return "Positional (2–6 weeks)", 42
+    # Very low conviction — no meaningful trade horizon.
+    if score is not None and score < 40:
+        return "Watch only – conviction too low for a horizon", 7
+
+    total = float(tech_pts) + float(mom_pts)
+    if total <= 0:
+        return "Watch – no clear timeframe", 7
+    mom_ratio = float(mom_pts) / total
+
+    # Base window from momentum-to-total ratio.
+    if mom_ratio >= 0.65:
+        label, days = "Fast swing (2–5 trading days)", 7
+    elif mom_ratio >= 0.55:
+        label, days = "Swing (5–10 trading days)", 14
+    elif mom_ratio >= 0.45:
+        label, days = "Positional (2–4 weeks)", 28
+    else:
+        label, days = "Trend hold (4–8 weeks)", 56
+
+    # VIX regime modifier — high vol -> shorter window; complacency -> longer.
+    reg = (vix_regime or "").lower()
+    if reg in {"fear", "panic"}:
+        days = max(3, int(round(days * 0.7)))
+        label = f"{label} (high-VIX: window shortened)"
+    elif reg == "complacency":
+        days = int(round(days * 1.25))
+        label = f"{label} (low-VIX: window extended)"
+
+    return label, days
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -592,7 +1074,10 @@ def _build_narrative(
     entry: float, sl: float, tp: float, rr: float,
     sector: str, vix_regime: str, sector_rank: int, n_sectors: int,
     momentum_fallback: bool,
+    sent_pts: Optional[Dict] = None,   # FIX FLOWS1: flow sentence gated on this
 ) -> Tuple[str, str]:
+    if sent_pts is None:
+        sent_pts = {}
 
     cur        = df.iloc[-1]
     price      = float(cur["Close"])
@@ -707,6 +1192,31 @@ def _build_narrative(
             f"sellers are currently in control."
         )
 
+    # Sentence 3b: Relative Strength vs Nifty (FIX RS1) — only rendered when
+    # RS_Score is present on the df (i.e. score_stock fetched a benchmark).
+    _rs_val = mom_pts.get("rs_score")
+    if _rs_val is not None:
+        if _rs_val >= 80:
+            parts.append(
+                f"Relative strength vs Nifty is exceptional ({_rs_val:.0f}/100 percentile) "
+                f"— outperforming the broad market decisively over the trailing year."
+            )
+        elif _rs_val >= 60:
+            parts.append(
+                f"Relative strength vs Nifty is strong ({_rs_val:.0f}/100 percentile) "
+                f"— leading the broader market."
+            )
+        elif _rs_val >= 40:
+            parts.append(
+                f"Relative strength vs Nifty is neutral ({_rs_val:.0f}/100 percentile) "
+                f"— tracking the broad market rather than leading it."
+            )
+        else:
+            parts.append(
+                f"Relative strength vs Nifty is weak ({_rs_val:.0f}/100 percentile) "
+                f"— lagging the broad market; any absolute-return uptick here is beta, not skill."
+            )
+
     # Sentence 4: Volume + pattern
     if vol > 1.5 and bull_pats:
         parts.append(
@@ -722,6 +1232,38 @@ def _build_narrative(
             f"A {bear_pats[0].replace('⚠️','')} pattern appeared recently — "
             f"a warning sign that some selling may follow."
         )
+
+    # Sentence 4b: Delivery % (FIX DELIV1) — only when the delivery snapshot
+    # is present in vol_pts. Two branches: normal read vs divergence flag.
+    if vol_pts.get("delivery_available"):
+        _dt_today = vol_pts.get("delivery_today")
+        _dt_mean  = vol_pts.get("delivery_mean")
+        _dt_z     = vol_pts.get("delivery_z")
+        _dt_n     = vol_pts.get("delivery_n", 0)
+        if vol_pts.get("delivery_divergence"):
+            parts.append(
+                f"Delivery % is only {_dt_today:.0f}% today vs the {_dt_n}-day mean "
+                f"of {_dt_mean:.0f}% ({_dt_z:+.1f}sigma) — the volume surge is "
+                f"largely intraday, not institutional accumulation. Frothy moves "
+                f"on low delivery tend to unwind."
+            )
+        elif _dt_today is not None and _dt_z is not None:
+            if _dt_z > 1.0:
+                parts.append(
+                    f"Delivery % is {_dt_today:.0f}% today, sharply above the "
+                    f"{_dt_n}-day mean of {_dt_mean:.0f}% ({_dt_z:+.1f}sigma) — "
+                    f"institutional accumulation footprint."
+                )
+            elif _dt_today >= 45 and _dt_z > 0.25:
+                parts.append(
+                    f"Delivery % is {_dt_today:.0f}% today vs the {_dt_n}-day mean "
+                    f"of {_dt_mean:.0f}% — above-normal institutional participation."
+                )
+            elif _dt_today < 25 and _dt_z < -0.5:
+                parts.append(
+                    f"Delivery % is {_dt_today:.0f}% today ({_dt_z:+.1f}sigma below the "
+                    f"{_dt_n}-day mean) — dominated by intraday traders, thin real conviction."
+                )
 
     # Sentence 5: Entry / SL / TP
     sl_pct = (sl / price - 1) * 100
@@ -751,6 +1293,31 @@ def _build_narrative(
     )
     parts.append(f"{vix_txt} {sector_txt}")
 
+    # Sentence 7: FII/DII 5-day flows (FIX FLOWS1) — only when available.
+    # The sub-scorer records the two sums on `pts["fii_5d"] / dii_5d`; we
+    # read them off the sentiment detail dict passed via `sent_pts` in
+    # score_dataframe. Keep this to one sentence so the narrative stays
+    # readable; the full flow analysis lives on the FII/DII Flows page.
+    if sent_pts.get("flows_available"):
+        _f = sent_pts.get("fii_5d", 0.0)
+        _d = sent_pts.get("dii_5d", 0.0)
+        if _f > 0 and _d > 0:
+            _flow_txt = ("FII and DII are both net buyers over the last 5 sessions "
+                         "— broad institutional participation, a tailwind.")
+        elif _f < 0 and _d < 0:
+            _flow_txt = ("FII and DII are both net sellers over the last 5 sessions "
+                         "— institutional distribution, a headwind.")
+        elif _f < 0 and _d > 0:
+            _flow_txt = ("FII selling absorbed by DII buying (5-day) — a domestic-supported "
+                         "dip, historically a tradeable pullback rather than a trend break.")
+        elif _f > 0 and _d < 0:
+            _flow_txt = ("FII buying with DII taking profits (5-day) — rallies in this regime "
+                         "tend to be shallower; keep stops tight.")
+        else:
+            _flow_txt = None
+        if _flow_txt:
+            parts.append(_flow_txt)
+
     return headline, " ".join(parts)
 
 
@@ -766,6 +1333,10 @@ def score_dataframe(
     sector:       str = "Other",
     n_sectors:    int = 15,
     dispersion:   Optional[float] = None,
+    flows_info:   Optional[Dict] = None,
+    delivery_info: Optional[Dict] = None,
+    regime_label: Optional[str] = None,
+    positioning_info: Optional[Dict] = None,
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
@@ -783,20 +1354,68 @@ def score_dataframe(
         vix_info = {"regime": "normal", "vix": None, "allow_buy": True}
 
     tech_pts,  tech_detail = _score_technical(df)
-    mom_pts,   mom_detail  = _score_momentum(df)
-    vol_pts,   vol_detail  = _score_volume(df)
+    mom_pts,   mom_detail  = _score_momentum(df, regime_label=regime_label)
+    vol_pts,   vol_detail  = _score_volume(df, delivery_info=delivery_info)
     pat_detail             = _detect_patterns(df)
-    sent_pts,  sent_detail = _score_sentiment(vix_info, sector_rank, n_sectors)
+    sent_pts,  sent_detail = _score_sentiment(vix_info, sector_rank, n_sectors,
+                                              flows_info=flows_info)
 
     momentum_fallback = mom_detail.get("is_fallback", False)
     patterns          = pat_detail.get("patterns", [])
 
-    total  = round(min(max(tech_pts + mom_pts + vol_pts + sent_pts, 0), 90.0), 1)
+    # ── FIX POS1 (2026-09-03) — Positioning pillar aggregation ─────────────
+    # Recommendation 6 design 6a: F&O-eligible tickers with the opt-in flag
+    # set aggregate as 35+20+15+10+10=90 (technical and momentum rescaled
+    # down to make room for the new pillar). Everything else — non-F&O
+    # tickers OR flag off — aggregates as the legacy 40+25+15+10=90.
+    # Guardrail 5 change ratified by user 2026-09-03; nse-app-guardrails
+    # SKILL.md §5 updated in this landing.
+    from data.fno_universe import is_fno_eligible as _is_fno
+    _fno_flag  = _is_fno(ticker)
+    _pi        = positioning_info or {}
+    # Pillar activates only when the flag is ON, ticker is F&O-eligible,
+    # AND at least one positioning input has real data. This prevents the
+    # -1.8 pt systematic bias that would otherwise hit every F&O name the
+    # moment the flag flips but before the data pipelines are online.
+    _has_pos_data  = any(_pi.get(k) is not None for k in
+                         ("oi_regime", "pcr", "max_pain_distance_pct",
+                          "fii_deriv_net"))
+    _positioning_on  = _positioning_pillar_enabled() and _fno_flag and _has_pos_data
+    positioning_pts: float = 0.0
+    positioning_detail: Dict = {"pillar_active": False, "is_fno": _fno_flag}
+    if _positioning_on:
+        positioning_pts, positioning_detail = _score_positioning(
+            oi_regime             = _pi.get("oi_regime"),
+            pcr                   = _pi.get("pcr"),
+            max_pain_distance_pct = _pi.get("max_pain_distance_pct"),
+            fii_deriv_net         = _pi.get("fii_deriv_net"),
+        )
+        positioning_detail["pillar_active"] = True
+        positioning_detail["is_fno"]        = True
+        # Rescale technical (40 -> 35) and momentum (25 -> 20). Sub-scorer
+        # outputs are UNCHANGED; the rescale happens only at aggregation
+        # so tests and callers reading tech/mom sub-scores directly stay
+        # calibrated against their original 40/25 caps.
+        _tech_scaled = tech_pts * (35.0 / 40.0)
+        _mom_scaled  = mom_pts  * (20.0 / 25.0)
+        total = round(min(max(_tech_scaled + _mom_scaled + vol_pts + sent_pts
+                              + positioning_pts, 0), 90.0), 1)
+    else:
+        total  = round(min(max(tech_pts + mom_pts + vol_pts + sent_pts, 0), 90.0), 1)
+
     grade  = _grade(total)
     action = _action(total)
 
-    entry, sl, tp, rr = _compute_entry_levels(df, total)
-    horizon_label, horizon_days = _pick_horizon(tech_pts, mom_pts)
+    entry, sl, tp, rr = _compute_entry_levels(
+        df, total, vix_regime=vix_info.get("regime", "normal")
+    )
+    # FIX HZ2 (2026-09-04): pass regime + score so the horizon is per-stock
+    # varied instead of a binary label.
+    horizon_label, horizon_days = _pick_horizon(
+        tech_pts, mom_pts,
+        vix_regime=vix_info.get("regime"),
+        score=total,
+    )
     valid_until = (datetime.now() + timedelta(days=horizon_days)).date().isoformat()
 
     # FIX WL1: RSI/1-day-return were never exposed on CompositeScore, even
@@ -804,6 +1423,15 @@ def score_dataframe(
     # cheap to derive from the df already in scope here — no extra fetch.
     _cur = df.iloc[-1]
     rsi_val = float(_cur.get("RSI", 50))
+    # FIX RS1: surface RS_Score on CompositeScore when present. None keeps
+    # backwards-compat for callers that never enriched with a benchmark.
+    _rs_raw = _cur.get("RS_Score")
+    try:
+        _rs_val = float(_rs_raw) if _rs_raw is not None else None
+        if _rs_val is not None and math.isnan(_rs_val):
+            _rs_val = None
+    except (TypeError, ValueError):
+        _rs_val = None
     _closes_1d = df["Close"].tail(2)
     return_1d_val = (
         float(_closes_1d.pct_change().iloc[-1]) * 100
@@ -818,6 +1446,7 @@ def score_dataframe(
         sector=sector, vix_regime=vix_info.get("regime", "normal"),
         sector_rank=sector_rank, n_sectors=n_sectors,
         momentum_fallback=momentum_fallback,
+        sent_pts=sent_detail,   # FIX FLOWS1: flow sentence needs the detail dict
     )
 
     # FIX REGIME-DISP-SCORE — append the low-dispersion caution to the
@@ -853,6 +1482,9 @@ def score_dataframe(
         valid_until       = valid_until,
         rsi               = rsi_val,
         return_1d         = return_1d_val,
+        rs_score          = _rs_val,
+        positioning_score = positioning_pts if _positioning_on else None,
+        is_fno            = _fno_flag,
         entry             = entry,
         stop_loss         = sl,
         target            = tp,
@@ -919,6 +1551,29 @@ def score_stock(
     try:
         df = _fetch_single(canonical, period=period)
         df = _add_all_indicators(df, groups=_SCORE_INDICATOR_GROUPS)
+
+        # FIX RS1 (2026-09-03) — enrich with RS vs Nifty so _score_momentum
+        # can use the abs:15 + RS:10 split. Best-effort: a benchmark-fetch
+        # failure leaves the df without RS_Score, and momentum falls back
+        # to the 25-pt absolute mode (documented in _score_momentum).
+        #
+        # FIX RS-CACHE (2026-09-04): the benchmark was being fetched INSIDE
+        # every score_stock() call. Command Centre scans N tickers -> N
+        # ^NSEI fetches. On network-blocked runs (CI page-smoke) each fetch
+        # walks Angel/Stooq/Yahoo with per-provider timeouts -> the smoke
+        # test for 02_command_centre hit its 120s ceiling. Cache the
+        # per-(period) result at module level so we pay at most one fetch
+        # per process per period; a failed fetch is remembered as None so
+        # subsequent tickers short-circuit instead of retrying.
+        try:
+            _bench = _get_bench_cached(period)
+            if _bench is not None and not _bench.empty:
+                from utils.indicators import add_relative_strength
+                df = add_relative_strength(df, _bench)
+        except Exception as _rs_e:
+            _log.debug("RS enrichment skipped for %s: %s: %s",
+                       canonical, type(_rs_e).__name__, _rs_e)
+
         df.dropna(subset=["RSI", "ATR"], inplace=True)
         if len(df) < 30:
             raise ValueError(f"Insufficient data for {canonical}")
@@ -933,12 +1588,119 @@ def score_stock(
             sector=sector, vix_regime="unknown", sector_rank=sector_rank,
         )
 
+    # FIX POS-OI1 (2026-09-03) — feed OI-regime sub-input to the Positioning
+    # pillar (Rec 6 sub-score #1 of 4). Only useful when the ticker is
+    # F&O-eligible AND the daily fno bhavcopy cron has populated at least
+    # two rows for it AND we have today's equity price change. All three
+    # are best-effort; a miss returns positioning_info=None which the
+    # three-way gate in score_dataframe handles as "pillar stays inactive
+    # for this ticker" (no bias).
+    #
+    # FIX POS-GATE (2026-09-04): also skip the DB reads entirely when the
+    # opt-in flag is off (the default). Command Centre scans many tickers
+    # per render; without this gate we did 3-4 SQL SELECTs per ticker even
+    # though _score_dataframe would then throw the results away. That was
+    # part of what pushed 02_command_centre's smoke past the 120s ceiling
+    # on the slower CI runner.
+    positioning_info: Optional[Dict] = None
+    try:
+        from data.fno_universe import is_fno_eligible as _fno_check
+        if _fno_check(canonical) and _positioning_pillar_enabled():
+            from data.nse_fno_bhavcopy import get_oi_regime_for_ticker as _oi_reg
+            # Today's price change from the df we already have.
+            _closes = df["Close"].tail(2)
+            _px_pct = (
+                float(_closes.pct_change().iloc[-1]) * 100
+                if len(_closes) == 2 else None
+            )
+            _oi_regime = _oi_reg(canonical, _px_pct)
+            # Positioning dict gets populated even with a single input;
+            # the three-way gate in score_dataframe then activates the
+            # pillar for this ticker.
+            _pi_acc: Dict = {}
+            if _oi_regime is not None:
+                _pi_acc["oi_regime"] = _oi_regime
+            # FII deriv net is UNIVERSE-LEVEL — one value for all F&O
+            # tickers on a given day. Cheap to load per ticker (single
+            # DB read + LRU-style cache implicit in the trade_store).
+            try:
+                from data.nse_fii_deriv import get_latest_fut_idx_net
+                _fii_net = get_latest_fut_idx_net()
+                if _fii_net is not None:
+                    _pi_acc["fii_deriv_net"] = _fii_net
+            except Exception as _fii_e:
+                _log.debug("FII deriv net unavailable: %s: %s",
+                           type(_fii_e).__name__, _fii_e)
+            # PCR + max-pain % come from the same options-chain row (last
+            # DB read per ticker). Both stay None gracefully when the
+            # options-chain cron hasn't fetched this symbol yet.
+            try:
+                from data.nse_option_chain import get_pcr, get_max_pain_pct
+                _pcr_v = get_pcr(canonical)
+                _mp_v  = get_max_pain_pct(canonical)
+                if _pcr_v is not None:
+                    _pi_acc["pcr"] = _pcr_v
+                if _mp_v is not None:
+                    _pi_acc["max_pain_distance_pct"] = _mp_v
+            except Exception as _oc_e:
+                _log.debug("option chain unavailable for %s: %s: %s",
+                           canonical, type(_oc_e).__name__, _oc_e)
+            if _pi_acc:
+                positioning_info = _pi_acc
+    except Exception as _pos_e:
+        _log.debug("positioning inputs unavailable for %s: %s: %s",
+                   canonical, type(_pos_e).__name__, _pos_e)
+
+    # FIX REGIME1 (2026-09-03) — best-effort regime snapshot for the
+    # opt-in bear-regime momentum dispatch (Rec 5). regime_label stays None
+    # when the snapshot fails or the flag is off; _score_momentum keeps
+    # its default behavior in either case. Env-var opt-in prevents this
+    # from changing production output until the 5-year variant study is
+    # run (see docs/REGIME_WEIGHTS_2026-09.md).
+    regime_label: Optional[str] = None
+    if _regime_weights_enabled():
+        try:
+            from analysis.regime import snapshot_live as _reg_snap
+            _rsnap = _reg_snap()
+            regime_label = getattr(_rsnap, "label", None)
+        except Exception as _rg_e:
+            _log.debug("regime snapshot unavailable for %s: %s: %s",
+                       canonical, type(_rg_e).__name__, _rg_e)
+
+    # FIX DELIV1 (2026-09-03) — load NSE bhavcopy delivery snapshot so the
+    # Volume pillar can consume delivery % as a 4-pt sub-score inside its
+    # 15-pt total. Best-effort: an empty local cache (fresh DB, bhavcopy
+    # cron hasn't run yet) returns None, and _score_volume falls back to
+    # its legacy vol_ratio:10 + obv:5 split. See docs/DELIVERY_INTEGRATION_2026-09.md.
+    delivery_info: Optional[Dict] = None
+    try:
+        from data.nse_delivery import get_snapshot as _delv_snap
+        delivery_info = _delv_snap(canonical, lookback=60)
+    except Exception as _dv_e:
+        _log.debug("NSE delivery snapshot unavailable for %s: %s: %s",
+                   canonical, type(_dv_e).__name__, _dv_e)
+
+    # FIX FLOWS1 (2026-09-03) — load FII/DII 5-day cash-market flows so the
+    # Sentiment pillar can consume the sign. load_history() reads from the
+    # trade_store cache the fii_dii cron populates; a miss here (no data yet,
+    # DB unreachable) is best-effort: flows_info stays None and _score_sentiment
+    # falls back to its legacy 6/4 split (documented in that function).
+    #
+    # FIX FLOWS-CACHE (2026-09-04): flows are universe-level (one value
+    # applies to every ticker on the same day). Cache at the module level
+    # so Command Centre's ticker sweep does a single DB read, not N.
+    flows_info = _get_flows_cached()
+
     result = score_dataframe(
         df=df, ticker=canonical,
         vix_info=vix_info,
         sector_rank=sector_rank,
         sector=sector,
         n_sectors=n_sectors,
+        flows_info=flows_info,
+        delivery_info=delivery_info,
+        regime_label=regime_label,
+        positioning_info=positioning_info,
     )
 
     # Update entry to live price if Angel One is configured

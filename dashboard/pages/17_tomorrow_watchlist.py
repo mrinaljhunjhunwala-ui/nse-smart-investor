@@ -47,7 +47,7 @@ render_sidebar(current="Tomorrow's Watchlist")
 render_top_bar()
 
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("📅 Tomorrow's Watchlist")
+st.title("Tomorrow's Watchlist")
 st.markdown(
     "Stocks worth watching for the **next trading session**, based on today's close "
     "signals — distinct from intraday Top Picks. Breakouts setting up, breakdown risks, "

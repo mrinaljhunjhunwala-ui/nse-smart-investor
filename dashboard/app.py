@@ -24,6 +24,36 @@ if _ROOT not in sys.path:
 
 import streamlit as st
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Promote [env] block from .streamlit/secrets.toml to os.environ.
+# Streamlit Cloud secrets.toml keys are accessed via st.secrets["..."], NOT
+# as environment variables. Score / positioning flags (NSE_USE_*), read via
+# os.environ.get() in analysis.score, would otherwise stay dark on the
+# hosted app. Reading here at process start makes the toml the single
+# source of truth for the operator. Idempotent — os.environ.setdefault
+# never clobbers an explicit shell export.
+# ─────────────────────────────────────────────────────────────────────────────
+def _promote_env_secrets() -> None:
+    try:
+        env_block = st.secrets.get("env")   # missing block returns None safely
+    except Exception:
+        return
+    if not env_block:
+        return
+    try:
+        for k, v in dict(env_block).items():
+            if v is None:
+                continue
+            os.environ.setdefault(str(k), str(v))
+    except Exception:
+        # Silent by design — a broken secrets file must not crash startup.
+        pass
+
+
+_promote_env_secrets()
+
+
 # ── Page config — the ONLY st.set_page_config call in the whole app ───────────
 st.set_page_config(
     page_title="NSE Smart Investor",

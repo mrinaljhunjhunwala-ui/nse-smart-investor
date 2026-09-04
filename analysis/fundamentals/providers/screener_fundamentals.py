@@ -194,7 +194,7 @@ class ScreenerFundamentalProvider(FundamentalProvider):
                 out[name] = _num(raw)
             return out
 
-        return {
+        result = {
             "pl":       _read_section("profit-loss"),
             "bs":       _read_section("balance-sheet"),
             "cf":       _read_section("cash-flow"),
@@ -204,6 +204,30 @@ class ScreenerFundamentalProvider(FundamentalProvider):
             "name":     (soup.find("h1").get_text(strip=True)
                          if soup.find("h1") else None),
         }
+
+        # Label-drift self-check — flagged HIGH RISK by data-provenance-auditor
+        # 2026-09-02. Screener.in periodically renames row labels (e.g.
+        # "Operating Profit" → "Op. Profit"); the row-map lookups downstream
+        # (_PL_MAP / _BS_MAP / _CF_MAP) then silently yield None for every
+        # renamed row and every stock, with no exception raised. Guard: after
+        # parsing, at least one of {pl, bs, cf} MUST have ≥ 1 label that
+        # matches one of our maps. If none do — HTML shape changed. Log
+        # WARNING with the labels we DID see so operators can update the map.
+        _seen: set[str] = set()
+        for _sec_key in ("pl", "bs", "cf"):
+            _sec = result.get(_sec_key)
+            if isinstance(_sec, dict):
+                _seen.update((_sec.get("rows") or {}).keys())
+        _known = set(_PL_MAP) | set(_BS_MAP) | set(_CF_MAP)
+        if _seen and not (_seen & _known):
+            _log.warning(
+                "screener: NO label from _PL_MAP/_BS_MAP/_CF_MAP matched any "
+                "row across pl/bs/cf — probable Screener.in HTML/label rewrite. "
+                "Fundamentals will silently become None for every stock until "
+                "the label maps are updated. First 15 labels seen: %s",
+                sorted(_seen)[:15],
+            )
+        return result
 
     # ── helpers for statement builders ──────────────────────────────────────
     @staticmethod

@@ -35,7 +35,8 @@ apply_design()
 render_sidebar(current="Overview")
 render_top_bar()
 
-st.title("📊 Overview")
+st.title("Overview")
+
 st.caption("Market snapshot, macro context, and breadth — everything for a market read in one place")
 
 _tab_snapshot, _tab_macro, _tab_breadth = st.tabs(

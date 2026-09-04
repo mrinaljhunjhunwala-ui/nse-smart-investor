@@ -150,6 +150,270 @@ def rr_line(rr_gross: float, rr_net: float,
 # Regime badge — use the SAME visual on every page that needs the context
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint 1.3 — panel() and stat() shared components
+# Replace the three parallel systems the audit flagged (design.py .card-*,
+# inline glass-panel divs, _pto_cell helper). Both source colour from
+# design.py CSS custom properties by name, not raw hex — Task 1.6 hook
+# rejects hex in page files.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PANEL_TONE_ACCENT = {
+    "neutral": "var(--hairline)",
+    "info":    "var(--accent)",
+    "bull":    "var(--bull)",
+    "bear":    "var(--bear)",
+    "amber":   "var(--amber)",
+    "violet":  "var(--violet)",
+}
+
+_PANEL_KINDS = {
+    "flat":   {"bg": "var(--surface)",  "radius": "var(--r-base)",
+               "border": "1px solid var(--hairline)"},
+    "glass":  {"bg": "var(--surface)",  "radius": "var(--r-soft)",
+               "border": "1px solid var(--hairline)"},
+    "sunken": {"bg": "var(--sunken)",   "radius": "var(--r-base)",
+               "border": "1px solid var(--hairline-soft)"},
+}
+
+
+def panel(body_html: str,
+          kind: str = "flat",
+          tone: str = "neutral",
+          title: str = "",
+          margin: str = "6px 0") -> str:
+    """Container for a card / hero / metric group.
+
+    kind: 'flat' (default cards), 'glass' (hero panels), 'sunken' (secondary)
+    tone: 'neutral' (default), 'info', 'bull', 'bear', 'amber', 'violet' —
+          adds a 3-px semantic rail on the left when non-neutral.
+    title: optional eyebrow label rendered in the mono utility face.
+
+    Returns raw HTML — caller stamps via st.markdown(..., unsafe_allow_html=True).
+    """
+    style = _PANEL_KINDS.get(kind, _PANEL_KINDS["flat"])
+    rail_color = _PANEL_TONE_ACCENT.get(tone, _PANEL_TONE_ACCENT["neutral"])
+    rail_css = (f"border-left:3px solid {rail_color};"
+                if tone != "neutral" else "")
+    title_html = (
+        f'<div style="font-family:var(--font-mono);font-size:10px;'
+        f'letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);'
+        f'font-weight:600;margin-bottom:8px">{title}</div>'
+        if title else ""
+    )
+    return (
+        f'<div style="background:{style["bg"]};border:{style["border"]};'
+        f'{rail_css}border-radius:{style["radius"]};'
+        f'padding:14px 18px;margin:{margin}">'
+        f'{title_html}{body_html}</div>'
+    )
+
+
+_STAT_TONE_COLOR = {
+    "neutral": "var(--ink)",
+    "bull":    "var(--bull)",
+    "bear":    "var(--bear)",
+    "amber":   "var(--amber)",
+    "accent":  "var(--accent)",
+    "dim":     "var(--dim)",
+}
+
+
+def stat(label: str, value: str,
+         delta: str = "",
+         delta_positive: Optional[bool] = None,
+         sub: str = "",
+         tone: str = "neutral",
+         align: str = "left") -> str:
+    """Single-value stat (label + big number + optional delta and sub-line).
+
+    Replaces st.metric / .metric-box / _pto_cell / _glass_metric etc.
+    Numeric value renders in the mono face for column-friendly alignment.
+
+    tone: 'neutral' | 'bull' | 'bear' | 'amber' | 'accent' | 'dim'
+    delta_positive: True → green arrow, False → red, None → grey (no arrow)
+    """
+    value_color = _STAT_TONE_COLOR.get(tone, _STAT_TONE_COLOR["neutral"])
+    delta_html = ""
+    if delta:
+        if delta_positive is True:
+            _c, _sym = "var(--bull)", "▲"
+        elif delta_positive is False:
+            _c, _sym = "var(--bear)", "▼"
+        else:
+            _c, _sym = "var(--dim)", "•"
+        delta_html = (
+            f'<div style="font-family:var(--font-mono);font-size:12px;'
+            f'color:{_c};font-weight:600;margin-top:4px">'
+            f'{_sym} {delta}</div>'
+        )
+    sub_html = (
+        f'<div style="font-size:11px;color:var(--dim);margin-top:3px">{sub}</div>'
+        if sub else ""
+    )
+    return (
+        f'<div style="text-align:{align}">'
+        f'<div style="font-family:var(--font-mono);font-size:10px;'
+        f'letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);'
+        f'font-weight:600">{label}</div>'
+        f'<div style="font-family:var(--font-mono);font-size:23px;'
+        f'font-weight:700;color:{value_color};margin-top:4px;'
+        f'letter-spacing:-.3px">{value}</div>'
+        f'{delta_html}{sub_html}</div>'
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint 1.4 — Verdict Card hero for Analyze Stock
+# Audit's #1 finding: "So what should I do?" was never the loudest thing on
+# the page. This is that one thing. Renders action, conviction score, size
+# in rupees, R multiple, horizon, and (when armed) the F&O positioning
+# regime — all in a single at-a-glance panel above every other on-page
+# section. Pure string builder; caller composes portfolio_ctx if available.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
+                 capital_per_trade: float = 100_000.0) -> str:
+    """Build the top-of-page verdict card for Analyze Stock.
+
+    cs is a CompositeScore instance. portfolio_ctx is optional — pass a dict
+    like {'shares_held': 40, 'avg_price': 2500.0} to render a position line.
+    capital_per_trade drives the suggested share count from risk-per-trade.
+
+    Only reads fields that CompositeScore always populates + the four new
+    fields shipped in Recs 1-6: rs_score, positioning_score, is_fno,
+    momentum_fallback.
+    """
+    action    = getattr(cs, "action", "HOLD") or "HOLD"
+    score     = float(getattr(cs, "score", 0.0) or 0.0)
+    grade     = getattr(cs, "grade", "F") or "F"
+    horizon   = getattr(cs, "horizon", "") or ""
+    entry     = float(getattr(cs, "entry", 0.0) or 0.0)
+    sl        = float(getattr(cs, "stop_loss", 0.0) or 0.0)
+    tp        = float(getattr(cs, "target", 0.0) or 0.0)
+    rr        = float(getattr(cs, "risk_reward", 0.0) or 0.0)
+    rs_score  = getattr(cs, "rs_score", None)
+    pos_score = getattr(cs, "positioning_score", None)
+    is_fno    = bool(getattr(cs, "is_fno", False))
+    ticker    = str(getattr(cs, "ticker", "")).replace(".NS", "") or "—"
+
+    tone = "bull" if action in ("STRONG BUY", "BUY") else \
+           "bear" if action in ("EXIT", "AVOID") else \
+           "amber" if action in ("CAUTION",) else "info"
+    action_color_ = action_color(action)
+
+    # Risk-per-trade sizing: 1% of capital, at least 1 share, capped when
+    # entry is unavailable.
+    per_share_risk = max(entry - sl, 0.01) if entry > 0 else 0.0
+    if per_share_risk > 0 and entry > 0:
+        risk_budget = capital_per_trade * 0.01
+        shares      = max(1, int(risk_budget / per_share_risk))
+        position_rs = shares * entry
+    else:
+        shares      = 0
+        position_rs = 0.0
+
+    # Header: ticker + action pill + grade + horizon
+    # NB: F&O chip is precomputed outside the f-string. Python 3.11 rejects
+    # backslashes inside f-string expressions (PEP 701 relaxed this in 3.12);
+    # CI runs on 3.11 so we keep the escape-free form.
+    fno_chip = (
+        ' · <span style="background:var(--tint-accent);color:var(--accent);'
+        'border:1px solid var(--accent);border-radius:4px;padding:2px 6px;'
+        'font-size:10px;font-weight:600;letter-spacing:.5px">F&amp;O</span>'
+        if is_fno else ""
+    )
+    horizon_txt = horizon or "-"
+    header = (
+        f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;'
+        f'margin-bottom:14px">'
+        f'<span style="font-size:22px;font-weight:700;color:var(--ink);'
+        f'letter-spacing:-.3px">{ticker}</span>'
+        f'<span style="background:{action_color_}22;color:{action_color_};'
+        f'border:1px solid {action_color_};border-radius:6px;padding:4px 12px;'
+        f'font-size:13px;font-weight:700;letter-spacing:.5px">{action}</span>'
+        f'<span style="color:var(--dim);font-family:var(--font-mono);'
+        f'font-size:12px">Grade {grade} · {horizon_txt}</span>'
+        f'{fno_chip}'
+        f'</div>'
+    )
+
+    # Left cluster: conviction score (big) + score bar
+    score_pct = max(0.0, min(1.0, score / 90.0))
+    conviction = (
+        f'<div style="text-align:left">'
+        f'<div style="font-family:var(--font-mono);font-size:10px;'
+        f'letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);'
+        f'font-weight:600">Conviction</div>'
+        f'<div style="font-family:var(--font-mono);font-size:44px;'
+        f'font-weight:700;color:{action_color_};line-height:1;letter-spacing:-1px;'
+        f'margin-top:6px">{score:.0f}<span style="font-size:16px;color:var(--dim);'
+        f'font-weight:500">/90</span></div>'
+        f'<div style="margin-top:8px;height:4px;background:var(--hairline);'
+        f'border-radius:2px;overflow:hidden;width:140px">'
+        f'<div style="height:100%;width:{score_pct*100:.1f}%;'
+        f'background:{action_color_}"></div></div></div>'
+    )
+
+    # Right cluster: entry / stop / target / R:R / size — all as stat()
+    def _fmt_rs(x: float) -> str:
+        return f"Rs.{x:,.2f}"
+    sl_pct = ((sl / entry - 1) * 100) if entry > 0 else 0.0
+    tp_pct = ((tp / entry - 1) * 100) if entry > 0 else 0.0
+    trade = (
+        '<div style="display:grid;grid-template-columns:repeat(5, minmax(90px,1fr));'
+        'gap:14px 22px;flex:1">'
+        + stat("Entry",  _fmt_rs(entry), tone="neutral")
+        + stat("Stop",   _fmt_rs(sl),
+               sub=f"{sl_pct:+.1f}%", tone="bear")
+        + stat("Target", _fmt_rs(tp),
+               sub=f"{tp_pct:+.1f}%", tone="bull")
+        + stat("R:R",    f"{rr:.1f}x", tone="accent")
+        + stat("Suggested size", f"{shares} sh"
+               if shares else "—",
+               sub=(_fmt_rs(position_rs) if position_rs else "risk-budget 1%"),
+               tone="neutral")
+        + '</div>'
+    )
+
+    body = (
+        f'{header}'
+        f'<div style="display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap">'
+        f'{conviction}{trade}</div>'
+    )
+
+    # Optional secondary row: RS + positioning + portfolio position
+    footer_bits = []
+    if rs_score is not None:
+        _rs_tone = "bull" if rs_score >= 70 else "amber" if rs_score >= 40 else "bear"
+        footer_bits.append(stat("RS vs Nifty", f"{rs_score:.0f}",
+                                sub="0-100 percentile", tone=_rs_tone))
+    if pos_score is not None:
+        _pos_tone = ("bull" if pos_score >= 7 else
+                     "amber" if pos_score >= 4 else "bear")
+        footer_bits.append(stat("Positioning", f"{pos_score:.1f}/10",
+                                sub="OI · PCR · MP · FII", tone=_pos_tone))
+    if portfolio_ctx:
+        _q = int(portfolio_ctx.get("shares_held", 0) or 0)
+        _a = float(portfolio_ctx.get("avg_price", 0) or 0.0)
+        if _q:
+            pnl = (entry - _a) * _q if entry > 0 else 0.0
+            footer_bits.append(stat("Your position", f"{_q} sh @ Rs.{_a:,.2f}",
+                                    sub=f"P/L Rs.{pnl:+,.0f}",
+                                    tone="bull" if pnl >= 0 else "bear"))
+    if footer_bits:
+        body += (
+            '<div style="margin-top:16px;padding-top:14px;'
+            'border-top:1px solid var(--hairline-soft);'
+            'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
+            'gap:14px 20px">'
+            + "".join(footer_bits)
+            + '</div>'
+        )
+
+    return panel(body, kind="glass", tone=tone, margin="12px 0")
+
+
 def regime_badge(label: str = "unknown",
                  confidence: str = "low",
                  compact: bool = False) -> str:

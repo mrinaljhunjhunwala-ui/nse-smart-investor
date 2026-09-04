@@ -30,7 +30,8 @@ render_sidebar(current="Position Sizer")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("📐 Position Sizer — Kelly Criterion + Risk Calculator")
+st.title("Position Sizer – Kelly Criterion + Risk Calculator")
+
 st.markdown(
     "Calculate exact position size using Kelly Criterion and fixed-risk rules.  \n"
     "Never guess your lot size again — know exactly how many shares to buy *before* you enter."

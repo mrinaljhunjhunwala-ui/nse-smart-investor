@@ -68,7 +68,8 @@ render_sidebar(current="Backtest")
 render_top_bar()
 
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("🧪 Backtest Results")
+st.title("Backtest Results")
+
 st.caption("Historical strategy performance — how would these signals have done in the past?")
 
 render_survivorship_notice()

@@ -69,7 +69,26 @@ def get_india_vix_regime() -> Dict:
         with _opener.open(req, timeout=10) as r:
             data = json.loads(r.read())
 
-        closes = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        # Defensive parse — flagged by data-provenance-auditor 2026-09-02.
+        # Bare indexing here would swallow a Yahoo schema drift into the outer
+        # `except`, defaulting the regime to "unknown" with `allow_buy=True` —
+        # a live panic-VIX reading would then be misclassified as safe. Naming
+        # the drift explicitly makes it visible in the warning log.
+        _chart   = (data or {}).get("chart") or {}
+        _results = _chart.get("result") or []
+        if not _results:
+            raise ValueError(
+                f"India VIX schema drift: chart.result missing/empty "
+                f"(chart.error={_chart.get('error')!r})"
+            )
+        _indicators = (_results[0] or {}).get("indicators") or {}
+        _quote_list = _indicators.get("quote") or []
+        if not _quote_list:
+            raise ValueError(
+                "India VIX schema drift: indicators.quote missing "
+                "(provider may have renamed the field)"
+            )
+        closes = (_quote_list[0] or {}).get("close") or []
         valid  = [v for v in closes if v is not None]
         if len(valid) < 2:
             raise ValueError("insufficient VIX data")

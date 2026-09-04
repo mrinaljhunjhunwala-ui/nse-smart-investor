@@ -69,7 +69,14 @@ def patch_session(monkeypatch):
 
 
 def test_login_and_fetch_historical_success(patch_session):
-    # ensure login works and fetch_historical returns DataFrame-like data
+    # ensure login works and fetch_historical returns DataFrame-like data.
+    # This test exercises the real _get_session() -> pyotp.TOTP(...) code
+    # path; pyotp is an optional live-broker dep (see requirements.txt
+    # comment on the pyotp line). Skip cleanly when it isn't installed
+    # rather than fail hard - CI's ubuntu image has occasionally installed
+    # requirements.txt without pyotp landing, causing a spurious red.
+    pytest.importorskip("pyotp",
+                        reason="Angel One login flow needs pyotp; skipped when absent")
     df = af.fetch_historical("RELIANCE.NS", period="5d", interval="1d")
     assert df is not None
     # check that session jwt got set
@@ -77,6 +84,9 @@ def test_login_and_fetch_historical_success(patch_session):
 
 
 def test_get_full_quote_success(patch_session):
+    # Same optional-dep guard as test_login_and_fetch_historical_success.
+    pytest.importorskip("pyotp",
+                        reason="Angel One login flow needs pyotp; skipped when absent")
     q = af.get_full_quote("RELIANCE.NS")
     assert q is not None
     assert q["price"] == 100

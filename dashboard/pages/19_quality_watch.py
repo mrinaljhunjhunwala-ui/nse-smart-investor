@@ -68,7 +68,8 @@ apply_design()
 render_sidebar(current="Quality Watch")
 render_top_bar()
 
-st.title("🏆 Quality Watch — Long-Term Holds")
+st.title("Quality Watch – Long-Term Holds")
+
 st.caption(
     "Ranked by a 0-100 Quality Score (valuation + governance safety + "
     "quality ratios) — not price momentum. This is the page for \"should "

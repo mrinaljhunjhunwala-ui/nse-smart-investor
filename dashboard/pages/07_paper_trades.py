@@ -81,7 +81,8 @@ render_top_bar()
 # ─────────────────────────────────────────────────────────────────────────────
 # Page header
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("📂 Paper Trading Simulator")
+st.title("Paper Trading Simulator")
+
 st.markdown(
     "Practice trading **without real money**. Open virtual trades, track live P&L, "
     "and measure your decision quality over time. All prices are from live market data."

@@ -29,7 +29,8 @@ from dashboard.shared.design import apply_design
 apply_design()
 render_sidebar()
 
-st.title("📊 Trend Quality Score")
+st.title("Trend Quality Score")
+
 st.caption(
     "Measures trend **health and persistence** across 4 pillars (max 90 pts). "
     "Validated baseline: +0.41 rank correlation with staying in an uptrend next month."

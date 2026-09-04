@@ -44,7 +44,8 @@ from data.angel_fetcher import (
     clear_session as _ao_clear_session,
 )
 
-st.title("🔗 Angel One — Broker Integration")
+st.title("Angel One – Broker Integration")
+
 st.markdown("Connect your Angel One SmartAPI account for live data, real holdings, and order placement.")
 
 _ao_ok = _ao_is_configured()
