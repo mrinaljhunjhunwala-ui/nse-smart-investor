@@ -261,6 +261,7 @@ class CompositeScore:
     rs_score:           Optional[float] = None # FIX RS1: RS_Score vs Nifty (0-100 percentile), None when benchmark unavailable
     positioning_score:  Optional[float] = None # FIX POS1: Positioning pillar (0-10, F&O + flag ON); None otherwise
     is_fno:             bool            = False # FIX POS1: True when the ticker is F&O-eligible per data.fno_universe
+    overlay_score:      Optional[int]   = None  # FIX OVERLAY1 (Task 3.3): TQS x valuation sidecar, 0-100. NEVER blended into .score.
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -279,7 +280,77 @@ class CompositeScore:
             "rs_score": self.rs_score,
             "positioning": self.positioning_score,
             "is_fno": self.is_fno,
+            "overlay_score": self.overlay_score,
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 3.3 - TQS x valuation sidecar overlay score
+#
+# Guardrail-safe home for the shape-review doc's "Quality & Valuation" idea:
+# the overlay is a SIDECAR (0-100), rendered next to the composite score on
+# the Verdict Card, NEVER blended into CompositeScore.score. Guardrail 5
+# shape stays at 4 pillars + 90-pt cap (or 5 pillars + 90 with Positioning).
+#
+# Formula: normalise TQS to 0-100, then apply a valuation-posture modifier
+# in [0.75, 1.15]. Rationale: TQS is the dominant signal (trend quality is
+# what the composite already respects); valuation is a modifier that
+# rewards paying for growth+quality and penalises paying for hype.
+#
+#   posture group       modifier   what it says
+#   ------------------  --------   -------------------------------------
+#   SUPPORTED_BY_       1.10       valuation supported by fundamentals
+#     GROWTH_AND_QUALITY  1.15     both growth AND quality supported
+#   REASONABLE          1.00       neither supported nor demanding
+#   DEMANDING_VS_*      0.75       paying up vs growth/returns/ROE
+#   INSUFFICIENT_       0.85       unknown - mild penalty, less than
+#     EVIDENCE                     an outright demanding read
+#
+# Returns None when TQS or posture is missing, so consumers can render
+# "not available" rather than a misleading zero.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_OVERLAY_MODIFIERS: Dict[str, float] = {
+    "SUPPORTED_BY_GROWTH_AND_QUALITY": 1.15,
+    "SUPPORTED_BY_GROWTH":              1.10,
+    "SUPPORTED_BY_QUALITY":             1.10,
+    "SUPPORTED_BY_ROE":                 1.10,
+    "REASONABLE":                       1.00,
+    "DEMANDING_VS_GROWTH":              0.75,
+    "DEMANDING_VS_RETURNS":             0.75,
+    "DEMANDING_VS_ROE":                 0.75,
+    "INSUFFICIENT_EVIDENCE":            0.85,
+}
+
+
+def compute_overlay_score(tqs: Optional[float],
+                          valuation_posture: Optional[str]) -> Optional[int]:
+    """TQS x valuation sidecar overlay, 0-100. Pure, deterministic.
+
+    Args:
+      tqs: TQSResult.tqs from analysis.trend_quality_score (0-90 native scale).
+      valuation_posture: one of the ValuationAssessment.posture constants
+        from analysis.fundamentals.valuation_decision (SUPPORTED_*, REASONABLE,
+        DEMANDING_*, INSUFFICIENT_EVIDENCE).
+
+    Returns:
+      Integer in [0, 100], or None when either input is missing / NaN /
+      not recognised. Never raises.
+    """
+    if tqs is None or valuation_posture is None:
+        return None
+    try:
+        tqs_f = float(tqs)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(tqs_f):
+        return None
+    modifier = _OVERLAY_MODIFIERS.get(valuation_posture)
+    if modifier is None:
+        return None
+    # Normalise TQS's 0-90 scale to 0-100, then apply the modifier.
+    tqs_norm = (max(0.0, min(90.0, tqs_f)) / 90.0) * 100.0
+    return int(round(max(0.0, min(100.0, tqs_norm * modifier))))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1337,6 +1408,8 @@ def score_dataframe(
     delivery_info: Optional[Dict] = None,
     regime_label: Optional[str] = None,
     positioning_info: Optional[Dict] = None,
+    tqs:                Optional[float] = None,   # FIX OVERLAY1: Task 3.3 sidecar input
+    valuation_posture:  Optional[str]   = None,   # FIX OVERLAY1: Task 3.3 sidecar input
 ) -> "CompositeScore":
     """
     Score from a pre-fetched, indicator-enriched DataFrame.
@@ -1485,6 +1558,7 @@ def score_dataframe(
         rs_score          = _rs_val,
         positioning_score = positioning_pts if _positioning_on else None,
         is_fno            = _fno_flag,
+        overlay_score     = compute_overlay_score(tqs, valuation_posture),
         entry             = entry,
         stop_loss         = sl,
         target            = tp,

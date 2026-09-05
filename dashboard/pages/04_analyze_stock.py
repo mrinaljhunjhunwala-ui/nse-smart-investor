@@ -452,6 +452,40 @@ if analyze_btn or _prefill_active or (
                 )
                 st.stop()
 
+            # ── Task 3.3: TQS x valuation sidecar overlay ───────────────────
+            # Populate cs.overlay_score BEFORE the verdict card renders so it
+            # picks up the Quality x Value stat in its footer row. Both
+            # subsystems are Streamlit-cached elsewhere on the page, so this
+            # is a warm call, not an extra fetch storm. Failures silently
+            # leave overlay as None; the verdict card omits the stat cleanly.
+            try:
+                from analysis.score import compute_overlay_score as _ov_compute
+                _ov_posture = None
+                _ov_tqs     = None
+                try:
+                    _ov_va, _ = _cached_valuation(
+                        ticker, getattr(cs, "sector", None), None)
+                    if _ov_va is not None:
+                        _ov_posture = getattr(_ov_va, "posture", None)
+                except Exception as _ov_val_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "overlay: valuation fetch failed: %s", _ov_val_e)
+                try:
+                    from analysis.trend_quality_score import score_ticker as _ov_tqs_fn
+                    _ov_tqs_res = _ov_tqs_fn(ticker, period="1y", last_n=1)
+                    if hasattr(_ov_tqs_res, "tqs"):
+                        _ov_tqs = float(_ov_tqs_res.tqs)
+                except Exception as _ov_tqs_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "overlay: TQS fetch failed: %s", _ov_tqs_e)
+                cs.overlay_score = _ov_compute(_ov_tqs, _ov_posture)
+            except Exception as _ov_outer_e:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "overlay populate failed: %s", _ov_outer_e)
+
             # ── Task 1.4: Verdict Card hero ─────────────────────────────────
             # Audit's #1 finding: "So what should I do?" was never the loudest
             # thing on this page. Rendered above the existing score/chart/

@@ -394,6 +394,16 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
                      "amber" if pos_score >= 4 else "bear")
         footer_bits.append(stat("Positioning", f"{pos_score:.1f}/10",
                                 sub="OI · PCR · MP · FII", tone=_pos_tone))
+    # FIX OVERLAY1 (Task 3.3) - TQS x valuation sidecar. Rendered as a footer
+    # stat next to RS / Positioning, deliberately NOT next to the big 0-90
+    # conviction number, so it reads as a secondary quality-x-value lens
+    # rather than a competing headline. Never blended into cs.score.
+    overlay_score = getattr(cs, "overlay_score", None)
+    if overlay_score is not None:
+        _ov_tone = ("bull"  if overlay_score >= 70 else
+                    "amber" if overlay_score >= 45 else "bear")
+        footer_bits.append(stat("Quality x Value", f"{overlay_score}/100",
+                                sub="TQS x valuation posture", tone=_ov_tone))
     if portfolio_ctx:
         _q = int(portfolio_ctx.get("shares_held", 0) or 0)
         _a = float(portfolio_ctx.get("avg_price", 0) or 0.0)
