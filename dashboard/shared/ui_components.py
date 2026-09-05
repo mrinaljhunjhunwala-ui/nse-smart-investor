@@ -52,16 +52,17 @@ REGIME_EMOJI = {
 
 REGIME_NOTES = {
     "trend_up":
-        "Trending up — momentum-heavy signals have historically hit ~60%",
+        "Trending up. Momentum-heavy signals have historically hit ~60%",
     "trend_down":
-        "Trending down — contrarian BUYs have outperformed, momentum signals have not",
+        "Trending down. Score dispatches to mean-reversion when v2 is on "
+        "(NSE_USE_REGIME_WEIGHTS=1); momentum-first signals underperform either way",
     "range":
-        "Range-bound — historical BUY hit rate here is ~46% vs 55%+ in trending regimes. "
+        "Range-bound. Historical BUY hit rate here is ~46% vs ~60% in trend-up regimes. "
         "Halve size or wait",
     "risk_off":
-        "Risk-off (VIX ≥ 22) — historically all BUYs paid 5-12% but you have to buy the fear",
+        "Risk-off (VIX ≥ 22). Historically all BUYs paid 5-12% but you have to buy the fear",
     "unknown":
-        "Regime undetermined — data unavailable",
+        "Regime undetermined. Data unavailable",
 }
 
 
