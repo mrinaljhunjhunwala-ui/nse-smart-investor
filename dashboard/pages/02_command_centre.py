@@ -44,6 +44,31 @@ render_top_bar()
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
 st.title("Command Centre")
 
+# ── FIX REGIME-CHIP1 - v2 scoring badge (Rec 5 / Task 3.6 flag on) ─────────
+# When NSE_USE_REGIME_WEIGHTS is truthy, the Momentum pillar swaps in the
+# 5-day mean-reversion percentile (Var M) on bear-regime days. Surface a
+# small chip so the user knows they are seeing v2 scoring, not legacy.
+# Deferred item from docs/REGIME_WEIGHTS_2026-09.md:93; now landed alongside
+# the default flip authorised by docs/REGIME_WEIGHTS_VALIDATION.md.
+_v2_flag = os.environ.get("NSE_USE_REGIME_WEIGHTS", "").strip().lower() in {"1", "true", "yes", "on"}
+if _v2_flag:
+    st.markdown(
+        '<div style="margin:-6px 0 10px 0">'
+        '<span style="display:inline-flex;align-items:center;gap:6px;'
+        'padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;'
+        'letter-spacing:0.4px;text-transform:uppercase;'
+        'background:color-mix(in srgb, var(--bull) 14%, transparent);color:var(--bull);'
+        'border:1px solid var(--bull)">'
+        '<span style="width:6px;height:6px;border-radius:50%;background:var(--bull)"></span>'
+        'v2 scoring active'
+        '</span>'
+        '<span style="margin-left:8px;font-size:11px;color:var(--dim)">'
+        'Momentum pillar dispatches to mean-reversion in bear regimes '
+        '(Rec 5 · <code style="font-size:10px">NSE_USE_REGIME_WEIGHTS=1</code>)'
+        '</span></div>',
+        unsafe_allow_html=True,
+    )
+
 st.caption("Market conditions · open positions needing action · watchlist decisions — no digging required.")
 
 # ── 0. MORNING SUMMARY CARD — your daily brief ─────────────────────────────
