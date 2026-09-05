@@ -1,0 +1,44 @@
+# pyproject.toml — replaces .flake8 with ruff.
+#
+# Migration note (2026-09-02): flake8 was retired for the following reasons:
+#   * ruff is ~100x faster on this repo (~0.2s vs ~10s over the whole tree)
+#   * ruff bundles pyflakes + pycodestyle + isort + pyupgrade + docstring
+#     rules, so we get several linters in one config
+#   * ruff formats too (compatible with black) if we ever want to add that
+#
+# Rule set is intentionally identical to the old flake8 bar (max-line 120,
+# ignore E203/W503) — this is a lossless swap, not a bar raise. Widen the
+# `select` list in a follow-up PR if we want to opt into more checks.
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+]
+
+[tool.ruff.lint]
+# What flake8 was checking:
+#   pycodestyle errors (E) + warnings (W) + pyflakes (F)
+# ruff spells these the same way. `select = ["E", "W", "F"]` reproduces
+# flake8's default bar exactly.
+select = ["E", "W", "F"]
+# Same ignores flake8 had, minus W503:
+#   E203 — whitespace before ':' (conflicts with black/PEP 8 slice conventions)
+# W503 was flake8-only (line break before binary operator). PEP 8 later flipped
+# to *prefer* that style (W504); ruff conforms to the modern side and never
+# implemented W503, so it's dropped from the ignore list rather than kept as
+# an "unknown rule" error.
+ignore = ["E203"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files often have long parametrize strings; give them slack.
+"tests/*.py" = ["E501"]

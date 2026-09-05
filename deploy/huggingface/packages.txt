@@ -1,0 +1,7 @@
+# apt-level packages installed on the HF Space container.
+# Kept empty because every Python dependency in requirements.txt ships as a
+# manylinux wheel (no C compilation needed on the Space).
+#
+# Add lines here only if a wheel is missing and pip has to build from source.
+# Example:
+#   libpq-dev   # (would be needed if psycopg2-binary is ever replaced with plain psycopg2)

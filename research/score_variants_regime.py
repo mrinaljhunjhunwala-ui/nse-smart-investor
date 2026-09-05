@@ -91,7 +91,7 @@ from research.regime_study import _market_regime_series   # noqa: E402
 
 OUT_DIR = os.path.join(_ROOT, "research", "output")
 
-PERIOD      = "5y"
+PERIOD      = "10y"
 SAMPLE_STEP = 5
 MAX_HORIZON = 60
 

@@ -471,6 +471,15 @@ def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     Return a date-sliced copy of df matching the UI display period.
     Indicators were computed on the full dataset so they remain accurate
     at the most-recent row after slicing.
+
+    FIX TZ1 (2026-09-05): the YTD branch built a NAIVE pd.Timestamp
+    (`pd.Timestamp(year, 1, 1)`) and compared it against the df's
+    DatetimeIndex. When the fetched frame comes back tz-aware (Angel
+    One + newer yfinance both return UTC+05:30 IST index), pandas
+    raises `InvalidComparison: Cannot compare tz-naive and tz-aware
+    datetime-like objects` — bubbles all the way up as "Analysis
+    failed" on every ticker in Analyze Stock. Match the index's tz
+    when building the cutoff.
     """
     if df.empty:
         return df
@@ -480,7 +489,10 @@ def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
         cutoff = last_ts - pd.Timedelta(days=_DAYS[period])
         return df[df.index >= cutoff]
     if period == "ytd":
-        return df[df.index >= pd.Timestamp(last_ts.year, 1, 1)]
+        _tz = getattr(df.index, "tz", None)
+        cutoff = pd.Timestamp(last_ts.year, 1, 1, tz=_tz) if _tz is not None \
+                 else pd.Timestamp(last_ts.year, 1, 1)
+        return df[df.index >= cutoff]
     return df  # "max" or anything else → full history
 
 

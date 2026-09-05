@@ -248,8 +248,14 @@ _INTERVAL_MAP: Dict[str, str] = {
 
 _PERIOD_DAYS: Dict[str, int] = {
     "1d": 10, "5d": 18, "1m": 35, "6m": 185,
-    "1y": 370, "2y": 740, "max": 1830,
+    "1y": 370, "2y": 740, "5y": 1830, "10y": 3650, "max": 1830,
 }
+
+# Angel SmartAPI historical/getCandleData caps a single request at ~2000 daily
+# bars (~5.5 years). Any period longer than this window is fetched in chunks
+# and stitched. 700 days per chunk keeps us safely inside that ceiling while
+# minimising round-trips for the 10y case (~5-6 chunks per ticker).
+_CANDLE_CHUNK_DAYS = 700
 
 
 def _get_credentials() -> Dict[str, str]:
@@ -478,43 +484,83 @@ def fetch_historical(
         return None
 
     ao_interval = _INTERVAL_MAP.get(interval, "ONE_DAY")
-    fromdate, todate = _period_to_dates(period)
+
+    # Compute the requested calendar-day span so we can decide whether to
+    # single-shot or chunk. YTD is bounded (< 1 year) and single-shots.
+    today = datetime.date.today()
+    if period == "ytd":
+        start_date = datetime.date(today.year, 1, 1)
+    else:
+        start_date = today - datetime.timedelta(days=_PERIOD_DAYS.get(period, 370))
+    span_days = (today - start_date).days
 
     try:
-        _hist_rate_limit()
-        resp = _http.post(
-            f"{_BASE}/rest/secure/angelbroking/historical/v1/getCandleData",
-            json={
-                "exchange": "NSE",
-                "symboltoken": token,
-                "interval": ao_interval,
-                "fromdate": fromdate,
-                "todate": todate,
-            },
-            headers=_auth_headers(session["jwt"], session["api_key"]),
-            timeout=20,
-        )
-        status = getattr(resp, "status_code", None)
-        if status and status >= 400:
-            _log.warning("angel_fetcher.fetch_historical: historical API returned %s", status)
-            return None
+        if span_days <= _CANDLE_CHUNK_DAYS:
+            fromdate, todate = _period_to_dates(period)
+            df = _fetch_candles_window(session, token, ao_interval, fromdate, todate)
+        else:
+            # Chunked path: slice into ~700-day windows, fetch each, concat.
+            frames: List[pd.DataFrame] = []
+            fmt = "%Y-%m-%d %H:%M"
+            cur_start = start_date
+            while cur_start <= today:
+                cur_end = min(today, cur_start + datetime.timedelta(days=_CANDLE_CHUNK_DAYS))
+                fd = datetime.datetime.combine(cur_start, datetime.time(9, 15)).strftime(fmt)
+                td = datetime.datetime.combine(cur_end,   datetime.time(15, 30)).strftime(fmt)
+                chunk = _fetch_candles_window(session, token, ao_interval, fd, td)
+                if chunk is not None and not chunk.empty:
+                    frames.append(chunk)
+                # Advance past this window's end (no overlap needed — endpoint
+                # returns inclusive rows on both bounds; dedupe below handles
+                # any single-bar overlap defensively).
+                cur_start = cur_end + datetime.timedelta(days=1)
+            if not frames:
+                return None
+            df = pd.concat(frames).sort_index()
+            df = df[~df.index.duplicated(keep="first")]
 
-        parsed = _safe_parse_json_response(resp)
-        candles = (parsed.get("data") if isinstance(parsed, dict) else None) or []
-        if not candles:
-            return None
-
-        df = pd.DataFrame(candles, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date").sort_index()
-        df = df.apply(pd.to_numeric, errors="coerce")
-        df.dropna(subset=["Close"], inplace=True)
-        return df if not df.empty else None
+        return df if df is not None and not df.empty else None
 
     except Exception as e:
         _log.warning("angel_fetcher.fetch_historical(%s) failed: %s", symbol, e)
         _SESSION["jwt"] = None
         return None
+
+
+def _fetch_candles_window(
+    session: Dict, token: str, ao_interval: str, fromdate: str, todate: str,
+) -> Optional[pd.DataFrame]:
+    """Single Angel getCandleData round-trip. Callers own chunking + retries."""
+    _hist_rate_limit()
+    resp = _http.post(
+        f"{_BASE}/rest/secure/angelbroking/historical/v1/getCandleData",
+        json={
+            "exchange": "NSE",
+            "symboltoken": token,
+            "interval": ao_interval,
+            "fromdate": fromdate,
+            "todate": todate,
+        },
+        headers=_auth_headers(session["jwt"], session["api_key"]),
+        timeout=20,
+    )
+    status = getattr(resp, "status_code", None)
+    if status and status >= 400:
+        _log.warning("angel_fetcher._fetch_candles_window: API returned %s (%s -> %s)",
+                     status, fromdate, todate)
+        return None
+
+    parsed = _safe_parse_json_response(resp)
+    candles = (parsed.get("data") if isinstance(parsed, dict) else None) or []
+    if not candles:
+        return None
+
+    df = pd.DataFrame(candles, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.set_index("Date").sort_index()
+    df = df.apply(pd.to_numeric, errors="coerce")
+    df.dropna(subset=["Close"], inplace=True)
+    return df if not df.empty else None
 
 
 def get_full_quote(ticker: str) -> Optional[Dict]:
