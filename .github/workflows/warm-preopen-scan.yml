@@ -1,0 +1,88 @@
+name: Warm Pre-Open Scan
+
+# Task 4.3 (Q4 option A). Fires the existing Top Picks + Tomorrow's Watchlist
+# warmers ONCE more, right before NSE's pre-open session opens at 09:00 IST,
+# so users visiting the app at or during pre-open see snapshots reflecting
+# yesterday's final settled close AND any overnight/pre-market data provider
+# refreshes, not the previous afternoon's 15:50 IST warmer output.
+#
+# Why "option A" (extra run of existing engine) not "option B" (dedicated
+# opening-picture engine): the composite score engine is deterministic on
+# close prices and already the source of truth for both surfaces. A dedicated
+# opening-picture engine would either duplicate that scoring or introduce a
+# second scoring shape and its own regression surface, which Guardrail 5
+# explicitly discourages. See docs/PREOPEN_SCAN.md for the full write-up.
+#
+# NSE session windows in UTC:
+#   Pre-open  09:00-09:15 IST = 03:30-03:45 UTC
+#   Regular   09:15-15:30 IST = 03:45-10:00 UTC
+#   Close     15:30 IST       = 10:00 UTC
+#
+# Cron chosen: 03:20 UTC = 08:50 IST, 10 min before pre-open. Gives the
+# ~2 min Top Picks scan and the ~2 min Tomorrow's Watchlist scan comfortable
+# room to finish before the pre-open user traffic starts hitting the page.
+#
+# Idempotent: both warmer scripts write to trade_store KV keys the app's
+# get_top_picks() / get_tomorrow_watchlist() already read. Running here does
+# not change any code paths; it only writes a fresher snapshot to the same
+# storage. If DATABASE_URL is not set on the runner, both scripts fall back
+# to a local SQLite file only the runner sees (they exit 0 without touching
+# the deployed app's snapshot), so a misconfigured secret degrades gracefully.
+
+on:
+  schedule:
+    - cron: "20 3 * * 1-5"   # 03:20 UTC = 08:50 IST, Mon-Fri (10 min before pre-open)
+  workflow_dispatch:          # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  # Own concurrency group so this cannot cancel or be cancelled by the
+  # regular Top Picks warmer (which runs on */15 and also fires at 03:15 /
+  # 03:30 UTC bracketing this one). Both warmers write to distinct KV keys
+  # already and are safe to overlap.
+  group: warm-preopen-scan
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    # Timeout covers both scans back-to-back plus setup: 2 min Top Picks +
+    # ~2 min Tomorrow's Watchlist + 2 min pip install + slack = 12 min. Kept
+    # generous rather than tight so a temporarily slow data provider does not
+    # cancel the job the same way an 8-min timeout used to cancel Top Picks
+    # (see warm-top-picks.yml history).
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Warm Top Picks (pre-open refresh)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python scripts/warm_top_picks.py
+
+      - name: Warm Tomorrow's Watchlist (pre-open refresh)
+        # continue-on-error: the two warmers are independent. If Top Picks
+        # succeeded and this one fails on a transient network issue, the app
+        # still benefits from the fresh Top Picks snapshot; the previous
+        # afternoon's Tomorrow's Watchlist stays served (its 6h TTL covers
+        # the overnight window).
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python scripts/warm_tomorrow_watchlist.py
