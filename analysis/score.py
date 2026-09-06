@@ -236,7 +236,7 @@ def _setup_encoding() -> None:
 class CompositeScore:
     ticker:             str
     price:              float
-    score:              float        # 0–90 (90 pt max composite)
+    score:              float        # 0-90 baseline; 0-100 when Positioning pillar active (F&O + NSE_USE_POSITIONING_PILLAR flag + real positioning data). See design 6b in docs/COMPOSITE_SCORE_SHAPE_REVIEW.md.
     grade:              str          # A+ … F
     action:             str          # STRONG BUY … EXIT
     technical_score:    float        # /40
@@ -1436,26 +1436,33 @@ def score_dataframe(
     momentum_fallback = mom_detail.get("is_fallback", False)
     patterns          = pat_detail.get("patterns", [])
 
-    # ── FIX POS1 (2026-09-03) — Positioning pillar aggregation ─────────────
-    # Recommendation 6 design 6a: F&O-eligible tickers with the opt-in flag
-    # set aggregate as 35+20+15+10+10=90 (technical and momentum rescaled
-    # down to make room for the new pillar). Everything else — non-F&O
-    # tickers OR flag off — aggregates as the legacy 40+25+15+10=90.
-    # Guardrail 5 change ratified by user 2026-09-03; nse-app-guardrails
-    # SKILL.md §5 updated in this landing.
+    # ── FIX POS2 (2026-09-06) — Positioning pillar aggregation, design 6b ──
+    # Recommendation 6 design 6b: F&O-eligible tickers with the opt-in flag
+    # set add positioning as a pure 10-pt overlay on top of the legacy
+    # 40+25+15+10=90 shape - cap becomes 100 for those tickers. Everything
+    # else (non-F&O tickers OR flag off) runs the legacy 40+25+15+10=90
+    # shape unchanged. Tech and momentum sub-scores are NOT rescaled - they
+    # keep their 0-40 and 0-25 outputs, so every existing calibration on
+    # sub-scores stays valid. Grade / action thresholds stay on their 0-90
+    # calibration too, so an F&O ticker with positioning data has a mild
+    # additive upgrade path (up to +10) but a non-F&O ticker behaves
+    # identically to today. Guardrail 5 shape change 6a -> 6b ratified by
+    # user 2026-09-06 (see docs/COMPOSITE_SCORE_SHAPE_REVIEW.md D2);
+    # nse-app-guardrails SKILL.md §5 updated in this landing.
     from data.fno_universe import is_fno_eligible as _is_fno
     _fno_flag  = _is_fno(ticker)
     _pi        = positioning_info or {}
     # Pillar activates only when the flag is ON, ticker is F&O-eligible,
-    # AND at least one positioning input has real data. This prevents the
-    # -1.8 pt systematic bias that would otherwise hit every F&O name the
-    # moment the flag flips but before the data pipelines are online.
+    # AND at least one positioning input has real data. This prevents an
+    # under-scored bias that would otherwise hit every F&O name the moment
+    # the flag flips but before the data pipelines are online.
     _has_pos_data  = any(_pi.get(k) is not None for k in
                          ("oi_regime", "pcr", "max_pain_distance_pct",
                           "fii_deriv_net"))
     _positioning_on  = _positioning_pillar_enabled() and _fno_flag and _has_pos_data
     positioning_pts: float = 0.0
     positioning_detail: Dict = {"pillar_active": False, "is_fno": _fno_flag}
+    _base_total = tech_pts + mom_pts + vol_pts + sent_pts
     if _positioning_on:
         positioning_pts, positioning_detail = _score_positioning(
             oi_regime             = _pi.get("oi_regime"),
@@ -1465,16 +1472,10 @@ def score_dataframe(
         )
         positioning_detail["pillar_active"] = True
         positioning_detail["is_fno"]        = True
-        # Rescale technical (40 -> 35) and momentum (25 -> 20). Sub-scorer
-        # outputs are UNCHANGED; the rescale happens only at aggregation
-        # so tests and callers reading tech/mom sub-scores directly stay
-        # calibrated against their original 40/25 caps.
-        _tech_scaled = tech_pts * (35.0 / 40.0)
-        _mom_scaled  = mom_pts  * (20.0 / 25.0)
-        total = round(min(max(_tech_scaled + _mom_scaled + vol_pts + sent_pts
-                              + positioning_pts, 0), 90.0), 1)
+        # Additive overlay - cap 100. Sub-scores unchanged.
+        total = round(min(max(_base_total + positioning_pts, 0), 100.0), 1)
     else:
-        total  = round(min(max(tech_pts + mom_pts + vol_pts + sent_pts, 0), 90.0), 1)
+        total  = round(min(max(_base_total, 0), 90.0), 1)
 
     grade  = _grade(total)
     action = _action(total)
