@@ -177,21 +177,67 @@ class ScreenerFundamentalProvider(FundamentalProvider):
             return {"headers": headers, "rows": rows}
 
         def _read_top_ratios() -> Dict[str, Optional[float]]:
-            """`#top-ratios` list: Market Cap, Stock P/E, Book Value, ROCE, ROE, D/E …"""
+            """`#top-ratios` list: Market Cap, Stock P/E, Book Value, ROCE, ROE, D/E …
+
+            FIX PROV-2026-09-06 - the earlier implementation grabbed the whole
+            value span's text (e.g. "₹ 1,322" or "₹ 17,89,001 Cr.") and handed
+            it to _num(), which only strips commas / dashes / trailing %. The
+            leading ₹ and trailing "Cr." made float() raise, so every currency-
+            denominated field (Market Cap, Current Price, High/Low, Book Value)
+            silently returned None. Downstream: get_ratios().pb was None for
+            every stock Screener served, which specifically degrades sector-
+            aware scoring for banks / NBFCs / insurers per Guardrail 3. See
+            docs/DATA_PROVENANCE_2026-09.md finding #7.
+
+            New strategy: prefer the nested <span class="number"> children of
+            the value span, which Screener always renders as bare numeric
+            (comma-formatted but no currency / unit). If exactly one, parse
+            that. If exactly two (High / Low pair renders as two numbers
+            joined by a slash), use their arithmetic mean so the caller still
+            gets a single float. Fall back to the whole-text path only when
+            the meaningful unit is % (Dividend Yield, ROCE, ROE), where _num()
+            already handles the trailing %.
+            """
             out: Dict[str, Optional[float]] = {}
             ul = soup.find("ul", id="top-ratios")
             if ul is None:
                 return out
             for li in ul.find_all("li"):
-                name_el = li.find("span", class_="name")
-                val_el = li.find("span", class_="number")
-                if not name_el or not val_el:
+                name_el  = li.find("span", class_="name")
+                value_el = li.find("span", class_="value")
+                if not name_el or not value_el:
                     continue
                 name = name_el.get_text(strip=True)
-                # value span may have unit siblings ("Cr.", "%"). Include % into _num.
-                raw = li.find("span", class_="value").get_text(" ", strip=True) \
-                    if li.find("span", class_="value") else val_el.get_text(strip=True)
-                out[name] = _num(raw)
+
+                number_spans = value_el.find_all("span", class_="number")
+                whole_text   = value_el.get_text(" ", strip=True)
+
+                if not number_spans:
+                    out[name] = _num(whole_text)
+                    continue
+
+                # % values keep the trailing sign, so let the whole-text +
+                # _num() path handle them (it strips % and divides by 100).
+                if whole_text.rstrip().endswith("%"):
+                    out[name] = _num(whole_text)
+                    continue
+
+                if len(number_spans) == 1:
+                    out[name] = _num(number_spans[0].get_text(strip=True))
+                    continue
+
+                # Two-number field (High / Low pair): report the mean so
+                # downstream single-float consumers get something meaningful
+                # rather than None. Individual highs / lows are also available
+                # from the yearly `ratios` section for callers that need them.
+                parsed = [_num(s.get_text(strip=True)) for s in number_spans]
+                parsed = [v for v in parsed if v is not None]
+                if not parsed:
+                    out[name] = None
+                elif len(parsed) == 1:
+                    out[name] = parsed[0]
+                else:
+                    out[name] = sum(parsed) / len(parsed)
             return out
 
         result = {

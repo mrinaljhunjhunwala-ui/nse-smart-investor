@@ -125,7 +125,16 @@ def get_corp_info(symbol: str, use_cache: bool = True) -> dict:
 
     base = "https://www.nseindia.com"
     homepage_url = base + "/"
-    api_url = f"{base}/api/corporate-info/{sym}"
+    # FIX PROV-2026-09-06 — NSE retired /api/corporate-info/{sym} (returns
+    # HTTP 404 "Resource not found"). The current live endpoint is
+    # /api/top-corp-info?symbol=X&market=cash and returns the same top-level
+    # shape the rest of this module and analysis/qualitative_flags.py already
+    # expect (latest_announcements.data, corporate_actions.data,
+    # shareholdings_patterns, financial_results, borad_meeting). Caught by
+    # the 2026-09-06 data-provenance audit; see docs/DATA_PROVENANCE_2026-09.md
+    # finding #4. Note qualitative_flags.py:370 was already documented against
+    # top-corp-info - the URL had diverged from the internal doc at some point.
+    api_url = f"{base}/api/top-corp-info?symbol={sym}&market=cash"
 
     session = _ensure_session()
 
