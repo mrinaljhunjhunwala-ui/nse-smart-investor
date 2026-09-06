@@ -1505,9 +1505,15 @@ def _deep_confirmation(ticker: str) -> dict:
     return out
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+# Task 2.4 F5: TTL reduced from 1800 -> 300 (5 min). Sparkline shows 22
+# daily closes; the 30-min TTL froze the last-day tick during market hours
+# even though it changes with every scan cycle. 300s matches the Top Picks /
+# watchlist cadence so the sparkline's trailing bar moves in lock-step with
+# the composite score it sits next to. Data cost is negligible (one 3mo
+# fetch per ticker per 5 min).
+@st.cache_data(ttl=300, show_spinner=False)
 def _sparkline_closes(ticker: str, n: int = 22) -> list:
-    """Last `n` daily closes for a mini sparkline (cached 30 min)."""
+    """Last `n` daily closes for a mini sparkline (cached 5 min per Task 2.4 F5)."""
     try:
         from data.fetcher import fetch_single
         c = fetch_single(ticker, period="3mo")["Close"].dropna().tolist()

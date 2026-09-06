@@ -15,8 +15,17 @@ name: Warm Top Picks
 
 on:
   schedule:
-    - cron: "*/15 3-10 * * 1-5"   # every 15 min, 03:00–10:59 UTC, Mon–Fri
-  workflow_dispatch:               # allow manual "Run workflow" from the Actions tab
+    # Task 2.4 F1: extended coverage so the audit-identified off-hours gap
+    # (users landing pre-open before 08:30 IST or post-close after 16:30 IST,
+    # plus weekend reads of Friday's close) no longer leaks cold ~2-min
+    # scans through to whoever hits an expired process-local cache. Free-tier
+    # Actions budget stays fine: ~74 runs/week vs the previous 160/week
+    # equivalent (see docs/RENDER_SPEED_AUDIT_2026-09.md, F1).
+    - cron: "*/15 3-10 * * 1-5"    # market hours, every 15 min (existing)
+    - cron: "*/30 1-2 * * 1-5"     # pre-open shoulder 06:30-08:29 IST, every 30 min
+    - cron: "*/30 11-13 * * 1-5"   # post-close shoulder 16:30-19:29 IST, every 30 min
+    - cron: "0 3 * * 6"            # Saturday 08:30 IST snapshot for weekend reads
+  workflow_dispatch:                # allow manual "Run workflow" from the Actions tab
 
 concurrency:
   group: warm-top-picks
