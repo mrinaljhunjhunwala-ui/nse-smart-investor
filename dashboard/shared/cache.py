@@ -1202,10 +1202,19 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
         kl  = f"₹{ent:,.0f}" if ent else "—"
 
         # FIX 4: Old thresholds (mom>=15, vol>=9) required top-40% on BOTH
-        # components simultaneously — almost impossible to satisfy together.
+        # components simultaneously - almost impossible to satisfy together.
         # New thresholds are ~33rd percentile of each component range.
-
-        _is_breakout  = act in ("STRONG BUY", "BUY", "WATCHLIST") and sc >= 52 and mom >= 8 and vol >= 5
+        #
+        # Task 4.2 M1 (audit docs/TOMORROW_WATCHLIST_AUDIT_2026-09.md): dropped
+        # "WATCHLIST" from the breakout gate. Rationale: a WATCHLIST action
+        # carries a "Mixed signals - worth watching for entry" headline, which
+        # the "Breakout setup" bucket label directly contradicts. A user
+        # reading a "Breakout" chip under a "Mixed Signals" narrative is the
+        # exact "marked BUY but you'd never actually buy" pattern the audit
+        # confirmed. Only genuinely BUY/STRONG BUY actions belong in the
+        # Breakout Watch tab; WATCHLIST-only names still qualify for the
+        # bullish-reversal bucket where the "watch" framing is honest.
+        _is_breakout  = act in ("STRONG BUY", "BUY") and sc >= 52 and mom >= 8 and vol >= 5
         _is_breakdown = (act in ("EXIT", "CAUTION") or sc < 40) and tech < 22 and vol >= 4
         _is_bull_rev  = 35 <= sc <= 58 and mom >= 8 and tech < 25
         _is_bear_rev  = 45 <= sc <= 68 and mom < 5 and tech >= 22
@@ -1254,6 +1263,56 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
                 "scans, thresholds may need recalibration.",
                 _bucket, len(results),
             )
+
+    # Task 4.2 F1 (audit docs/TOMORROW_WATCHLIST_AUDIT_2026-09.md): log every
+    # shortlisted pick to verdict_ledger with source="tomorrow_watchlist" so
+    # the Verdict Calibration page can answer "how did yesterday's TW picks
+    # actually perform" - previously ~45 daily picks were surfaced then
+    # thrown away because the bespoke card renderer bypassed the
+    # pick_freshness helper that normally handles this.
+    #
+    # Dedup is handled by verdict_log's (logged_date, ticker, horizon, source)
+    # PRIMARY KEY, so re-invocations inside the 1h cache window or via the
+    # warmer script are safe no-ops. Every failure path in log_verdict()
+    # itself is swallowed and logged at debug, per its docstring - the
+    # ledger is a background concern that must never break the scan.
+    try:
+        from analysis.verdict_ledger import log_verdict as _vl_log
+        from analysis.final_verdict import combine as _fv_combine
+        _shortlist = (
+            out["breakout_candidates"]
+            + out["breakdown_watch"]
+            + out["reversal_watch"]
+        )
+        for _pick in _shortlist:
+            _tk = _pick.get("ticker")
+            if not _tk:
+                continue
+            try:
+                # Rebuild a FinalVerdict for this pick from its composite
+                # score + action, then persist. Horizon defaults to "medium"
+                # via combine's own default - matches how pick_freshness
+                # does it for Top Picks so calibration slices align across
+                # sources.
+                _fv = _fv_combine(
+                    composite_score=_pick.get("score"),
+                    composite_action=_pick.get("action"),
+                )
+                _vl_log(
+                    ticker=_tk,
+                    final_verdict=_fv,
+                    entry_price=(float(_pick["entry"]) if _pick.get("entry") else None),
+                    composite_score=(float(_pick["score"]) if _pick.get("score") is not None else None),
+                    source="tomorrow_watchlist",
+                )
+            except Exception as _one_e:
+                _log.debug(
+                    "cache._tomorrow_watchlist ledger write failed for %s: %s",
+                    _tk, _one_e,
+                )
+    except Exception as _vl_e:
+        # verdict_ledger unavailable - ledger writes are best-effort only
+        _log.debug("cache._tomorrow_watchlist ledger disabled: %s", _vl_e)
 
     return out
 
