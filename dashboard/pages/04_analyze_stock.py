@@ -516,7 +516,7 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "verdict card render failed: %s", _vc_err)
 
-            # ── AI Co-Pilot panel (moved 2026-09-04) ─────────────────────
+            # ── AI Co-Pilot panel (moved 2026-09-04, portfolio wiring 2026-09-06) ─
             # Was at the bottom of the file behind ~2260 lines of page
             # content, inside a collapsed expander. Users reasonably said
             # "AI chatbot not showing" - they never scrolled that far or
@@ -525,15 +525,36 @@ if analyze_btn or _prefill_active or (
             # by default when GROQ_API_KEY is set (see panel.py's expanded=
             # kwarg default). Try/except-wrapped so a co-pilot failure
             # never crashes the page.
+            #
+            # Portfolio: reuse _pctx from the Verdict Card block above (same
+            # load_manual_holdings lookup) so the panel sees the user's real
+            # position when it exists. Panel accepts a Portfolio dataclass;
+            # translate _pctx dict -> Portfolio here.
             try:
                 from dashboard.shared.ai import (
                     collect_for_analyze_stock as _ai_collect,
                     render_chat_panel as _ai_panel,
                 )
+                from dashboard.shared.ai.context_builder import Portfolio as _AIPortfolio
                 _ai_sym = ticker.replace(".NS", "") if ticker else ""
                 if _ai_sym:
                     _ai_inputs = _ai_collect(_ai_sym)
-                    _ai_panel(_ai_sym, _ai_inputs)
+                    _ai_portfolio = None
+                    _pctx_local = locals().get("_pctx")
+                    if _pctx_local:
+                        _q  = _pctx_local.get("shares_held") or None
+                        _av = _pctx_local.get("avg_price") or None
+                        _upl = None
+                        if _q and _av and getattr(cs, "price", None):
+                            try:
+                                _upl = round((float(cs.price) / float(_av) - 1.0) * 100.0, 2)
+                            except Exception:
+                                _upl = None
+                        _ai_portfolio = _AIPortfolio(
+                            avg_price=_av, quantity=_q, unrealised_pl_pct=_upl,
+                        )
+                    _ai_panel(_ai_sym, _ai_inputs, portfolio=_ai_portfolio)
+                    st.session_state["_ai_panel_top_rendered"] = True
             except Exception as _ai_err:
                 import logging
                 logging.getLogger("dashboard.analyze_stock").debug(
@@ -2337,17 +2358,22 @@ if analyze_btn or _prefill_active or (
 # Card near the top of the page (2026-09-04). This bottom placement stays
 # for the case where the top block failed to render (guard-only, expander
 # collapsed) so the diagnostic is still reachable at the foot of the page.
-try:
-    from dashboard.shared.ai import (
-        collect_for_analyze_stock,
-        render_chat_panel,
-    )
+# Guarded (2026-09-06) by the session-state flag the top block sets on
+# success, so users don't see two panels for the same symbol.
+if not st.session_state.get("_ai_panel_top_rendered", False):
+    try:
+        from dashboard.shared.ai import (
+            collect_for_analyze_stock,
+            render_chat_panel,
+        )
 
-    _copilot_sym = ticker.replace(".NS", "") if ticker else ""
-    if _copilot_sym:
-        _copilot_inputs = collect_for_analyze_stock(_copilot_sym)
-        render_chat_panel(_copilot_sym, _copilot_inputs,
-                          heading="AI Co-Pilot (bottom fallback)",
-                          expanded=False)
-except Exception as _copilot_err:
-    st.caption(f"AI co-pilot not rendered: {_copilot_err}")
+        _copilot_sym = ticker.replace(".NS", "") if ticker else ""
+        if _copilot_sym:
+            _copilot_inputs = collect_for_analyze_stock(_copilot_sym)
+            render_chat_panel(_copilot_sym, _copilot_inputs,
+                              heading="AI Co-Pilot (bottom fallback)",
+                              expanded=False)
+    except Exception as _copilot_err:
+        st.caption(f"AI co-pilot not rendered: {_copilot_err}")
+# Reset the flag so the next page render evaluates the guard fresh.
+st.session_state["_ai_panel_top_rendered"] = False

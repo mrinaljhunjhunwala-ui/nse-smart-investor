@@ -9,8 +9,6 @@ Public API: render_chat_panel(symbol, inputs, position=None, risk_rules=None)
 """
 from __future__ import annotations
 
-import os
-
 import streamlit as st
 
 from .client import ChatSettings, CopilotUnavailable, Message, chat, is_available
@@ -66,25 +64,9 @@ def render_chat_panel(
     with st.expander(heading, expanded=_open):
         if not _is_ok:
             st.info(
-                "AI co-pilot unavailable — set `GROQ_API_KEY` in "
+                "AI co-pilot unavailable. Set `GROQ_API_KEY` in "
                 "`.streamlit/secrets.toml` (local) or as a Repository secret in "
-                "the Hugging Face Space settings. Free key at "
-                "https://console.groq.com."
-            )
-            # Temporary diagnostic — shows WHERE the panel looked and what it saw.
-            # Values are never printed, only key names. Remove this block once
-            # the panel is confirmed working end-to-end.
-            _diag_env = "GROQ_API_KEY" in os.environ
-            _diag_secret_keys: list[str] = []
-            _diag_secret_err: str = ""
-            try:
-                _diag_secret_keys = sorted(list(st.secrets.keys()))  # type: ignore[attr-defined]
-            except Exception as _e:
-                _diag_secret_err = f"{type(_e).__name__}: {_e}"
-            st.caption(
-                f"debug · env has GROQ_API_KEY: **{_diag_env}** · "
-                f"st.secrets top-level keys: **{_diag_secret_keys or '(none / read failed)'}** · "
-                f"secrets read error: **{_diag_secret_err or 'none'}**"
+                "the Streamlit Cloud settings. Free key at https://console.groq.com."
             )
             return
 
