@@ -67,6 +67,35 @@ _FETCH_CACHE_TTL = 300  # 5 minutes — consistent with VIX cache TTL
 _FETCH_CACHE_MAX = 2000  # entries; comfortably covers one full-universe scan
 _FETCH_CACHE_LOCK = threading.Lock()
 
+# FIX DIAG-FETCHER (Task 2.3 follow-up C): expose last-diagnostic per provider
+# tier so dashboard/shared/data_health.py's Command Centre panel can surface
+# actual Yahoo / Stooq / Angel liveness without launching probes. Written on
+# every fetch_single call - success or failure per tier.
+_LAST_DIAG_BY_PROVIDER: dict = {"AngelOne": {}, "Stooq": {}, "Yahoo": {}}
+
+
+def get_last_diagnostic(provider: str) -> dict:
+    """Return the diagnostic recorded on the most recent fetch attempt for
+    the given provider tier ('AngelOne' / 'Stooq' / 'Yahoo').
+
+    Shape: {"ok": bool, "at": iso, "reason": str, "symbol": str, "warnings": int}.
+    Empty dict if that provider has not been exercised this process.
+    """
+    return dict(_LAST_DIAG_BY_PROVIDER.get(provider, {}))
+
+
+def _record_provider_diagnostic(provider: str, *, ok: bool, symbol: str,
+                                reason: str = "") -> None:
+    from datetime import datetime as _dt
+    prior = _LAST_DIAG_BY_PROVIDER.get(provider) or {}
+    _LAST_DIAG_BY_PROVIDER[provider] = {
+        "ok": ok,
+        "at": _dt.now().isoformat(),
+        "reason": reason,
+        "symbol": symbol,
+        "warnings": int(prior.get("warnings", 0)) + (0 if ok else 1),
+    }
+
 
 def _cache_get(cache_key, now: float):
     """Return a cached DataFrame for `cache_key`, or None if absent/expired."""
@@ -575,12 +604,17 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
             df = _ao_fetch(ticker, period=period, interval=interval)
             if df is not None and not df.empty:
                 served = "AngelOne"
+                _record_provider_diagnostic("AngelOne", ok=True, symbol=ticker)
             else:
                 _log.warning("data fallback: provider=AngelOne symbol=%s returned no data",
                              ticker)
+                _record_provider_diagnostic("AngelOne", ok=False, symbol=ticker,
+                                            reason="returned no data")
     except Exception as e:
         df = None
         _fail("AngelOne", e)
+        _record_provider_diagnostic("AngelOne", ok=False, symbol=ticker,
+                                    reason=f"{type(e).__name__}: {e}")
 
     # ── Tier 1: Stooq CSV (daily bars only — no intraday support) ────────────
     if (df is None or df.empty) and interval == "1d":
@@ -591,10 +625,13 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
                 df = _fetch_stooq(ticker, period=period)
                 served = "Stooq"
                 _stooq_breaker_record(success=True)
+                _record_provider_diagnostic("Stooq", ok=True, symbol=ticker)
             except Exception as e:
                 df = None
                 _stooq_breaker_record(success=False)
                 _fail("Stooq", e)
+                _record_provider_diagnostic("Stooq", ok=False, symbol=ticker,
+                                            reason=f"{type(e).__name__}: {e}")
     elif (df is None or df.empty) and served is None:
         _log.debug("intraday %s for %s — skipping Stooq (daily-only)", interval, ticker)
 
@@ -603,9 +640,12 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         try:
             df = _fetch_yahoo_direct(ticker, period=period, interval=interval)
             served = "Yahoo"
+            _record_provider_diagnostic("Yahoo", ok=True, symbol=ticker)
         except Exception as e:
             df = None
             _fail("Yahoo", e)
+            _record_provider_diagnostic("Yahoo", ok=False, symbol=ticker,
+                                        reason=f"{type(e).__name__}: {e}")
 
     if df is None or df.empty:
         _log.error("data fetch FAILED: symbol=%s — all providers failed: %s",

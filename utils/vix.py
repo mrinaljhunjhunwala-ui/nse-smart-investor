@@ -12,11 +12,27 @@ No yfinance dependency — safe on Streamlit Cloud.
 from __future__ import annotations
 import logging
 import time
-from typing import Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 _log = logging.getLogger("vix")
 _VIX_CACHE: Optional[Dict] = None
 _VIX_CACHE_TTL = 600   # 10 minutes — VIX can spike intraday
+
+# FIX DIAG-VIX (Task 2.3 follow-up C): expose a last-diagnostic getter so
+# dashboard/shared/data_health.py can surface VIX freshness in the
+# Command Centre panel. Same shape other providers use (nse_corp_info,
+# news_feed, etc.). Written on every fetch attempt, success or failure.
+_last_diagnostic: Dict[str, Any] = {}
+
+
+def get_last_diagnostic() -> Dict[str, Any]:
+    """Return the diagnostic recorded on the most recent VIX fetch attempt.
+
+    Shape: {"ok": bool, "at": iso, "reason": str, "warnings": int}.
+    Empty dict if no fetch has been attempted yet this process.
+    """
+    return dict(_last_diagnostic)
 
 
 def get_india_vix_regime() -> Dict:
@@ -110,6 +126,10 @@ def get_india_vix_regime() -> Dict:
             "vix_pct_chg": round(pct_chg, 2),
             "_ts":         time.time(),
         }
+        _last_diagnostic.update({
+            "ok": True, "at": datetime.now().isoformat(),
+            "reason": "", "warnings": 0,
+        })
 
     except Exception as e:
         _log.warning("India VIX fetch failed, defaulting to 'unknown' regime: %s", e)
@@ -118,6 +138,11 @@ def get_india_vix_regime() -> Dict:
             "allow_buy": True, "vix_pct_chg": 0.0,
             "_ts": time.time(),
         }
+        _last_diagnostic.update({
+            "ok": False, "at": datetime.now().isoformat(),
+            "reason": f"{type(e).__name__}: {e}",
+            "warnings": int(_last_diagnostic.get("warnings", 0)) + 1,
+        })
 
     return {k: v for k, v in _VIX_CACHE.items() if k != "_ts"}
 
