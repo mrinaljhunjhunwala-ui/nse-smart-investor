@@ -23,6 +23,10 @@ from dashboard.shared.ai.context_builder import (
     Portfolio,
     RiskRules,
     build_context,
+    _macd_signal_narrative,
+    _sma_50_200_narrative,
+    _nifty_bias_narrative,
+    _data_freshness,
 )
 from dashboard.shared.ai import client as ai_client
 
@@ -158,6 +162,145 @@ def test_build_context_rounds_floats():
     ctx = build_context(inputs)
     assert "2856.41" in ctx
     assert "2856.4127" not in ctx
+
+
+# ── collector narrative helpers (Task 5.3 fill) ──────────────────────────────
+
+import numpy as np
+import pandas as pd
+
+
+def _synth_df(n: int = 260, drift: float = 0.4, seed: int = 3) -> pd.DataFrame:
+    """Deterministic synthetic OHLCV with SMA_50/SMA_200/MACD/MACD_Signal
+    columns pre-computed. Used only by the collector-helper tests."""
+    rng = np.random.default_rng(seed)
+    close = np.maximum(100 + np.cumsum(rng.normal(drift, 0.8, n)), 5.0)
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    df = pd.DataFrame({"Close": close}, index=idx)
+    df["SMA_50"]  = df["Close"].rolling(50).mean()
+    df["SMA_200"] = df["Close"].rolling(200).mean()
+    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+    df["MACD"] = ema12 - ema26
+    df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+    return df
+
+
+def test_macd_signal_narrative_uptrend_returns_bullish_or_positive():
+    df = _synth_df(drift=0.5)
+    out = _macd_signal_narrative(df)
+    assert out is not None
+    assert any(w in out for w in ("bullish", "positive"))
+
+
+def test_macd_signal_narrative_none_on_missing_columns():
+    df = pd.DataFrame({"Close": [1.0, 2.0, 3.0]})
+    assert _macd_signal_narrative(df) is None
+
+
+def test_sma_50_200_narrative_uptrend_says_50_above_200():
+    df = _synth_df(drift=0.5)  # clear uptrend → 50 crosses above 200
+    out = _sma_50_200_narrative(df)
+    assert out is not None
+    assert "50 above 200" in out
+
+
+def test_sma_50_200_narrative_downtrend_says_50_below_200():
+    df = _synth_df(drift=-0.5, seed=17)
+    # In case the noise leaves the current bar ambiguous, still get a well-formed string
+    out = _sma_50_200_narrative(df)
+    assert out is not None
+    assert "50 " in out and "200" in out
+
+
+def test_sma_50_200_narrative_none_on_short_frame():
+    df = pd.DataFrame({"Close": [1.0, 2.0, 3.0]})
+    assert _sma_50_200_narrative(df) is None
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("trend_up",   "trending up"),
+    ("trend_down", "trending down"),
+    ("range",      "range-bound"),
+    ("risk_off",   "risk-off"),
+    ("unknown",    None),
+    (None,         None),
+    ("",           None),
+])
+def test_nifty_bias_narrative_maps(label, expected):
+    assert _nifty_bias_narrative(label) == expected
+
+
+def test_data_freshness_fresh_when_recent():
+    now = _dt.datetime(2026, 9, 6, 12, 0, 0)
+    ts  = (now - _dt.timedelta(minutes=5)).isoformat()
+    assert _data_freshness(ts, now=now) == "fresh"
+
+
+def test_data_freshness_stale_when_old():
+    now = _dt.datetime(2026, 9, 6, 12, 0, 0)
+    ts  = (now - _dt.timedelta(minutes=30)).isoformat()
+    assert _data_freshness(ts, now=now) == "stale"
+
+
+def test_data_freshness_boundary_at_15_min_is_fresh():
+    now = _dt.datetime(2026, 9, 6, 12, 0, 0)
+    ts  = (now - _dt.timedelta(minutes=15)).isoformat()
+    assert _data_freshness(ts, now=now) == "fresh"
+
+
+def test_data_freshness_none_on_bad_input():
+    assert _data_freshness(None) is None
+    assert _data_freshness("not-a-timestamp") is None
+    assert _data_freshness("") is None
+
+
+# ── build_context contract: newly-populated fields serialise correctly ───────
+
+def test_build_context_includes_new_stock_fields():
+    inp = ContextInputs(
+        page="analyze_stock",
+        stock=Stock(symbol="RELIANCE", name="Reliance Industries",
+                    sector="Oil & Gas", ltp=1400.0, prev_close=1385.0,
+                    day_change_pct=1.08),
+    )
+    ctx = build_context(inp)
+    _, body = ctx.split("\n", 1)
+    parsed = json.loads(body)
+    assert parsed["stock"]["name"] == "Reliance Industries"
+    assert parsed["stock"]["prev_close"] == 1385.0
+    assert parsed["stock"]["day_change_pct"] == 1.08
+
+
+def test_build_context_includes_technicals_narrative_strings():
+    inp = ContextInputs(
+        page="analyze_stock",
+        stock=Stock(symbol="TCS"),
+        technicals=Technicals(
+            rsi_14=58.2,
+            macd_signal="bullish crossover 2 sessions ago",
+            sma_50_200="50 above 200 (golden cross regime, recent)",
+        ),
+    )
+    ctx = build_context(inp)
+    parsed = json.loads(ctx.split("\n", 1)[1])
+    assert parsed["technicals"]["macd_signal"].startswith("bullish crossover")
+    assert "50 above 200" in parsed["technicals"]["sma_50_200"]
+    # vwap_position and cpr_stance were not set → must be omitted
+    assert "vwap_position" not in parsed["technicals"]
+    assert "cpr_stance"   not in parsed["technicals"]
+
+
+def test_build_context_includes_nifty_bias_and_freshness():
+    inp = ContextInputs(
+        page="analyze_stock",
+        stock=Stock(symbol="INFY"),
+        regime=Regime(nifty_bias="trending up", india_vix=13.4, vix_zone="normal", sector_rank=3),
+        data_freshness="fresh",
+    )
+    parsed = json.loads(build_context(inp).split("\n", 1)[1])
+    assert parsed["regime"]["nifty_bias"] == "trending up"
+    assert parsed["data_freshness"] == "fresh"
 
 
 # ── client (read_api_key / is_available) ──────────────────────────────────────
