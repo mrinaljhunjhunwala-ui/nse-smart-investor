@@ -100,17 +100,22 @@ def _try(fn: Callable, *args, **kwargs):
 
 
 def probe_angel() -> ProviderCheck:
-    """Angel One: configured or not. No network."""
+    """Angel One: configured plus last-fetch state from data.fetcher tier 0."""
     try:
         from data.angel_fetcher import is_configured
+        from data.fetcher import get_last_diagnostic as _fetch_diag
     except ImportError:
         return ProviderCheck("Angel One SmartAPI", "market", STATUS_UNAVAILABLE,
                              note="module import failed")
-    if _try(is_configured):
+    if not _try(is_configured):
+        return ProviderCheck("Angel One SmartAPI", "market", STATUS_UNAVAILABLE,
+                             note="no ANGEL_* env / secret")
+    diag = _try(_fetch_diag, "AngelOne") or {}
+    if not diag:
         return ProviderCheck("Angel One SmartAPI", "market", STATUS_HEALTHY,
-                             note="credentials present")
-    return ProviderCheck("Angel One SmartAPI", "market", STATUS_UNAVAILABLE,
-                         note="no ANGEL_* env / secret")
+                             note="credentials present, no fetches yet")
+    status, at, warnings, note = _status_from_diagnostic(diag)
+    return ProviderCheck("Angel One SmartAPI", "market", status, at, warnings, note)
 
 
 def probe_stooq() -> ProviderCheck:
@@ -204,11 +209,59 @@ def probe_nse_rss() -> ProviderCheck:
     return ProviderCheck("NSE RSS feeds", "news", status, at, warnings, note)
 
 
+def probe_yahoo() -> ProviderCheck:
+    """Yahoo v8 chart: tier-2 fetcher state per _record_provider_diagnostic."""
+    try:
+        from data.fetcher import get_last_diagnostic as _fetch_diag
+    except ImportError:
+        return ProviderCheck("Yahoo v8 chart", "market", STATUS_UNAVAILABLE,
+                             note="fetcher module import failed")
+    diag = _try(_fetch_diag, "Yahoo") or {}
+    if not diag:
+        return ProviderCheck("Yahoo v8 chart", "market", STATUS_IDLE,
+                             note="no recent activity")
+    status, at, warnings, note = _status_from_diagnostic(diag)
+    return ProviderCheck("Yahoo v8 chart", "market", status, at, warnings, note)
+
+
+def probe_vix() -> ProviderCheck:
+    """India VIX: last fetch diagnostic from utils.vix."""
+    try:
+        from utils.vix import get_last_diagnostic
+    except ImportError:
+        return ProviderCheck("India VIX", "market", STATUS_UNAVAILABLE,
+                             note="module import failed")
+    diag = _try(get_last_diagnostic) or {}
+    if not diag:
+        return ProviderCheck("India VIX", "market", STATUS_IDLE,
+                             note="no recent activity")
+    status, at, warnings, note = _status_from_diagnostic(diag)
+    return ProviderCheck("India VIX", "market", status, at, warnings, note)
+
+
+def probe_nse_delivery() -> ProviderCheck:
+    """NSE bhavcopy delivery: last fetch_and_persist_today diagnostic."""
+    try:
+        from data.nse_delivery import get_last_diagnostic
+    except ImportError:
+        return ProviderCheck("NSE bhavcopy delivery", "market", STATUS_UNAVAILABLE,
+                             note="module import failed")
+    diag = _try(get_last_diagnostic) or {}
+    if not diag:
+        return ProviderCheck("NSE bhavcopy delivery", "market", STATUS_IDLE,
+                             note="no recent activity")
+    status, at, warnings, note = _status_from_diagnostic(diag)
+    return ProviderCheck("NSE bhavcopy delivery", "market", status, at, warnings, note)
+
+
 def collect_all_health() -> List[ProviderCheck]:
     """Every probe. Pure: no network, no Streamlit."""
     return [
         probe_angel(),
         probe_stooq(),
+        probe_yahoo(),
+        probe_vix(),
+        probe_nse_delivery(),
         probe_nse_corp_info(),
         probe_bse_corp_info(),
         probe_news_feed(),

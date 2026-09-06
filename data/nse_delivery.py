@@ -253,11 +253,41 @@ def fetch_and_persist_today(as_of: Optional[_dt.date] = None) -> int:
     is not yet published (typical before ~7 PM IST).
     """
     date = as_of or _dt.date.today()
-    csv_text = _fetch_bhavcopy(date)
-    rows = _parse_bhavcopy(csv_text)
-    written = _persist(rows)
-    _log.info("nse_delivery: persisted %d rows for %s", written, date.isoformat())
-    return written
+    try:
+        csv_text = _fetch_bhavcopy(date)
+        rows = _parse_bhavcopy(csv_text)
+        written = _persist(rows)
+        _log.info("nse_delivery: persisted %d rows for %s", written, date.isoformat())
+        _record_last_diagnostic(
+            ok=True, at=_dt.datetime.now().isoformat(),
+            reason=f"persisted {written} rows for {date.isoformat()}",
+        )
+        return written
+    except Exception as e:
+        _record_last_diagnostic(
+            ok=False, at=_dt.datetime.now().isoformat(),
+            reason=f"{type(e).__name__}: {e}",
+        )
+        raise
+
+
+# FIX DIAG-DELIVERY (Task 2.3 follow-up C): expose a last-diagnostic getter
+# for data_health.py's Command Centre panel. Same shape as other providers.
+_last_diagnostic: dict = {}
+
+
+def _record_last_diagnostic(*, ok: bool, at: str, reason: str = "") -> None:
+    prior_warns = int(_last_diagnostic.get("warnings", 0))
+    _last_diagnostic.update({
+        "ok": ok, "at": at, "reason": reason,
+        "warnings": prior_warns + (0 if ok else 1),
+    })
+
+
+def get_last_diagnostic() -> dict:
+    """Return the diagnostic recorded on the most recent fetch_and_persist_today
+    call. Empty dict if the fetcher hasn't been exercised this process."""
+    return dict(_last_diagnostic)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

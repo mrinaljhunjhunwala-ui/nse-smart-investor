@@ -70,9 +70,20 @@ def test_probe_angel_unavailable_when_missing_config(monkeypatch):
 
 
 def test_probe_angel_healthy_when_configured(monkeypatch):
-    fake_module = mock.MagicMock()
-    fake_module.is_configured.return_value = True
-    monkeypatch.setitem(__import__("sys").modules, "data.angel_fetcher", fake_module)
+    """Configured + no fetcher diag yet -> HEALTHY with 'no fetches yet' note.
+
+    Test explicitly mocks BOTH is_configured (angel_fetcher) AND
+    get_last_diagnostic (data.fetcher). Without the second mock, a prior
+    test in the same session may have exercised fetch_single and left a
+    real Angel diagnostic behind, taking the probe down a different branch.
+    """
+    import sys
+    fake_angel = mock.MagicMock()
+    fake_angel.is_configured.return_value = True
+    monkeypatch.setitem(sys.modules, "data.angel_fetcher", fake_angel)
+    fake_fetcher = mock.MagicMock()
+    fake_fetcher.get_last_diagnostic.return_value = {}
+    monkeypatch.setitem(sys.modules, "data.fetcher", fake_fetcher)
     c = dh.probe_angel()
     assert c.status == dh.STATUS_HEALTHY
 
