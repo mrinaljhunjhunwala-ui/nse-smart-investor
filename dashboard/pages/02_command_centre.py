@@ -108,6 +108,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ── 0a. DATA HEALTH (Task 2.3) ─────────────────────────────────────────────
+# Per-provider up/degraded/idle snapshot behind a collapsed expander so the
+# top-of-page density stays intact for the common case. Opens on demand
+# when the user wants to know why data looks off. Read-only aggregation of
+# the diagnostic surfaces each provider already exposes; no network on this
+# path (probes are is_configured() / get_last_diagnostic() reads).
+try:
+    from dashboard.shared.data_health import render_data_health_html as _dh_render
+    with st.expander("Data health", expanded=False):
+        st.markdown(_dh_render(), unsafe_allow_html=True)
+except Exception as _dh_err:
+    import logging
+    logging.getLogger("dashboard.command_centre").debug(
+        "data_health panel render failed: %s", _dh_err)
+
 # ── 0b. PAPER TRADES OVERVIEW (quick view) ─────────────────────────────────
 try:
     import trade_store as _pto_ts
