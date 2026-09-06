@@ -340,7 +340,12 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
     )
 
     # Left cluster: conviction score (big) + score bar
-    score_pct = max(0.0, min(1.0, score / 90.0))
+    # FIX POS2-UI (Rec 6 design 6b): F&O ticker with the Positioning pillar
+    # active scores against a 100-pt cap instead of 90 (the extra 10 comes
+    # from the positioning overlay). Show the real ceiling so the fraction
+    # reads honestly. Non-F&O or pillar-inactive tickers keep the 90 cap.
+    _cap = 100.0 if pos_score is not None else 90.0
+    score_pct = max(0.0, min(1.0, score / _cap))
     conviction = (
         f'<div style="text-align:left">'
         f'<div style="font-family:var(--font-mono);font-size:10px;'
@@ -349,7 +354,7 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
         f'<div style="font-family:var(--font-mono);font-size:44px;'
         f'font-weight:700;color:{action_color_};line-height:1;letter-spacing:-1px;'
         f'margin-top:6px">{score:.0f}<span style="font-size:16px;color:var(--dim);'
-        f'font-weight:500">/90</span></div>'
+        f'font-weight:500">/{int(_cap)}</span></div>'
         f'<div style="margin-top:8px;height:4px;background:var(--hairline);'
         f'border-radius:2px;overflow:hidden;width:140px">'
         f'<div style="height:100%;width:{score_pct*100:.1f}%;'
