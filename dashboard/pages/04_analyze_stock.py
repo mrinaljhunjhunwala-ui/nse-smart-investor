@@ -1727,559 +1727,195 @@ if analyze_btn or _prefill_active or (
             if latest.get("RSI_Bear_Div", 0):
                 st.warning("📉 **Bearish RSI Divergence detected** — momentum fading despite higher price")
 
-            # ── Chart ──────────────────────────────────────────────────────
-            st.markdown("---")
-            st.subheader("📊 Price Chart")
-            st.plotly_chart(build_price_chart(df_chart, ticker, period=period),
-                            width="stretch")
 
-            # ── News & Flags (merged) ─────────────────────────────────────
-            # Flags used to render as a standalone strip further up the page,
-            # sourced from the SAME feeds (NSE corp announcements + Google
-            # News + NSE RSS) that this News section reads — so the user got
-            # essentially the same headlines twice. Merged into one section:
-            #   • summary badge line: N flags active · red/amber/green count
-            #   • expander with the flag detail (headline, category, sentiment)
-            #   • the news list below (unchanged)
-            st.markdown("---")
-            st.subheader(f"📰 News & Flags — {get_display_name(ticker)}")
+            # ────────────────────────────────────────────────────────────────
+            # Task 2.4 F3 PR C.1 (audit docs/RENDER_SPEED_AUDIT_2026-09.md):
+            # tail sections grouped into tabs so this page no longer renders
+            # as a 600+ LOC vertical scroll. Streamlit still runs every tab's
+            # body on every rerun (compute-gating is PR C.2's job); this ships
+            # the visual/DOM win first as a low-risk incremental improvement.
+            # ────────────────────────────────────────────────────────────────
+            tab_chart, tab_news, tab_thesis, tab_fund, tab_val, tab_liq, tab_pf = st.tabs([
+                "📊 Chart", "📰 News & Flags", "🧭 Thesis",
+                "🏢 Fundamentals", "💰 Valuation", "💧 Liquidity",
+                "🧩 Portfolio Fit",
+            ])
 
-            # Flag summary strip (from the same 6h-cached helper the pre-fix
-            # standalone strip used). SPEED FIX: setting the warm marker here
-            # lets the Final-Verdict banner include the flag gate on the NEXT
-            # rerun of the same ticker without a fresh scrape.
-            _flag_dicts = []
-            try:
-                from dashboard.shared.flags_ui import get_cached_flags as _news_gcf
-                _flag_dicts = _news_gcf(
-                    ticker, company_name=getattr(cs, "company_name", None)) or []
-                st.session_state[f"_as_flags_warm::{ticker}"] = True
-            except Exception as _fl_e:
-                import logging
-                logging.getLogger("dashboard.analyze_stock").debug(
-                    "flags fetch (news section) failed for %s: %s", ticker, _fl_e)
+            with tab_chart:
+                # ── Chart ──────────────────────────────────────────────────────
+                st.markdown("---")
+                st.subheader("📊 Price Chart")
+                st.plotly_chart(build_price_chart(df_chart, ticker, period=period),
+                                width="stretch")
 
-            if _flag_dicts:
-                _sev_counts = {"red": 0, "amber": 0, "green": 0}
-                for _f in _flag_dicts:
-                    _s = str(_f.get("sentiment", "")).lower()
-                    if _s == "negative": _sev_counts["red"]   += 1
-                    elif _s == "neutral":  _sev_counts["amber"] += 1
-                    elif _s == "positive": _sev_counts["green"] += 1
-                _top_color = ("var(--bear)" if _sev_counts["red"]
-                              else "var(--amber)" if _sev_counts["amber"] else "var(--bull)")
-                st.markdown(
-                    f'<div style="background:var(--surface);border-left:4px solid {_top_color};'
-                    f'border-radius:6px;padding:10px 14px;margin-bottom:10px">'
-                    f'<b style="color:{_top_color};font-size:13px">'
-                    f'🚩 {len(_flag_dicts)} qualitative flag'
-                    f'{"s" if len(_flag_dicts) != 1 else ""} active</b> '
-                    f'<span style="font-size:12px;color:var(--dim)">'
-                    f'· 🔴 {_sev_counts["red"]} · 🟡 {_sev_counts["amber"]} '
-                    f'· 🟢 {_sev_counts["green"]}</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                with st.expander("See flag detail", expanded=False):
-                    for _f in _flag_dicts[:10]:
-                        _s = str(_f.get("sentiment", "")).lower()
-                        _dot = ("🔴" if _s == "negative"
-                                else "🟡" if _s == "neutral" else "🟢")
-                        _msg = str(_f.get("headline") or _f.get("message") or "")[:220]
-                        _cat = str(_f.get("category") or "")
-                        _src = str(_f.get("source") or "")
-                        _date = str(_f.get("date") or "")
-                        # UX-FIX: flag detail was a bare one-liner with no way
-                        # to jump to the source story. QualitativeFlag carries
-                        # the URL in `.detail` (set from the news/RSS "link"
-                        # field). Render the headline as a clickable link when
-                        # a URL is present, and show the source + date so
-                        # users can see who reported it and when.
-                        _link = str(_f.get("detail") or "").strip()
-                        _has_link = _link.startswith(("http://", "https://"))
-                        _title_md = (f"[{_msg}]({_link})" if _has_link else _msg)
-                        _meta_bits = []
-                        if _cat:  _meta_bits.append(_cat)
-                        if _src:  _meta_bits.append(_src)
-                        if _date: _meta_bits.append(_date)
-                        _meta = " · ".join(_meta_bits)
-                        st.markdown(
-                            f"- {_dot} **{_title_md}**  \n"
-                            f"  <span style='font-size:11px;color:var(--dim)'>"
-                            f"{_meta}</span>",
-                            unsafe_allow_html=True,
-                        )
+            with tab_news:
+                # ── News & Flags (merged) ─────────────────────────────────────
+                # Flags used to render as a standalone strip further up the page,
+                # sourced from the SAME feeds (NSE corp announcements + Google
+                # News + NSE RSS) that this News section reads — so the user got
+                # essentially the same headlines twice. Merged into one section:
+                #   • summary badge line: N flags active · red/amber/green count
+                #   • expander with the flag detail (headline, category, sentiment)
+                #   • the news list below (unchanged)
+                st.markdown("---")
+                st.subheader(f"📰 News & Flags — {get_display_name(ticker)}")
 
-            with st.spinner("Loading news…"):
-                from utils.news import get_stock_news as _gsn
-                articles = _gsn(ticker, max_articles=6)
-            if articles:
-                for art in articles:
-                    s      = art["sentiment"]
-                    icon   = "🟢" if s == "positive" else ("🔴" if s == "negative" else "⚪")
-                    impact = (
-                        "Positive catalyst" if s == "positive"
-                        else "Negative signal" if s == "negative"
-                        else "Neutral update"
-                    )
-                    st.markdown(
-                        f'{icon} **[{art["title"]}]({art["link"]})**  \n'
-                        f'<span style="font-size:11px;color:var(--dim)">'
-                        f'{art["publisher"]} · {art["time"]} · *{impact}*</span>',
-                        unsafe_allow_html=True,
-                    )
-            elif not _flag_dicts:
-                st.info("No recent news or qualitative flags found for this stock.")
-
-            # (Removed: "Trading Plan" box — the THIRD copy of the same
-            # Signal/Score/Entry/SL/Target/RR block, after the score hero and
-            # the deleted Action strip. The only content unique to it was the
-            # "Entry zone ₹X — ₹Y" band (entry × 1.01) and the ATR footnote;
-            # both are trivial and already implied by the metric cards. R:R
-            # sizing warning now lives in the score-hero column, next to the
-            # RR metric itself.)
-
-            # (Paper Trade popover moved UP to right below Multi-Signal
-            # Confirmation — see the Paper Trade block earlier on the page.)
-
-            # ── Investment Thesis (structured) ─────────────────────────────
-            # LAYOUT-REORDER: Thesis is the "WHY" — it belongs BEFORE the
-            # Fundamentals / Valuation / Liquidity blocks, which are the
-            # "CONTEXT" that feeds it. The Portfolio Fit block below then reads
-            # the same `_th` object (unchanged), so the semantic ordering is
-            # now: verdict → why (Thesis) → context (F/V/L) → fit.
-            st.markdown("---")
-            st.subheader("🧭 Investment Thesis (structured)")
-            st.caption(
-                "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
-                "single verdict. Every point is traceable to its source. Not investment advice."
-            )
-            _th = None
-            try:
-                # SPEED FIX: route through the page-level cached full-thesis
-                # helper so reruns of the SAME ticker (period toggle, popover
-                # open, checkbox flip) are instant. Fingerprint the dc + liq
-                # inputs with a cheap hashable summary so a materially-different
-                # input invalidates the cache; the full objects come from
-                # session_state so st.cache_data can hash the key.
-                st.session_state["_as_cs_snap"]  = cs
-                st.session_state["_as_dc_snap"]  = _dc
-                st.session_state["_as_liq_snap"] = _liq_ctx
-                _dc_total = None
-                if isinstance(_dc, dict):
-                    _dc_total = _dc.get("total")
-                _liq_tier = getattr(_liq_ctx, "liquidity_tier", None)
-                _th = _cached_thesis_full(ticker, cs.score, cs.action,
-                                          _dc_total, _liq_tier)
-                _v_color = {
-                    "Strong Positive": "var(--bull)", "Positive": "var(--bull)",
-                    "Neutral":         "var(--dim)",  "Negative": "var(--amber)",
-                    "Strong Negative": "var(--bear)",
-                }.get(_th.verdict, "var(--dim)")
-                st.markdown(
-                    f"<div style='font-size:1.15rem'>Verdict: "
-                    f"<b style='color:{_v_color}'>{_th.verdict}</b> "
-                    f"<span style='color:var(--dim)'>(score {_th.verdict_score:+d})</span></div>",
-                    unsafe_allow_html=True,
-                )
-                st.caption(_th.verdict_rationale)
-
-                # UX-FIX: Bull / Bear / Risks used to render as three walls of
-                # dash-bullet text — no color coding, no visual weight, easy
-                # to skim past. Chip-card layout below: each factor becomes a
-                # coloured card (green = bull, red = bear, amber = risk) with
-                # the source tag as a subtle pill, so the user sees the shape
-                # of the thesis at a glance instead of reading paragraphs.
-                _CHIP_STYLES = {
-                    "bull": ("var(--sunken)", "var(--bull)", "🟢"),
-                    "bear": ("var(--sunken)", "var(--bear)", "🔴"),
-                    "risk": ("var(--sunken)", "var(--amber)", "⚠️"),
-                }
-                def _factor_chips(_factors, _kind, _empty):
-                    if not _factors:
-                        st.caption(_empty); return
-                    _bg, _border, _icon = _CHIP_STYLES[_kind]
-                    for _f in _factors:
-                        _pill = (
-                            f'<span style="background:var(--sunken);color:var(--dim);'
-                            f'padding:1px 8px;border-radius:10px;font-size:10px;'
-                            f'letter-spacing:0.5px">{_f.source}</span>'
-                            if getattr(_f, "source", "") else ""
-                        )
-                        st.markdown(
-                            f'<div style="background:{_bg};border-left:3px solid {_border};'
-                            f'border-radius:6px;padding:8px 12px;margin:4px 0">'
-                            f'<div style="color:var(--ink-mid);font-size:13px;line-height:1.4">'
-                            f'{_icon} {_f.text}</div>'
-                            f'<div style="margin-top:4px;font-size:11px;color:var(--dim)">'
-                            f'{_pill} <span style="margin-left:6px">{getattr(_f, "evidence", "")}</span></div>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-
-                _tc1, _tc2 = st.columns(2)
-                with _tc1:
-                    st.markdown(
-                        '<div style="color:var(--bull);font-weight:700;'
-                        'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
-                        'margin-bottom:4px">🟢 Bull case</div>',
-                        unsafe_allow_html=True,
-                    )
-                    _factor_chips(_th.bull_factors, "bull", "No bull factors triggered.")
-                with _tc2:
-                    st.markdown(
-                        '<div style="color:var(--bear);font-weight:700;'
-                        'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
-                        'margin-bottom:4px">🔴 Bear case</div>',
-                        unsafe_allow_html=True,
-                    )
-                    _factor_chips(_th.bear_factors, "bear", "No bear factors triggered.")
-                st.markdown(
-                    '<div style="color:var(--amber);font-weight:700;'
-                    'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
-                    'margin:12px 0 4px 0">⚠️ Key risks</div>',
-                    unsafe_allow_html=True,
-                )
-                _factor_chips(_th.key_risks, "risk",
-                              "No specific risks flagged by the rules.")
-                for _tn in getattr(_th, "notes", []) or []:
-                    st.info("ℹ️ " + _tn)
-                st.caption(
-                    "Contributing subsystems: "
-                    + (", ".join(_th.inputs_present) or "none available")
-                    + ". Phase A1/D1 — explainable, sector-aware rules; no AI/LLM narration."
-                )
-            except Exception as _th_e:
-                st.caption(f"⚠️ Thesis unavailable: {_th_e}")
-
-            # ── Fundamentals ───────────────────────────────────────────────
-            st.markdown("---")
-            st.subheader("📊 Fundamentals")
-            try:
-                import datetime as _f_dt
-                _f_cf  = _fund_service().get_fundamentals(ticker)
-                _f_res = _fund_analytics.compute_all(_f_cf, cagr_years=5)
-                _f_fresh = "—"
-                if _f_cf.last_updated:
-                    _f_hrs   = (_f_dt.datetime.now() - _f_cf.last_updated).total_seconds() / 3600
-                    _f_fresh = "just now" if _f_hrs < 1 else f"{_f_hrs:.0f}h ago"
-                st.caption(
-                    f"Provider: **{_f_cf.provider_name or '—'}**  ·  "
-                    f"Statement date: **{_f_cf.statement_date or '—'}**  ·  "
-                    f"Data freshness: **{_f_fresh}**"
-                )
-                if _f_cf.is_partial:
-                    st.warning(
-                        f"⚠️ **Partial data** — some fundamentals are unavailable for this stock "
-                        f"from {_f_cf.provider_name or 'the provider'}. "
-                        f"Missing: {', '.join(_f_cf.missing_fields) or 'n/a'}."
-                    )
-
-                def _f_show(_col, _r):
-                    # UX-FIX: the "confidence: high" caption was misread as
-                    # "these numbers are trustworthy / this stock is good" —
-                    # but it means "we have enough YEARS of data to compute
-                    # this metric confidently", i.e. it is DATA-COVERAGE, not
-                    # a quality/goodness signal. A stock with a bad ROE and
-                    # 5 years of data still gets confidence=high. Relabel to
-                    # "data:" and prepend a colour cue that reflects the
-                    # METRIC's own health (green = good, red = poor) so the
-                    # user sees the health of the NUMBER at a glance, and the
-                    # data-completeness separately.
-                    if _r.available and _r.value is not None:
-                        _txt = f"{_r.value:,.1f}%" if _r.unit == "%" else f"{_r.value:,.2f}x"
-                        # Heuristic health thresholds — kept intentionally
-                        # simple; the deep read still lives in the Valuation
-                        # section (P/E ranges) and Fundamental Quality (score).
-                        _health_color = "var(--dim)"
-                        _mname = str(_r.metric or "").lower()
-                        if _r.unit == "%":
-                            if "roe" in _mname or "roce" in _mname:
-                                _health_color = ("var(--bull)" if _r.value >= 15
-                                                 else "var(--amber)" if _r.value >= 8
-                                                 else "var(--bear)")
-                            elif "cagr" in _mname:
-                                _health_color = ("var(--bull)" if _r.value >= 12
-                                                 else "var(--amber)" if _r.value >= 5
-                                                 else "var(--bear)")
-                        elif "debt" in _mname:
-                            _health_color = ("var(--bull)" if _r.value <= 0.5
-                                             else "var(--amber)" if _r.value <= 1.0
-                                             else "var(--bear)")
-                        _col.markdown(
-                            f'<div style="font-size:11px;color:var(--dim);'
-                            f'text-transform:uppercase;letter-spacing:0.5px">'
-                            f'{_r.metric}</div>'
-                            f'<div style="font-size:24px;font-weight:700;'
-                            f'color:{_health_color}">{_txt}</div>',
-                            unsafe_allow_html=True,
-                        )
-                        _col.caption(
-                            f"data: {_r.confidence} coverage"
-                            + (f" · {_r.reason}" if _r.reason else "")
-                        )
-                    else:
-                        _col.metric(_r.metric, "N/A")
-                        _col.caption(f"⚠️ {_r.reason}")
-
-                _fc1, _fc2, _fc3, _fc4 = st.columns(4)
-                _f_show(_fc1, _f_res["revenue_cagr"])
-                _f_show(_fc2, _f_res["eps_cagr"])
-                _f_show(_fc3, _f_res["roe"])
-                _f_show(_fc4, _f_res["debt_to_equity"])
-
-                # (Removed: the same "🔬 Revenue growth …" marketing blurb —
-                # see the identical removal in the score-hero section. The
-                # metric card above already carries the same context.)
-
-                _cagr_results = [
-                    r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
-                    if r is not None and getattr(r, "available", False)
-                ]
-                if _cagr_results and any(r.confidence in ("medium", "low") for r in _cagr_results):
-                    st.caption(
-                        "📊 **Data coverage note:** the *data:* label above measures how many "
-                        "years of history Yahoo Finance returned (~4–5 for most NSE names) — "
-                        "**not** whether the number itself is good. Colour on the value = "
-                        "the metric's own health (green good · amber ok · red weak)."
-                    )
-
-                from analysis.sector_classification import classify_sector as _classify
-                _sp = _classify(
-                    getattr(cs, "sector", None),
-                    name=getattr(cs, "company_name", None),
-                )
-                if _sp.is_financial:
-                    st.info(f"🏦 **{_sp.group}** — {_sp.note}")
-                else:
-                    _rc1, _rc2 = st.columns(2)
-                    _f_show(_rc1, _f_res["roce"])
-                    _rr = _f_res["fcf"]
-                    if _rr.available and _rr.value is not None:
-                        _rc2.metric("Free Cash Flow", f"₹{_rr.value:,.0f} cr")
-                        _cap = (
-                            " · capex-heavy: negative FCF can be a normal investment cycle"
-                            if _sp.fcf_capex_caveat else ""
-                        )
-                        _rc2.caption(f"data: {_rr.confidence} coverage{_cap}")
-                    else:
-                        _rc2.metric("Free Cash Flow", "N/A")
-                        _rc2.caption(f"⚠️ {_rr.reason}")
-                st.caption(
-                    "Phase 0/D1: Yahoo Finance data only (~4-yr depth), no paid provider. "
-                    "ROCE/FCF shown only where economically meaningful. Not investment advice."
-                )
-            except Exception as _f_e:
-                st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
-
-            # ── Valuation Context ──────────────────────────────────────────
-            st.markdown("---")
-            st.subheader("💰 Valuation Context")
-            st.caption(
-                "Valuation multiples already available from the fundamentals provider. "
-                "Factual context only — no cheap/expensive judgment, no peer comparison yet."
-            )
-            try:
-                from analysis.fundamentals.valuation import build_valuation_context
-                from analysis.sector_classification import classify_sector as _classify_v
-                _spv     = _classify_v(
-                    getattr(cs, "sector", None),
-                    name=getattr(cs, "company_name", None),
-                )
-                _val_cf  = _fund_service().get_fundamentals(ticker)
-                _val     = build_valuation_context(_val_cf, sector_profile=_spv)
-                _vc1, _vc2, _vc3 = st.columns(3)
-                _vc1.metric("P/E",  f"{_val.pe:,.1f}x"  if _val.pe  is not None else "N/A")
-                _vc2.metric("P/B",  f"{_val.pb:,.1f}x"  if _val.pb  is not None else "N/A")
-                if _val.ev_ebitda_applicable:
-                    _vc3.metric(
-                        "EV/EBITDA",
-                        f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A",
-                    )
-                else:
-                    _vc3.metric("EV/EBITDA", "n/a")
-                    _vc3.caption("not meaningful for financials")
-                if _val.preferred_valuation:
-                    st.caption(f"📐 Right lens for this sector: **{_val.preferred_valuation}**")
-                for _vn in _val.notes:
-                    st.caption("ℹ️ " + _vn)
-                st.caption(
-                    f"Coverage: **{_val.confidence}**"
-                    + (f" · missing: {', '.join(_val.missing_fields)}" if _val.missing_fields else "")
-                    + (f" · source: {_val.source}" if _val.source else "")
-                    + ". Values are None when unavailable — never fabricated."
-                )
-
-                st.markdown("**🧮 Valuation Assessment** *(growth- & quality-adjusted, descriptive)*")
+                # Flag summary strip (from the same 6h-cached helper the pre-fix
+                # standalone strip used). SPEED FIX: setting the warm marker here
+                # lets the Final-Verdict banner include the flag gate on the NEXT
+                # rerun of the same ticker without a fresh scrape.
+                _flag_dicts = []
                 try:
-                    from analysis.fundamentals.valuation_decision import assess_valuation
-                    _va_res = _fund_analytics.compute_all(_val_cf)
-                    _va     = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
+                    from dashboard.shared.flags_ui import get_cached_flags as _news_gcf
+                    _flag_dicts = _news_gcf(
+                        ticker, company_name=getattr(cs, "company_name", None)) or []
+                    st.session_state[f"_as_flags_warm::{ticker}"] = True
+                except Exception as _fl_e:
+                    import logging
+                    logging.getLogger("dashboard.analyze_stock").debug(
+                        "flags fetch (news section) failed for %s: %s", ticker, _fl_e)
 
-                    # UX-FIX: the old rendering was a small blockquote + a
-                    # trailing "confidence: X" line that read as an admission
-                    # of insufficient data every time. Promote the POSTURE
-                    # itself to a bold colored badge (that IS the assessment),
-                    # then a clean two-panel layout — left: basis + reasons;
-                    # right: caveats + coverage — instead of five stacked
-                    # captions the eye slides past.
-                    _POSTURE_COLORS = {
-                        "SUPPORTED":              ("var(--bull)", "🟢"),
-                        "REASONABLE":             ("var(--bull)", "🟢"),
-                        "STRETCHED":              ("var(--amber)", "🟡"),
-                        "PRICING_IN_PERFECTION":  ("var(--bear)", "🔴"),
-                        "PEG_RICH":               ("var(--bear)", "🔴"),
-                        "CYCLICAL_PEAK":          ("var(--amber)", "🟡"),
-                        "CYCLICAL_TROUGH":        ("var(--accent)", "🔵"),
-                        "INSUFFICIENT_EVIDENCE":  ("var(--dim)", "⚪"),
-                    }
-                    _post = str(_va.posture or "INSUFFICIENT_EVIDENCE")
-                    _pc, _picon = _POSTURE_COLORS.get(
-                        _post, ("var(--dim)", "⚪"))
+                if _flag_dicts:
+                    _sev_counts = {"red": 0, "amber": 0, "green": 0}
+                    for _f in _flag_dicts:
+                        _s = str(_f.get("sentiment", "")).lower()
+                        if _s == "negative": _sev_counts["red"]   += 1
+                        elif _s == "neutral":  _sev_counts["amber"] += 1
+                        elif _s == "positive": _sev_counts["green"] += 1
+                    _top_color = ("var(--bear)" if _sev_counts["red"]
+                                  else "var(--amber)" if _sev_counts["amber"] else "var(--bull)")
                     st.markdown(
-                        f'<div style="background:var(--surface);border-left:5px solid {_pc};'
-                        f'border-radius:8px;padding:14px 18px;margin:8px 0">'
-                        f'<div style="font-size:11px;color:var(--dim);letter-spacing:1.5px;'
-                        f'text-transform:uppercase">Valuation posture</div>'
-                        f'<div style="font-size:22px;font-weight:700;color:{_pc};'
-                        f'margin:2px 0 6px 0">{_picon} {_post.replace("_", " ").title()}</div>'
-                        f'<div style="font-size:13px;color:var(--ink-mid);line-height:1.5">'
-                        f'{_va.phrase}</div>'
+                        f'<div style="background:var(--surface);border-left:4px solid {_top_color};'
+                        f'border-radius:6px;padding:10px 14px;margin-bottom:10px">'
+                        f'<b style="color:{_top_color};font-size:13px">'
+                        f'🚩 {len(_flag_dicts)} qualitative flag'
+                        f'{"s" if len(_flag_dicts) != 1 else ""} active</b> '
+                        f'<span style="font-size:12px;color:var(--dim)">'
+                        f'· 🔴 {_sev_counts["red"]} · 🟡 {_sev_counts["amber"]} '
+                        f'· 🟢 {_sev_counts["green"]}</span>'
                         f'</div>',
                         unsafe_allow_html=True,
                     )
-                    _vac1, _vac2 = st.columns(2)
-                    with _vac1:
-                        if _va.justification and _post != "INSUFFICIENT_EVIDENCE":
-                            st.markdown(f"**Basis:** {_va.justification}")
-                        if _va.reasons:
-                            st.markdown("**Reasons:**")
-                            for _rz in _va.reasons:
-                                st.markdown(f"- {_rz}")
-                        if _va.triggered_guard:
-                            st.caption(f"🛡 Guard: {_va.triggered_guard}")
-                    with _vac2:
-                        if _va.caveats:
-                            st.markdown("**Caveats:**")
-                            for _cv in _va.caveats:
-                                st.markdown(f"- ⚠️ {_cv}")
-                        if _va.confidence_factors:
-                            st.caption("Coverage factors: " + " · ".join(_va.confidence_factors))
-                        st.caption(
-                            f"Data coverage for this assessment: **{_va.confidence}**. "
-                            "Descriptive only — no buy/sell, no fair/intrinsic value, "
-                            "no cheap/expensive label."
-                        )
-                except Exception as _va_e:
-                    st.caption(f"⚠️ Valuation assessment unavailable: {_va_e}")
-            except Exception as _val_e:
-                st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
+                    with st.expander("See flag detail", expanded=False):
+                        for _f in _flag_dicts[:10]:
+                            _s = str(_f.get("sentiment", "")).lower()
+                            _dot = ("🔴" if _s == "negative"
+                                    else "🟡" if _s == "neutral" else "🟢")
+                            _msg = str(_f.get("headline") or _f.get("message") or "")[:220]
+                            _cat = str(_f.get("category") or "")
+                            _src = str(_f.get("source") or "")
+                            _date = str(_f.get("date") or "")
+                            # UX-FIX: flag detail was a bare one-liner with no way
+                            # to jump to the source story. QualitativeFlag carries
+                            # the URL in `.detail` (set from the news/RSS "link"
+                            # field). Render the headline as a clickable link when
+                            # a URL is present, and show the source + date so
+                            # users can see who reported it and when.
+                            _link = str(_f.get("detail") or "").strip()
+                            _has_link = _link.startswith(("http://", "https://"))
+                            _title_md = (f"[{_msg}]({_link})" if _has_link else _msg)
+                            _meta_bits = []
+                            if _cat:  _meta_bits.append(_cat)
+                            if _src:  _meta_bits.append(_src)
+                            if _date: _meta_bits.append(_date)
+                            _meta = " · ".join(_meta_bits)
+                            st.markdown(
+                                f"- {_dot} **{_title_md}**  \n"
+                                f"  <span style='font-size:11px;color:var(--dim)'>"
+                                f"{_meta}</span>",
+                                unsafe_allow_html=True,
+                            )
 
-            # ── Liquidity Context ──────────────────────────────────────────
-            # NOTE: _liq_ctx is computed EARLIER (right after _dc) so the
-            # Investment Thesis section can consume it; this render block just
-            # displays what was already computed. Do not re-compute here.
-            st.markdown("---")
-            st.subheader("💧 Liquidity Context")
-            try:
-                from analysis.liquidity import format_turnover
-                if _liq_ctx is None:
-                    raise RuntimeError("liquidity context not available (see log)")
-                _lt_color = {
-                    "High": "var(--bull)", "Medium": "var(--bull)",
-                    "Low":  "var(--amber)", "Illiquid": "var(--bear)",
-                }.get(_liq_ctx.liquidity_tier, "var(--dim)")
-                st.markdown(
-                    f"Liquidity tier: <b style='color:{_lt_color}'>{_liq_ctx.liquidity_tier}</b>",
-                    unsafe_allow_html=True,
-                )
-                _lc1, _lc2, _lc3 = st.columns(3)
-                _lc1.metric(
-                    "Avg daily turnover (30d)",
-                    format_turnover(_liq_ctx.avg_daily_turnover_30d),
-                )
-                _lc2.metric(
-                    "Avg daily volume (30d)",
-                    f"{_liq_ctx.avg_daily_volume_30d:,.0f}"
-                    if _liq_ctx.avg_daily_volume_30d is not None else "N/A",
-                )
-                _lc3.metric(
-                    "Volume trend (30d vs 90d)",
-                    (_liq_ctx.volume_trend or "—").title(),
-                    f"{_liq_ctx.volume_trend_ratio:.2f}x"
-                    if _liq_ctx.volume_trend_ratio is not None else None,
-                )
+                with st.spinner("Loading news…"):
+                    from utils.news import get_stock_news as _gsn
+                    articles = _gsn(ticker, max_articles=6)
+                if articles:
+                    for art in articles:
+                        s      = art["sentiment"]
+                        icon   = "🟢" if s == "positive" else ("🔴" if s == "negative" else "⚪")
+                        impact = (
+                            "Positive catalyst" if s == "positive"
+                            else "Negative signal" if s == "negative"
+                            else "Neutral update"
+                        )
+                        st.markdown(
+                            f'{icon} **[{art["title"]}]({art["link"]})**  \n'
+                            f'<span style="font-size:11px;color:var(--dim)">'
+                            f'{art["publisher"]} · {art["time"]} · *{impact}*</span>',
+                            unsafe_allow_html=True,
+                        )
+                elif not _flag_dicts:
+                    st.info("No recent news or qualitative flags found for this stock.")
+
+                # (Removed: "Trading Plan" box — the THIRD copy of the same
+                # Signal/Score/Entry/SL/Target/RR block, after the score hero and
+                # the deleted Action strip. The only content unique to it was the
+                # "Entry zone ₹X — ₹Y" band (entry × 1.01) and the ATR footnote;
+                # both are trivial and already implied by the metric cards. R:R
+                # sizing warning now lives in the score-hero column, next to the
+                # RR metric itself.)
+
+                # (Paper Trade popover moved UP to right below Multi-Signal
+                # Confirmation — see the Paper Trade block earlier on the page.)
+
+            with tab_thesis:
+                # ── Investment Thesis (structured) ─────────────────────────────
+                # LAYOUT-REORDER: Thesis is the "WHY" — it belongs BEFORE the
+                # Fundamentals / Valuation / Liquidity blocks, which are the
+                # "CONTEXT" that feeds it. The Portfolio Fit block below then reads
+                # the same `_th` object (unchanged), so the semantic ordering is
+                # now: verdict → why (Thesis) → context (F/V/L) → fit.
+                st.markdown("---")
+                st.subheader("🧭 Investment Thesis (structured)")
                 st.caption(
-                    _liq_ctx.reason
-                    + " · computed from existing OHLCV (no new data source)."
+                    "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
+                    "single verdict. Every point is traceable to its source. Not investment advice."
                 )
-            except Exception as _liq_e:
-                st.caption(f"⚠️ Liquidity context unavailable: {_liq_e}")
-
-            # (Investment Thesis section moved UP to just before Fundamentals
-            # — see the "🧭 Investment Thesis" block earlier on the page. Kept
-            # the local variable `_th` in scope so the Portfolio Fit block
-            # below can still consume the candidate thesis.)
-
-            # ── Portfolio Fit — FIX A5 + A9: cached, reads manual holdings ──
-            st.markdown("---")
-            st.subheader("🧩 Portfolio Fit Assessment")
-            st.caption(
-                "Is this a good *addition* to your current book? Marginal impact on "
-                "diversification, sector mix, beta and concentration. Not investment advice."
-            )
-            try:
-                # FIX A9: manual holdings (kv-backed) replace the old CSV path read
-                _pf_holds_raw = load_manual_holdings()
-                _pf_holds = []
-                for _r in _pf_holds_raw:
-                    _t = str(_r.get("ticker", "")).strip()
-                    if _t and not _t.upper().endswith(".NS"):
-                        _t += ".NS"
-                    _q = float(_r.get("quantity", 0) or 0)
-                    if _t and _q > 0:
-                        _pf_holds.append({"ticker": _t, "quantity": _q})
-
-                if not _pf_holds:
-                    st.info(
-                        "No holdings found — add holdings on the **🏠 My Portfolio** page "
-                        "to see how this stock would fit your book."
-                    )
-                else:
-                    from analysis.thesis import build_fit_inputs, assess_fit
-                    with st.spinner("Assessing fit against your portfolio…"):
-                        _fit = assess_fit(
-                            build_fit_inputs(ticker, _pf_holds, candidate_thesis=_th)
-                        )
-
-                    _fr_color = {
-                        "Strong Fit":     "var(--bull)", "Fit":      "var(--bull)",
-                        "Neutral":        "var(--dim)", "Poor Fit": "var(--amber)",
-                        "Strong Conflict":"var(--bear)",
-                    }.get(_fit.fit_rating, "var(--dim)")
+                _th = None
+                try:
+                    # SPEED FIX: route through the page-level cached full-thesis
+                    # helper so reruns of the SAME ticker (period toggle, popover
+                    # open, checkbox flip) are instant. Fingerprint the dc + liq
+                    # inputs with a cheap hashable summary so a materially-different
+                    # input invalidates the cache; the full objects come from
+                    # session_state so st.cache_data can hash the key.
+                    st.session_state["_as_cs_snap"]  = cs
+                    st.session_state["_as_dc_snap"]  = _dc
+                    st.session_state["_as_liq_snap"] = _liq_ctx
+                    _dc_total = None
+                    if isinstance(_dc, dict):
+                        _dc_total = _dc.get("total")
+                    _liq_tier = getattr(_liq_ctx, "liquidity_tier", None)
+                    _th = _cached_thesis_full(ticker, cs.score, cs.action,
+                                              _dc_total, _liq_tier)
+                    _v_color = {
+                        "Strong Positive": "var(--bull)", "Positive": "var(--bull)",
+                        "Neutral":         "var(--dim)",  "Negative": "var(--amber)",
+                        "Strong Negative": "var(--bear)",
+                    }.get(_th.verdict, "var(--dim)")
                     st.markdown(
-                        f"<div style='font-size:1.15rem'>Fit rating: "
-                        f"<b style='color:{_fr_color}'>{_fit.fit_rating}</b> "
-                        f"<span style='color:var(--dim)'>(score {_fit.fit_score:+d})</span></div>",
+                        f"<div style='font-size:1.15rem'>Verdict: "
+                        f"<b style='color:{_v_color}'>{_th.verdict}</b> "
+                        f"<span style='color:var(--dim)'>(score {_th.verdict_score:+d})</span></div>",
                         unsafe_allow_html=True,
                     )
-                    _im1, _im2 = st.columns(2)
-                    _im1.caption("📊 " + _fit.diversification_impact)
-                    _im1.caption("🏭 " + _fit.sector_impact)
-                    _im2.caption("📈 " + _fit.beta_impact)
-                    _im2.caption("⚖️ " + _fit.concentration_impact)
+                    st.caption(_th.verdict_rationale)
 
-                    # UX-FIX: mirror the Investment-Thesis chip-card layout
-                    # here so Positive/Negative effects have the same visual
-                    # weight and color coding — user asked for parity.
-                    _FIT_STYLES = {
-                        "pos": ("var(--sunken)", "var(--bull)", "✅"),
-                        "neg": ("var(--sunken)", "var(--bear)", "❌"),
+                    # UX-FIX: Bull / Bear / Risks used to render as three walls of
+                    # dash-bullet text — no color coding, no visual weight, easy
+                    # to skim past. Chip-card layout below: each factor becomes a
+                    # coloured card (green = bull, red = bear, amber = risk) with
+                    # the source tag as a subtle pill, so the user sees the shape
+                    # of the thesis at a glance instead of reading paragraphs.
+                    _CHIP_STYLES = {
+                        "bull": ("var(--sunken)", "var(--bull)", "🟢"),
+                        "bear": ("var(--sunken)", "var(--bear)", "🔴"),
+                        "risk": ("var(--sunken)", "var(--amber)", "⚠️"),
                     }
-                    def _fit_chips(_factors, _kind, _empty):
+                    def _factor_chips(_factors, _kind, _empty):
                         if not _factors:
                             st.caption(_empty); return
-                        _bg, _border, _icon = _FIT_STYLES[_kind]
+                        _bg, _border, _icon = _CHIP_STYLES[_kind]
                         for _f in _factors:
                             _pill = (
                                 f'<span style="background:var(--sunken);color:var(--dim);'
@@ -2298,40 +1934,425 @@ if analyze_btn or _prefill_active or (
                                 unsafe_allow_html=True,
                             )
 
-                    _fp, _fn = st.columns(2)
-                    with _fp:
+                    _tc1, _tc2 = st.columns(2)
+                    with _tc1:
                         st.markdown(
                             '<div style="color:var(--bull);font-weight:700;'
                             'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
-                            'margin-bottom:4px">✅ Positive effects</div>',
+                            'margin-bottom:4px">🟢 Bull case</div>',
                             unsafe_allow_html=True,
                         )
-                        _fit_chips(_fit.positive_effects, "pos", "No positive effects flagged.")
-                    with _fn:
+                        _factor_chips(_th.bull_factors, "bull", "No bull factors triggered.")
+                    with _tc2:
                         st.markdown(
                             '<div style="color:var(--bear);font-weight:700;'
                             'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
-                            'margin-bottom:4px">❌ Negative effects</div>',
+                            'margin-bottom:4px">🔴 Bear case</div>',
                             unsafe_allow_html=True,
                         )
-                        _fit_chips(_fit.negative_effects, "neg", "No negative effects flagged.")
-
-                    _ps_color = {
-                        "Large": "var(--bull)", "Moderate": "var(--amber)", "Small": "var(--amber)",
-                    }.get(_fit.position_size_guidance, "var(--dim)")
+                        _factor_chips(_th.bear_factors, "bear", "No bear factors triggered.")
                     st.markdown(
-                        f"**Position size guidance:** "
-                        f"<b style='color:{_ps_color}'>{_fit.position_size_guidance}</b>",
+                        '<div style="color:var(--amber);font-weight:700;'
+                        'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                        'margin:12px 0 4px 0">⚠️ Key risks</div>',
                         unsafe_allow_html=True,
                     )
-                    st.caption(_fit.position_size_reason)
+                    _factor_chips(_th.key_risks, "risk",
+                                  "No specific risks flagged by the rules.")
+                    for _tn in getattr(_th, "notes", []) or []:
+                        st.info("ℹ️ " + _tn)
                     st.caption(
                         "Contributing subsystems: "
-                        + (", ".join(_fit.inputs_present) or "none")
-                        + ". Phase B — rules only, no buy/sell recommendation, no target price."
+                        + (", ".join(_th.inputs_present) or "none available")
+                        + ". Phase A1/D1 — explainable, sector-aware rules; no AI/LLM narration."
                     )
-            except Exception as _pf_e:
-                st.caption(f"⚠️ Portfolio fit unavailable: {_pf_e}")
+                except Exception as _th_e:
+                    st.caption(f"⚠️ Thesis unavailable: {_th_e}")
+
+            with tab_fund:
+                # ── Fundamentals ───────────────────────────────────────────────
+                st.markdown("---")
+                st.subheader("📊 Fundamentals")
+                try:
+                    import datetime as _f_dt
+                    _f_cf  = _fund_service().get_fundamentals(ticker)
+                    _f_res = _fund_analytics.compute_all(_f_cf, cagr_years=5)
+                    _f_fresh = "—"
+                    if _f_cf.last_updated:
+                        _f_hrs   = (_f_dt.datetime.now() - _f_cf.last_updated).total_seconds() / 3600
+                        _f_fresh = "just now" if _f_hrs < 1 else f"{_f_hrs:.0f}h ago"
+                    st.caption(
+                        f"Provider: **{_f_cf.provider_name or '—'}**  ·  "
+                        f"Statement date: **{_f_cf.statement_date or '—'}**  ·  "
+                        f"Data freshness: **{_f_fresh}**"
+                    )
+                    if _f_cf.is_partial:
+                        st.warning(
+                            f"⚠️ **Partial data** — some fundamentals are unavailable for this stock "
+                            f"from {_f_cf.provider_name or 'the provider'}. "
+                            f"Missing: {', '.join(_f_cf.missing_fields) or 'n/a'}."
+                        )
+
+                    def _f_show(_col, _r):
+                        # UX-FIX: the "confidence: high" caption was misread as
+                        # "these numbers are trustworthy / this stock is good" —
+                        # but it means "we have enough YEARS of data to compute
+                        # this metric confidently", i.e. it is DATA-COVERAGE, not
+                        # a quality/goodness signal. A stock with a bad ROE and
+                        # 5 years of data still gets confidence=high. Relabel to
+                        # "data:" and prepend a colour cue that reflects the
+                        # METRIC's own health (green = good, red = poor) so the
+                        # user sees the health of the NUMBER at a glance, and the
+                        # data-completeness separately.
+                        if _r.available and _r.value is not None:
+                            _txt = f"{_r.value:,.1f}%" if _r.unit == "%" else f"{_r.value:,.2f}x"
+                            # Heuristic health thresholds — kept intentionally
+                            # simple; the deep read still lives in the Valuation
+                            # section (P/E ranges) and Fundamental Quality (score).
+                            _health_color = "var(--dim)"
+                            _mname = str(_r.metric or "").lower()
+                            if _r.unit == "%":
+                                if "roe" in _mname or "roce" in _mname:
+                                    _health_color = ("var(--bull)" if _r.value >= 15
+                                                     else "var(--amber)" if _r.value >= 8
+                                                     else "var(--bear)")
+                                elif "cagr" in _mname:
+                                    _health_color = ("var(--bull)" if _r.value >= 12
+                                                     else "var(--amber)" if _r.value >= 5
+                                                     else "var(--bear)")
+                            elif "debt" in _mname:
+                                _health_color = ("var(--bull)" if _r.value <= 0.5
+                                                 else "var(--amber)" if _r.value <= 1.0
+                                                 else "var(--bear)")
+                            _col.markdown(
+                                f'<div style="font-size:11px;color:var(--dim);'
+                                f'text-transform:uppercase;letter-spacing:0.5px">'
+                                f'{_r.metric}</div>'
+                                f'<div style="font-size:24px;font-weight:700;'
+                                f'color:{_health_color}">{_txt}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            _col.caption(
+                                f"data: {_r.confidence} coverage"
+                                + (f" · {_r.reason}" if _r.reason else "")
+                            )
+                        else:
+                            _col.metric(_r.metric, "N/A")
+                            _col.caption(f"⚠️ {_r.reason}")
+
+                    _fc1, _fc2, _fc3, _fc4 = st.columns(4)
+                    _f_show(_fc1, _f_res["revenue_cagr"])
+                    _f_show(_fc2, _f_res["eps_cagr"])
+                    _f_show(_fc3, _f_res["roe"])
+                    _f_show(_fc4, _f_res["debt_to_equity"])
+
+                    # (Removed: the same "🔬 Revenue growth …" marketing blurb —
+                    # see the identical removal in the score-hero section. The
+                    # metric card above already carries the same context.)
+
+                    _cagr_results = [
+                        r for r in [_f_res.get("revenue_cagr"), _f_res.get("eps_cagr")]
+                        if r is not None and getattr(r, "available", False)
+                    ]
+                    if _cagr_results and any(r.confidence in ("medium", "low") for r in _cagr_results):
+                        st.caption(
+                            "📊 **Data coverage note:** the *data:* label above measures how many "
+                            "years of history Yahoo Finance returned (~4–5 for most NSE names) — "
+                            "**not** whether the number itself is good. Colour on the value = "
+                            "the metric's own health (green good · amber ok · red weak)."
+                        )
+
+                    from analysis.sector_classification import classify_sector as _classify
+                    _sp = _classify(
+                        getattr(cs, "sector", None),
+                        name=getattr(cs, "company_name", None),
+                    )
+                    if _sp.is_financial:
+                        st.info(f"🏦 **{_sp.group}** — {_sp.note}")
+                    else:
+                        _rc1, _rc2 = st.columns(2)
+                        _f_show(_rc1, _f_res["roce"])
+                        _rr = _f_res["fcf"]
+                        if _rr.available and _rr.value is not None:
+                            _rc2.metric("Free Cash Flow", f"₹{_rr.value:,.0f} cr")
+                            _cap = (
+                                " · capex-heavy: negative FCF can be a normal investment cycle"
+                                if _sp.fcf_capex_caveat else ""
+                            )
+                            _rc2.caption(f"data: {_rr.confidence} coverage{_cap}")
+                        else:
+                            _rc2.metric("Free Cash Flow", "N/A")
+                            _rc2.caption(f"⚠️ {_rr.reason}")
+                    st.caption(
+                        "Phase 0/D1: Yahoo Finance data only (~4-yr depth), no paid provider. "
+                        "ROCE/FCF shown only where economically meaningful. Not investment advice."
+                    )
+                except Exception as _f_e:
+                    st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
+
+            with tab_val:
+                # ── Valuation Context ──────────────────────────────────────────
+                st.markdown("---")
+                st.subheader("💰 Valuation Context")
+                st.caption(
+                    "Valuation multiples already available from the fundamentals provider. "
+                    "Factual context only — no cheap/expensive judgment, no peer comparison yet."
+                )
+                try:
+                    from analysis.fundamentals.valuation import build_valuation_context
+                    from analysis.sector_classification import classify_sector as _classify_v
+                    _spv     = _classify_v(
+                        getattr(cs, "sector", None),
+                        name=getattr(cs, "company_name", None),
+                    )
+                    _val_cf  = _fund_service().get_fundamentals(ticker)
+                    _val     = build_valuation_context(_val_cf, sector_profile=_spv)
+                    _vc1, _vc2, _vc3 = st.columns(3)
+                    _vc1.metric("P/E",  f"{_val.pe:,.1f}x"  if _val.pe  is not None else "N/A")
+                    _vc2.metric("P/B",  f"{_val.pb:,.1f}x"  if _val.pb  is not None else "N/A")
+                    if _val.ev_ebitda_applicable:
+                        _vc3.metric(
+                            "EV/EBITDA",
+                            f"{_val.ev_ebitda:,.1f}x" if _val.ev_ebitda is not None else "N/A",
+                        )
+                    else:
+                        _vc3.metric("EV/EBITDA", "n/a")
+                        _vc3.caption("not meaningful for financials")
+                    if _val.preferred_valuation:
+                        st.caption(f"📐 Right lens for this sector: **{_val.preferred_valuation}**")
+                    for _vn in _val.notes:
+                        st.caption("ℹ️ " + _vn)
+                    st.caption(
+                        f"Coverage: **{_val.confidence}**"
+                        + (f" · missing: {', '.join(_val.missing_fields)}" if _val.missing_fields else "")
+                        + (f" · source: {_val.source}" if _val.source else "")
+                        + ". Values are None when unavailable — never fabricated."
+                    )
+
+                    st.markdown("**🧮 Valuation Assessment** *(growth- & quality-adjusted, descriptive)*")
+                    try:
+                        from analysis.fundamentals.valuation_decision import assess_valuation
+                        _va_res = _fund_analytics.compute_all(_val_cf)
+                        _va     = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
+
+                        # UX-FIX: the old rendering was a small blockquote + a
+                        # trailing "confidence: X" line that read as an admission
+                        # of insufficient data every time. Promote the POSTURE
+                        # itself to a bold colored badge (that IS the assessment),
+                        # then a clean two-panel layout — left: basis + reasons;
+                        # right: caveats + coverage — instead of five stacked
+                        # captions the eye slides past.
+                        _POSTURE_COLORS = {
+                            "SUPPORTED":              ("var(--bull)", "🟢"),
+                            "REASONABLE":             ("var(--bull)", "🟢"),
+                            "STRETCHED":              ("var(--amber)", "🟡"),
+                            "PRICING_IN_PERFECTION":  ("var(--bear)", "🔴"),
+                            "PEG_RICH":               ("var(--bear)", "🔴"),
+                            "CYCLICAL_PEAK":          ("var(--amber)", "🟡"),
+                            "CYCLICAL_TROUGH":        ("var(--accent)", "🔵"),
+                            "INSUFFICIENT_EVIDENCE":  ("var(--dim)", "⚪"),
+                        }
+                        _post = str(_va.posture or "INSUFFICIENT_EVIDENCE")
+                        _pc, _picon = _POSTURE_COLORS.get(
+                            _post, ("var(--dim)", "⚪"))
+                        st.markdown(
+                            f'<div style="background:var(--surface);border-left:5px solid {_pc};'
+                            f'border-radius:8px;padding:14px 18px;margin:8px 0">'
+                            f'<div style="font-size:11px;color:var(--dim);letter-spacing:1.5px;'
+                            f'text-transform:uppercase">Valuation posture</div>'
+                            f'<div style="font-size:22px;font-weight:700;color:{_pc};'
+                            f'margin:2px 0 6px 0">{_picon} {_post.replace("_", " ").title()}</div>'
+                            f'<div style="font-size:13px;color:var(--ink-mid);line-height:1.5">'
+                            f'{_va.phrase}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _vac1, _vac2 = st.columns(2)
+                        with _vac1:
+                            if _va.justification and _post != "INSUFFICIENT_EVIDENCE":
+                                st.markdown(f"**Basis:** {_va.justification}")
+                            if _va.reasons:
+                                st.markdown("**Reasons:**")
+                                for _rz in _va.reasons:
+                                    st.markdown(f"- {_rz}")
+                            if _va.triggered_guard:
+                                st.caption(f"🛡 Guard: {_va.triggered_guard}")
+                        with _vac2:
+                            if _va.caveats:
+                                st.markdown("**Caveats:**")
+                                for _cv in _va.caveats:
+                                    st.markdown(f"- ⚠️ {_cv}")
+                            if _va.confidence_factors:
+                                st.caption("Coverage factors: " + " · ".join(_va.confidence_factors))
+                            st.caption(
+                                f"Data coverage for this assessment: **{_va.confidence}**. "
+                                "Descriptive only — no buy/sell, no fair/intrinsic value, "
+                                "no cheap/expensive label."
+                            )
+                    except Exception as _va_e:
+                        st.caption(f"⚠️ Valuation assessment unavailable: {_va_e}")
+                except Exception as _val_e:
+                    st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
+
+            with tab_liq:
+                # ── Liquidity Context ──────────────────────────────────────────
+                # NOTE: _liq_ctx is computed EARLIER (right after _dc) so the
+                # Investment Thesis section can consume it; this render block just
+                # displays what was already computed. Do not re-compute here.
+                st.markdown("---")
+                st.subheader("💧 Liquidity Context")
+                try:
+                    from analysis.liquidity import format_turnover
+                    if _liq_ctx is None:
+                        raise RuntimeError("liquidity context not available (see log)")
+                    _lt_color = {
+                        "High": "var(--bull)", "Medium": "var(--bull)",
+                        "Low":  "var(--amber)", "Illiquid": "var(--bear)",
+                    }.get(_liq_ctx.liquidity_tier, "var(--dim)")
+                    st.markdown(
+                        f"Liquidity tier: <b style='color:{_lt_color}'>{_liq_ctx.liquidity_tier}</b>",
+                        unsafe_allow_html=True,
+                    )
+                    _lc1, _lc2, _lc3 = st.columns(3)
+                    _lc1.metric(
+                        "Avg daily turnover (30d)",
+                        format_turnover(_liq_ctx.avg_daily_turnover_30d),
+                    )
+                    _lc2.metric(
+                        "Avg daily volume (30d)",
+                        f"{_liq_ctx.avg_daily_volume_30d:,.0f}"
+                        if _liq_ctx.avg_daily_volume_30d is not None else "N/A",
+                    )
+                    _lc3.metric(
+                        "Volume trend (30d vs 90d)",
+                        (_liq_ctx.volume_trend or "—").title(),
+                        f"{_liq_ctx.volume_trend_ratio:.2f}x"
+                        if _liq_ctx.volume_trend_ratio is not None else None,
+                    )
+                    st.caption(
+                        _liq_ctx.reason
+                        + " · computed from existing OHLCV (no new data source)."
+                    )
+                except Exception as _liq_e:
+                    st.caption(f"⚠️ Liquidity context unavailable: {_liq_e}")
+
+                # (Investment Thesis section moved UP to just before Fundamentals
+                # — see the "🧭 Investment Thesis" block earlier on the page. Kept
+                # the local variable `_th` in scope so the Portfolio Fit block
+                # below can still consume the candidate thesis.)
+
+            with tab_pf:
+                # ── Portfolio Fit — FIX A5 + A9: cached, reads manual holdings ──
+                st.markdown("---")
+                st.subheader("🧩 Portfolio Fit Assessment")
+                st.caption(
+                    "Is this a good *addition* to your current book? Marginal impact on "
+                    "diversification, sector mix, beta and concentration. Not investment advice."
+                )
+                try:
+                    # FIX A9: manual holdings (kv-backed) replace the old CSV path read
+                    _pf_holds_raw = load_manual_holdings()
+                    _pf_holds = []
+                    for _r in _pf_holds_raw:
+                        _t = str(_r.get("ticker", "")).strip()
+                        if _t and not _t.upper().endswith(".NS"):
+                            _t += ".NS"
+                        _q = float(_r.get("quantity", 0) or 0)
+                        if _t and _q > 0:
+                            _pf_holds.append({"ticker": _t, "quantity": _q})
+
+                    if not _pf_holds:
+                        st.info(
+                            "No holdings found — add holdings on the **🏠 My Portfolio** page "
+                            "to see how this stock would fit your book."
+                        )
+                    else:
+                        from analysis.thesis import build_fit_inputs, assess_fit
+                        with st.spinner("Assessing fit against your portfolio…"):
+                            _fit = assess_fit(
+                                build_fit_inputs(ticker, _pf_holds, candidate_thesis=_th)
+                            )
+
+                        _fr_color = {
+                            "Strong Fit":     "var(--bull)", "Fit":      "var(--bull)",
+                            "Neutral":        "var(--dim)", "Poor Fit": "var(--amber)",
+                            "Strong Conflict":"var(--bear)",
+                        }.get(_fit.fit_rating, "var(--dim)")
+                        st.markdown(
+                            f"<div style='font-size:1.15rem'>Fit rating: "
+                            f"<b style='color:{_fr_color}'>{_fit.fit_rating}</b> "
+                            f"<span style='color:var(--dim)'>(score {_fit.fit_score:+d})</span></div>",
+                            unsafe_allow_html=True,
+                        )
+                        _im1, _im2 = st.columns(2)
+                        _im1.caption("📊 " + _fit.diversification_impact)
+                        _im1.caption("🏭 " + _fit.sector_impact)
+                        _im2.caption("📈 " + _fit.beta_impact)
+                        _im2.caption("⚖️ " + _fit.concentration_impact)
+
+                        # UX-FIX: mirror the Investment-Thesis chip-card layout
+                        # here so Positive/Negative effects have the same visual
+                        # weight and color coding — user asked for parity.
+                        _FIT_STYLES = {
+                            "pos": ("var(--sunken)", "var(--bull)", "✅"),
+                            "neg": ("var(--sunken)", "var(--bear)", "❌"),
+                        }
+                        def _fit_chips(_factors, _kind, _empty):
+                            if not _factors:
+                                st.caption(_empty); return
+                            _bg, _border, _icon = _FIT_STYLES[_kind]
+                            for _f in _factors:
+                                _pill = (
+                                    f'<span style="background:var(--sunken);color:var(--dim);'
+                                    f'padding:1px 8px;border-radius:10px;font-size:10px;'
+                                    f'letter-spacing:0.5px">{_f.source}</span>'
+                                    if getattr(_f, "source", "") else ""
+                                )
+                                st.markdown(
+                                    f'<div style="background:{_bg};border-left:3px solid {_border};'
+                                    f'border-radius:6px;padding:8px 12px;margin:4px 0">'
+                                    f'<div style="color:var(--ink-mid);font-size:13px;line-height:1.4">'
+                                    f'{_icon} {_f.text}</div>'
+                                    f'<div style="margin-top:4px;font-size:11px;color:var(--dim)">'
+                                    f'{_pill} <span style="margin-left:6px">{getattr(_f, "evidence", "")}</span></div>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                        _fp, _fn = st.columns(2)
+                        with _fp:
+                            st.markdown(
+                                '<div style="color:var(--bull);font-weight:700;'
+                                'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                                'margin-bottom:4px">✅ Positive effects</div>',
+                                unsafe_allow_html=True,
+                            )
+                            _fit_chips(_fit.positive_effects, "pos", "No positive effects flagged.")
+                        with _fn:
+                            st.markdown(
+                                '<div style="color:var(--bear);font-weight:700;'
+                                'letter-spacing:1px;text-transform:uppercase;font-size:12px;'
+                                'margin-bottom:4px">❌ Negative effects</div>',
+                                unsafe_allow_html=True,
+                            )
+                            _fit_chips(_fit.negative_effects, "neg", "No negative effects flagged.")
+
+                        _ps_color = {
+                            "Large": "var(--bull)", "Moderate": "var(--amber)", "Small": "var(--amber)",
+                        }.get(_fit.position_size_guidance, "var(--dim)")
+                        st.markdown(
+                            f"**Position size guidance:** "
+                            f"<b style='color:{_ps_color}'>{_fit.position_size_guidance}</b>",
+                            unsafe_allow_html=True,
+                        )
+                        st.caption(_fit.position_size_reason)
+                        st.caption(
+                            "Contributing subsystems: "
+                            + (", ".join(_fit.inputs_present) or "none")
+                            + ". Phase B — rules only, no buy/sell recommendation, no target price."
+                        )
+                except Exception as _pf_e:
+                    st.caption(f"⚠️ Portfolio fit unavailable: {_pf_e}")
 
         except Exception as e:
             # BUGFIX: previously every failure here — including a simple
