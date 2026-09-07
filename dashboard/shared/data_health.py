@@ -254,6 +254,74 @@ def probe_nse_delivery() -> ProviderCheck:
     return ProviderCheck("NSE bhavcopy delivery", "market", status, at, warnings, note)
 
 
+def _probe_warmer_snapshot(name: str, kv_key: str, kv_user: str,
+                           max_age_seconds: int) -> ProviderCheck:
+    """Task 2.4 F1: read a trade_store snapshot's generated_at and report
+    whether the scheduled warmer is keeping it fresh.
+
+    This is NOT a provider fetch - it inspects the persisted snapshot the
+    GitHub Actions warmer writes. Purpose: surface a silent warmer failure
+    (cron missed, workflow error, DATABASE_URL misconfigured) BEFORE the
+    user hits a cold-scan latency spike on the next visit.
+
+    healthy   - snapshot exists and generated_at is within max_age_seconds.
+    stale     - snapshot exists but older than max_age_seconds.
+    idle      - snapshot missing entirely (fresh deploy, or warmer never ran).
+    unavailable - trade_store import/read raised.
+    """
+    group = "warmer"
+    try:
+        import trade_store as _store   # local import: keeps module Streamlit-free
+    except ImportError as _e:
+        return ProviderCheck(name, group, STATUS_UNAVAILABLE,
+                             note=f"trade_store import failed: {type(_e).__name__}")
+    try:
+        snap = _store.kv_get(kv_key, user_id=kv_user)
+    except Exception as _e:
+        return ProviderCheck(name, group, STATUS_UNAVAILABLE,
+                             note=f"kv_get failed: {type(_e).__name__}")
+    if not snap or not isinstance(snap, dict):
+        return ProviderCheck(name, group, STATUS_IDLE,
+                             note="no snapshot yet (warmer has not run)")
+    gen_at = snap.get("generated_at")
+    if not gen_at:
+        return ProviderCheck(name, group, STATUS_IDLE, note="snapshot present but no generated_at")
+    ts = _parse_iso(gen_at)
+    if ts is None:
+        return ProviderCheck(name, group, STATUS_IDLE, gen_at, 0,
+                             note=f"unparseable generated_at: {gen_at!r}")
+    ref = datetime.now(ts.tzinfo) if ts.tzinfo else datetime.now()
+    age = (ref - ts).total_seconds()
+    if age <= max_age_seconds:
+        return ProviderCheck(name, group, STATUS_HEALTHY, gen_at, 0,
+                             note="warmer on schedule")
+    # Older than the app's max-age tolerance: on the next visit the app
+    # falls back to a live scan, which is the cold-latency situation.
+    hours_late = int(age // 3600)
+    return ProviderCheck(name, group, STATUS_STALE, gen_at, 1,
+                         note=f"snapshot {hours_late}h+ old, cold scan risk")
+
+
+def probe_warmer_top_picks() -> ProviderCheck:
+    """Task 2.4 F1: freshness of the Top Picks warmer snapshot."""
+    # KV constants intentionally hard-coded here (not imported from
+    # dashboard/shared/cache.py) to keep this module Streamlit-free.
+    # If either constant changes in cache.py, mirror it here. Two-line
+    # duplication is acceptable in return for module-purity guardrail.
+    return _probe_warmer_snapshot(
+        "Warmer: Top Picks", "top_picks_snapshot", "_system",
+        max_age_seconds=1800,   # 30 min: covers the 15-min cron cadence + one miss
+    )
+
+
+def probe_warmer_tomorrow_watchlist() -> ProviderCheck:
+    """Task 2.4 F1: freshness of the Tomorrow's Watchlist warmer snapshot."""
+    return _probe_warmer_snapshot(
+        "Warmer: Tomorrow's Watchlist", "tomorrow_watchlist_snapshot", "_system",
+        max_age_seconds=24 * 3600,   # 24h: post-close daily, pre-open retry, and pre-open scan
+    )
+
+
 def collect_all_health() -> List[ProviderCheck]:
     """Every probe. Pure: no network, no Streamlit."""
     return [
@@ -266,6 +334,10 @@ def collect_all_health() -> List[ProviderCheck]:
         probe_bse_corp_info(),
         probe_news_feed(),
         probe_nse_rss(),
+        # Task 2.4 F1: warmer freshness surfaces silent cron failures before
+        # they become user-visible cold-scan latency spikes.
+        probe_warmer_top_picks(),
+        probe_warmer_tomorrow_watchlist(),
     ]
 
 
