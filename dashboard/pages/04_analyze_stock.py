@@ -1741,14 +1741,26 @@ if analyze_btn or _prefill_active or (
                 "🧩 Portfolio Fit",
             ])
 
-            with tab_chart:
+            # ────────────────────────────────────────────────────────────────
+            # Task 2.4 F3 PR C.2: each tab body wrapped in @st.fragment so
+            # widget-driven reruns inside a tab only re-execute that tab's
+            # body, not the other 6 tabs and not the outer script. Fragments
+            # capture parent-scope vars (df_chart, cs, latest, _fv, ...) via
+            # closure so no context needs to be threaded through as args.
+            # ────────────────────────────────────────────────────────────────
+
+            @st.fragment
+            def _frag_chart():
                 # ── Chart ──────────────────────────────────────────────────────
                 st.markdown("---")
                 st.subheader("📊 Price Chart")
                 st.plotly_chart(build_price_chart(df_chart, ticker, period=period),
                                 width="stretch")
+            with tab_chart:
+                _frag_chart()
 
-            with tab_news:
+            @st.fragment
+            def _frag_news():
                 # ── News & Flags (merged) ─────────────────────────────────────
                 # Flags used to render as a standalone strip further up the page,
                 # sourced from the SAME feeds (NSE corp announcements + Google
@@ -1857,8 +1869,11 @@ if analyze_btn or _prefill_active or (
 
                 # (Paper Trade popover moved UP to right below Multi-Signal
                 # Confirmation — see the Paper Trade block earlier on the page.)
+            with tab_news:
+                _frag_news()
 
-            with tab_thesis:
+            @st.fragment
+            def _frag_thesis():
                 # ── Investment Thesis (structured) ─────────────────────────────
                 # LAYOUT-REORDER: Thesis is the "WHY" — it belongs BEFORE the
                 # Fundamentals / Valuation / Liquidity blocks, which are the
@@ -1968,8 +1983,11 @@ if analyze_btn or _prefill_active or (
                     )
                 except Exception as _th_e:
                     st.caption(f"⚠️ Thesis unavailable: {_th_e}")
+            with tab_thesis:
+                _frag_thesis()
 
-            with tab_fund:
+            @st.fragment
+            def _frag_fund():
                 # ── Fundamentals ───────────────────────────────────────────────
                 st.markdown("---")
                 st.subheader("📊 Fundamentals")
@@ -2089,8 +2107,11 @@ if analyze_btn or _prefill_active or (
                     )
                 except Exception as _f_e:
                     st.caption(f"⚠️ Fundamentals unavailable: {_f_e}")
+            with tab_fund:
+                _frag_fund()
 
-            with tab_val:
+            @st.fragment
+            def _frag_val():
                 # ── Valuation Context ──────────────────────────────────────────
                 st.markdown("---")
                 st.subheader("💰 Valuation Context")
@@ -2193,8 +2214,11 @@ if analyze_btn or _prefill_active or (
                         st.caption(f"⚠️ Valuation assessment unavailable: {_va_e}")
                 except Exception as _val_e:
                     st.caption(f"⚠️ Valuation context unavailable: {_val_e}")
+            with tab_val:
+                _frag_val()
 
-            with tab_liq:
+            @st.fragment
+            def _frag_liq():
                 # ── Liquidity Context ──────────────────────────────────────────
                 # NOTE: _liq_ctx is computed EARLIER (right after _dc) so the
                 # Investment Thesis section can consume it; this render block just
@@ -2240,8 +2264,11 @@ if analyze_btn or _prefill_active or (
                 # — see the "🧭 Investment Thesis" block earlier on the page. Kept
                 # the local variable `_th` in scope so the Portfolio Fit block
                 # below can still consume the candidate thesis.)
+            with tab_liq:
+                _frag_liq()
 
-            with tab_pf:
+            @st.fragment
+            def _frag_pf():
                 # ── Portfolio Fit — FIX A5 + A9: cached, reads manual holdings ──
                 st.markdown("---")
                 st.subheader("🧩 Portfolio Fit Assessment")
@@ -2353,6 +2380,8 @@ if analyze_btn or _prefill_active or (
                         )
                 except Exception as _pf_e:
                     st.caption(f"⚠️ Portfolio fit unavailable: {_pf_e}")
+            with tab_pf:
+                _frag_pf()
 
         except Exception as e:
             # BUGFIX: previously every failure here — including a simple
