@@ -85,6 +85,22 @@ def test_gmail_send_swallows_smtp_errors(monkeypatch):
     assert "sekret-app-pw-16" not in buf.getvalue()
 
 
+def test_gmail_app_password_whitespace_is_stripped(monkeypatch):
+    """Google's app-password UI displays the token as 4 groups of 4
+    separated by spaces. Users legitimately copy it either way. Whichever
+    form landed in the env var, the value sent to smtp.login must be the
+    space-free canonical form so Gmail's auth accepts it every time."""
+    monkeypatch.setenv("ALERT_GMAIL_ADDRESS",      "test@example.com")
+    monkeypatch.setenv("ALERT_GMAIL_APP_PASSWORD", "  uiqu goej\talxe\nkthc  ")
+    monkeypatch.setenv("ALERT_GMAIL_TO",           "test@example.com")
+    from utils.alerts_gmail import GmailAlerter
+    smtp_instance = mock.MagicMock()
+    smtp_instance.__enter__.return_value = smtp_instance
+    with mock.patch("utils.alerts_gmail.smtplib.SMTP", return_value=smtp_instance):
+        GmailAlerter().send("s", "b")
+    smtp_instance.login.assert_called_once_with("test@example.com", "uiqugoejalxekthc")
+
+
 def test_gmail_send_signal_builds_reasonable_body(monkeypatch):
     """send_signal produces a subject + body carrying all trade fields."""
     for k in ("ALERT_GMAIL_ADDRESS", "ALERT_GMAIL_APP_PASSWORD", "ALERT_GMAIL_TO"):

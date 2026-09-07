@@ -48,7 +48,13 @@ class GmailAlerter:
         to_address:   Optional[str] = None,
     ):
         self.address      = (address      or os.getenv("ALERT_GMAIL_ADDRESS", "")).strip()
-        self.app_password =  app_password  or os.getenv("ALERT_GMAIL_APP_PASSWORD", "")
+        # Google's app-password display shows 4 groups of 4 separated by
+        # spaces ("uiqu goej alxe kthc") and users legitimately copy it
+        # either way. Gmail SMTP accepts both forms, but strip whitespace
+        # so an accidental trailing newline / hidden space from copy-paste
+        # doesn't turn a valid password into an auth failure.
+        _pw_raw           =  app_password  or os.getenv("ALERT_GMAIL_APP_PASSWORD", "")
+        self.app_password = "".join(str(_pw_raw).split())
         self.to_address   = (to_address   or os.getenv("ALERT_GMAIL_TO", "") or self.address).strip()
 
         if not self.address or not self.app_password or not self.to_address:
