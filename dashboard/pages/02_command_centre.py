@@ -185,147 +185,160 @@ try:
 except Exception as _pto_e:
     st.caption(f"⚠️ Paper trades overview unavailable ({_pto_e}).")
 
-# ── 1. MARKET PULSE ────────────────────────────────────────────────────────
-_cc_vix_info = get_vix_info()
-_cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
-_cc_vix_v = _cc_vix_info.get("vix")
 
-_cc_nifty_trend = "unknown"
-_cc_nifty_val   = None
-_cc_nifty_5d    = 0.0
-try:
-    from data.fetcher import fetch_single as _cc_fs
-    _cc_ndf = _cc_fs("^NSEI", period="3mo")
-    if not _cc_ndf.empty:
-        _cc_nifty_val = float(_cc_ndf["Close"].iloc[-1])
-        _cc_nifty_5d  = float((_cc_ndf["Close"].iloc[-1] / _cc_ndf["Close"].iloc[-6] - 1) * 100) if len(_cc_ndf) >= 6 else 0
-        _cc_sma20 = float(_cc_ndf["Close"].rolling(20).mean().iloc[-1]) if len(_cc_ndf) >= 20 else _cc_nifty_val
-        _cc_sma50 = float(_cc_ndf["Close"].rolling(50).mean().iloc[-1]) if len(_cc_ndf) >= 50 else _cc_nifty_val
-        if _cc_nifty_val > _cc_sma20 and _cc_sma20 > _cc_sma50:
-            _cc_nifty_trend = "uptrend"
-        elif _cc_nifty_val < _cc_sma20 and _cc_sma20 < _cc_sma50:
-            _cc_nifty_trend = "downtrend"
-        else:
-            _cc_nifty_trend = "sideways"
-except Exception as _e:
-    st.caption(f"⚠️ Couldn't load Nifty trend ({_e}) — market pulse may be incomplete.")
+# ── 1. MARKET PULSE (wrapped in @st.fragment per Task 2.4 F4) ──────────────
+# The full pulse card lives inside _render_market_pulse_section() below so a
+# '🔄 Refresh' click reruns only this section, not the whole 1128-LOC page.
+# We hoist _cc_vix_r to module scope because _render_top_picks_section
+# (called much later) reads it as an argument.
+_cc_vix_r = get_vix_info().get('regime', 'unknown').lower()
 
-_VIX_LBL = {
-    "complacency": ("var(--amber)", "😴", "COMPLACENT"), "normal":  ("var(--bull)", "🟢", "CALM"),
-    "elevated":    ("var(--amber)", "🟡", "ELEVATED"),   "fear":    ("var(--bear)", "🔴", "HIGH FEAR"),
-    "panic":       ("var(--bear)", "🚨", "PANIC"),      "unknown": ("var(--dim)", "❓", "UNKNOWN"),
-}
-_NT_LBL = {
-    "uptrend":  ("var(--bull)", "📈", "UPTREND"),  "downtrend": ("var(--bear)", "📉", "DOWNTREND"),
-    "sideways": ("var(--amber)", "↔️", "SIDEWAYS"), "unknown":   ("var(--dim)", "❓", "NO DATA"),
-}
-_vc, _vi, _vl = _VIX_LBL.get(_cc_vix_r, _VIX_LBL["unknown"])
-_nc, _ni, _nl = _NT_LBL.get(_cc_nifty_trend, _NT_LBL["unknown"])
+@st.fragment
+def _render_market_pulse_section() -> None:
+    """Section 1 rendered as a fragment: the '🔄 Refresh' button below only
+    reruns this fragment, not the outer script."""
+    _cc_vix_info = get_vix_info()
+    _cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
+    _cc_vix_v = _cc_vix_info.get("vix")
 
-if _cc_vix_r == "normal" and _cc_nifty_trend == "uptrend":
-    _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "var(--sunken)", "var(--bull)"
-elif _cc_vix_r in ("fear", "panic") or _cc_nifty_trend == "downtrend":
-    _verd, _vbg, _vbdr = "🔴 Weak / fearful market — avoid new buys, protect capital", "var(--sunken)", "var(--bear)"
-elif _cc_vix_r == "complacency":
-    _verd, _vbg, _vbdr = "😴 Market too calm — be selective, tighten stops", "var(--sunken)", "var(--amber)"
-else:
-    _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "var(--sunken)", "var(--amber)"
+    _cc_nifty_trend = "unknown"
+    _cc_nifty_val   = None
+    _cc_nifty_5d    = 0.0
+    try:
+        from data.fetcher import fetch_single as _cc_fs
+        _cc_ndf = _cc_fs("^NSEI", period="3mo")
+        if not _cc_ndf.empty:
+            _cc_nifty_val = float(_cc_ndf["Close"].iloc[-1])
+            _cc_nifty_5d  = float((_cc_ndf["Close"].iloc[-1] / _cc_ndf["Close"].iloc[-6] - 1) * 100) if len(_cc_ndf) >= 6 else 0
+            _cc_sma20 = float(_cc_ndf["Close"].rolling(20).mean().iloc[-1]) if len(_cc_ndf) >= 20 else _cc_nifty_val
+            _cc_sma50 = float(_cc_ndf["Close"].rolling(50).mean().iloc[-1]) if len(_cc_ndf) >= 50 else _cc_nifty_val
+            if _cc_nifty_val > _cc_sma20 and _cc_sma20 > _cc_sma50:
+                _cc_nifty_trend = "uptrend"
+            elif _cc_nifty_val < _cc_sma20 and _cc_sma20 < _cc_sma50:
+                _cc_nifty_trend = "downtrend"
+            else:
+                _cc_nifty_trend = "sideways"
+    except Exception as _e:
+        st.caption(f"⚠️ Couldn't load Nifty trend ({_e}) — market pulse may be incomplete.")
 
-st.markdown(
-    f'<div style="display:flex;gap:12px;margin-bottom:4px">'
-    f'<div style="flex:1;background:var(--surface);border-left:5px solid {_vc};border-radius:10px;padding:14px 16px">'
-    f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">India VIX</div>'
-    f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
-    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
-    f'</div>'
-    f'<div style="flex:1;background:var(--surface);border-left:5px solid {_nc};border-radius:10px;padding:14px 16px">'
-    f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Nifty 50</div>'
-    f'<div style="font-size:20px;font-weight:700;color:{_nc}">{_ni} {_nl}</div>'
-    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">'
-    f'{f"{_cc_nifty_val:,.0f}" if _cc_nifty_val else "—"}'
-    f'{f"&nbsp;({_cc_nifty_5d:+.1f}% 5d)" if _cc_nifty_val else ""}</div>'
-    f'</div>'
-    f'<div style="flex:2;background:{_vbg};border-left:5px solid {_vbdr};border-radius:10px;'
-    f'padding:14px 16px;display:flex;align-items:center">'
-    f'<div style="font-size:16px;font-weight:600;color:var(--ink)">{_verd}</div>'
-    f'</div>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
-_mood_vix = {"complacency": 85, "normal": 65, "elevated": 45,
-             "fear": 22, "panic": 6, "unknown": 50}.get(_cc_vix_r, 50)
-_mood_nty = {"uptrend": 80, "sideways": 50, "downtrend": 20,
-             "unknown": 50}.get(_cc_nifty_trend, 50)
-_mood = int(round((_mood_vix + _mood_nty) / 2))
-if   _mood < 20: _mood_lbl, _mood_c = "Extreme Fear", "var(--bear)"
-elif _mood < 40: _mood_lbl, _mood_c = "Fear", "var(--bear)"
-elif _mood < 60: _mood_lbl, _mood_c = "Neutral", "var(--amber)"
-elif _mood < 80: _mood_lbl, _mood_c = "Greed", "var(--bull)"
-else:            _mood_lbl, _mood_c = "Extreme Greed", "var(--bull)"
-st.markdown(
-    f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);border-radius:10px;'
-    f'padding:12px 18px;margin-top:8px;display:flex;align-items:center;gap:16px">'
-    f'<div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;min-width:96px">Market Mood</div>'
-    f'<div style="flex:1;position:relative;height:10px;border-radius:6px;'
-    f'background:linear-gradient(90deg,var(--bear),var(--bear),var(--amber),var(--bull),var(--bull))">'
-    f'<div style="position:absolute;left:{_mood}%;top:-5px;transform:translateX(-50%);'
-    f'width:20px;height:20px;border-radius:50%;background:{_mood_c};border:3px solid var(--surface);'
-    f'box-shadow:0 0 8px {_mood_c}"></div></div>'
-    f'<div style="min-width:130px;text-align:right">'
-    f'<span style="font-size:20px;font-weight:800;color:{_mood_c}">{_mood}</span>'
-    f'<span style="font-size:13px;color:{_mood_c};font-weight:600"> · {_mood_lbl}</span></div>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
+    _VIX_LBL = {
+        "complacency": ("var(--amber)", "😴", "COMPLACENT"), "normal":  ("var(--bull)", "🟢", "CALM"),
+        "elevated":    ("var(--amber)", "🟡", "ELEVATED"),   "fear":    ("var(--bear)", "🔴", "HIGH FEAR"),
+        "panic":       ("var(--bear)", "🚨", "PANIC"),      "unknown": ("var(--dim)", "❓", "UNKNOWN"),
+    }
+    _NT_LBL = {
+        "uptrend":  ("var(--bull)", "📈", "UPTREND"),  "downtrend": ("var(--bear)", "📉", "DOWNTREND"),
+        "sideways": ("var(--amber)", "↔️", "SIDEWAYS"), "unknown":   ("var(--dim)", "❓", "NO DATA"),
+    }
+    _vc, _vi, _vl = _VIX_LBL.get(_cc_vix_r, _VIX_LBL["unknown"])
+    _nc, _ni, _nl = _NT_LBL.get(_cc_nifty_trend, _NT_LBL["unknown"])
 
-_cc_ref_c = st.columns([6, 1])[1]
-if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
-    # BUGFIX: this only needs to bust the VIX cache — the previous blanket
-    # st.cache_data.clear() also wiped Top Picks (2-min cold scan), watchlist
-    # scores, and sparklines, forcing expensive re-fetches the user never
-    # asked for just to refresh the VIX/Nifty pulse panel.
-    get_vix_info.clear()
-    st.rerun()
+    if _cc_vix_r == "normal" and _cc_nifty_trend == "uptrend":
+        _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "var(--sunken)", "var(--bull)"
+    elif _cc_vix_r in ("fear", "panic") or _cc_nifty_trend == "downtrend":
+        _verd, _vbg, _vbdr = "🔴 Weak / fearful market — avoid new buys, protect capital", "var(--sunken)", "var(--bear)"
+    elif _cc_vix_r == "complacency":
+        _verd, _vbg, _vbdr = "😴 Market too calm — be selective, tighten stops", "var(--sunken)", "var(--amber)"
+    else:
+        _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "var(--sunken)", "var(--amber)"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FIX CC-REGIME — composite regime badge (Phase 2 wiring)
-# The 5-year efficacy study established that the composite score's edge is
-# regime-dependent: 62-66 % BUY hit rate on train (2020-22, trending), 46 %
-# on holdout (2023-25, mean-reverting). Users need to see WHAT REGIME the
-# app thinks the market is in RIGHT NOW so they can calibrate expectations
-# on every BUY signal below. Fetches are cached at the classifier layer —
-# no per-page-load network cost.
-# ─────────────────────────────────────────────────────────────────────────────
-try:
-    @st.cache_data(ttl=1800, show_spinner=False)
-    def _cc_regime_snapshot() -> "dict | None":
-        from analysis.regime import snapshot_live
-        try:
-            snap = snapshot_live()
-            return snap.as_dict()
-        except Exception as _reg_e:
-            import logging as _reg_log
-            _reg_log.getLogger("dashboard.command_centre").debug(
-                "regime snapshot failed: %s", _reg_e)
-            return None
+    st.markdown(
+        f'<div style="display:flex;gap:12px;margin-bottom:4px">'
+        f'<div style="flex:1;background:var(--surface);border-left:5px solid {_vc};border-radius:10px;padding:14px 16px">'
+        f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">India VIX</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
+        f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
+        f'</div>'
+        f'<div style="flex:1;background:var(--surface);border-left:5px solid {_nc};border-radius:10px;padding:14px 16px">'
+        f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Nifty 50</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{_nc}">{_ni} {_nl}</div>'
+        f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">'
+        f'{f"{_cc_nifty_val:,.0f}" if _cc_nifty_val else "—"}'
+        f'{f"&nbsp;({_cc_nifty_5d:+.1f}% 5d)" if _cc_nifty_val else ""}</div>'
+        f'</div>'
+        f'<div style="flex:2;background:{_vbg};border-left:5px solid {_vbdr};border-radius:10px;'
+        f'padding:14px 16px;display:flex;align-items:center">'
+        f'<div style="font-size:16px;font-weight:600;color:var(--ink)">{_verd}</div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    _mood_vix = {"complacency": 85, "normal": 65, "elevated": 45,
+                 "fear": 22, "panic": 6, "unknown": 50}.get(_cc_vix_r, 50)
+    _mood_nty = {"uptrend": 80, "sideways": 50, "downtrend": 20,
+                 "unknown": 50}.get(_cc_nifty_trend, 50)
+    _mood = int(round((_mood_vix + _mood_nty) / 2))
+    if   _mood < 20: _mood_lbl, _mood_c = "Extreme Fear", "var(--bear)"
+    elif _mood < 40: _mood_lbl, _mood_c = "Fear", "var(--bear)"
+    elif _mood < 60: _mood_lbl, _mood_c = "Neutral", "var(--amber)"
+    elif _mood < 80: _mood_lbl, _mood_c = "Greed", "var(--bull)"
+    else:            _mood_lbl, _mood_c = "Extreme Greed", "var(--bull)"
+    st.markdown(
+        f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);border-radius:10px;'
+        f'padding:12px 18px;margin-top:8px;display:flex;align-items:center;gap:16px">'
+        f'<div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;min-width:96px">Market Mood</div>'
+        f'<div style="flex:1;position:relative;height:10px;border-radius:6px;'
+        f'background:linear-gradient(90deg,var(--bear),var(--bear),var(--amber),var(--bull),var(--bull))">'
+        f'<div style="position:absolute;left:{_mood}%;top:-5px;transform:translateX(-50%);'
+        f'width:20px;height:20px;border-radius:50%;background:{_mood_c};border:3px solid var(--surface);'
+        f'box-shadow:0 0 8px {_mood_c}"></div></div>'
+        f'<div style="min-width:130px;text-align:right">'
+        f'<span style="font-size:20px;font-weight:800;color:{_mood_c}">{_mood}</span>'
+        f'<span style="font-size:13px;color:{_mood_c};font-weight:600"> · {_mood_lbl}</span></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
-    # FIX UI-REGIME — inline regime banner replaced with the shared
-    # dashboard.shared.ui_components.regime_badge so this page's regime
-    # visual matches Analyze Stock and My Portfolio exactly. Removes ~20
-    # lines of duplicated color/emoji/note tables — one source of truth.
-    _cc_reg = _cc_regime_snapshot()
-    if _cc_reg:
-        from dashboard.shared.ui_components import regime_badge as _ui_regime_badge
-        st.markdown(
-            _ui_regime_badge(_cc_reg.get("label", "unknown"),
-                             _cc_reg.get("confidence", "low"),
-                             compact=False),
-            unsafe_allow_html=True,
-        )
-except Exception as _cc_reg_e:
-    import logging as _cc_reg_log
-    _cc_reg_log.getLogger("dashboard.command_centre").debug(
-        "regime banner render failed: %s", _cc_reg_e)
+    _cc_ref_c = st.columns([6, 1])[1]
+    if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
+        # BUGFIX: this only needs to bust the VIX cache — the previous blanket
+        # st.cache_data.clear() also wiped Top Picks (2-min cold scan), watchlist
+        # scores, and sparklines, forcing expensive re-fetches the user never
+        # asked for just to refresh the VIX/Nifty pulse panel.
+        get_vix_info.clear()
+        st.rerun()
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # FIX CC-REGIME — composite regime badge (Phase 2 wiring)
+    # The 5-year efficacy study established that the composite score's edge is
+    # regime-dependent: 62-66 % BUY hit rate on train (2020-22, trending), 46 %
+    # on holdout (2023-25, mean-reverting). Users need to see WHAT REGIME the
+    # app thinks the market is in RIGHT NOW so they can calibrate expectations
+    # on every BUY signal below. Fetches are cached at the classifier layer —
+    # no per-page-load network cost.
+    # ─────────────────────────────────────────────────────────────────────────────
+    try:
+        @st.cache_data(ttl=1800, show_spinner=False)
+        def _cc_regime_snapshot() -> "dict | None":
+            from analysis.regime import snapshot_live
+            try:
+                snap = snapshot_live()
+                return snap.as_dict()
+            except Exception as _reg_e:
+                import logging as _reg_log
+                _reg_log.getLogger("dashboard.command_centre").debug(
+                    "regime snapshot failed: %s", _reg_e)
+                return None
+
+        # FIX UI-REGIME — inline regime banner replaced with the shared
+        # dashboard.shared.ui_components.regime_badge so this page's regime
+        # visual matches Analyze Stock and My Portfolio exactly. Removes ~20
+        # lines of duplicated color/emoji/note tables — one source of truth.
+        _cc_reg = _cc_regime_snapshot()
+        if _cc_reg:
+            from dashboard.shared.ui_components import regime_badge as _ui_regime_badge
+            st.markdown(
+                _ui_regime_badge(_cc_reg.get("label", "unknown"),
+                                 _cc_reg.get("confidence", "low"),
+                                 compact=False),
+                unsafe_allow_html=True,
+            )
+    except Exception as _cc_reg_e:
+        import logging as _cc_reg_log
+        _cc_reg_log.getLogger("dashboard.command_centre").debug(
+            "regime banner render failed: %s", _cc_reg_e)
+
+_render_market_pulse_section()
 
 st.markdown("---")
 
