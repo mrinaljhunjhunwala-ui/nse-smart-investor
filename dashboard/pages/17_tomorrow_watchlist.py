@@ -244,11 +244,31 @@ def _render_cards(items, kind, key_prefix):
         except Exception:
             _flag_badge = ""
 
+        # Task 4.2 M2 (audit docs/TOMORROW_WATCHLIST_AUDIT_2026-09.md): show
+        # an honest conviction chip based on the composite score band, so a
+        # card's visible label matches what the score actually says instead
+        # of promising more than the number supports. Bands match the
+        # composite-score grade thresholds elsewhere in the app.
+        _sc = float(_it.get("score", 0) or 0)
+        if _sc >= 70:
+            _conv_label, _conv_col = "high conviction", "#26a69a"
+        elif _sc >= 55:
+            _conv_label, _conv_col = "developing", "#c6a15b"
+        else:
+            _conv_label, _conv_col = "watch only", "#8892a0"
+        _conv_chip = (
+            f'<span style="display:inline-block;padding:1px 7px;border-radius:999px;'
+            f'font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;'
+            f'color:{_conv_col};border:1px solid {_conv_col};'
+            f'background:color-mix(in srgb, {_conv_col} 12%, transparent);'
+            f'margin-left:6px">{_conv_label}</span>'
+        )
+
         st.markdown(
             f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
             f'border-radius:10px;padding:11px 14px;margin-bottom:6px">'
             f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span style="font-size:16px;font-weight:700;color:#fff">{_lbl}</span>'
+            f'<span style="font-size:16px;font-weight:700;color:#fff">{_lbl}{_conv_chip}</span>'
             f'<span style="font-size:13px;font-weight:700;color:{accent}">'
             f'{_it["score"]:.0f}/100 · {_it["action"]}</span>'
             f'</div>'
