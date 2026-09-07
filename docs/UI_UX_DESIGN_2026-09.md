@@ -360,6 +360,190 @@ stay updated together as work lands - never let them drift.
 
 ---
 
+## 9. Visual design language - looks, texture, colour
+
+The existing `NSE Pro` theme in `design.py` is a solid foundation but reads
+as "generic dark dashboard" today. Three things missing that separate a
+professional dealing-room from a portfolio-tracker: **an aesthetic
+commitment, texture layering, and a semantic-only colour law.**
+
+### 9.1 Pick one aesthetic (not three)
+
+The current theme is stuck between Bloomberg and TradingView. Pick one and
+commit; blends read as indecision.
+
+| Direction | Feel | When to use | Steal from |
+|---|---|---|---|
+| **A: Dealing Room** (recommended) | Pure black, IBM Plex Mono numbers, semantic red/green, cyan accent, high density | For serious retail traders using this alongside a broker. This is your user. | Bloomberg Terminal + FT.com's markets pages |
+| **B: TradingView Modern** | Charcoal (not black), softer corners, subtle drop shadows, teal accent | If the app were charts-first. It isn't. | TradingView web app |
+| **C: Groww Warm Dark** | Navy-black with warm undertones, larger type, purple accent, generous whitespace | If the audience were investing-curious beginners. Not your user. | Groww web, Dhan |
+
+**Commitment: Direction A - Dealing Room.** Justify every subsequent design
+call against it. If a card would look at home on a Bloomberg terminal, keep
+it. If it looks like it belongs on a fintech landing page, cut it.
+
+### 9.2 Texture layers (four, in order of user-visibility)
+
+Currently the app is flat dark rectangles. Add depth without adding chrome:
+
+1. **Base ground** - `#0a0a0a` (pure black), NOT the current default off-charcoal.
+   Pure black lets amber / cyan / red pop with actual chromatic weight.
+2. **Card fill** - `rgba(255, 255, 255, 0.02)` sitting on the ground. The
+   2 % white creates a barely-visible float without a border. Trick borrowed
+   from macOS's `NSVisualEffectView`.
+3. **Hairline system** - three widths:
+   - `rgba(255,255,255,0.04)` - section dividers (barely there)
+   - `rgba(255,255,255,0.08)` - interactive borders (buttons, chips)
+   - `rgba(255,255,255,0.16)` - active-focus borders (inputs, active nav)
+4. **Grain overlay** - single SVG noise pattern at 3 % opacity on the whole
+   app body. Imperceptible in isolation; stops the "empty dark rectangle"
+   flatness that reads as amateur. Bloomberg terminals had physical CRT
+   grain; this is the digital equivalent. Adds ~2 kB, no runtime cost.
+
+Optional: **glow layer** - active nav pill + focused input get a 12 px
+soft cyan glow at 15 % opacity. Never on hover (would trigger on every
+mouse move); only on `:focus-visible` + `[aria-current="page"]`.
+
+### 9.3 Colour system - every colour is a signal
+
+Rule: **no decorative colour.** If a colour appears, it means something.
+
+| Role | Base | Strong | Use for |
+|---|---|---|---|
+| **Bull** | `#26a69a` | `#00e5cc` | Positive P&L, uptrend regime, BUY posture. That is it. |
+| **Bear** | `#ef5350` | `#ff1744` | Negative P&L, downtrend regime, EXIT/SELL posture. |
+| **Amber** | `#c6a15b` | `#ffab00` | Attention required, NOT a value judgment. Caution, developing, elevated VIX. |
+| **Cyan** | `#2fd1e0` | - | "You can act here." Active nav, links, primary buttons, active-focus. |
+| **Purple** | `#ab8bff` | - | Meta-info: regime chips, TQS overlay, calibration, valuation posture. |
+| **Ink** | `#e0e0e0` / `#a0a0a0` / `#6a6a6a` / `#3a3a3a` | - | Text, in four densities. Never below `#3a3a3a` on `#0a0a0a` (fails WCAG AA). |
+
+**Enforcement**:
+
+- Ban `success`/`error`/`warning` semantic aliases anywhere in `design.py`.
+  Buttons that say "Save" get `--accent` (cyan), not green. Bull/bear are
+  reserved for money direction.
+- The `page-smoke-check` hook can be extended to fail on new hex codes in
+  `dashboard/pages/**` that are not in the token map. Rule: only
+  `var(--*)` in page files, never raw hex.
+- Palette above lives entirely in `design.py`; nothing else defines a
+  colour.
+
+### 9.4 Typography scale - one axis, formalised
+
+Current pages use inconsistent sizes (14px everywhere on Investor Guide,
+20px+ hero on Analyze Stock, 11px caption stacks on Command Centre). Lock
+this scale into `design.py` and every card / heading / label calls it:
+
+```
+Display      32 / 700 / -0.02em     Page title  ("Command Centre")
+H1 section   22 / 700 / -0.01em     Section head ("TOP PICKS TODAY")
+H2 heading   16 / 600 /  0em        Panel title  ("Regime: Uptrend")
+Body         14 / 400 /  1.5        Long-form paragraph text
+Label        11 / 600 /  1.2px UP   Small caps  ("OPEN POSITIONS")
+Value        20 / 700 / -0.01em     Numbers        ₹1,45,320  (Plex Mono)
+Small val    14 / 600 /  0em        Chart labels, table cells
+Caption      12 / 400 /  1.3        Freshness    "as of 15:30 IST"
+```
+
+Font families stay: IBM Plex Sans for UI, IBM Plex Mono for numbers +
+tickers. Consistent, well-hinted, ships from Google Fonts.
+
+### 9.5 The five things Groww / TradingView do that we should steal
+
+Even committing to Direction A, three cross-references worth stealing:
+
+- **Chart palette from TradingView**: single-line up-trend chart uses
+  cyan-teal (not green - reserve green strictly for P&L). Multi-series
+  charts use TradingView's 8-colour ordinal palette
+  (see `dataviz` skill's `references/palette.md`).
+- **Micro-price-change animation from Groww**: value changes get a 400 ms
+  pulse - cyan on rise, magenta on fall - not the numbers changing colour
+  but a background pulse behind them. Discussed in §10.
+- **Nifty/Sensex sticky strip from Zerodha Kite**: 32 px strip pinned to
+  the top of every page showing Nifty / Bank Nifty / VIX / current time /
+  market open indicator. Already have a top-bar; make it always-sticky.
+
+---
+
+## 10. Additional UX ideas beyond the backlog
+
+Ranked by user-visible impact per unit of work.
+
+### 10.1 High-impact (worth building)
+
+**Command palette (`Ctrl+K` / `⌘K`)** - one keystroke jumps to any page,
+ticker, or action. Type "recl" → surface "Reliance analyze", "Reliance in
+watchlist", "Paper trade Reliance". TradingView's single most-praised
+feature. Streamlit doesn't have a native `st.command_palette`, so it's a
+custom `st.components.v1.html` modal, but ~200 LOC and worth every one.
+
+**Hover preview cards on tickers** - hover any `RELIANCE` chip anywhere
+in the app, 300 ms delay, a floating mini-card appears: price, day change,
+composite score, key level. Enables the "quick look without leaving the
+current page" pattern Yahoo Finance made table stakes.
+
+**Live-tick pulse** - values that just changed get a 400 ms pulse (cyan
+for rising, magenta for falling) behind the digit block. Users see WHAT
+just changed without having to remember previous values. Motion is
+`prefers-reduced-motion` respectful.
+
+**Pinned tickers in the sidebar** - user pins RELIANCE. It appears in a
+new "📌 Pinned" section at the top of the sidebar with live price / day
+change. One click from any page. Zerodha does this and it's the reason
+users open Kite instead of a broker's default UI.
+
+**Ticker chip drag-and-drop** - drag a ticker chip from anywhere (top
+picks card, watchlist row, screener result) → drop on a page icon in the
+sidebar → jumps to that page pre-loaded with the ticker. Chart-first apps
+(TradingView, Investing.com) live and die by this affordance.
+
+### 10.2 Medium-impact (worth building after the highs land)
+
+**Compare mode** - pin 2-3 tickers side-by-side. Composite scores + charts
++ verdicts render in synchronised columns. Great for "which of these three
+should I buy?" decisions.
+
+**Keyboard shortcuts** - `j`/`k` navigate picks in Command Centre, `y` add
+to watchlist, `p` paper-trade, `/` focus search, `?` shows shortcut
+overlay. Muscle memory for daily users; discoverable via the `?`
+overlay.
+
+**Private notes on any ticker** - user annotates ("bought at 2850, thesis:
+EV pivot, review at Q3"). Persists in `trade_store`. Renders as a chip on
+Analyze Stock and My Watchlist.
+
+**Universal freshness pill** - every data-driven card gets a
+`as of HH:MM · via source · ⟳` pill in its footer. Partially there in
+data_health panel; make it universal. Data-transparency micro-UX in the
+backlog already flags this (DT1/DT2/DT3).
+
+**Onboarding tour** - first-visit only. 5-step overlay tour: Command
+Centre → Analyze Stock → Portfolio → Paper Trades → Alerts. Dismissible,
+never shown again. Cuts the "what does this app do" bounce.
+
+### 10.3 Low-impact (nice-to-have)
+
+**Multi-account paper-trade books** - "Momentum", "Value", "Learning" as
+separate books. Trade-store table already has an `account` column, so
+mostly UI work.
+
+**Time machine** - "see this page as it was 5 d / 20 d / 60 d ago" via
+`verdict_ledger` history. Useful for post-mortem: "did the model actually
+recommend this on 2026-08-30?"
+
+**Print view** - clean-print CSS on Analyze Stock. One-page report for
+sending to your CA / mentor / trading buddy.
+
+**Public share** - generate a shareable read-only link to a specific
+analysis. Useful for "look at this setup" conversations. Requires signed
+tokens + a public route; multi-day.
+
+**Alert priority tiers** - urgent (SL hit, target hit) fires push + email
++ sound; informational (regime change, VIX crossing threshold) fires
+email only. Currently all alerts are equal weight.
+
+---
+
 ## 8. See also
 
 - [`UI_UX_BACKLOG.md`](UI_UX_BACKLOG.md) - the living per-page task list
