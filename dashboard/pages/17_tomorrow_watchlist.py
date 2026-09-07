@@ -212,8 +212,22 @@ def _render_cards(items, kind, key_prefix):
         st.caption("No candidates in this bucket on today's scan.")
         return
     accent = _ACCENT[kind]
-    for _it in items:
+    # Task 4.2 PR beta (audit docs/TOMORROW_WATCHLIST_AUDIT_2026-09.md, FM2
+    # follow-up): rank prefix so a user reading a card can tell at a glance
+    # whether this is the #1 conviction pick of the bucket or #15 of 15.
+    # Items already arrive sorted by _tomorrow_watchlist (desc score for
+    # breakout / reversal, asc for breakdown) so enumerate() from 1 is the
+    # displayed rank directly.
+    for _idx, _it in enumerate(items, start=1):
         _lbl = _it["ticker"].replace(".NS", "")
+        _rank_chip = (
+            f'<span style="display:inline-block;padding:1px 6px;border-radius:4px;'
+            f'font-size:10px;font-weight:700;font-family:var(--font-mono, ui-monospace);'
+            f'letter-spacing:0.3px;color:{accent};'
+            f'background:color-mix(in srgb, {accent} 14%, transparent);'
+            f'border:1px solid color-mix(in srgb, {accent} 40%, transparent);'
+            f'margin-right:8px">#{_idx}</span>'
+        )
         _tt_lbl, _tt_emo, _tt_col = _trade_type(_it.get("headline", ""))
 
         _entry = _it.get("entry") or 0
@@ -268,7 +282,7 @@ def _render_cards(items, kind, key_prefix):
             f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
             f'border-radius:10px;padding:11px 14px;margin-bottom:6px">'
             f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span style="font-size:16px;font-weight:700;color:#fff">{_lbl}{_conv_chip}</span>'
+            f'<span style="font-size:16px;font-weight:700;color:#fff">{_rank_chip}{_lbl}{_conv_chip}</span>'
             f'<span style="font-size:13px;font-weight:700;color:{accent}">'
             f'{_it["score"]:.0f}/100 · {_it["action"]}</span>'
             f'</div>'
