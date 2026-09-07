@@ -83,6 +83,59 @@ def send_telegram(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Gmail (Task 4.1 Q1 answer, added 2026-09-08)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def send_gmail(subject: str, body_html: str) -> bool:
+    """Send the alert as email via Gmail SMTP. body_html is stripped of
+    the HTML tags used for Telegram, since email clients render plain
+    text more reliably across mobile / web / desktop."""
+    try:
+        from utils.alerts_gmail import GmailAlerter
+    except ImportError as _ie:
+        print(f"[gmail] alerts_gmail import failed: {_ie}")
+        return False
+    import re as _re
+    # Cheap HTML-to-text: strip <b>/<i>/<br>/etc, keep whitespace.
+    _plain = _re.sub(r"<[^>]+>", "", body_html)
+    _plain = (_plain
+              .replace("&amp;", "&")
+              .replace("&lt;",  "<")
+              .replace("&gt;",  ">")
+              .replace("&nbsp;", " "))
+    return GmailAlerter().send(subject, _plain)
+
+
+def _subject_from_message(msg: str, fallback: str) -> str:
+    """Derive a subject line from the first non-empty line of the alert
+    text, with HTML tags stripped and length-capped. Falls back to the
+    channel-level label if the message is empty."""
+    import re as _re
+    first = ""
+    for _ln in msg.splitlines():
+        _s = _re.sub(r"<[^>]+>", "", _ln).strip()
+        if _s:
+            first = _s
+            break
+    if not first:
+        return fallback
+    return (first[:120] + "...") if len(first) > 120 else first
+
+
+def dispatch(msg: str, *, subject: str = "NSE Smart Investor alert") -> bool:
+    """Fan one alert out to every configured channel. Returns True if at
+    least one channel accepted the message (so the de-dup marker gets
+    set), False only if BOTH channels failed AND neither was in console-
+    fallback mode. Channels that are unconfigured print to console and
+    count as delivered locally (matching prior behaviour so a local dev
+    run still marks the state file)."""
+    _subj = _subject_from_message(msg, fallback=subject)
+    _tg_ok    = send_telegram(msg)
+    _gmail_ok = send_gmail(_subj, msg)
+    return bool(_tg_ok or _gmail_ok)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # De-dup state (per-day)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -202,7 +255,7 @@ def check_price_alerts(state: dict, today: str) -> int:
             f"Crossed <b>{condition} ₹{level:,.2f}</b>"
             + (f"\n📝 {note}" if note else "")
         )
-        if send_telegram(msg):
+        if dispatch(msg):
             _mark_fired(state, key, today)
             sent += 1
     return sent
@@ -234,7 +287,7 @@ def check_vix_regime(state: dict, today: str) -> int:
         + "\nNew long entries are higher-risk — protect open positions, "
           "tighten stops, avoid fresh leverage."
     )
-    if send_telegram(msg):
+    if dispatch(msg):
         _mark_fired(state, key, today)
         return 1
     return 0
@@ -269,7 +322,7 @@ def check_nifty_trend(state: dict, today: str) -> int:
         f"SMA20 ({sma20:,.0f}) and SMA50 ({sma50:,.0f}).\n"
         f"Trend has turned down — be defensive with new buys."
     )
-    if send_telegram(msg):
+    if dispatch(msg):
         _mark_fired(state, key, today)
         return 1
     return 0

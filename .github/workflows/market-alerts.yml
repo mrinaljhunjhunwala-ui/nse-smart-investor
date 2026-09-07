@@ -47,7 +47,20 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Optional — set these only if you want real-time Angel One prices
+          # Task 4.1 (added 2026-09-08): Gmail SMTP as the second alert
+          # channel alongside Telegram. Requires GitHub Actions secrets:
+          #   ALERT_GMAIL_ADDRESS       - your Gmail address
+          #   ALERT_GMAIL_APP_PASSWORD  - 16-char app password from
+          #                               myaccount.google.com/apppasswords
+          #                               (NOT your real Gmail password)
+          #   ALERT_GMAIL_TO            - recipient (usually same as address)
+          # If any of the three is unset, GmailAlerter falls through to
+          # console-fallback and this workflow still succeeds - the Telegram
+          # channel picks up the load.
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          # Optional - set these only if you want real-time Angel One prices
           # instead of the 15-min-delayed Yahoo fallback:
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
