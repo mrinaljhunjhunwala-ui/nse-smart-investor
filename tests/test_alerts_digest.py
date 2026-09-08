@@ -205,3 +205,96 @@ def test_portfolio_posture_fires_when_exit_watch(_silence_dispatch, monkeypatch)
     assert fired == 1
     msg = _silence_dispatch.call_args[0][0]
     assert "DANGER" in msg and "EXIT" in msg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# check_intraday_watchlist
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _mk_ohlcv(n=30, close=1000):
+    """Synthetic OHLCV frame for ATR-computable rows."""
+    import numpy as np
+    idx = pd.date_range("2026-08-01", periods=n, freq="B")
+    return pd.DataFrame({
+        "Open":   np.full(n, float(close)),
+        "High":   np.full(n, close * 1.01),
+        "Low":    np.full(n, close * 0.99),
+        "Close":  np.full(n, float(close)),
+        "Volume": np.full(n, 100_000.0),
+    }, index=idx)
+
+
+def test_intraday_watchlist_reformats_picks(_silence_dispatch, monkeypatch):
+    """A snapshot with 3 buys + a working fetcher must send an intraday msg."""
+    fake_store = SimpleNamespace(kv_get=lambda k, user_id: _mk_snapshot(3))
+    monkeypatch.setitem(sys.modules, "trade_store", fake_store)
+    monkeypatch.setattr("data.fetcher.fetch_single", lambda t, period="3mo": _mk_ohlcv())
+
+    fired = ca.check_intraday_watchlist({}, "2026-09-09")
+    assert fired == 1
+    msg = _silence_dispatch.call_args[0][0]
+    assert "Intraday Morning Watchlist" in msg
+    assert "ORB above" in msg
+    assert "TICK0" in msg
+
+
+def test_intraday_watchlist_dedups(_silence_dispatch, monkeypatch):
+    fake_store = SimpleNamespace(kv_get=lambda k, user_id: _mk_snapshot(3))
+    monkeypatch.setitem(sys.modules, "trade_store", fake_store)
+    monkeypatch.setattr("data.fetcher.fetch_single", lambda t, period="3mo": _mk_ohlcv())
+
+    state = {"intraday_watchlist": "2026-09-09"}
+    assert ca.check_intraday_watchlist(state, "2026-09-09") == 0
+    _silence_dispatch.assert_not_called()
+
+
+def test_intraday_watchlist_no_snapshot_skips(_silence_dispatch, monkeypatch):
+    fake_store = SimpleNamespace(kv_get=lambda k, user_id: None)
+    monkeypatch.setitem(sys.modules, "trade_store", fake_store)
+
+    assert ca.check_intraday_watchlist({}, "2026-09-09") == 0
+    _silence_dispatch.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# check_weekly_digest
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_weekly_digest_refuses_mid_week(_silence_dispatch, monkeypatch):
+    """weekly-digest must NOT fire on a weekday even if manually triggered."""
+    # Fake Tuesday
+    fake_now = datetime.datetime(2026, 9, 8, 9, 0, tzinfo=ca._IST)  # weekday=1
+    class _FakeDt(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None): return fake_now
+    monkeypatch.setattr(ca.datetime, "datetime", _FakeDt)
+
+    fired = ca.check_weekly_digest({}, "2026-09-08")
+    assert fired == 0
+    _silence_dispatch.assert_not_called()
+
+
+def test_weekly_digest_fires_on_sunday(_silence_dispatch, monkeypatch, tmp_path):
+    """On a Sunday with a snapshot and journal activity, digest goes out."""
+    # Fake Sunday. Capture the real strptime BEFORE patching so our fake
+    # can delegate to it without recursing into itself.
+    _real_strptime = datetime.datetime.strptime
+    fake_now = datetime.datetime(2026, 9, 13, 9, 0, tzinfo=ca._IST)  # weekday=6
+    class _FakeDt(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None): return fake_now
+        @classmethod
+        def strptime(cls, s, f): return _real_strptime(s, f)
+    monkeypatch.setattr(ca.datetime, "datetime", _FakeDt)
+
+    fake_store = SimpleNamespace(kv_get=lambda k, user_id: _mk_snapshot(4))
+    monkeypatch.setitem(sys.modules, "trade_store", fake_store)
+
+    # Empty journal is fine — the digest still sends with the picks section
+    monkeypatch.setattr("alerts.journal_store.read_entries", lambda: [])
+
+    fired = ca.check_weekly_digest({}, "2026-09-13")
+    assert fired == 1
+    msg = _silence_dispatch.call_args[0][0]
+    assert "Weekly Digest" in msg
+    assert "TICK0" in msg
