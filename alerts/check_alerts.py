@@ -329,25 +329,196 @@ def check_nifty_trend(state: dict, today: str) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main
+# Delivery digest — top positional picks from the pre-warmed snapshot
+#
+# Reads the ~745-ticker top-picks scan that scripts/warm_top_picks.py already
+# writes every 15 min to trade_store KV, so this check does NOT rescan the
+# universe. It only formats and sends. Fires ONCE per day (pre-market at
+# 09:00 IST via the market-digest workflow), so the state key is date-only.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def check_delivery_digest(state: dict, today: str, *, max_picks: int = 5) -> int:
+    """Read persisted Top Picks snapshot and email/Telegram the top delivery
+    candidates for the day. One fire per day (state-deduplicated)."""
+    key = "delivery_digest"
+    if _already_fired(state, key, today):
+        return 0
+
+    try:
+        import trade_store as store
+    except Exception as _e:
+        print(f"[digest] trade_store import failed: {_e}")
+        return 0
+
+    try:
+        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+    except Exception as _e:
+        print(f"[digest] kv_get failed: {_e}")
+        return 0
+
+    if not (snap and isinstance(snap, dict) and isinstance(snap.get("data"), dict)):
+        print("[digest] no persisted top-picks snapshot yet — skipping")
+        return 0
+
+    buys = snap["data"].get("buys") or []
+    if not buys:
+        print("[digest] snapshot has 0 buys — nothing to send")
+        return 0
+
+    gen_at = snap.get("generated_at", "unknown")
+    lines = [
+        "📈 <b>Morning Delivery Digest</b>",
+        f"<i>Top {min(max_picks, len(buys))} positional candidates from today's scan "
+        f"(snapshot {gen_at[:16] if isinstance(gen_at, str) else 'unknown'} IST)</i>",
+        "",
+    ]
+    for i, b in enumerate(buys[:max_picks], start=1):
+        tk    = b.get("ticker", "?")
+        score = b.get("score", 0)
+        act   = b.get("action", "").replace("_", " ")
+        price = b.get("price") or b.get("last_price") or b.get("current_price")
+        entry = b.get("entry_zone") or b.get("entry")
+        stop  = b.get("stop_loss")  or b.get("stop")
+        tgt   = b.get("target")
+        sec   = b.get("sector", "").strip()
+
+        price_str = f"₹{float(price):,.2f}" if isinstance(price, (int, float)) else "n/a"
+        head = f"{i}. <b>{tk}</b> — {act} · Score {score}/90 · {price_str}"
+        if sec:
+            head += f" · {sec}"
+        lines.append(head)
+        detail = []
+        if entry:
+            detail.append(f"Entry {entry}")
+        if stop:
+            detail.append(f"Stop {stop}")
+        if tgt:
+            detail.append(f"Target {tgt}")
+        if detail:
+            lines.append("   " + " · ".join(str(x) for x in detail))
+
+    lines.extend([
+        "",
+        "<i>Descriptive scan of composite-score leaders — not advice. "
+        "Verify each name on the Analyze Stock page before any action.</i>",
+    ])
+    msg = "\n".join(lines)
+
+    if dispatch(msg, subject="Morning Delivery Digest — NSE Smart Investor"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Momentum opportunities — pure scanner + fetcher, fires every 30 min
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_momentum_opportunities(state: dict, today: str, *, top_n: int = 8) -> int:
+    """Run the Donchian-55 momentum scan over the niftytotalmarket universe
+    and send a digest. Deduped by (today + hour bucket) so we get at most 2
+    fires per day from the every-30-min workflow trigger — one mid-morning
+    push and one afternoon push, not the same list every 30 min.
+
+    The 30-min cadence is intentional: momentum breakouts hold for hours,
+    not minutes, and a 15-min ping would spam identical lists.
+    """
+    now_ist = datetime.datetime.now(_IST)
+    # Bucket: "am" (before 12:30) vs "pm" — one digest per bucket per day
+    bucket = "am" if now_ist.hour < 12 or (now_ist.hour == 12 and now_ist.minute < 30) else "pm"
+    key = f"momentum_{bucket}"
+    if _already_fired(state, key, today):
+        return 0
+
+    try:
+        from analysis.momentum_scanner import (
+            scan_momentum, format_momentum_message, MomentumConfig,
+        )
+        from data.fetcher import fetch_single
+        from data.universe import get_universe
+    except Exception as _e:
+        print(f"[momentum] import failed: {_e}")
+        return 0
+
+    try:
+        universe = get_universe("niftytotalmarket")
+    except Exception as _e:
+        print(f"[momentum] universe load failed: {_e}")
+        return 0
+
+    def _fetch(ticker: str):
+        try:
+            df = fetch_single(ticker, period="2y")
+            return df
+        except Exception as _fe:
+            _log.debug("momentum fetch failed for %s: %s", ticker, _fe)
+            return None
+
+    try:
+        nifty_df = fetch_single("^NSEI", period="2y")
+    except Exception as _e:
+        print(f"[momentum] nifty fetch failed (RS will fall back to absolute): {_e}")
+        nifty_df = None
+
+    cfg = MomentumConfig(top_n=top_n)
+    print(f"[momentum] scanning {len(universe)} tickers ({bucket} bucket)...")
+    candidates = scan_momentum(universe, _fetch, nifty_history=nifty_df, cfg=cfg)
+
+    msg = format_momentum_message(candidates)
+    subject = (
+        f"Momentum Scan — {len(candidates)} setup(s) surfaced"
+        if candidates else "Momentum Scan — quiet day"
+    )
+    if dispatch(msg, subject=subject):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main — mode-based dispatch
+#
+# Modes:
+#   default          — the original 15-min market-alerts cadence
+#                      (price CSV + VIX + Nifty trend)
+#   morning-digest   — 09:00 IST daily: delivery top-picks digest
+#   momentum         — every 30 min market hours: momentum opportunities
+#
+# --force skips the market-hours guard for local/manual runs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_mode(argv: list[str]) -> str:
+    for a in argv:
+        if a.startswith("--mode="):
+            return a.split("=", 1)[1].strip().lower()
+    return "default"
+
+
 def main() -> int:
-    force = "--force" in sys.argv      # bypass market-hours guard for testing
-    if not force and not _is_market_hours():
-        print("[main] outside NSE market hours — nothing to do.")
+    force = "--force" in sys.argv
+    mode  = _parse_mode(sys.argv)
+
+    # Digest mode fires pre-market (09:00 IST) so it deliberately runs
+    # outside is_market_open — do not apply the guard.
+    if mode not in ("morning-digest",) and not force and not _is_market_hours():
+        print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
         return 0
 
     today = datetime.datetime.now(_IST).strftime("%Y-%m-%d")
     state = _prune_state(_load_state(), today)
 
     total = 0
-    total += check_price_alerts(state, today)
-    total += check_vix_regime(state, today)
-    total += check_nifty_trend(state, today)
+    if mode == "morning-digest":
+        total += check_delivery_digest(state, today)
+    elif mode == "momentum":
+        total += check_momentum_opportunities(state, today)
+    else:   # default
+        total += check_price_alerts(state, today)
+        total += check_vix_regime(state, today)
+        total += check_nifty_trend(state, today)
 
     _save_state(state)
-    print(f"[main] done — {total} alert(s) sent.")
+    print(f"[main mode={mode}] done — {total} alert(s) sent.")
     return 0
 
 
