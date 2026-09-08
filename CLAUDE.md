@@ -89,6 +89,7 @@ py -m pytest -m slow -q
 
 | Task | Skill |
 |---|---|
+| Deep-dive on ONE Indian ticker (portable — works in any chat) | `nse-ticker-deepdive` |
 | Any trading analysis on a symbol | `nse-trading-toolkit` (routes to the specific framework skill) |
 | Adding/tuning the AI co-pilot | `ai-copilot-context` |
 | Editing a dashboard page | `page-smoke-check` runs automatically |

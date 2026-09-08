@@ -152,3 +152,56 @@ def test_momentum_quiet_day_still_sends(_silence_dispatch, monkeypatch):
     assert fired == 1
     msg = _silence_dispatch.call_args[0][0]
     assert "No stocks passed" in msg or "quiet" in msg.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# check_portfolio_posture
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_portfolio_posture_no_holdings_returns_zero(_silence_dispatch, monkeypatch):
+    monkeypatch.setattr("data.angel_fetcher.get_holdings", lambda: [])
+    monkeypatch.setattr("data.angel_fetcher.get_positions", lambda: {"day": [], "net": []})
+    monkeypatch.setattr("data.fetcher.fetch_single", lambda *a, **kw: pd.DataFrame())
+
+    fired = ca.check_portfolio_posture({}, "2026-09-08")
+    assert fired == 0
+    _silence_dispatch.assert_not_called()
+
+
+def test_portfolio_posture_all_hold_marks_dedup(_silence_dispatch, monkeypatch):
+    """When every holding is HOLD, we don't send a message but DO mark the
+    day fired so the workflow won't keep retrying every re-run."""
+    from analysis.portfolio_posture import HoldingPosture
+    fake_hold = HoldingPosture(
+        symbol="X", qty=10, avg_price=100, ltp=110, pnl_pct=10,
+        posture="HOLD", reason="fine", filters_passing=4,
+    )
+    monkeypatch.setattr("data.angel_fetcher.get_holdings", lambda: [{"symbol": "X"}])
+    monkeypatch.setattr("data.angel_fetcher.get_positions", lambda: {"day": [], "net": []})
+    monkeypatch.setattr("data.fetcher.fetch_single", lambda *a, **kw: pd.DataFrame())
+    monkeypatch.setattr("analysis.portfolio_posture.analyse_holdings", lambda *a, **kw: [fake_hold])
+    monkeypatch.setattr("analysis.portfolio_posture.analyse_positions", lambda *a, **kw: [])
+
+    state = {}
+    fired = ca.check_portfolio_posture(state, "2026-09-08")
+    assert fired == 0
+    assert state.get("portfolio_posture") == "2026-09-08"    # deduped
+    _silence_dispatch.assert_not_called()
+
+
+def test_portfolio_posture_fires_when_exit_watch(_silence_dispatch, monkeypatch):
+    from analysis.portfolio_posture import HoldingPosture
+    danger = HoldingPosture(
+        symbol="DANGER", qty=10, avg_price=100, ltp=80, pnl_pct=-20,
+        posture="EXIT_WATCH", reason="SMA50 breakdown", filters_passing=1,
+    )
+    monkeypatch.setattr("data.angel_fetcher.get_holdings", lambda: [{"symbol": "DANGER"}])
+    monkeypatch.setattr("data.angel_fetcher.get_positions", lambda: {"day": [], "net": []})
+    monkeypatch.setattr("data.fetcher.fetch_single", lambda *a, **kw: pd.DataFrame())
+    monkeypatch.setattr("analysis.portfolio_posture.analyse_holdings", lambda *a, **kw: [danger])
+    monkeypatch.setattr("analysis.portfolio_posture.analyse_positions", lambda *a, **kw: [])
+
+    fired = ca.check_portfolio_posture({}, "2026-09-08")
+    assert fired == 1
+    msg = _silence_dispatch.call_args[0][0]
+    assert "DANGER" in msg and "EXIT" in msg

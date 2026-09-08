@@ -476,6 +476,79 @@ def check_momentum_opportunities(state: dict, today: str, *, top_n: int = 8) -> 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Portfolio posture — analyse Angel One holdings + intraday positions
+#
+# Fires once per day (typically 14:00 IST via the market-digest workflow's
+# 3rd cron) and sends a message listing only the holdings that need
+# attention: EXIT_WATCH, TRIM_WATCH, ADD_WATCH, plus intraday STOP_HIT /
+# TARGET_HIT / TRAIL_TIGHTER. If everything is HOLD/RUNNING, no message
+# (only_actionable=True by default in format_portfolio_message).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_portfolio_posture(state: dict, today: str) -> int:
+    """Fetch Angel One holdings + positions, run posture analysis, alert only
+    on actionable rows. Requires ANGEL_* env vars — silently no-ops otherwise
+    (Angel One is optional; we can't analyse a portfolio we can't see)."""
+    key = "portfolio_posture"
+    if _already_fired(state, key, today):
+        return 0
+
+    try:
+        from analysis.portfolio_posture import (
+            analyse_holdings, analyse_positions, format_portfolio_message,
+        )
+        from data.angel_fetcher import get_holdings, get_positions
+        from data.fetcher import fetch_single
+    except Exception as _e:
+        print(f"[portfolio] import failed: {_e}")
+        return 0
+
+    try:
+        holdings = get_holdings() or []
+    except Exception as _e:
+        print(f"[portfolio] get_holdings failed (Angel One session issue?): {_e}")
+        return 0
+    try:
+        positions = (get_positions() or {}).get("day", []) or []
+    except Exception as _e:
+        print(f"[portfolio] get_positions failed: {_e}")
+        positions = []
+
+    if not holdings and not positions:
+        print("[portfolio] no holdings / positions — nothing to analyse")
+        return 0
+
+    def _fetch(sym):
+        try:
+            return fetch_single(sym, period="2y")
+        except Exception:
+            return None
+
+    try:
+        nifty_df = fetch_single("^NSEI", period="2y")
+    except Exception:
+        nifty_df = None
+
+    print(f"[portfolio] analysing {len(holdings)} holdings + {len(positions)} intraday positions")
+    hpost = analyse_holdings(holdings, _fetch, nifty_history=nifty_df)
+    ipost = analyse_positions(positions, _fetch)
+
+    msg = format_portfolio_message(hpost, ipost, only_actionable=True)
+    # Suppress the 'nothing to do' message from the daily digest — the whole
+    # point of an alert is to surface something. If everything is HOLD,
+    # count it as fired-successfully (dedup key set) so we don't keep polling.
+    if "Nothing to do" in msg:
+        _mark_fired(state, key, today)
+        print("[portfolio] all HOLD/RUNNING — no message sent")
+        return 0
+
+    if dispatch(msg, subject=f"Portfolio Posture — {len(hpost)+len(ipost)} row(s) need attention"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main — mode-based dispatch
 #
 # Modes:
@@ -498,9 +571,11 @@ def main() -> int:
     force = "--force" in sys.argv
     mode  = _parse_mode(sys.argv)
 
-    # Digest mode fires pre-market (09:00 IST) so it deliberately runs
-    # outside is_market_open — do not apply the guard.
-    if mode not in ("morning-digest",) and not force and not _is_market_hours():
+    # morning-digest fires pre-market (09:00 IST); portfolio-posture can also
+    # run after-hours (holdings LTP is snapshot-based from Angel One's last
+    # trade). So both bypass the market-hours guard. Other modes still enforce.
+    if mode not in ("morning-digest", "portfolio-posture") and not force \
+            and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
         return 0
 
@@ -512,6 +587,8 @@ def main() -> int:
         total += check_delivery_digest(state, today)
     elif mode == "momentum":
         total += check_momentum_opportunities(state, today)
+    elif mode == "portfolio-posture":
+        total += check_portfolio_posture(state, today)
     else:   # default
         total += check_price_alerts(state, today)
         total += check_vix_regime(state, today)
