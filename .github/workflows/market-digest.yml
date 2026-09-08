@@ -1,0 +1,105 @@
+name: Market Digest
+
+# Two new alert cadences on top of the existing Market Alerts workflow:
+#
+#   1. Morning Delivery Digest — 09:00 IST daily (Mon-Fri), pre-market open.
+#      Reads the already-persisted top-picks snapshot and emails/Telegrams
+#      the top 5 positional candidates for the day. No universe rescan —
+#      cheap, sub-30-second run.
+#
+#   2. Momentum Opportunities Scan — every 30 min, 10:00–15:00 IST.
+#      Runs analysis/momentum_scanner over the full niftytotalmarket
+#      universe (~745 tickers) and pushes fresh breakouts. Deduped by
+#      am/pm bucket in check_alerts.py so you get at most one AM + one
+#      PM digest per day, not the same list every 30 min.
+#
+# Kept separate from market-alerts.yml so a scheduling change to one
+# doesn't accidentally alter the other, and so the concurrency groups
+# don't collide when the delivery digest and the 15-min market-alerts
+# tick happen to overlap at 09:15.
+
+on:
+  schedule:
+    # 09:00 IST = 03:30 UTC — GitHub cron can't express :30 with slashes but
+    # a plain minute value works. Weekdays only.
+    - cron: "30 3 * * 1-5"
+    # Momentum scan: every 30 min from 04:30 UTC (10:00 IST) to 09:30 UTC
+    # (15:00 IST), Mon–Fri. First fire is after top-picks warmer has run
+    # for the day; last fire leaves room to act before 15:30 close.
+    - cron: "0,30 4-9 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which digest to fire (morning-digest | momentum)"
+        required: true
+        default: "morning-digest"
+        type: choice
+        options:
+          - morning-digest
+          - momentum
+
+concurrency:
+  group: market-digest-${{ github.event.schedule || github.event.inputs.mode }}
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # momentum scan can take ~3-5 min on ~745 tickers
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # requirements.txt covers pandas/numpy/yfinance/psycopg2 needed for the
+      # trade_store KV read and the fetcher. Install lean but complete.
+      - name: Install project deps
+        run: pip install --quiet -r requirements.txt
+
+      - name: Restore alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
+          restore-keys: |
+            alert-state-
+
+      - name: Pick mode
+        id: pick
+        run: |
+          # Schedule → mode mapping: 09:00 IST cron → morning-digest,
+          # every 30-min cron → momentum. workflow_dispatch → input.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 3 * * 1-5" ]; then
+            echo "mode=morning-digest" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=momentum" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run digest
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          # trade_store KV read for the morning digest
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+          # Optional real-time Angel One prices for the momentum scan
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python alerts/check_alerts.py --mode=${{ steps.pick.outputs.mode }}
+
+      - name: Save alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
