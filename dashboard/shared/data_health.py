@@ -39,8 +39,16 @@ STATUS_DEGRADED    = "degraded"
 STATUS_UNAVAILABLE = "unavailable"
 STATUS_IDLE        = "idle"
 
-_HEALTHY_STATUSES = {STATUS_HEALTHY}
-_DOWN_STATUSES    = {STATUS_STALE, STATUS_DEGRADED, STATUS_UNAVAILABLE}
+_HEALTHY_STATUSES  = {STATUS_HEALTHY}
+# Trouble = real, actionable issue (breaker open, request failing, snapshot too
+# stale to trust). These earn the loud red section.
+_TROUBLE_STATUSES  = {STATUS_STALE, STATUS_DEGRADED}
+# Inactive = no signal to worry about: provider isn't wired up (missing creds,
+# optional dependency not installed) or simply hasn't been exercised this
+# session. Bucketing these with real failures was making a working dashboard
+# look 7/9 broken. Kept visible so an operator can still see the roster, but
+# rendered in the muted "neutral" tone rather than bear-red.
+_INACTIVE_STATUSES = {STATUS_UNAVAILABLE, STATUS_IDLE}
 
 _STALE_MINUTES = 30
 
@@ -106,7 +114,7 @@ def probe_angel() -> ProviderCheck:
         from data.fetcher import get_last_diagnostic as _fetch_diag
     except ImportError:
         return ProviderCheck("Angel One SmartAPI", "market", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     if not _try(is_configured):
         return ProviderCheck("Angel One SmartAPI", "market", STATUS_UNAVAILABLE,
                              note="no ANGEL_* env / secret")
@@ -124,7 +132,7 @@ def probe_stooq() -> ProviderCheck:
         from data.fetcher import _STOOQ_BREAKER, _STOOQ_BREAKER_COOLDOWN
     except ImportError:
         return ProviderCheck("Stooq CSV", "market", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     fails = int(_STOOQ_BREAKER.get("consecutive_failures", 0))
     tripped_until = float(_STOOQ_BREAKER.get("tripped_until", 0.0))
     now = time.time()
@@ -154,7 +162,7 @@ def probe_nse_corp_info() -> ProviderCheck:
         from data.nse_corp_info import get_last_diagnostic
     except ImportError:
         return ProviderCheck("NSE corp-info", "corp_info", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     return _probe_diagnostic_provider("NSE corp-info", "corp_info",
                                       get_last_diagnostic, "RELIANCE.NS")
 
@@ -164,7 +172,7 @@ def probe_bse_corp_info() -> ProviderCheck:
         from data.bse_corp_info import get_last_diagnostic
     except ImportError:
         return ProviderCheck("BSE corp-info", "corp_info", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     diag = _try(get_last_diagnostic, "500325")
     if diag is None:
         # Package may not be installed; that's the dependency-gated deferral
@@ -180,7 +188,7 @@ def probe_news_feed() -> ProviderCheck:
         from data.news_feed import get_last_diagnostic
     except ImportError:
         return ProviderCheck("Google News RSS", "news", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     return _probe_diagnostic_provider("Google News RSS", "news",
                                       get_last_diagnostic, "RELIANCE")
 
@@ -190,7 +198,7 @@ def probe_nse_rss() -> ProviderCheck:
         from data.nse_rss_feeds import get_last_diagnostic
     except ImportError:
         return ProviderCheck("NSE RSS feeds", "news", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     # Poll all documented categories; if any populated, pick most-recent.
     categories = ("related_party_transactions", "reason_for_encumbrance",
                   "sast_regulation_29", "sast_regulation_31",
@@ -215,7 +223,7 @@ def probe_yahoo() -> ProviderCheck:
         from data.fetcher import get_last_diagnostic as _fetch_diag
     except ImportError:
         return ProviderCheck("Yahoo v8 chart", "market", STATUS_UNAVAILABLE,
-                             note="fetcher module import failed")
+                             note="diagnostic getter unavailable")
     diag = _try(_fetch_diag, "Yahoo") or {}
     if not diag:
         return ProviderCheck("Yahoo v8 chart", "market", STATUS_IDLE,
@@ -230,7 +238,7 @@ def probe_vix() -> ProviderCheck:
         from utils.vix import get_last_diagnostic
     except ImportError:
         return ProviderCheck("India VIX", "market", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     diag = _try(get_last_diagnostic) or {}
     if not diag:
         return ProviderCheck("India VIX", "market", STATUS_IDLE,
@@ -245,7 +253,7 @@ def probe_nse_delivery() -> ProviderCheck:
         from data.nse_delivery import get_last_diagnostic
     except ImportError:
         return ProviderCheck("NSE bhavcopy delivery", "market", STATUS_UNAVAILABLE,
-                             note="module import failed")
+                             note="diagnostic getter unavailable")
     diag = _try(get_last_diagnostic) or {}
     if not diag:
         return ProviderCheck("NSE bhavcopy delivery", "market", STATUS_IDLE,
@@ -388,9 +396,9 @@ def render_data_health_html(checks: Optional[List[ProviderCheck]] = None) -> str
     if checks is None:
         checks = collect_all_health()
 
-    up   = [c for c in checks if c.status in _HEALTHY_STATUSES]
-    down = [c for c in checks if c.status in _DOWN_STATUSES]
-    idle = [c for c in checks if c.status == STATUS_IDLE]
+    up       = [c for c in checks if c.status in _HEALTHY_STATUSES]
+    trouble  = [c for c in checks if c.status in _TROUBLE_STATUSES]
+    inactive = [c for c in checks if c.status in _INACTIVE_STATUSES]
 
     def _row(c: ProviderCheck) -> str:
         rel = _relative_time(c.last_success_at)
@@ -424,9 +432,9 @@ def render_data_health_html(checks: Optional[List[ProviderCheck]] = None) -> str
         )
 
     parts = [
-        _section("providers up",       "bull",    up),
-        _section("providers degraded", "bear",    down),
-        _section("providers idle",     "neutral", idle),
+        _section("providers live",   "bull",    up),
+        _section("needs attention",  "bear",    trouble),
+        _section("inactive",         "neutral", inactive),
     ]
     if not any(parts):
         # Nothing to show; render an empty-state panel for symmetry.
