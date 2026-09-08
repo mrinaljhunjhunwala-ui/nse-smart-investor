@@ -476,6 +476,68 @@ def check_momentum_opportunities(state: dict, today: str, *, top_n: int = 8) -> 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Diagnostic mode — proves end-to-end delivery
+#
+# check_test_alert unconditionally sends a "hello" message through EVERY
+# configured channel, with per-channel success reporting printed to the
+# workflow log. Use this to debug "I ran the workflow but nothing arrived":
+# it will tell you exactly which channel is broken (or that both worked
+# and the mail landed in Promotions / All Mail / a filter).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_test_alert(state: dict, today: str) -> int:
+    """Fire a one-shot diagnostic message via Telegram AND Gmail with per-
+    channel success reporting. No dedup — every invocation attempts a send
+    so you can retry until it works. Returns 1 if any channel succeeded.
+    """
+    now_ist = datetime.datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")
+    body_html = (
+        "🧪 <b>NSE Smart Investor — Test Alert</b>\n"
+        f"<i>Fired at {now_ist} IST from GitHub Actions workflow_dispatch.</i>\n\n"
+        "If you see this, both the workflow secrets and the send path are "
+        "wired correctly. Your real alerts (delivery digest, momentum scan, "
+        "portfolio posture) will arrive on the same channel(s).\n\n"
+        "<i>Diagnostic — no market data attached.</i>"
+    )
+    subject = f"NSE Smart Investor test alert — {now_ist} IST"
+
+    # Report per-channel status BEFORE dispatch so the log tells the whole story
+    _tg_env    = bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
+    _gmail_env = bool(
+        os.environ.get("ALERT_GMAIL_ADDRESS")
+        and os.environ.get("ALERT_GMAIL_APP_PASSWORD")
+        and os.environ.get("ALERT_GMAIL_TO")
+    )
+    print(f"[test] TELEGRAM secrets present: {_tg_env}")
+    print(f"[test]    ALERT_GMAIL_ADDRESS      set: {bool(os.environ.get('ALERT_GMAIL_ADDRESS'))}")
+    print(f"[test]    ALERT_GMAIL_APP_PASSWORD set: {bool(os.environ.get('ALERT_GMAIL_APP_PASSWORD'))}")
+    print(f"[test]    ALERT_GMAIL_TO           set: {bool(os.environ.get('ALERT_GMAIL_TO'))}")
+    print(f"[test]    TELEGRAM_BOT_TOKEN       set: {bool(os.environ.get('TELEGRAM_BOT_TOKEN'))}")
+    print(f"[test]    TELEGRAM_CHAT_ID         set: {bool(os.environ.get('TELEGRAM_CHAT_ID'))}")
+
+    _tg_ok    = send_telegram(body_html)
+    _gmail_ok = send_gmail(subject, body_html)
+
+    print(f"[test] Telegram send returned: {_tg_ok}")
+    print(f"[test] Gmail    send returned: {_gmail_ok}")
+
+    if _tg_ok or _gmail_ok:
+        print("[test] SUCCESS — at least one channel accepted the message. "
+              "If you don't see it in Telegram/Gmail, check: (1) Gmail Spam / "
+              "Promotions / All Mail folders, (2) that you sent your bot the "
+              "initial 'hi' message so it can DM you, (3) the recipient "
+              "address in ALERT_GMAIL_TO.")
+        return 1
+
+    print("[test] FAILURE — no channel accepted the message. "
+          "Check the *_ok logs above: if send_telegram printed 'FAILED' the "
+          "bot token or chat id is wrong; if send_gmail's GmailAlerter said "
+          "console-fallback, one or more ALERT_GMAIL_* secrets are missing "
+          "or misspelled.")
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Portfolio posture — analyse Angel One holdings + intraday positions
 #
 # Fires once per day (typically 14:00 IST via the market-digest workflow's
@@ -573,9 +635,10 @@ def main() -> int:
 
     # morning-digest fires pre-market (09:00 IST); portfolio-posture can also
     # run after-hours (holdings LTP is snapshot-based from Angel One's last
-    # trade). So both bypass the market-hours guard. Other modes still enforce.
-    if mode not in ("morning-digest", "portfolio-posture") and not force \
-            and not _is_market_hours():
+    # trade). Test mode must ALWAYS run — its whole purpose is diagnostics.
+    # Other modes still enforce the market-hours guard unless --force.
+    _bypass_market_hours = ("morning-digest", "portfolio-posture", "test")
+    if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
         return 0
 
@@ -589,6 +652,8 @@ def main() -> int:
         total += check_momentum_opportunities(state, today)
     elif mode == "portfolio-posture":
         total += check_portfolio_posture(state, today)
+    elif mode == "test":
+        total += check_test_alert(state, today)
     else:   # default
         total += check_price_alerts(state, today)
         total += check_vix_regime(state, today)

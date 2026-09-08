@@ -35,11 +35,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Which digest to fire (morning-digest | momentum | portfolio-posture)"
+        description: "Which digest to fire"
         required: true
-        default: "morning-digest"
+        default: "test"
         type: choice
         options:
+          - test               # diagnostic — proves both channels deliver
           - morning-digest
           - momentum
           - portfolio-posture
@@ -103,7 +104,17 @@ jobs:
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
-        run: python alerts/check_alerts.py --mode=${{ steps.pick.outputs.mode }}
+        # --force on workflow_dispatch so a manual "Run workflow" click for
+        # momentum mode works OUTSIDE market hours too (otherwise the
+        # market-hours guard silently no-ops evening / weekend runs and it
+        # looks like the workflow is broken). Scheduled cron runs never pass
+        # --force — they respect the guard as intended.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python alerts/check_alerts.py --mode=${{ steps.pick.outputs.mode }} --force
+          else
+            python alerts/check_alerts.py --mode=${{ steps.pick.outputs.mode }}
+          fi
 
       - name: Save alert state
         if: always()
