@@ -87,12 +87,13 @@ ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  ANGEL_TOTP_SECRET=..
 # ── Connected — show tabs ────────────────────────────────────────────────
 st.success("Angel One connected", icon="🟢")
 
-tab_ao1, tab_ao2, tab_ao3, tab_ao4, tab_ao5 = st.tabs([
+tab_ao1, tab_ao2, tab_ao3, tab_ao4, tab_ao5, tab_ao6 = st.tabs([
     "📊 Account Overview",
     "💼 Holdings",
     "⚡ Today's Positions",
     "📋 Orders & Trades",
     "🛒 Quick Order",
+    "🧭 Posture Analysis",
 ])
 
 # ── TAB 1: ACCOUNT OVERVIEW ───────────────────────────────────────────────
@@ -404,3 +405,114 @@ with tab_ao5:
                 st.error(f"Order failed: {_result.get('message', 'Unknown error')}")
             else:
                 st.error("Could not connect to Angel One — check session")
+
+# ── TAB 6: POSTURE ANALYSIS ────────────────────────────────────────────────
+# Runs the same six-filter momentum recipe used by the alerts' momentum scan
+# on every delivery holding and every open intraday position, so the user
+# sees at a glance which names still have their thesis intact vs which have
+# decayed. Pure analysis (no order side-effects). See
+# analysis/portfolio_posture.py for the classifier.
+with tab_ao6:
+    st.subheader("Posture Analysis")
+    st.caption(
+        "Descriptive posture per holding using the same 55-day breakout + "
+        "1.5× volume + RSI 55–75 + trend + VWAP + ATR filters the momentum "
+        "scanner uses. **Not advice** — position sizing and stops are yours."
+    )
+
+    _ap_c1, _ap_c2 = st.columns([1, 1])
+    with _ap_c1:
+        _do_del = st.checkbox("Analyse delivery holdings", value=True, key="ap_do_del")
+    with _ap_c2:
+        _do_int = st.checkbox("Analyse intraday positions", value=True, key="ap_do_int")
+
+    if st.button("Run posture analysis", type="primary", key="ap_run"):
+        from analysis.portfolio_posture import (
+            analyse_holdings, analyse_positions, format_portfolio_message,
+        )
+        from data.fetcher import fetch_single
+
+        def _fetch(sym: str):
+            try:
+                return fetch_single(sym, period="2y")
+            except Exception:
+                return None
+
+        _nifty = None
+        try:
+            _nifty = fetch_single("^NSEI", period="2y")
+        except Exception:
+            pass
+
+        _hpost, _ipost = [], []
+        with st.spinner("Analysing holdings…"):
+            if _do_del:
+                _holdings_now = _ao_get_holdings() or []
+                _hpost = analyse_holdings(_holdings_now, _fetch, nifty_history=_nifty)
+            if _do_int:
+                _pos_now = _ao_get_positions() or {"day": [], "net": []}
+                _ipost = analyse_positions(_pos_now.get("day") or [], _fetch)
+
+        # Rendering: colour chip per posture, sorted with EXIT_WATCH first
+        _order = {"EXIT_WATCH": 0, "TRIM_WATCH": 1, "HOLD": 2, "ADD_WATCH": 3, "STOPPED_OUT": 4}
+        _hpost.sort(key=lambda h: _order.get(h.posture, 9))
+
+        _colour = {
+            "EXIT_WATCH":  "#ef5350",   # red
+            "TRIM_WATCH":  "#ffa726",   # amber
+            "HOLD":        "#42a5f5",   # blue
+            "ADD_WATCH":   "#26a69a",   # green
+            "STOPPED_OUT": "#8d6e63",   # brown
+            "STOP_HIT":    "#ef5350",
+            "TARGET_HIT":  "#26a69a",
+            "TRAIL_TIGHTER":"#ffa726",
+            "RUNNING":     "#42a5f5",
+            "UNCLEAR":     "#8d6e63",
+        }
+
+        if _hpost:
+            st.markdown("#### 💼 Delivery holdings")
+            for h in _hpost:
+                _c = _colour.get(h.posture, "#42a5f5")
+                st.markdown(
+                    f'<div style="border-left:4px solid {_c}; padding:8px 12px;'
+                    f' margin:6px 0; background:rgba(66,165,245,0.05)">'
+                    f'<b>{h.symbol}</b> · '
+                    f'<span style="color:{_c};font-weight:600">{h.posture.replace("_"," ")}</span> · '
+                    f'{h.filters_passing}/6 filters · P&L {h.pnl_pct:+.2f}%<br>'
+                    f'<span style="color:#888;font-size:0.9em">{h.reason}</span><br>'
+                    f'<span style="font-size:0.85em">RSI {h.rsi} · SMA50 ₹{h.sma50:,.2f} · '
+                    f'ATR ₹{h.atr:,.2f} · Suggested stop ₹{h.suggested_stop:,.2f} · '
+                    f'RS-63d {h.rs_63d:+.1f}%</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        elif _do_del:
+            st.info("No delivery holdings, or all failed to fetch history.")
+
+        if _ipost:
+            st.markdown("#### ⚡ Intraday positions")
+            for p in _ipost:
+                _c = _colour.get(p.posture, "#42a5f5")
+                st.markdown(
+                    f'<div style="border-left:4px solid {_c}; padding:8px 12px;'
+                    f' margin:6px 0; background:rgba(66,165,245,0.05)">'
+                    f'<b>{p.symbol}</b> · '
+                    f'<span style="color:{_c};font-weight:600">{p.posture.replace("_"," ")}</span> · '
+                    f'P&L {p.pnl_pct:+.2f}%<br>'
+                    f'<span style="color:#888;font-size:0.9em">{p.reason}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        elif _do_int:
+            st.info("No open intraday positions today.")
+
+        if _hpost or _ipost:
+            with st.expander("📨 Preview alert message"):
+                st.code(format_portfolio_message(_hpost, _ipost), language="text")
+    else:
+        st.info(
+            "Click **Run posture analysis** to fetch your Angel One holdings and "
+            "score each name on the 6-filter momentum recipe. Fresh network call — "
+            "takes ~10–30 seconds depending on holdings count."
+        )
