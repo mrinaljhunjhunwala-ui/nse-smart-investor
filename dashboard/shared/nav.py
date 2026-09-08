@@ -18,7 +18,7 @@ import trade_store as _store
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre"],
     "Markets":   ["Market Live", "Overview", "Quality Watch", "FII / DII Flows"],
-    "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Tomorrow's Watchlist"],
+    "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Stock Journal", "Tomorrow's Watchlist"],
     "Trading":   ["Intraday Trader", "Smart Screener"],
     # Swing Checklist folded into Analyze Stock as an expander
     # (Analysis-page-consolidation #5). The standalone page is removed.
@@ -37,6 +37,7 @@ _PAGE_EMOJI: dict = {
     "My Portfolio":    "🏠",
     "Paper Trades":    "📂",
     "My Watchlist":    "⭐",
+    "Stock Journal":   "📓",
     "Tomorrow's Watchlist": "📅",
     "Analyze Stock":   "🔍",
     "Backtest":        "🧪",
@@ -59,6 +60,7 @@ _PAGE_FULL_NAME: dict = {
     "My Portfolio":    "🏠 My Portfolio",
     "Paper Trades":    "📂 Paper Trades",
     "My Watchlist":    "⭐ My Watchlist",
+    "Stock Journal":   "📓 Stock Journal",
     "Tomorrow's Watchlist": "📅 Tomorrow's Watchlist",
     "Analyze Stock":   "🔍 Analyze Stock",
     "Backtest":        "🧪 Backtest",
@@ -96,6 +98,7 @@ _PAGE_FILE = {
     # "Max Pain Calculator" / "PCR Zone Reference" tabs.
     "Intraday Trader": "pages/11_intraday_trader.py",
     "Position Sizer":  "pages/12_position_sizer.py",
+    "Stock Journal":   "pages/13_stock_journal.py",
     "My Watchlist":    "pages/14_my_watchlist.py",
     "Investor Guide":  "pages/15_investor_guide.py",
     "Angel One":       "pages/16_angel_one.py",

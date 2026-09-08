@@ -79,7 +79,14 @@ def test_all_pages_present():
     # 2026-08-30 sprint (Analysis-page consolidation): −1 page
     #   * 13_swing_checklist.py removed — its 8-factor go/no-go was folded
     #     into 04_analyze_stock.py via dashboard/shared/checklist_ui.py.
-    assert len(_PAGES) == 19, f"expected 19 pages, found {len(_PAGES)}: {_IDS}"
+    #
+    # 2026-09-09 (PR 3 alerts follow-through): +1 page
+    #   * 13_stock_journal.py — reclaims the number vacated by the swing
+    #     checklist removal. Backing store is data/stock_journal.csv +
+    #     alerts/journal_store.py (already shipped in PR #74). Weekly
+    #     digest reads entries added in the last 7 days and reviews due
+    #     in the next 7 days.
+    assert len(_PAGES) == 20, f"expected 20 pages, found {len(_PAGES)}: {_IDS}"
 
 
 @pytest.mark.smoke

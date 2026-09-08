@@ -611,13 +611,217 @@ def check_portfolio_posture(state: dict, today: str) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Intraday morning watchlist — 09:20 IST
+#
+# Not a true ORB scan (that needs intraday tick data — PR 4). Instead, reads
+# the persisted top-picks snapshot and reformats the top 5 delivery-quality
+# names as intraday setups: yesterday's close as the anchor, ATR-derived
+# ORB high/low, tighter stops (0.5-ATR), tighter targets (1-ATR).
+#
+# The rationale: names that pass the delivery-quality composite filter also
+# tend to trend intraday. Framing them with intraday levels gives a same-day
+# trading angle without a second scan.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_intraday_watchlist(state: dict, today: str, *, max_picks: int = 5) -> int:
+    """Reformat the top-picks snapshot as intraday setups. Once per day."""
+    key = "intraday_watchlist"
+    if _already_fired(state, key, today):
+        return 0
+
+    try:
+        import trade_store as store
+        from data.fetcher import fetch_single
+    except Exception as _e:
+        print(f"[intraday] import failed: {_e}")
+        return 0
+
+    try:
+        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+    except Exception as _e:
+        print(f"[intraday] kv_get failed: {_e}")
+        return 0
+
+    if not (snap and isinstance(snap, dict) and isinstance(snap.get("data"), dict)):
+        print("[intraday] no persisted top-picks snapshot — skipping")
+        return 0
+
+    buys = snap["data"].get("buys") or []
+    if not buys:
+        print("[intraday] snapshot has 0 buys — nothing to reformat")
+        return 0
+
+    # Enrich each with ATR-derived intraday levels
+    lines = [
+        "⚡ <b>Intraday Morning Watchlist</b>",
+        f"<i>Top {min(max_picks, len(buys))} names from the delivery scan, "
+        f"reframed with intraday levels for today's session.</i>",
+        "",
+    ]
+    n_enriched = 0
+    for i, b in enumerate(buys[:max_picks], start=1):
+        tk = b.get("ticker", "?")
+        try:
+            df = fetch_single(tk, period="3mo")
+        except Exception as _fe:
+            _log.debug("intraday fetch failed for %s: %s", tk, _fe)
+            df = None
+
+        if df is None or df.empty or len(df) < 20:
+            # Skip enrichment for this row but still surface the name
+            lines.append(f"{i}. <b>{tk}</b> — data unavailable for intraday levels")
+            continue
+
+        # Yesterday's close as anchor
+        y_close = float(df["Close"].iloc[-1])
+        # Simple ATR(14) — same convention as momentum_scanner
+        high, low, close = df["High"], df["Low"], df["Close"]
+        prev_close = close.shift(1)
+        tr = (high - low).combine(
+            (high - prev_close).abs(), max
+        ).combine((low - prev_close).abs(), max)
+        atr = float(tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean().iloc[-1])
+
+        orb_hi = y_close + 0.5 * atr
+        orb_lo = y_close - 0.5 * atr
+        stop   = y_close - 0.5 * atr    # 0.5-ATR intraday stop
+        target = y_close + 1.0 * atr    # 1-ATR target = 2R on a 0.5-ATR stop
+
+        lines.append(
+            f"{i}. <b>{tk}</b> · y-close ₹{y_close:,.2f} · ATR₁₄ ₹{atr:.2f}"
+        )
+        lines.append(
+            f"   ORB above ₹{orb_hi:,.2f} (long) / below ₹{orb_lo:,.2f} (short) · "
+            f"Intraday stop ₹{stop:,.2f} · Target ₹{target:,.2f}"
+        )
+        n_enriched += 1
+
+    lines.extend([
+        "",
+        "<i>Intraday framing of delivery-quality picks. Wait 15 min after open "
+        "before entering — let the true opening range establish. Descriptive "
+        "levels, not advice.</i>",
+    ])
+
+    if n_enriched == 0:
+        print("[intraday] no rows could be enriched — skipping send")
+        return 0
+
+    msg = "\n".join(lines)
+    if dispatch(msg, subject="Intraday Morning Watchlist — NSE Smart Investor"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sunday weekly digest — 09:00 IST Sunday
+#
+# Zooms out from the daily fires: current top-picks list, journal entries
+# added this week, and any reviews due next week. Meant for the "how did
+# my thesis basket evolve" question rather than "what's fresh today".
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_weekly_digest(state: dict, today: str) -> int:
+    """Sunday-only weekly summary. Once per week."""
+    # Dedup by ISO week — one fire per week, not per day
+    _week_id = datetime.datetime.strptime(today, "%Y-%m-%d").strftime("%G-W%V")
+    key = f"weekly_digest_{_week_id}"
+    if _already_fired(state, key, today):
+        return 0
+
+    now_ist = datetime.datetime.now(_IST)
+    # Sunday guard — check_alerts.py's dispatcher gates the fire time but
+    # the mode itself belt-and-braces refuses to run mid-week even if
+    # someone workflow_dispatch's it (weekly ≠ daily).
+    if now_ist.weekday() != 6:   # Monday=0 ... Sunday=6
+        print(f"[weekly] not Sunday (weekday={now_ist.weekday()}) — skipping")
+        return 0
+
+    lines = [
+        "📆 <b>Weekly Digest — Week Ahead</b>",
+        f"<i>Sunday {today}. Roll-up of last week's picks + journal + review due.</i>",
+        "",
+    ]
+
+    # Section 1 — current top-picks list (from the persisted snapshot)
+    try:
+        import trade_store as store
+        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+        buys = (snap or {}).get("data", {}).get("buys", []) or []
+    except Exception as _e:
+        print(f"[weekly] snapshot read failed: {_e}")
+        buys = []
+
+    if buys:
+        lines.append("<b>Current top delivery picks going into the week</b>")
+        for i, b in enumerate(buys[:5], start=1):
+            tk = b.get("ticker", "?")
+            score = b.get("score", 0)
+            act   = b.get("action", "").replace("_", " ")
+            lines.append(f"{i}. <b>{tk}</b> — {act} · Score {score}/90")
+        lines.append("")
+    else:
+        lines.append("<i>No top-picks snapshot to summarise this week.</i>")
+        lines.append("")
+
+    # Section 2 — journal entries added this week
+    try:
+        from alerts.journal_store import read_entries
+        entries = read_entries()
+    except Exception as _e:
+        print(f"[weekly] journal read failed: {_e}")
+        entries = []
+
+    _week_start = (now_ist - datetime.timedelta(days=7)).date().isoformat()
+    recent = [e for e in entries if e.added_date >= _week_start]
+    if recent:
+        lines.append(f"<b>Journal entries this week — {len(recent)}</b>")
+        for e in recent[:8]:
+            lines.append(f"• <b>{e.ticker}</b> ({e.status}) — {e.thesis[:80]}")
+        lines.append("")
+
+    # Section 3 — reviews due in the next 7 days
+    _due_cutoff = (now_ist + datetime.timedelta(days=7)).date().isoformat()
+    due = [
+        e for e in entries
+        if e.status == "open" and e.review_date and e.review_date <= _due_cutoff
+    ]
+    if due:
+        lines.append(f"<b>Journal reviews due next week — {len(due)}</b>")
+        for e in sorted(due, key=lambda x: x.review_date)[:8]:
+            lines.append(f"• <b>{e.ticker}</b> — review by {e.review_date}: {e.thesis[:80]}")
+        lines.append("")
+
+    if len(lines) <= 4:
+        # Only the header + "no data" line landed — send a "quiet week" note
+        # rather than a near-empty message.
+        lines.append("<i>Quiet week — no snapshot, no journal activity. Nothing to review.</i>")
+
+    lines.extend([
+        "",
+        "<i>Weekly roll-up. Descriptive, not advice.</i>",
+    ])
+    msg = "\n".join(lines)
+
+    if dispatch(msg, subject=f"Weekly Digest — week of {today}"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main — mode-based dispatch
 #
 # Modes:
-#   default          — the original 15-min market-alerts cadence
-#                      (price CSV + VIX + Nifty trend)
-#   morning-digest   — 09:00 IST daily: delivery top-picks digest
-#   momentum         — every 30 min market hours: momentum opportunities
+#   default              — the original 15-min market-alerts cadence
+#                          (price CSV + VIX + Nifty trend)
+#   morning-digest       — 09:00 IST daily: delivery top-picks digest
+#   intraday-watchlist   — 09:20 IST daily: intraday framing of top picks
+#   momentum             — every 30 min market hours: momentum opportunities
+#   portfolio-posture    — 14:00 IST daily: Angel One holdings posture
+#   weekly-digest        — 09:00 IST Sunday: week-ahead summary
+#   test                 — diagnostic; proves both channels deliver
 #
 # --force skips the market-hours guard for local/manual runs.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -637,7 +841,10 @@ def main() -> int:
     # run after-hours (holdings LTP is snapshot-based from Angel One's last
     # trade). Test mode must ALWAYS run — its whole purpose is diagnostics.
     # Other modes still enforce the market-hours guard unless --force.
-    _bypass_market_hours = ("morning-digest", "portfolio-posture", "test")
+    _bypass_market_hours = (
+        "morning-digest", "portfolio-posture", "test",
+        "weekly-digest", "intraday-watchlist",
+    )
     if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
         return 0
@@ -648,10 +855,14 @@ def main() -> int:
     total = 0
     if mode == "morning-digest":
         total += check_delivery_digest(state, today)
+    elif mode == "intraday-watchlist":
+        total += check_intraday_watchlist(state, today)
     elif mode == "momentum":
         total += check_momentum_opportunities(state, today)
     elif mode == "portfolio-posture":
         total += check_portfolio_posture(state, today)
+    elif mode == "weekly-digest":
+        total += check_weekly_digest(state, today)
     elif mode == "test":
         total += check_test_alert(state, today)
     else:   # default
