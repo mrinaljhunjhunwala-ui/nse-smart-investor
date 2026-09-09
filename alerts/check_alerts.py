@@ -161,11 +161,39 @@ def _save_state(state: dict) -> None:
         print(f"[state] could not save: {e}")
 
 
+# _FORCE_SEND is set to True by main() when --force is on argv. It makes
+# _already_fired() always return False AND _mark_fired() a no-op, so a
+# manual test run (workflow_dispatch) does not pollute the shared state
+# file and thereby starve subsequent scheduled runs of the same bucket.
+# Root cause of "scheduled cron produced no email" bug diagnosed via the
+# GitHub Actions runs API 2026-09-09: workflow_dispatch runs at 12:58 and
+# 13:04 IST stamped momentum_pm=today, then every scheduled fire that
+# afternoon saw dedup-set and exited in <1 second silently.
+_FORCE_SEND = False
+
+
 def _already_fired(state: dict, key: str, today: str) -> bool:
-    return state.get(key) == today
+    """Dedup check. Prints when it's returning True so scheduled runs that
+    silently skip because of dedup show up in the workflow log — before
+    this diagnostic print, the "successful 1-second run that sent nothing"
+    was indistinguishable from a healthy send in the Actions UI."""
+    if _FORCE_SEND:
+        # --force bypasses dedup for manual testing so the tester actually
+        # sees the alert land in Gmail/Telegram right now.
+        return False
+    already = state.get(key) == today
+    if already:
+        print(f"[dedup] '{key}' already fired today ({today}) — skipping this check")
+    return already
 
 
 def _mark_fired(state: dict, key: str, today: str) -> None:
+    """Set dedup state. --force is a no-op so manual tests don't leave a
+    stamp that later starves the real scheduled fire."""
+    if _FORCE_SEND:
+        print(f"[dedup] --force is set; NOT marking '{key}' fired "
+              "(manual test won't block the real scheduled fire)")
+        return
     state[key] = today
 
 
@@ -834,8 +862,30 @@ def _parse_mode(argv: list[str]) -> str:
 
 
 def main() -> int:
-    force = "--force" in sys.argv
-    mode  = _parse_mode(sys.argv)
+    force        = "--force" in sys.argv
+    clear_today  = "--clear-today" in sys.argv
+    mode         = _parse_mode(sys.argv)
+
+    # Propagate --force into the module-level dedup-bypass flag so every
+    # _already_fired() call in this run returns False and every
+    # _mark_fired() call is a no-op. See _FORCE_SEND above for why.
+    global _FORCE_SEND
+    _FORCE_SEND = force
+
+    # --clear-today: wipe today's dedup entries from the state file BEFORE
+    # this run's own state pruning. Use this exactly once after a stale
+    # manual-test dedup entry has starved a real scheduled fire — after
+    # which the fix above (dedup bypass on --force) prevents recurrence.
+    if clear_today:
+        try:
+            _today_iso = datetime.datetime.now(_IST).strftime("%Y-%m-%d")
+            _existing = _load_state()
+            _wiped    = {k: v for k, v in _existing.items() if v != _today_iso}
+            _dropped  = len(_existing) - len(_wiped)
+            _save_state(_wiped)
+            print(f"[clear-today] dropped {_dropped} state entries for {_today_iso}")
+        except Exception as _e:
+            print(f"[clear-today] failed: {_e}")
 
     # morning-digest fires pre-market (09:00 IST); portfolio-posture can also
     # run after-hours (holdings LTP is snapshot-based from Angel One's last
