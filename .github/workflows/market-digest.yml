@@ -1,5 +1,10 @@
 name: Market Digest
 
+# 2026-09-09 re-registration nudge: the API showed 0 scheduled fires for this
+# workflow since it was created, likely because it was modified in 4 rapid
+# PRs on 2026-09-08 and GitHub's Actions scheduler paused the cron. Touching
+# the file forces a re-registration on the next default-branch push.
+#
 # Two new alert cadences on top of the existing Market Alerts workflow:
 #
 #   1. Morning Delivery Digest — 09:00 IST daily (Mon-Fri), pre-market open.

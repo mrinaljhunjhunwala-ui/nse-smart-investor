@@ -1,5 +1,11 @@
 name: Market Alerts
 
+# 2026-09-09 re-registration nudge: last scheduled fire was 2026-09-08 12:16
+# UTC, then the cron went silent. Suspected cause: GitHub's scheduler paused
+# the cron after 4 rapid workflow-file modifications on the sibling
+# market-digest.yml in the same 24-hour window. Touching this file forces
+# re-registration on the next default-branch push.
+#
 # Runs every 15 minutes during NSE market hours and sends Telegram alerts
 # for custom price levels, VIX fear/panic regimes, and Nifty downtrends.
 #
