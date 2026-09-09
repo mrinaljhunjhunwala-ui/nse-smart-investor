@@ -58,6 +58,11 @@ on:
           - momentum
           - portfolio-posture
           - weekly-digest
+      clear_today:
+        description: "Wipe today's dedup state before running (fixes 'scheduled runs skipped because a manual test polluted state')"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: market-digest-${{ github.event.schedule || github.event.inputs.mode }}
@@ -128,11 +133,20 @@ jobs:
         # looks like the workflow is broken). Scheduled cron runs never pass
         # --force — they respect the guard as intended.
         run: |
+          # Assemble flags. --force on workflow_dispatch bypasses BOTH the
+          # market-hours guard AND the dedup check (see check_alerts.py's
+          # _FORCE_SEND) so a manual test always sends AND never stamps
+          # today's state, which was the root cause of "scheduled runs
+          # produce nothing" diagnosed 2026-09-09. --clear-today wipes
+          # any lingering dedup entries for today when the input is set.
+          FLAGS="--mode=${{ steps.pick.outputs.mode }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            python alerts/check_alerts.py --mode=${{ steps.pick.outputs.mode }} --force
-          else
-            python alerts/check_alerts.py --mode=${{ steps.pick.outputs.mode }}
+            FLAGS="$FLAGS --force"
+            if [ "${{ github.event.inputs.clear_today }}" = "true" ]; then
+              FLAGS="$FLAGS --clear-today"
+            fi
           fi
+          python alerts/check_alerts.py $FLAGS
 
       - name: Save alert state
         if: always()
