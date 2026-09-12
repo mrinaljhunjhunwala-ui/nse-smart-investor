@@ -32,10 +32,10 @@ from dashboard.shared.chart_helpers import (
 from dashboard.shared.cache import load_vix_data
 
 apply_design()
-render_sidebar(current="Overview")
+render_sidebar(current="Market Breadth")
 render_top_bar()
 
-st.title("Overview")
+st.title("Market Breadth")
 
 st.caption("Market snapshot, macro context, and breadth — everything for a market read in one place")
 
