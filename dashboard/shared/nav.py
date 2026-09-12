@@ -15,22 +15,37 @@ if _ROOT not in sys.path:
 import trade_store as _store
 
 
+# ── SLICE 1 · UI/UX 2026-09 · sidebar IA restructure ───────────────────────
+# Design doc: docs/UI_UX_DESIGN_2026-09.md §2 · reference mockup:
+# https://claude.ai/code/artifact/d630c73b-5365-4061-83f4-d4bb1cf136b5
+#
+# Changes vs pre-Slice-1:
+#   - Trading group merged into "Tools & Ops"; Intraday moves there
+#   - New "Scanners & Signals" group (Screener + Tomorrow's WL + TQS)
+#   - Tomorrow's Watchlist moves Portfolio -> Scanners & Signals
+#   - TQS moves Analysis -> Scanners & Signals
+#   - Verdict Calibration moves Analysis -> Tools & Ops
+#   - Deep Dive removed from sidebar (fold into Analyze Stock as a tab in
+#     a follow-up slice); page file + switch_page routing kept intact
+#   - "Market Live" -> "Live Ticker"; "Overview" -> "Market Breadth"
+#   - TQS emoji retagged 📊 -> 📈 to resolve the emoji collision with
+#     the old "Overview" (now "Market Breadth")
+# Palette shift (saffron accent, Instrument Serif type) is a later slice;
+# this slice ships IA + sidebar chrome only.
 _NAV_GROUPS: dict = {
-    "Home":      ["Command Centre"],
-    "Markets":   ["Market Live", "Overview", "Quality Watch", "FII / DII Flows"],
-    "Portfolio": ["My Portfolio", "Paper Trades", "My Watchlist", "Stock Journal", "Tomorrow's Watchlist"],
-    "Trading":   ["Intraday Trader", "Smart Screener"],
-    # Swing Checklist folded into Analyze Stock as an expander
-    # (Analysis-page-consolidation #5). The standalone page is removed.
-    "Analysis":  ["Analyze Stock", "Backtest", "Trend Quality Score",
-                  "Deep Dive Analysis", "Verdict Calibration"],
-    "Tools":     ["Position Sizer", "Angel One", "Investor Guide"],
+    "Home":                ["Command Centre"],
+    "Markets":             ["Live Ticker", "Market Breadth", "Quality Watch", "FII / DII Flows"],
+    "Portfolio":           ["My Portfolio", "Paper Trades", "My Watchlist", "Stock Journal"],
+    "Scanners & Signals":  ["Smart Screener", "Tomorrow's Watchlist", "Trend Quality Score"],
+    "Analysis":            ["Analyze Stock", "Backtest"],
+    "Tools & Ops":         ["Intraday Trader", "Position Sizer", "Angel One",
+                            "Verdict Calibration", "Investor Guide"],
 }
 
 _PAGE_EMOJI: dict = {
     "Command Centre":  "🎯",
-    "Market Live":     "📡",
-    "Overview":        "📊",
+    "Live Ticker":     "📡",
+    "Market Breadth":  "📊",
     "Quality Watch":   "🏆",
     "Intraday Trader": "⚡",
     "Smart Screener":  "🔎",
@@ -44,16 +59,16 @@ _PAGE_EMOJI: dict = {
     "Position Sizer":  "📐",
     "Angel One":       "🔗",
     "Investor Guide":  "📖",
-    "Trend Quality Score": "📊", # <-- Added Page Emoji
-    "Deep Dive Analysis": "📑",
+    "Trend Quality Score": "📈",  # retagged from 📊 (collision with Market Breadth)
+    "Deep Dive Analysis": "📑",   # not in nav; kept for st.switch_page routing
     "Verdict Calibration": "📏",
     "FII / DII Flows":     "🏦",
 }
 
 _PAGE_FULL_NAME: dict = {
     "Command Centre":  "🎯 Command Centre",
-    "Market Live":     "📡 Market Live",
-    "Overview":        "📊 Overview",
+    "Live Ticker":     "📡 Live Ticker",
+    "Market Breadth":  "📊 Market Breadth",
     "Quality Watch":   "🏆 Quality Watch",
     "Intraday Trader": "⚡ Intraday Trader",
     "Smart Screener":  "🔎 Smart Screener",
@@ -67,25 +82,25 @@ _PAGE_FULL_NAME: dict = {
     "Position Sizer":  "📐 Position Sizer",
     "Angel One":       "🔗 Angel One",
     "Investor Guide":  "📖 Investor Guide",
-    "Trend Quality Score": "📊 Trend Quality Score", # <-- Added Full Display Name
+    "Trend Quality Score": "📈 Trend Quality Score",
     "Deep Dive Analysis": "📑 Deep Dive Analysis",
     "Verdict Calibration": "📏 Verdict Calibration",
     "FII / DII Flows":     "🏦 FII / DII Flows",
 }
 
 _group_icons: dict = {
-    "Home": "🎯", "Markets": "📊", "Trading": "⚡", "Portfolio": "💼",
-    "Analysis": "🔍", "Tools": "🛠",
+    "Home": "🎯", "Markets": "📊", "Portfolio": "💼",
+    "Scanners & Signals": "🔎", "Analysis": "🔍", "Tools & Ops": "🛠",
 }
 
 
 
 _PAGE_FILE = {
-    "Market Live":     "pages/01_market_live.py",
+    "Live Ticker":     "pages/01_market_live.py",   # renamed from "Market Live" — file path kept
     "Command Centre":  "pages/02_command_centre.py",
     "My Portfolio":    "pages/03_my_portfolio.py",
     "Analyze Stock":   "pages/04_analyze_stock.py",
-    "Overview":        "pages/05_market_overview.py",  # MERGE: file kept, content replaced with tabbed Overview
+    "Market Breadth":  "pages/05_market_overview.py",  # renamed from "Overview" — file path kept
     "Smart Screener":  "pages/06_smart_screener.py",
     "Paper Trades":    "pages/07_paper_trades.py",
     "Backtest":        "pages/08_backtest.py",

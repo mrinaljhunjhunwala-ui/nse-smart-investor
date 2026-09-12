@@ -235,6 +235,48 @@ def apply_design():
         font-size: 13px; color: #8b8d93;
     }
 
+    /* ── SLICE 1 · UI/UX 2026-09 · sidebar group headers + active-page pill ──
+       Structural polish for the 6-group nav restructure. Group headers are
+       flattened to hairline dividers with an uppercase eyebrow label; the
+       active page gets a leading-edge accent pill so it reads at a glance.
+       Sourced from --accent (currently cyan #2fd1e0); palette shift to the
+       editorial saffron proposal is a later slice. See
+       docs/UI_UX_DESIGN_2026-09.md §3. */
+    [data-testid="stSidebar"] [data-testid="stExpander"] {
+        background: transparent !important;
+        border: 0 !important;
+        border-bottom: 1px solid rgba(255,255,255,.06) !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        padding: 10px 12px 8px !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary p,
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary span {
+        font-size: 10px !important;
+        text-transform: uppercase;
+        letter-spacing: .14em;
+        color: #8b8d93 !important;
+        font-weight: 600 !important;
+    }
+    /* Active page: leading-edge cyan pill on the disabled (current) button. */
+    [data-testid="stSidebar"] .stButton > button:disabled {
+        background: linear-gradient(90deg, rgba(47,209,224,.14), transparent 60%) !important;
+        color: #edeef0 !important;
+        border: 0 !important;
+        border-left: 3px solid #2fd1e0 !important;
+        border-radius: 0 4px 4px 0 !important;
+        padding-left: 13px !important;
+        text-align: left !important;
+        opacity: 1 !important;
+        cursor: default !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:disabled:hover {
+        color: #edeef0 !important;
+        border-color: #2fd1e0 !important;
+    }
+
     /* ── Selectbox / inputs ──────────────────────────────────────────────────── */
     [data-baseweb="select"] > div:first-child {
         background: #0e0e10; border-color: rgba(255,255,255,.1) !important;
