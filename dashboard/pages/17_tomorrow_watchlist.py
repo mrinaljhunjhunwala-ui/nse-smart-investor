@@ -47,7 +47,7 @@ render_sidebar(current="Tomorrow's Watchlist")
 render_top_bar()
 
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("Tomorrow's Watchlist")
+st.markdown('<h1 class="page-title-serif">Tomorrow\'s <em>Watchlist</em></h1>', unsafe_allow_html=True)
 st.markdown(
     "Stocks worth watching for the **next trading session**, based on today's close "
     "signals — distinct from intraday Top Picks. Breakouts setting up, breakdown risks, "

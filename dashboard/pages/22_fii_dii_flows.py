@@ -29,7 +29,7 @@ if _ROOT not in sys.path:
 from analysis import fii_dii as _fd     # noqa: E402
 
 st.set_page_config(page_title="FII / DII Flows", page_icon="🏦", layout="wide")
-st.title("FII / DII Cash-Market Flows")
+st.markdown('<h1 class="page-title-serif">FII / DII <em>Cash-Market Flows</em></h1>', unsafe_allow_html=True)
 
 st.caption(
     "Institutional net-buy/sell in the cash segment. FIIs move the tape; "

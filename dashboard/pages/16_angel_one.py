@@ -44,7 +44,7 @@ from data.angel_fetcher import (
     clear_session as _ao_clear_session,
 )
 
-st.title("Angel One – Broker Integration")
+st.markdown('<h1 class="page-title-serif">Angel <em>One</em></h1><p class="page-subtitle">Broker integration.</p>', unsafe_allow_html=True)
 
 st.markdown("Connect your Angel One SmartAPI account for live data, real holdings, and order placement.")
 

@@ -35,7 +35,7 @@ render_sidebar(current="Intraday Trader")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("Intraday Trader")
+st.markdown('<h1 class="page-title-serif">Intraday <em>Trader</em></h1>', unsafe_allow_html=True)
 
 st.markdown(
     "Real-time intraday tools — Gap Scanner, CPR Levels, ORB Setup, "

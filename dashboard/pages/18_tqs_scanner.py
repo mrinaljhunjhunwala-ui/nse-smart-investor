@@ -29,7 +29,7 @@ from dashboard.shared.design import apply_design
 apply_design()
 render_sidebar()
 
-st.title("Trend Quality Score")
+st.markdown('<h1 class="page-title-serif">Trend <em>Quality Score</em></h1>', unsafe_allow_html=True)
 
 st.caption(
     "Measures trend **health and persistence** across 4 pillars (max 90 pts). "

@@ -35,7 +35,7 @@ apply_design()
 render_sidebar(current="Market Breadth")
 render_top_bar()
 
-st.title("Market Breadth")
+st.markdown('<h1 class="page-title-serif">Market <em>Breadth</em></h1>', unsafe_allow_html=True)
 
 st.caption("Market snapshot, macro context, and breadth — everything for a market read in one place")
 
