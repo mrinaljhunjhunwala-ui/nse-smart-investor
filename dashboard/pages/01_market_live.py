@@ -25,7 +25,7 @@ from dashboard.shared.chart_helpers import (
 )
 
 apply_design()
-render_sidebar(current="Market Live")
+render_sidebar(current="Live Ticker")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
@@ -43,7 +43,7 @@ if ri > 0:
 # ── Header ─────────────────────────────────────────────────────────────────
 col_h1, col_h2 = st.columns([3, 1])
 with col_h1:
-    st.title("Market Live")
+    st.title("Live Ticker")
 
     st.markdown("Real-time NSE prices · Top movers · News signals")
 with col_h2:
