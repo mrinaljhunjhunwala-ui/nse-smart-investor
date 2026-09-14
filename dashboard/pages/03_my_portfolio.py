@@ -392,7 +392,7 @@ if _csv_source is not None:
                 f'<div style="font-size:24px;font-weight:700;color:{_ov_c}">{_ov_a} ₹{abs(_total_overall_pnl):,.0f} '
                 f'<span style="font-size:14px">({_ov_p:+.1f}%)</span></div>'
                 f'</div>'
-                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid #2fd1e0">'
+                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid #ff9500">'
                 f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Portfolio Value</div>'
                 f'<div style="font-size:24px;font-weight:700;color:#fff">₹{_total_port_value:,.0f}</div>'
                 f'</div>'
@@ -586,12 +586,12 @@ if _csv_source is not None:
             )
 
             # Aligned to design.py's "Dealing Room v2" tokens (bull #16c784 /
-            # bear #ff4d4d / caution #f2a93b / accent #2fd1e0) instead of the
+            # bear #ff4d4d / caution #f2a93b / accent #ff9500) instead of the
             # pre-redesign teal/material-green/blue set, so this page matches
             # the rest of the app now.
             _ACT_CARD_STYLE = {
                 "STRONG BUY": ("#16c784", "rgba(22,199,132,.10)"), "BUY": ("#3dbd8f", "rgba(61,189,143,.09)"),
-                "WATCHLIST":  ("#2fd1e0", "rgba(47,209,224,.09)"), "HOLD": ("#8b8d93", "rgba(255,255,255,.04)"),
+                "WATCHLIST":  ("#ff9500", "rgba(255,149,0,.09)"), "HOLD": ("#8b8d93", "rgba(255,255,255,.04)"),
                 "CAUTION":    ("#f2a93b", "rgba(242,169,59,.09)"), "EXIT": ("#ff4d4d", "rgba(255,77,77,.10)"),
             }
             _hc_grid = st.columns(2)
