@@ -979,6 +979,13 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
 _TOP_PICKS_KV_KEY  = "top_picks_snapshot"
 _TOP_PICKS_KV_USER = "_system"          # not per-user — one shared scan result
 _TOP_PICKS_MAX_AGE_SECONDS = 1200       # 20 min — tolerates one missed 15-min cron tick
+# FIX SPEED-DEV1 (2026-09-15): NSE_ACCEPT_STALE_SNAPSHOTS=1 makes every
+# persisted-snapshot age check pass regardless of wall-clock age. For local
+# dev where the GH-Actions warmer never runs against your machine's KV, a
+# stale snapshot is dramatically better than paying the 2-min live-scan
+# tax on every Command Centre / Watchlist page load. Prod stays on the
+# 20-min tick unless someone deliberately opts in.
+_ACCEPT_STALE = os.environ.get("NSE_ACCEPT_STALE_SNAPSHOTS", "").lower() in ("1", "true", "yes")
 
 # FIX WL-SNAP1: separate KV entry for the full scored map. Kept out of the
 # top-picks snapshot so the small/fast reads on that path aren't slowed by
@@ -1018,7 +1025,7 @@ def _persisted_top_picks_snapshot() -> dict | None:
         _log.debug("cache._persisted_top_picks_snapshot: bad generated_at %r: %s",
                    _gen_at, _parse_e)
         return None
-    if _age > _TOP_PICKS_MAX_AGE_SECONDS:
+    if _age > _TOP_PICKS_MAX_AGE_SECONDS and not _ACCEPT_STALE:
         return None
     data = snap.get("data")
     if not (isinstance(data, dict) and "buys" in data):
@@ -1026,6 +1033,8 @@ def _persisted_top_picks_snapshot() -> dict | None:
     out = dict(data)
     out["source"] = "persisted"
     out["generated_at"] = _gen_at
+    if _age > _TOP_PICKS_MAX_AGE_SECONDS:
+        out["stale"] = True  # UI can surface this via a chip; behaviour is opt-in via NSE_ACCEPT_STALE_SNAPSHOTS
     return out
 
 
@@ -1060,7 +1069,7 @@ def _persisted_all_scores_snapshot() -> dict | None:
         _log.debug("cache._persisted_all_scores_snapshot: bad generated_at %r: %s",
                    _gen_at, _parse_e)
         return None
-    if _age > _TOP_PICKS_MAX_AGE_SECONDS:
+    if _age > _TOP_PICKS_MAX_AGE_SECONDS and not _ACCEPT_STALE:
         return None
     data = snap.get("data")
     if not isinstance(data, dict):
@@ -1092,6 +1101,15 @@ def get_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple =
     snap = _persisted_top_picks_snapshot()
     if snap is not None:
         return snap
+
+    # FIX SPEED-DEV1 (2026-09-15): NSE_SKIP_LIVE_TOP_PICKS=1 short-circuits
+    # the ~2-min live full-universe scan and returns an empty placeholder.
+    # For local dev on a machine where the GH-Actions warmer has never run
+    # against your Postgres KV, this is what unblocks first-paint. The
+    # Command Centre UI can surface a "Top Picks not primed — run scripts/
+    # warm_top_picks.py" chip on the empty payload.
+    if os.environ.get("NSE_SKIP_LIVE_TOP_PICKS", "").lower() in ("1", "true", "yes"):
+        return {"buys": [], "source": "skipped_dev", "generated_at": None}
 
     result = _home_top_picks(vix_regime=vix_regime, n=n, sector_ranks=sector_ranks)
     result = dict(result)

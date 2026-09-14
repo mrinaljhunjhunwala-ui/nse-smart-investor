@@ -9,7 +9,11 @@
       "cwd": "${workspaceFolder}",
       "env": {
         "PYTHONUTF8": "1",
-        "PYTHONIOENCODING": "utf-8"
+        "PYTHONIOENCODING": "utf-8",
+        "NSE_SIDEBAR_QV_OFF": "1",
+        "NSE_ACCEPT_STALE_SNAPSHOTS": "1",
+        "NSE_QV_MAX_WAIT_SECONDS": "3",
+        "NSE_SKIP_LIVE_TOP_PICKS": "1"
       }
     }
   ]

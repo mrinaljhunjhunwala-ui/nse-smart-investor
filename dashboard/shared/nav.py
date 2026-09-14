@@ -142,13 +142,25 @@ def _qv_prices(tickers: tuple) -> dict:
     see live_price.py's FIX LP2 docstring) and Yahoo/NSE/Stooq are degraded
     (which happens routinely on Streamlit Cloud's shared IPs). That meant
     the ENTIRE APP could freeze for the better part of a minute on any page,
-    any time this 60s cache went cold. 10s is enough for Angel One's fast
-    batch path or a quick Yahoo/NSE hit; anything slower now degrades to
-    "price unavailable" for that ticker instead of freezing the sidebar.
+    any time this 60s cache went cold.
+
+    FIX SPEED-DEV1 (2026-09-15):
+      • `NSE_SIDEBAR_QV_OFF=1` opt-out returns {} instantly, skipping the
+        batch entirely — for local dev where you don't need the quick-view.
+      • `NSE_QV_MAX_WAIT_SECONDS` overrides the wait cap (default drops
+        from 10 -> 4s; fast networks stay under, slow paths degrade to
+        "unavailable" instead of freezing every navigation).
     """
+    if os.environ.get("NSE_SIDEBAR_QV_OFF", "").lower() in ("1", "true", "yes"):
+        return {}
+    _wait = 4
+    try:
+        _wait = int(os.environ.get("NSE_QV_MAX_WAIT_SECONDS", "4"))
+    except (TypeError, ValueError):
+        _wait = 4
     try:
         from utils.live_price import get_live_prices_batch
-        raw = get_live_prices_batch(list(tickers), max_wait_seconds=10)
+        raw = get_live_prices_batch(list(tickers), max_wait_seconds=_wait)
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "_qv_prices", _e)
         raw = {}
