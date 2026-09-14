@@ -2,13 +2,13 @@
 
 ── DESIGN TOKENS (NSE Pro v2 — "Dealing Room") ───────────────────────────────
 Reference point: the black-and-phosphor heritage of Bloomberg/Reuters terminals
-rather than a generic dark-mode SaaS dashboard. One accent (signal cyan) carries
+rather than a generic dark-mode SaaS dashboard. One accent (India saffron) carries
 all interactive/brand chrome; green and red are reserved strictly for
 buy/sell semantics so they never compete with the UI for attention.
 
   Surface   ink #09090b · surface #131316 · sunken #0e0e10 · hairline rgba(255,255,255,.08)
   Text      primary #edeef0 · dim #8b8d93 · faint #55575e
-  Signal    bull #16c784 · bear #ff4d4d · caution #f2a93b · accent #2fd1e0
+  Signal    bull #16c784 · bear #ff4d4d · caution #f2a93b · accent #ff9500
   Type      display/UI: IBM Plex Sans · data/numeric: IBM Plex Mono
   Radius    sharp 6px (tables/inputs/tape) · base 10px (cards/metrics) · soft 18px (hero panels)
 
@@ -52,7 +52,7 @@ def apply_design():
                             borderwidth=1, font=dict(color="#8b8d93", size=11)),
                 hoverlabel=dict(bgcolor="#131316", bordercolor="rgba(255,255,255,0.14)",
                                 font=dict(color="#edeef0", family="IBM Plex Mono", size=12)),
-                colorway=["#2fd1e0", "#16c784", "#f2a93b", "#ff4d4d", "#8b8d93", "#5a8fd6",
+                colorway=["#ff9500", "#16c784", "#f2a93b", "#ff4d4d", "#8b8d93", "#5a8fd6",
                           "#c77dff", "#edeef0"],
             )
         )
@@ -90,8 +90,8 @@ def apply_design():
       --amber:     #f2a93b;
 
       /* Accent — one hue for all interactive/brand chrome */
-      --accent:    #2fd1e0;
-      --accent-hi: #5cdce8;
+      --accent:    #ff9500;
+      --accent-hi: #ffb340;
 
       /* Purple/blue kept for categorical fills only (charts, sector tags) */
       --violet:    #c77dff;
@@ -113,7 +113,7 @@ def apply_design():
       --tint-bull:   rgba(22,199,132,.12);
       --tint-bear:   rgba(255,77,77,.12);
       --tint-amber:  rgba(242,169,59,.12);
-      --tint-accent: rgba(47,209,224,.12);
+      --tint-accent: rgba(255,149,0,.12);
       --tint-violet: rgba(199,125,255,.12);
 
       /* Radius */
@@ -137,7 +137,7 @@ def apply_design():
     }
     .stApp {
         background: #09090b;
-        background-image: radial-gradient(ellipse 90% 40% at 50% -10%, rgba(47,209,224,0.05) 0%, transparent 60%);
+        background-image: radial-gradient(ellipse 90% 40% at 50% -10%, rgba(255,149,0,0.05) 0%, transparent 60%);
         background-attachment: fixed;
     }
     .mono { font-family:'IBM Plex Mono','Courier New',monospace !important; font-variant-numeric: tabular-nums; }
@@ -156,7 +156,7 @@ def apply_design():
     .card-green  { background:rgba(22,199,132,.07);  border-left:3px solid #16c784; }
     .card-yellow { background:rgba(242,169,59,.07);  border-left:3px solid #f2a93b; }
     .card-red    { background:rgba(255,77,77,.07);   border-left:3px solid #ff4d4d; }
-    .card-blue   { background:rgba(47,209,224,.06);  border-left:3px solid #2fd1e0; }
+    .card-blue   { background:rgba(255,149,0,.06);  border-left:3px solid #ff9500; }
     .card-purple { background:rgba(199,125,255,.06); border-left:3px solid #c77dff; }
     .card-orange { background:rgba(242,169,59,.07);  border-left:3px solid #f2a93b; }
 
@@ -171,13 +171,13 @@ def apply_design():
     .pill-red    { display:inline-block; background:rgba(255,77,77,.12);  color:#ff4d4d; border:1px solid rgba(255,77,77,.4);  border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
     .pill-yellow { display:inline-block; background:rgba(242,169,59,.12); color:#f2a93b; border:1px solid rgba(242,169,59,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
     .pill-gray   { display:inline-block; background:rgba(255,255,255,.06); color:#8b8d93; border:1px solid rgba(255,255,255,.14); border-radius:20px; padding:3px 14px; font-size:12px; }
-    .pill-blue   { display:inline-block; background:rgba(47,209,224,.12);  color:#2fd1e0; border:1px solid rgba(47,209,224,.4);  border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
+    .pill-blue   { display:inline-block; background:rgba(255,149,0,.12);  color:#ff9500; border:1px solid rgba(255,149,0,.4);  border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
 
     /* ── Signal badges ───────────────────────────────────────────────────────── */
     .badge-buy   { background:rgba(22,199,132,.14); color:#16c784; border:1px solid #16c784; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
     .badge-sell  { background:rgba(255,77,77,.14);  color:#ff4d4d; border:1px solid #ff4d4d; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
     .badge-hold  { background:rgba(242,169,59,.14); color:#f2a93b; border:1px solid #f2a93b; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
-    .badge-watch { background:rgba(47,209,224,.14); color:#2fd1e0; border:1px solid #2fd1e0; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
+    .badge-watch { background:rgba(255,149,0,.14); color:#ff9500; border:1px solid #ff9500; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
 
     /* ── Angel One badges ────────────────────────────────────────────────────── */
     .ao-badge-on  { background:rgba(22,199,132,.08); border:1px solid rgba(22,199,132,.4); border-radius:8px; padding:10px 14px; font-size:12px; color:#16c784; margin:4px 0; display:flex; align-items:center; gap:8px; }
@@ -206,11 +206,11 @@ def apply_design():
         border: 1px solid rgba(255,255,255,.1); transition: all .15s ease;
         background: rgba(255,255,255,.04);
     }
-    .stButton > button:hover { border-color: rgba(47,209,224,.5); color:#2fd1e0; }
+    .stButton > button:hover { border-color: rgba(255,149,0,.5); color:#ff9500; }
     .stButton > button[kind="primary"] {
-        background: #2fd1e0; border:none; color:#09090b; font-weight:700;
+        background: #ff9500; border:none; color:#09090b; font-weight:700;
     }
-    .stButton > button[kind="primary"]:hover { background:#5cdce8; color:#09090b; }
+    .stButton > button[kind="primary"]:hover { background:#ffb340; color:#09090b; }
 
     /* ── Tabs ────────────────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] {
@@ -223,7 +223,7 @@ def apply_design():
         color: #55575e; transition: all .15s;
     }
     .stTabs [aria-selected="true"] {
-        background: #131316; font-weight: 700; color: #2fd1e0;
+        background: #131316; font-weight: 700; color: #ff9500;
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
@@ -239,9 +239,8 @@ def apply_design():
        Structural polish for the 6-group nav restructure. Group headers are
        flattened to hairline dividers with an uppercase eyebrow label; the
        active page gets a leading-edge accent pill so it reads at a glance.
-       Sourced from --accent (currently cyan #2fd1e0); palette shift to the
-       editorial saffron proposal is a later slice. See
-       docs/UI_UX_DESIGN_2026-09.md §3. */
+       Sourced from --accent — saffron #ff9500 as of the palette-shift slice.
+       See docs/UI_UX_DESIGN_2026-09.md §3. */
     [data-testid="stSidebar"] [data-testid="stExpander"] {
         background: transparent !important;
         border: 0 !important;
@@ -260,12 +259,12 @@ def apply_design():
         color: #8b8d93 !important;
         font-weight: 600 !important;
     }
-    /* Active page: leading-edge cyan pill on the disabled (current) button. */
+    /* Active page: leading-edge saffron pill on the disabled (current) button. */
     [data-testid="stSidebar"] .stButton > button:disabled {
-        background: linear-gradient(90deg, rgba(47,209,224,.14), transparent 60%) !important;
+        background: linear-gradient(90deg, rgba(255,149,0,.14), transparent 60%) !important;
         color: #edeef0 !important;
         border: 0 !important;
-        border-left: 3px solid #2fd1e0 !important;
+        border-left: 3px solid #ff9500 !important;
         border-radius: 0 4px 4px 0 !important;
         padding-left: 13px !important;
         text-align: left !important;
@@ -274,7 +273,7 @@ def apply_design():
     }
     [data-testid="stSidebar"] .stButton > button:disabled:hover {
         color: #edeef0 !important;
-        border-color: #2fd1e0 !important;
+        border-color: #ff9500 !important;
     }
 
     /* ── Selectbox / inputs ──────────────────────────────────────────────────── */
@@ -306,7 +305,7 @@ def apply_design():
         font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.07) !important;
     }
     [data-testid="stDataFrame"] tbody td { color: #c8cad0 !important; font-family:'IBM Plex Mono',monospace; font-size:13px; }
-    [data-testid="stDataFrame"] tbody tr:hover td { background: rgba(47,209,224,.05) !important; }
+    [data-testid="stDataFrame"] tbody tr:hover td { background: rgba(255,149,0,.05) !important; }
 
     /* ── Order form ──────────────────────────────────────────────────────────── */
     .order-buy  { background:rgba(22,199,132,.06); border:1px solid rgba(22,199,132,.3); border-radius:10px; padding:18px; }
@@ -350,9 +349,9 @@ def apply_design():
     @keyframes ticker-scroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
     .ticker-wrap {
         overflow:hidden; padding:9px 0; margin:8px 0;
-        border-top:1px solid rgba(47,209,224,.3);
+        border-top:1px solid rgba(255,149,0,.3);
         border-bottom:1px solid rgba(255,255,255,.05);
-        background:linear-gradient(180deg, rgba(47,209,224,.04), transparent);
+        background:linear-gradient(180deg, rgba(255,149,0,.04), transparent);
     }
     .ticker-content {
         display:inline-block; white-space:nowrap; animation:ticker-scroll 80s linear infinite;
@@ -395,7 +394,7 @@ def _signal_card(ticker, action, price, entry, stop, target, reason, score=None,
         "BUY":  ("#16c784", "rgba(22,199,132,.12)"),
         "SELL": ("#ff4d4d", "rgba(255,77,77,.12)"),
         "HOLD": ("#f2a93b", "rgba(242,169,59,.12)"),
-        "WATCH":("#2fd1e0", "rgba(47,209,224,.12)"),
+        "WATCH":("#ff9500", "rgba(255,149,0,.12)"),
     }
     tc, bc = COLORS.get(action, COLORS["HOLD"])
     rr = (target - entry) / (entry - stop) if (entry - stop) > 0.01 else 0
