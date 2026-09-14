@@ -26,7 +26,7 @@ render_sidebar(current="Investor Guide")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("Investor Guide – How to Read This Dashboard")
+st.markdown('<h1 class="page-title-serif">Investor <em>Guide</em></h1><p class="page-subtitle">How to read this dashboard.</p>', unsafe_allow_html=True)
 
 st.markdown(
     "This guide explains every signal, score, and term used in the NSE Smart Investor platform.  \n"

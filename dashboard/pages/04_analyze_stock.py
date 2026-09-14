@@ -86,7 +86,7 @@ render_sidebar(current="Analyze Stock")
 render_top_bar()
 
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("Analyze Any NSE Stock")
+st.markdown('<h1 class="page-title-serif">Analyze <em>Any NSE Stock</em></h1>', unsafe_allow_html=True)
 
 st.markdown(
     "Search by company name or ticker — get a full **trend-quality score**, "
