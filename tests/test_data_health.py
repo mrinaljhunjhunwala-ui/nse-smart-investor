@@ -129,10 +129,11 @@ def test_render_data_health_html_produces_string_with_status_pills():
     assert isinstance(html, str)
     for label in ("HealthySrc", "StaleSrc", "DegradedSrc", "OfflineSrc", "IdleSrc"):
         assert label in html
-    # Bucketing labels
-    assert "providers up" in html
-    assert "providers degraded" in html
-    assert "providers idle" in html
+    # Bucketing labels — unavailable + idle now share the calm "inactive" bucket
+    # so the panel stops shouting about providers that are simply not configured.
+    assert "providers live" in html
+    assert "needs attention" in html
+    assert "inactive" in html
 
 
 def test_render_data_health_html_empty_state():
