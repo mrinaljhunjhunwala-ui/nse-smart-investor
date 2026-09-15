@@ -67,6 +67,7 @@ from dashboard.shared.cache import (
     get_display_name,
     load_ticker_df,
 )
+from dashboard.shared.ui_components import chip_pill, chip_tag
 from dashboard.shared.trade_utils import (
     _action_color,
     _action_emoji,
@@ -1947,15 +1948,24 @@ if analyze_btn or _prefill_active or (
                     _liq_tier = getattr(_liq_ctx, "liquidity_tier", None)
                     _th = _cached_thesis_full(ticker, cs.score, cs.action,
                                               _dc_total, _liq_tier)
-                    _v_color = {
-                        "Strong Positive": "var(--bull)", "Positive": "var(--bull)",
-                        "Neutral":         "var(--dim)",  "Negative": "var(--amber)",
-                        "Strong Negative": "var(--bear)",
-                    }.get(_th.verdict, "var(--dim)")
+                    # Thesis verdict posture routed through the shared chip
+                    # vocabulary (chip_pill) so every posture in the app shares
+                    # one visual language -- see docs/UI_UX_DESIGN_2026-09.md §4.
+                    # Note: 5-way scale keeps "Negative" as WARN amber (not BAD
+                    # red), matching the existing color map -- BAD red is
+                    # reserved for the "Strong Negative" step.
+                    _v_tone = {
+                        "Strong Positive": "good",   "Positive": "good",
+                        "Neutral":         "neutral","Negative": "warn",
+                        "Strong Negative": "bad",
+                    }.get(_th.verdict, "neutral")
                     st.markdown(
-                        f"<div style='font-size:1.15rem'>Verdict: "
-                        f"<b style='color:{_v_color}'>{_th.verdict}</b> "
-                        f"<span style='color:var(--dim)'>(score {_th.verdict_score:+d})</span></div>",
+                        f"<div style='font-size:1.05rem;display:flex;"
+                        f"align-items:center;gap:8px;flex-wrap:wrap'>"
+                        f"<span>Verdict:</span>"
+                        f"{chip_pill(_th.verdict, tone=_v_tone)}"
+                        f"<span style='color:var(--dim);font-family:var(--font-mono);"
+                        f"font-size:12px'>score {_th.verdict_score:+d}</span></div>",
                         unsafe_allow_html=True,
                     )
                     st.caption(_th.verdict_rationale)
@@ -1976,10 +1986,11 @@ if analyze_btn or _prefill_active or (
                             st.caption(_empty); return
                         _bg, _border, _icon = _CHIP_STYLES[_kind]
                         for _f in _factors:
+                            # Source label routed through the shared chip_tag
+                            # so it reads the same as every other neutral
+                            # provenance chip in the app.
                             _pill = (
-                                f'<span style="background:var(--sunken);color:var(--dim);'
-                                f'padding:1px 8px;border-radius:10px;font-size:10px;'
-                                f'letter-spacing:0.5px">{_f.source}</span>'
+                                chip_tag(_f.source)
                                 if getattr(_f, "source", "") else ""
                             )
                             st.markdown(
@@ -2344,15 +2355,23 @@ if analyze_btn or _prefill_active or (
                                 build_fit_inputs(ticker, _pf_holds, candidate_thesis=_th)
                             )
 
-                        _fr_color = {
-                            "Strong Fit":     "var(--bull)", "Fit":      "var(--bull)",
-                            "Neutral":        "var(--dim)", "Poor Fit": "var(--amber)",
-                            "Strong Conflict":"var(--bear)",
-                        }.get(_fit.fit_rating, "var(--dim)")
+                        # Portfolio fit rating routed through chip_pill --
+                        # mirrors the thesis verdict pill above so the two
+                        # postures read as one vocabulary. "Poor Fit" stays WARN
+                        # amber (a friction, not a veto); "Strong Conflict" is
+                        # the BAD red step.
+                        _fr_tone = {
+                            "Strong Fit":     "good",    "Fit":      "good",
+                            "Neutral":        "neutral", "Poor Fit": "warn",
+                            "Strong Conflict":"bad",
+                        }.get(_fit.fit_rating, "neutral")
                         st.markdown(
-                            f"<div style='font-size:1.15rem'>Fit rating: "
-                            f"<b style='color:{_fr_color}'>{_fit.fit_rating}</b> "
-                            f"<span style='color:var(--dim)'>(score {_fit.fit_score:+d})</span></div>",
+                            f"<div style='font-size:1.05rem;display:flex;"
+                            f"align-items:center;gap:8px;flex-wrap:wrap'>"
+                            f"<span>Fit rating:</span>"
+                            f"{chip_pill(_fit.fit_rating, tone=_fr_tone)}"
+                            f"<span style='color:var(--dim);font-family:var(--font-mono);"
+                            f"font-size:12px'>score {_fit.fit_score:+d}</span></div>",
                             unsafe_allow_html=True,
                         )
                         _im1, _im2 = st.columns(2)
@@ -2373,10 +2392,9 @@ if analyze_btn or _prefill_active or (
                                 st.caption(_empty); return
                             _bg, _border, _icon = _FIT_STYLES[_kind]
                             for _f in _factors:
+                                # Mirror _factor_chips above -- shared chip_tag.
                                 _pill = (
-                                    f'<span style="background:var(--sunken);color:var(--dim);'
-                                    f'padding:1px 8px;border-radius:10px;font-size:10px;'
-                                    f'letter-spacing:0.5px">{_f.source}</span>'
+                                    chip_tag(_f.source)
                                     if getattr(_f, "source", "") else ""
                                 )
                                 st.markdown(
