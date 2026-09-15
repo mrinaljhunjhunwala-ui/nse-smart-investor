@@ -569,7 +569,16 @@ def hero_verdict(posture: str,
 
     # Inline serif style so hero_verdict works standalone (independent of the
     # .verdict-posture-serif class from the typography slice).
+    # NOTE: Python 3.11 f-strings do NOT allow backslashes in expression
+    # parts, so the paragraph HTML is built outside the f-string. Don't
+    # inline the escaped-quotes ternary or CI collection breaks.
     serif_stack = "'Instrument Serif','Iowan Old Style',Georgia,serif"
+    why_html = ""
+    if why:
+        why_html = (
+            '<p style="font-size:13.5px;color:var(--ink-mid);line-height:1.55;'
+            f'margin:0;max-width:46ch">{why}</p>'
+        )
     lead_html = (
         f'<div style="padding:22px 26px;background:linear-gradient(180deg,'
         f'color-mix(in srgb,{tone_color} 6%,var(--surface)),var(--surface) 80%);'
@@ -581,7 +590,7 @@ def hero_verdict(posture: str,
         f'margin:4px 0 10px 0">'
         f'<em style="font-style:italic;color:{tone_color}">{posture}.</em>{q_html}'
         f'</div>'
-        f'{"<p style=\"font-size:13.5px;color:var(--ink-mid);line-height:1.55;margin:0;max-width:46ch\">" + why + "</p>" if why else ""}'
+        f'{why_html}'
         f'</div>'
     )
 
