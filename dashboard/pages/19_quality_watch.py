@@ -87,13 +87,15 @@ with st.expander("↔️ Also see: Analyze Stock · Deep Dive", expanded=False):
         "**Analyze Stock**."
     )
 
+# F1 audit -- posture colours now route through design.py tokens so a
+# future palette swap flows through the whole app in one place.
 _POSTURE_COLOR = {
-    "REASONABLE": "#26a69a",
-    "SUPPORTED_BY_ROE": "#26a69a",
-    "DEMANDING_VS_ROE": "#ffa726",
-    "DEMANDING_VS_RETURNS": "#ffa726",
-    "DEMANDING_VS_GROWTH": "#ffa726",
-    "INSUFFICIENT_EVIDENCE": "#8899bb",
+    "REASONABLE": "var(--bull)",
+    "SUPPORTED_BY_ROE": "var(--bull)",
+    "DEMANDING_VS_ROE": "var(--amber)",
+    "DEMANDING_VS_RETURNS": "var(--amber)",
+    "DEMANDING_VS_GROWTH": "var(--amber)",
+    "INSUFFICIENT_EVIDENCE": "var(--dim)",
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -352,18 +354,18 @@ def _duration_guidance(quality_score: int) -> tuple:
     if quality_score >= 80:
         return ("2-3+ years (core holding)",
                 "High conviction — review each quarterly result, re-run "
-                "this screen after any major news.", "#26a69a")
+                "this screen after any major news.", "var(--bull)")
     if quality_score >= 60:
         return ("1-2 years",
                 "Moderate conviction — review quarterly, re-check sooner "
-                "if a red flag appears.", "#8bc34a")
+                "if a red flag appears.", "var(--bull)")
     if quality_score >= 40:
         return ("6-12 months (provisional)",
                 "Below-average conviction — treat as a smaller, provisional "
-                "position; re-assess sooner rather than later.", "#ffa726")
+                "position; re-assess sooner rather than later.", "var(--amber)")
     return ("Not a long-term-hold candidate right now",
             "Score is too low at current price/quality — reconsider, or "
-            "wait for a better entry/improved fundamentals.", "#ef5350")
+            "wait for a better entry/improved fundamentals.", "var(--bear)")
 
 
 def _render_sizing_tab(ticker: str, quality_score: int, score_breakdown: dict):
@@ -407,9 +409,9 @@ def _render_sizing_tab(ticker: str, quality_score: int, score_breakdown: dict):
     duration, note, color = _duration_guidance(quality_score)
     st.markdown(
         f'<div style="border-left:4px solid {color};padding:10px 14px;'
-        f'background:#181818;border-radius:6px">'
+        f'background:var(--surface);border-radius:6px">'
         f'<b style="font-size:15px;color:{color}">{duration}</b>'
-        f'<br><span style="font-size:13px;color:#ccc">{note}</span>'
+        f'<br><span style="font-size:13px;color:var(--ink-mid)">{note}</span>'
         f'</div>', unsafe_allow_html=True,
     )
 
@@ -746,7 +748,7 @@ else:
 
             for _, row in ranked.iterrows():
                 short = row["ticker"].replace(".NS", "")
-                color = _POSTURE_COLOR.get(row["posture"], "#8899bb")
+                color = _POSTURE_COLOR.get(row["posture"], "var(--dim)")
                 score = int(row["quality_score"])
                 flag_bits = []
                 if row["red_flags"]:
@@ -761,15 +763,15 @@ else:
                 with card_col:
                     st.markdown(
                         f'<div style="border-left:4px solid {color};padding:10px 14px;'
-                        f'margin:4px 0;background:#181818;border-radius:6px">'
+                        f'margin:4px 0;background:var(--surface);border-radius:6px">'
                         f'<b style="font-size:18px;color:{color}">{score}</b>'
-                        f'<span style="font-size:11px;color:#777">/100</span>  '
+                        f'<span style="font-size:11px;color:var(--faint)">/100</span>  '
                         f'<b style="font-size:15px">{short}</b>'
-                        f'<span style="color:#999;font-size:12px"> '
+                        f'<span style="color:var(--dim);font-size:12px"> '
                         f'{row.get("company_name") or ""}</span>'
-                        f'<span style="float:right;font-size:12px;color:#ccc">{flag_str}</span>'
+                        f'<span style="float:right;font-size:12px;color:var(--ink-mid)">{flag_str}</span>'
                         f'<br><span style="font-size:13px;color:{color}">{row["phrase"]}</span>'
-                        f'<br><span style="font-size:11px;color:#777">'
+                        f'<br><span style="font-size:11px;color:var(--faint)">'
                         f'confidence: {row["confidence"]}'
                         + (f' · P/E {row["pe"]:.1f}x' if pd.notna(row["pe"]) else '')
                         + (f' · P/B {row["pb"]:.1f}x' if pd.notna(row["pb"]) else '')
