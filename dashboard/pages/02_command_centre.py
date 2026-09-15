@@ -14,6 +14,7 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.ui_components import chip_pill
 from dashboard.shared.cache import (
     get_top_picks,
     _persisted_top_picks_snapshot,   # FIX TP-FAST1 / FIX TP-NOOP1
@@ -872,11 +873,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _card_grad   = ("linear-gradient(135deg,var(--sunken),var(--sunken))" if _is_watch_tier
                             else "linear-gradient(135deg,var(--sunken),var(--sunken))")
             _score_color = "var(--amber)" if _is_watch_tier else "var(--bull)"
-            _tier_badge  = (
-                '<span style="background:var(--tint-amber);color:var(--amber);border:1px solid var(--amber);'
-                'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
-                'WATCHLIST-GRADE</span>'
-            ) if _is_watch_tier else ""
+            _tier_badge = chip_pill("Watchlist-grade", tone="warn") if _is_watch_tier else ""
 
             # FIX FV-PILL — surface the ONE-verdict answer on the pick card.
             # Horizon is inferred from the pick's own "horizon" hint so a
@@ -886,18 +883,18 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _fv_pill = ""
             try:
                 _fv = _compose_fv_for_card(_b, tqs=None)
-                _fv_pill_colors = {
-                    "STRONG BUY": "var(--bull)", "BUY": "var(--bull)", "WATCH": "var(--accent)",
-                    "HOLD": "var(--dim)", "AVOID": "var(--bear)",
+                _fv_pill_tones = {
+                    "STRONG BUY": "good", "BUY": "good", "WATCH": "accent",
+                    "HOLD": "neutral", "AVOID": "bad",
                 }
-                _pc = _fv_pill_colors.get(_fv.verdict, "var(--dim)")
-                _fv_pill = (
-                    f'<span style="background:{_pc}22;color:{_pc};border:1px solid {_pc};'
-                    f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px" '
-                    f'title="FinalVerdict on the {_fv.horizon} horizon — '
-                    f'{_fv.confidence} confidence, conviction {_fv.conviction}/100. '
-                    f'{_fv.primary_reason}">'
-                    f'VERDICT: {_fv.verdict}</span>'
+                _fv_tone = _fv_pill_tones.get(_fv.verdict, "neutral")
+                _fv_title = (
+                    f"FinalVerdict on the {_fv.horizon} horizon -- "
+                    f"{_fv.confidence} confidence, conviction {_fv.conviction}/100. "
+                    f"{_fv.primary_reason}"
+                )
+                _fv_pill = chip_pill(
+                    f"Verdict: {_fv.verdict}", tone=_fv_tone, title=_fv_title,
                 )
             except Exception as _fv_pill_e:
                 import logging
