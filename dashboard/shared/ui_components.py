@@ -461,3 +461,134 @@ def regime_badge(label: str = "unknown",
         f'<span style="font-size:12px;color:#bbb">{note}</span>'
         f'</div>'
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UI/UX 2026-09 · chip vocabulary + hero verdict card
+# See docs/UI_UX_DESIGN_2026-09.md §4 (cross-cutting rules).
+# Four chip shapes, never mixed in one row:
+#   chip_tag    -- squared, neutral labels ("Nifty 50", "Delivery 42%")
+#   chip_pill   -- rounded, semantic state ("Constructive", "Overheated")
+#   chip_delta  -- mono, numeric change ("+1.24%", "-36.65")
+#   (tabs are native st.tabs -- no helper)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def chip_tag(label: str) -> str:
+    """Squared neutral tag. Uppercase, letter-spaced, muted."""
+    return (
+        f'<span style="display:inline-flex;align-items:center;'
+        f'padding:2px 8px;border:1px solid var(--hairline);border-radius:3px;'
+        f'font-size:10px;color:var(--dim);text-transform:uppercase;'
+        f'letter-spacing:0.08em;font-weight:500;'
+        f'margin-right:4px;line-height:1.5">{label}</span>'
+    )
+
+
+def chip_pill(label: str, tone: str = "neutral") -> str:
+    """Rounded semantic-state pill. tone: good/warn/bad/accent/neutral."""
+    palette = {
+        "good":    ("var(--bull)",   "var(--tint-bull)",   "rgba(22,199,132,.4)"),
+        "warn":    ("var(--amber)",  "var(--tint-amber)",  "rgba(242,169,59,.4)"),
+        "bad":     ("var(--bear)",   "var(--tint-bear)",   "rgba(255,77,77,.4)"),
+        "accent":  ("var(--accent)", "var(--tint-accent)", "rgba(255,149,0,.4)"),
+        "neutral": ("var(--dim)",    "rgba(255,255,255,.06)", "var(--hairline)"),
+    }
+    fg, bg, border = palette.get(tone, palette["neutral"])
+    return (
+        f'<span style="display:inline-flex;align-items:center;'
+        f'padding:3px 10px;border-radius:999px;background:{bg};color:{fg};'
+        f'border:1px solid {border};font-size:11px;font-weight:600;'
+        f'letter-spacing:0.02em;margin-right:4px">{label}</span>'
+    )
+
+
+def chip_delta(value: float, unit: str = "%") -> str:
+    """Mono numeric-change chip. Auto-signed. Bull >0, bear <0, dim ==0."""
+    if value > 0:
+        color, arrow, sign = "var(--bull)", "▲", "+"
+    elif value < 0:
+        color, arrow, sign = "var(--bear)", "▼", ""
+    else:
+        color, arrow, sign = "var(--dim)", "▪", ""
+    return (
+        f'<span style="font-family:var(--font-mono);font-size:12px;'
+        f'font-weight:500;color:{color};letter-spacing:-.01em;'
+        f'margin-right:6px">{arrow} {sign}{value:.2f}{unit}</span>'
+    )
+
+
+def hero_verdict(posture: str,
+                 posture_qualifier: str = "",
+                 composite: Optional[float] = None,
+                 max_score: float = 90,
+                 kicker: str = "Posture · this session",
+                 why: str = "",
+                 tone: str = "accent") -> str:
+    """Editorial verdict hero card (mockup Variant A -- serif italic posture).
+
+    Two-column card. LEFT: kicker, serif italic posture noun, muted
+    qualifier, why paragraph. RIGHT: big mono composite score with
+    /max denominator. tone: accent / good / warn / bad.
+    """
+    tone_color = {
+        "accent": "var(--accent)",
+        "good":   "var(--bull)",
+        "warn":   "var(--amber)",
+        "bad":    "var(--bear)",
+    }.get(tone, "var(--accent)")
+
+    q_html = (
+        f' <span style="color:var(--dim);font-style:italic;font-weight:400">'
+        f'{posture_qualifier}</span>'
+        if posture_qualifier else ""
+    )
+
+    score_html = ""
+    if composite is not None:
+        pct = max(0.0, min(1.0, composite / max_score))
+        score_html = (
+            f'<div style="padding:22px 26px;background:var(--sunken);'
+            f'border-left:1px solid var(--hairline);display:flex;'
+            f'flex-direction:column;justify-content:center;align-items:flex-start;'
+            f'gap:8px">'
+            f'<div style="font-size:10px;letter-spacing:.14em;'
+            f'text-transform:uppercase;color:var(--dim);font-weight:600">'
+            f'Composite</div>'
+            f'<div style="display:flex;align-items:baseline;gap:8px;'
+            f'font-family:var(--font-mono)">'
+            f'<span style="font-size:44px;font-weight:500;letter-spacing:-.02em;'
+            f'color:var(--ink)">{composite:.0f}</span>'
+            f'<span style="font-size:16px;color:var(--dim)">/ {max_score:.0f}</span>'
+            f'</div>'
+            f'<div style="width:100%;height:4px;background:var(--hairline);'
+            f'border-radius:999px;overflow:hidden">'
+            f'<div style="height:100%;width:{pct*100:.1f}%;background:{tone_color}"></div>'
+            f'</div>'
+            f'</div>'
+        )
+
+    # Inline serif style so hero_verdict works standalone (independent of the
+    # .verdict-posture-serif class from the typography slice).
+    serif_stack = "'Instrument Serif','Iowan Old Style',Georgia,serif"
+    lead_html = (
+        f'<div style="padding:22px 26px;background:linear-gradient(180deg,'
+        f'color-mix(in srgb,{tone_color} 6%,var(--surface)),var(--surface) 80%);'
+        f'border-right:1px solid var(--hairline)">'
+        f'<div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;'
+        f'color:{tone_color};font-weight:700;margin-bottom:10px">{kicker}</div>'
+        f'<div style="font-family:{serif_stack};font-weight:400;font-size:32px;'
+        f'line-height:1.1;letter-spacing:-.015em;color:var(--ink);'
+        f'margin:4px 0 10px 0">'
+        f'<em style="font-style:italic;color:{tone_color}">{posture}.</em>{q_html}'
+        f'</div>'
+        f'{"<p style=\"font-size:13.5px;color:var(--ink-mid);line-height:1.55;margin:0;max-width:46ch\">" + why + "</p>" if why else ""}'
+        f'</div>'
+    )
+
+    grid_cols = "1.4fr 1fr" if score_html else "1fr"
+    return (
+        f'<div style="display:grid;grid-template-columns:{grid_cols};'
+        f'border:1px solid var(--hairline);border-radius:var(--r-base);'
+        f'overflow:hidden;margin:12px 0 20px 0">'
+        f'{lead_html}{score_html}</div>'
+    )

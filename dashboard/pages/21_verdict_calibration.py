@@ -53,7 +53,7 @@ import trade_store as _store                       # noqa: E402
 
 
 st.set_page_config(page_title="Verdict Calibration", page_icon="📏", layout="wide")
-st.title("Verdict Calibration & Shadow Trades")
+st.markdown('<h1 class="page-title-serif">Verdict <em>Calibration &amp; Shadow Trades</em></h1>', unsafe_allow_html=True)
 
 st.caption(
     "How accurate is the model, really? Every FinalVerdict this app has "

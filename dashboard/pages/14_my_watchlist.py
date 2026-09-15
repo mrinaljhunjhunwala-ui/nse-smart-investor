@@ -37,7 +37,7 @@ render_sidebar(current="My Watchlist")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("My Watchlist")
+st.markdown('<h1 class="page-title-serif">My <em>Watchlist</em></h1>', unsafe_allow_html=True)
 
 st.markdown("Save stocks you're tracking. Scores and prices update automatically.")
 

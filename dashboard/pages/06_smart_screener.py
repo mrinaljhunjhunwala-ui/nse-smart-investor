@@ -19,7 +19,7 @@ render_sidebar(current="Smart Screener")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("Smart Stock Screener")
+st.markdown('<h1 class="page-title-serif">Smart <em>Stock Screener</em></h1>', unsafe_allow_html=True)
 
 st.markdown(
     "Scan the NSE universe using 4 proven screens — oversold bounce, "

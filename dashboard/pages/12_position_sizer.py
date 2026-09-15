@@ -30,7 +30,7 @@ render_sidebar(current="Position Sizer")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("Position Sizer – Kelly Criterion + Risk Calculator")
+st.markdown('<h1 class="page-title-serif">Position <em>Sizer</em></h1><p class="page-subtitle">Kelly Criterion + Risk Calculator.</p>', unsafe_allow_html=True)
 
 st.markdown(
     "Calculate exact position size using Kelly Criterion and fixed-risk rules.  \n"

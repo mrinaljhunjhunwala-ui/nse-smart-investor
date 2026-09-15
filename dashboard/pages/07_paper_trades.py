@@ -81,7 +81,7 @@ render_top_bar()
 # ─────────────────────────────────────────────────────────────────────────────
 # Page header
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("Paper Trading Simulator")
+st.markdown('<h1 class="page-title-serif">Paper <em>Trading Simulator</em></h1>', unsafe_allow_html=True)
 
 st.markdown(
     "Practice trading **without real money**. Open virtual trades, track live P&L, "

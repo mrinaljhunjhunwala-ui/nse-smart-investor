@@ -68,7 +68,7 @@ render_sidebar(current="Backtest")
 render_top_bar()
 
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("Backtest Results")
+st.markdown('<h1 class="page-title-serif">Backtest <em>Results</em></h1>', unsafe_allow_html=True)
 
 st.caption("Historical strategy performance — how would these signals have done in the past?")
 

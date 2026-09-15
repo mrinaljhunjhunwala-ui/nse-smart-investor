@@ -53,7 +53,7 @@ apply_design()
 render_sidebar(current="Stock Journal")
 render_top_bar()
 
-st.title("📓 Stock Journal")
+st.markdown('<h1 class="page-title-serif">Stock <em>Journal</em></h1>', unsafe_allow_html=True)
 st.caption(
     "Your decision log — why you cared about each stock, what target and stop you "
     "had in mind, and when to review. Referenced by the alert digests so you get "

@@ -68,7 +68,7 @@ apply_design()
 render_sidebar(current="Quality Watch")
 render_top_bar()
 
-st.title("Quality Watch – Long-Term Holds")
+st.markdown('<h1 class="page-title-serif">Quality <em>Watch</em></h1><p class="page-subtitle">Long-term holds.</p>', unsafe_allow_html=True)
 
 st.caption(
     "Ranked by a 0-100 Quality Score (valuation + governance safety + "
