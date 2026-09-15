@@ -115,6 +115,49 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ── UI/UX 2026-09 · editorial market-posture hero (mockup Variant A) ────────
+# Maps the VIX regime to a descriptive posture noun. Never buy/sell/hold
+# (guardrail §1). See docs/UI_UX_DESIGN_2026-09.md.
+_regime_to_posture = {
+    "panic":       ("Defensive",    "protect capital", "bad",
+                    "India VIX is in panic territory. Broad de-risking, "
+                    "widened stops, and new entries only on the highest "
+                    "conviction setups. Position sizing halved."),
+    "fear":        ("Watchful",     "be selective", "bad",
+                    "India VIX is elevated. Prefer defensive sectors and "
+                    "tight stops. Reduce fresh long exposure until VIX cools."),
+    "elevated":    ("Cautious",     "quality-first", "warn",
+                    "India VIX above the 90-day median. Momentum trades "
+                    "benefit from smaller size and tighter risk. "
+                    "Watch for breadth deterioration."),
+    "normal":      ("Constructive", "with reservations", "accent",
+                    "India VIX is at calm-market levels and breadth is "
+                    "broad. Trade your setups at plan size. Watchful of "
+                    "VIX spikes as the regime turns."),
+    "complacency": ("Complacent",   "asymmetric downside", "warn",
+                    "India VIX is unusually low. Options are cheap, "
+                    "downside is under-priced. Tighten trailing stops on "
+                    "extended positions."),
+}
+_posture_noun, _posture_qual, _posture_tone, _posture_why = \
+    _regime_to_posture.get(_mb_reg, _regime_to_posture["normal"])
+try:
+    from dashboard.shared.ui_components import hero_verdict as _hero_verdict
+    st.markdown(
+        _hero_verdict(
+            posture=_posture_noun,
+            posture_qualifier=_posture_qual,
+            kicker=f"Market posture · {_mb_reg} regime",
+            why=_posture_why,
+            tone=_posture_tone,
+        ),
+        unsafe_allow_html=True,
+    )
+except Exception as _hv_err:
+    import logging
+    logging.getLogger("dashboard.command_centre").debug(
+        "hero_verdict render failed: %s", _hv_err)
+
 # ── 0a. DATA HEALTH (Task 2.3) ─────────────────────────────────────────────
 # Per-provider up/degraded/idle snapshot behind a collapsed expander so the
 # top-of-page density stays intact for the common case. Opens on demand

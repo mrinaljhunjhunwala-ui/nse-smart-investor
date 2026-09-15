@@ -420,20 +420,85 @@ if _csv_source is not None:
             pnl_sign  = "+" if summary.total_pnl >= 0 else ""
             pnl_color = "#16c784" if summary.total_pnl >= 0 else "#ff4d4d"
 
-            # ── DC1 — Health metrics + narrative come right after scoring ──
-            st.markdown("---")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Portfolio Value",
-                      f"₹{summary.total_current_value:,.0f}",
-                      f"{pnl_sign}₹{summary.total_pnl:,.0f}")
-            c2.metric("Total Return",
-                      f"{pnl_sign}{summary.total_pnl_pct:.1f}%",
-                      delta_color="normal" if summary.total_pnl >= 0 else "inverse")
-            c3.metric("Health Score",
-                      f"{summary.portfolio_score:.0f}/100",
-                      f"Grade {summary.portfolio_grade}")
-            c4.metric("Diversification", summary.diversification.concentration_risk)
-            c5.metric("VIX Regime", summary.vix_regime)
+            # ── UI/UX 2026-09 · editorial KPI-tile row (mockup Portfolio row) ──
+            # Replaces the flat st.metric row with the mockup's 5-KPI ceiling
+            # design: first tile carries the saffron accent gradient (NAV is
+            # the number that matters most), rest are neutral. Semantic delta
+            # colours preserved for P&L per the trading-dashboard-design skill.
+            _pn_sign = pnl_sign  # "+" or ""
+            _pn_col  = "var(--bull)" if summary.total_pnl >= 0 else "var(--bear)"
+            _grade_letter = summary.portfolio_grade
+            _grade_col = {
+                "A": "var(--bull)", "B": "var(--bull)", "C": "var(--amber)",
+                "D": "var(--bear)", "F": "var(--bear)",
+            }.get(str(_grade_letter)[:1] if _grade_letter else "", "var(--dim)")
+            _vix_reg = str(summary.vix_regime or "normal")
+            _vix_col = {
+                "panic":       "var(--bear)",
+                "fear":        "var(--bear)",
+                "elevated":    "var(--amber)",
+                "normal":      "var(--bull)",
+                "complacency": "var(--amber)",
+            }.get(_vix_reg, "var(--dim)")
+            _tile_common = (
+                "background:var(--surface);border:1px solid var(--hairline);"
+                "border-radius:var(--r-sharp);padding:14px 16px"
+            )
+            _tile_hero = (
+                "background:linear-gradient(180deg,"
+                "color-mix(in srgb,var(--accent) 8%,var(--surface)),"
+                "var(--surface) 80%);"
+                "border:1px solid color-mix(in srgb,var(--accent) 30%,var(--hairline));"
+                "border-radius:var(--r-sharp);padding:14px 16px"
+            )
+            _k_lbl = ("font-size:10px;text-transform:uppercase;"
+                      "letter-spacing:.1em;color:var(--dim);font-weight:600")
+            _k_v   = ("font-family:var(--font-mono);font-size:22px;font-weight:500;"
+                      "margin-top:4px;letter-spacing:-.01em;color:var(--ink)")
+            _k_ccy = ("font-size:14px;color:var(--dim);font-weight:400;margin-right:3px")
+            _k_d   = "margin-top:3px;font-family:var(--font-mono);font-size:12px"
+            _k_txt = ("font-family:'Inter',sans-serif;font-size:14px;"
+                      "font-weight:500;margin-top:4px;letter-spacing:-.005em")
+            st.markdown(
+                f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
+                f'gap:10px;margin:8px 0 14px 0">'
+                # NAV -- hero tile
+                f'<div style="{_tile_hero}">'
+                f'<div style="{_k_lbl}">NAV</div>'
+                f'<div style="{_k_v}"><span style="{_k_ccy}">₹</span>'
+                f'{summary.total_current_value:,.0f}</div>'
+                f'<div style="{_k_d};color:{_pn_col}">'
+                f'{_pn_sign}₹{summary.total_pnl:,.0f}</div>'
+                f'</div>'
+                # Total return
+                f'<div style="{_tile_common}">'
+                f'<div style="{_k_lbl}">Total return</div>'
+                f'<div style="{_k_v};color:{_pn_col}">'
+                f'{_pn_sign}{summary.total_pnl_pct:.1f}%</div>'
+                f'<div style="{_k_d};color:var(--dim)">vs cost</div>'
+                f'</div>'
+                # Health score
+                f'<div style="{_tile_common}">'
+                f'<div style="{_k_lbl}">Health score</div>'
+                f'<div style="{_k_v}">{summary.portfolio_score:.0f}<span style="{_k_ccy};font-size:14px"> /100</span></div>'
+                f'<div style="{_k_d};color:{_grade_col}">Grade {_grade_letter}</div>'
+                f'</div>'
+                # Diversification
+                f'<div style="{_tile_common}">'
+                f'<div style="{_k_lbl}">Diversification</div>'
+                f'<div style="{_k_txt}">{summary.diversification.concentration_risk}</div>'
+                f'<div style="{_k_d};color:var(--dim)">concentration</div>'
+                f'</div>'
+                # VIX regime
+                f'<div style="{_tile_common}">'
+                f'<div style="{_k_lbl}">VIX regime</div>'
+                f'<div style="{_k_txt};color:{_vix_col}">'
+                f'{_vix_reg.title()}</div>'
+                f'<div style="{_k_d};color:var(--dim)">market conditions</div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
             st.markdown(
                 f'<div class="card-blue"><span class="narrative">'
