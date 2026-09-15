@@ -41,6 +41,7 @@ from dashboard.shared.cache import (
 )
 from dashboard.shared.trade_utils import _paper_trade_popover
 from dashboard.shared.flags_ui import render_flag_badge_html  # QF2: shortlist-only flag badge
+from dashboard.shared.ui_components import chip_pill, chip_delta
 
 apply_design()
 render_sidebar(current="Tomorrow's Watchlist")
@@ -101,34 +102,31 @@ try:
                 _r_label = ("1D" if _ret1 is not None else
                             "5D" if _ret5 is not None else
                             "20D" if _ret20 is not None else "—")
-                # follow-through pill from forward return
+                # Follow-through pill from forward return — routed through
+                # chip_pill/chip_delta so every posture chip in the app uses
+                # the same vocabulary (see docs/UI_UX_DESIGN_2026-09.md §4).
                 if _r_shown is None:
-                    _pill_bg, _pill_fg, _pill_txt = (
-                        "rgba(255,255,255,.06)", "var(--dim)", "Pending")
+                    _pill_tone, _pill_txt = "neutral", "Pending"
                     _card_bg = "var(--surface)"
                     _card_bd = "var(--hairline)"
                 elif _r_shown >= 0.02:
-                    _pill_bg, _pill_fg, _pill_txt = (
-                        "var(--tint-bull)", "var(--bull)", "Working")
+                    _pill_tone, _pill_txt = "good", "Working"
                     _card_bg = "linear-gradient(180deg,rgba(22,199,132,.06),var(--surface) 80%)"
                     _card_bd = "rgba(22,199,132,.3)"
                 elif _r_shown <= -0.02:
-                    _pill_bg, _pill_fg, _pill_txt = (
-                        "var(--tint-bear)", "var(--bear)", "Stopped")
+                    _pill_tone, _pill_txt = "bad", "Stopped"
                     _card_bg = "linear-gradient(180deg,rgba(255,77,77,.06),var(--surface) 80%)"
                     _card_bd = "rgba(255,77,77,.25)"
                 else:
-                    _pill_bg, _pill_fg, _pill_txt = (
-                        "var(--tint-amber)", "var(--amber)", "Flat")
+                    _pill_tone, _pill_txt = "warn", "Flat"
                     _card_bg = "var(--surface)"
                     _card_bd = "var(--hairline)"
                 _ret_html = (
-                    f'<span style="font-family:var(--font-mono);font-size:12px;'
-                    f'font-weight:600;color:{"var(--bull)" if (_r_shown or 0) > 0 else "var(--bear)" if (_r_shown or 0) < 0 else "var(--dim)"}">'
-                    f'{("+" if (_r_shown or 0) > 0 else "")}{(_r_shown*100 if _r_shown is not None else 0):.2f}%</span>'
+                    chip_delta(_r_shown * 100)
                     if _r_shown is not None else
                     '<span style="color:var(--faint);font-size:11px">no data yet</span>'
                 )
+                _pill_html = chip_pill(_pill_txt, tone=_pill_tone)
                 _yp_cards_html.append(
                     f'<div style="background:{_card_bg};border:1px solid {_card_bd};'
                     f'border-radius:6px;padding:12px 14px;position:relative;overflow:hidden">'
@@ -145,11 +143,7 @@ try:
                     f'<span style="color:var(--dim);font-size:10px;'
                     f'text-transform:uppercase;letter-spacing:.08em">{_r_label} ret</span>'
                     f'{_ret_html}</div>'
-                    f'<div style="margin-top:9px">'
-                    f'<span style="display:inline-flex;padding:3px 10px;'
-                    f'border-radius:999px;background:{_pill_bg};color:{_pill_fg};'
-                    f'font-size:10px;font-weight:600;letter-spacing:.02em">{_pill_txt}</span>'
-                    f'</div>'
+                    f'<div style="margin-top:9px">{_pill_html}</div>'
                     f'</div>'
                 )
             st.markdown(
