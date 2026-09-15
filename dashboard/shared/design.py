@@ -235,18 +235,28 @@ def apply_design():
         font-size: 13px; color: #8b8d93;
     }
 
-    /* ── SLICE 1 · UI/UX 2026-09 · sidebar group headers + active-page pill ──
-       Structural polish for the 6-group nav restructure. Group headers are
-       flattened to hairline dividers with an uppercase eyebrow label; the
-       active page gets a leading-edge accent pill so it reads at a glance.
-       Sourced from --accent — saffron #ff9500 as of the palette-shift slice.
-       See docs/UI_UX_DESIGN_2026-09.md §3. */
+    /* ── SLICE 1 + POLISH · UI/UX 2026-09 · sidebar group headers + nav ──
+       Structural polish for the 6-group nav. Group headers flatten to
+       hairline dividers with an uppercase eyebrow label. Nav buttons
+       drop their default borders + backgrounds to read as list items.
+       The active page gets a leading-edge accent pill so it reads at a
+       glance. Sourced from --accent (saffron #ff9500). See
+       docs/UI_UX_DESIGN_2026-09.md §3. */
     [data-testid="stSidebar"] [data-testid="stExpander"] {
         background: transparent !important;
         border: 0 !important;
         border-bottom: 1px solid rgba(255,255,255,.06) !important;
         border-radius: 0 !important;
         margin: 0 !important;
+    }
+    /* Kill Streamlit's expanded-state purple tint on the summary/details */
+    [data-testid="stSidebar"] [data-testid="stExpander"] details,
+    [data-testid="stSidebar"] [data-testid="stExpander"] details[open],
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary,
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover,
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary:focus {
+        background: transparent !important;
+        box-shadow: none !important;
     }
     [data-testid="stSidebar"] [data-testid="stExpander"] summary {
         padding: 10px 12px 8px !important;
@@ -258,6 +268,23 @@ def apply_design():
         letter-spacing: .14em;
         color: #8b8d93 !important;
         font-weight: 600 !important;
+    }
+    /* Nav buttons — flatten to list-item feel, keep only left padding */
+    [data-testid="stSidebar"] .stButton > button {
+        background: transparent !important;
+        border: 0 !important;
+        border-left: 3px solid transparent !important;
+        border-radius: 0 4px 4px 0 !important;
+        padding-left: 13px !important;
+        text-align: left !important;
+        color: #c8cad0 !important;
+        font-weight: 500 !important;
+        transition: background .12s ease, color .12s ease, border-color .12s ease !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(255,149,0,.06) !important;
+        color: #edeef0 !important;
+        border-left-color: rgba(255,149,0,.35) !important;
     }
     /* Active page: leading-edge saffron pill on the disabled (current) button. */
     [data-testid="stSidebar"] .stButton > button:disabled {
@@ -274,6 +301,7 @@ def apply_design():
     [data-testid="stSidebar"] .stButton > button:disabled:hover {
         color: #edeef0 !important;
         border-color: #ff9500 !important;
+        background: linear-gradient(90deg, rgba(255,149,0,.14), transparent 60%) !important;
     }
 
     /* ── Selectbox / inputs ──────────────────────────────────────────────────── */
