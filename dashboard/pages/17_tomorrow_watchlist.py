@@ -65,6 +65,118 @@ with st.expander("↔️ Also see: Smart Screener · TQS Scanner", expanded=Fals
         "name against its TQS reading before acting."
     )
 
+# ── UI/UX 2026-09 · Task 4.2 β · yesterday's-picks follow-through strip ─────
+# Data-unblocked 2026-09-15: ledger has accumulated >1 week of
+# source="tomorrow_watchlist" rows since the writes started in PR #65
+# on 2026-09-07. The strip solves user complaint: "scanning the full
+# table takes too long to tell the stock names". Reads verdict_ledger
+# with the backfilled forward returns so no live-price fetch is needed.
+try:
+    from analysis.verdict_ledger import load_ledger as _yp_load_ledger
+    _yp_df = _yp_load_ledger(source="tomorrow_watchlist", limit=40)
+    if _yp_df is not None and not _yp_df.empty:
+        # Take the most recent row per ticker, up to 5
+        _yp_df = _yp_df.sort_values("logged_at", ascending=False)
+        _yp_seen: set = set()
+        _yp_rows: list = []
+        for _r in _yp_df.itertuples():
+            _tk = getattr(_r, "ticker", None)
+            if not _tk or _tk in _yp_seen:
+                continue
+            _yp_seen.add(_tk)
+            _yp_rows.append(_r)
+            if len(_yp_rows) >= 5:
+                break
+        if _yp_rows:
+            _yp_cards_html = []
+            for _idx, _r in enumerate(_yp_rows, start=1):
+                _sym    = str(getattr(_r, "ticker", "?")).replace(".NS", "")
+                _sc     = float(getattr(_r, "score", 0) or 0)
+                _act    = str(getattr(_r, "action", "") or "").strip()
+                _ret1   = getattr(_r, "ret_1d", None)
+                _ret5   = getattr(_r, "ret_5d", None)
+                _ret20  = getattr(_r, "ret_20d", None)
+                _r_shown = _ret1 if _ret1 is not None else (
+                           _ret5 if _ret5 is not None else _ret20)
+                _r_label = ("1D" if _ret1 is not None else
+                            "5D" if _ret5 is not None else
+                            "20D" if _ret20 is not None else "—")
+                # follow-through pill from forward return
+                if _r_shown is None:
+                    _pill_bg, _pill_fg, _pill_txt = (
+                        "rgba(255,255,255,.06)", "var(--dim)", "Pending")
+                    _card_bg = "var(--surface)"
+                    _card_bd = "var(--hairline)"
+                elif _r_shown >= 0.02:
+                    _pill_bg, _pill_fg, _pill_txt = (
+                        "var(--tint-bull)", "var(--bull)", "Working")
+                    _card_bg = "linear-gradient(180deg,rgba(22,199,132,.06),var(--surface) 80%)"
+                    _card_bd = "rgba(22,199,132,.3)"
+                elif _r_shown <= -0.02:
+                    _pill_bg, _pill_fg, _pill_txt = (
+                        "var(--tint-bear)", "var(--bear)", "Stopped")
+                    _card_bg = "linear-gradient(180deg,rgba(255,77,77,.06),var(--surface) 80%)"
+                    _card_bd = "rgba(255,77,77,.25)"
+                else:
+                    _pill_bg, _pill_fg, _pill_txt = (
+                        "var(--tint-amber)", "var(--amber)", "Flat")
+                    _card_bg = "var(--surface)"
+                    _card_bd = "var(--hairline)"
+                _ret_html = (
+                    f'<span style="font-family:var(--font-mono);font-size:12px;'
+                    f'font-weight:600;color:{"var(--bull)" if (_r_shown or 0) > 0 else "var(--bear)" if (_r_shown or 0) < 0 else "var(--dim)"}">'
+                    f'{("+" if (_r_shown or 0) > 0 else "")}{(_r_shown*100 if _r_shown is not None else 0):.2f}%</span>'
+                    if _r_shown is not None else
+                    '<span style="color:var(--faint);font-size:11px">no data yet</span>'
+                )
+                _yp_cards_html.append(
+                    f'<div style="background:{_card_bg};border:1px solid {_card_bd};'
+                    f'border-radius:6px;padding:12px 14px;position:relative;overflow:hidden">'
+                    f'<div style="position:absolute;top:9px;right:12px;'
+                    f'font-family:var(--font-mono);font-size:10px;color:var(--faint);'
+                    f'letter-spacing:.08em">RANK {_idx:02d}</div>'
+                    f'<div style="font-weight:600;font-size:14px;color:var(--ink);'
+                    f'letter-spacing:-.005em">{_sym}</div>'
+                    f'<div style="color:var(--dim);font-size:11px;margin-top:1px">'
+                    f'Score {_sc:.0f}/90 · {_act or "logged"}</div>'
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'align-items:baseline;margin-top:10px;padding-top:8px;'
+                    f'border-top:1px dotted var(--hairline)">'
+                    f'<span style="color:var(--dim);font-size:10px;'
+                    f'text-transform:uppercase;letter-spacing:.08em">{_r_label} ret</span>'
+                    f'{_ret_html}</div>'
+                    f'<div style="margin-top:9px">'
+                    f'<span style="display:inline-flex;padding:3px 10px;'
+                    f'border-radius:999px;background:{_pill_bg};color:{_pill_fg};'
+                    f'font-size:10px;font-weight:600;letter-spacing:.02em">{_pill_txt}</span>'
+                    f'</div>'
+                    f'</div>'
+                )
+            st.markdown(
+                '<div style="margin:14px 0 6px 0;display:flex;'
+                'justify-content:space-between;align-items:baseline">'
+                '<h3 style="margin:0;font-family:\'Instrument Serif\',Georgia,serif;'
+                'font-weight:400;font-size:20px;letter-spacing:-.01em;color:var(--ink)">'
+                'Yesterday\'s picks · follow-through</h3>'
+                f'<span style="font-size:10px;color:var(--faint);'
+                'text-transform:uppercase;letter-spacing:.1em;'
+                'font-family:var(--font-mono)">source: verdict_ledger · '
+                f'{len(_yp_rows)} shown</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div style="display:grid;grid-template-columns:repeat(5,1fr);'
+                'gap:10px;margin-bottom:22px">'
+                + "".join(_yp_cards_html)
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+except Exception as _yp_err:
+    import logging
+    logging.getLogger("dashboard.tomorrow_watchlist").debug(
+        "yesterday's-picks strip render failed: %s", _yp_err)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX W1 — non-blocking scan with stale-while-revalidate pattern
 # ─────────────────────────────────────────────────────────────────────────────
