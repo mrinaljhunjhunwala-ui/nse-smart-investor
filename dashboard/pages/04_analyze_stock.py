@@ -486,12 +486,56 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "overlay populate failed: %s", _ov_outer_e)
 
-            # ── Task 1.4: Verdict Card hero ─────────────────────────────────
-            # Audit's #1 finding: "So what should I do?" was never the loudest
-            # thing on this page. Rendered above the existing score/chart/
-            # narrative sections so the answer lands before the evidence.
-            # Portfolio position pulled from load_manual_holdings when the
-            # user holds this ticker — no extra fetch.
+            # ── UI/UX 2026-09 · editorial hero verdict (mockup Variant A) ───
+            # Renders ABOVE the existing verdict_card so the descriptive
+            # posture noun (never buy/sell/hold, guardrail §1) reads first.
+            # Score -> posture mapping stays inside the sector-aware
+            # composite thresholds (grade thresholds match analysis/score.py).
+            try:
+                from dashboard.shared.ui_components import hero_verdict as _hero_verdict
+                _score = float(getattr(cs, "score", 0) or 0)
+                if _score >= 70:
+                    _posture, _qual, _tone = (
+                        "Constructive", "trend intact, momentum aligned", "good")
+                elif _score >= 55:
+                    _posture, _qual, _tone = (
+                        "Constructive", "with reservations", "accent")
+                elif _score >= 40:
+                    _posture, _qual, _tone = (
+                        "Neutral", "wait for the tape to decide", "neutral")
+                elif _score >= 25:
+                    _posture, _qual, _tone = (
+                        "Watchful", "trend structure weakening", "warn")
+                else:
+                    _posture, _qual, _tone = (
+                        "Weak", "avoid fresh long exposure", "bad")
+                _hv_why = ""
+                _narr = getattr(cs, "narrative", "") or ""
+                if _narr:
+                    _hv_why = _narr.strip().split("\n")[0][:280]
+                st.markdown(
+                    _hero_verdict(
+                        posture=_posture,
+                        posture_qualifier=_qual,
+                        composite=_score,
+                        max_score=90,
+                        kicker=f"Posture · {ticker.replace('.NS','')}",
+                        why=_hv_why,
+                        tone=_tone,
+                    ),
+                    unsafe_allow_html=True,
+                )
+            except Exception as _hv_err:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "hero_verdict render failed: %s", _hv_err)
+
+            # ── Task 1.4: Verdict Card hero (existing detail card, kept) ────
+            # Existing card retained below the new editorial hero so the
+            # user still gets sector-aware fundamentals, portfolio context,
+            # and per-pillar breakdown. Two hero moments layered:
+            #    (1) descriptive posture in serif italic  (new)
+            #    (2) detailed action/reasoning card       (existing)
             try:
                 from dashboard.shared.ui_components import verdict_card as _verdict_card
                 _pctx = None
