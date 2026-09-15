@@ -112,7 +112,7 @@ apply_design()
 render_sidebar(current="My Portfolio")
 render_top_bar()
 
-st.title("My Portfolio")
+st.markdown('<h1 class="page-title-serif">My <em>Portfolio</em></h1>', unsafe_allow_html=True)
 
 st.markdown(
     "Your holdings health check — live prices, trend-quality scores, and plain English guidance for each stock."

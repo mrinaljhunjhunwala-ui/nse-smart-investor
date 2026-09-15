@@ -61,7 +61,7 @@ def apply_design():
     # ── NSE Pro Design System v2 — "Dealing Room" ──────────────────────────────
     st.markdown(
         """<style>
-    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
 
     /* ── SPRINT 1.1: Design tokens as CSS custom properties ─────────────────
        Single source of truth for palette, radius, and shadow. Every rule
@@ -124,6 +124,49 @@ def apply_design():
       /* Type */
       --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+      --font-serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+    }
+
+    /* ── Editorial serif · used SPARINGLY on hero moments only ─────────────
+       - Page-title-serif on the H1 of anchor pages (Command Centre,
+         Analyze Stock, Portfolio, Investor Guide).
+       - Verdict-posture-serif on the descriptive posture line inside a
+         hero card ("Constructive, with reservations.").
+       - Never on data, buttons, or body copy — that's what Plex Sans is
+         for. See docs/UI_UX_DESIGN_2026-09.md §4 (cross-cutting rules). */
+    .page-title-serif {
+        font-family: var(--font-serif) !important;
+        font-weight: 400 !important;
+        font-size: clamp(32px, 4vw, 44px) !important;
+        line-height: 1.05 !important;
+        letter-spacing: -0.02em !important;
+        color: var(--ink) !important;
+        margin: 0 0 6px 0 !important;
+        text-wrap: balance;
+    }
+    .page-title-serif em {
+        font-style: italic;
+        color: var(--accent);
+    }
+    .page-subtitle {
+        font-size: 13px !important;
+        color: var(--dim) !important;
+        margin: 0 0 20px 0 !important;
+        max-width: 62ch;
+        line-height: 1.55;
+    }
+    .verdict-posture-serif {
+        font-family: var(--font-serif) !important;
+        font-weight: 400 !important;
+        font-size: 32px !important;
+        line-height: 1.1 !important;
+        letter-spacing: -0.015em !important;
+        color: var(--ink) !important;
+        margin: 4px 0 8px 0 !important;
+    }
+    .verdict-posture-serif em {
+        font-style: italic;
+        color: var(--accent);
     }
 
     /* ── Hide Streamlit's auto-generated pages/ nav (custom nav lives in

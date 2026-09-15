@@ -42,7 +42,14 @@ render_sidebar(current="Command Centre")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.title("Command Centre")
+# UI/UX 2026-09 typography slice: editorial serif on the H1, saffron-italic
+# accent on the descriptive noun. Subtitle stays in the pre-existing block
+# below to avoid duplicating the "no digging required" line.
+# See docs/UI_UX_DESIGN_2026-09.md §4.
+st.markdown(
+    '<h1 class="page-title-serif">Command <em>Centre</em></h1>',
+    unsafe_allow_html=True,
+)
 
 # ── FIX REGIME-CHIP1 - v2 scoring badge (Rec 5 / Task 3.6 flag on) ─────────
 # When NSE_USE_REGIME_WEIGHTS is truthy, the Momentum pillar swaps in the

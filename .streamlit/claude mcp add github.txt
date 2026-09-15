@@ -1,0 +1,3 @@
+claude mcp add github
+claude mcp add --scope user github
+E:\code\nse-smart-investor\.streamlit\secrets.toml
