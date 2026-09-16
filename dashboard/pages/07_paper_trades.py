@@ -177,10 +177,11 @@ if "pt_account" not in st.session_state or st.session_state["pt_account"] not in
     st.session_state["pt_account"] = _all_accounts[0]
 
 with st.container():
-    # Thin blue left-border accent via a single self-contained markdown
+    # F1 audit -- accent + card bg now source from design.py tokens (--azure
+    # rail, --surface bg) so a palette swap flows through in one place.
     st.markdown(
-        '<style>.acct-bar{border-left:5px solid #2196F3;padding-left:14px;'
-        'background:#0d1f3c;border-radius:10px;padding:12px 18px;margin-bottom:16px}</style>'
+        '<style>.acct-bar{border-left:5px solid var(--azure);padding-left:14px;'
+        'background:var(--surface);border-radius:10px;padding:12px 18px;margin-bottom:16px}</style>'
         '<div class="acct-bar"></div>',
         unsafe_allow_html=True,
     )
@@ -197,7 +198,7 @@ with st.container():
         st.session_state["pt_account"] = _selected_account
         _acc_type  = paper_account_type(_selected_account)
         _at_badge  = "🔆 INTRADAY (MIS)" if _acc_type == "MIS" else "📦 DELIVERY (CNC)"
-        _at_col    = "#ff9500"           if _acc_type == "MIS" else "#5b8def"
+        _at_col    = "var(--accent)"     if _acc_type == "MIS" else "var(--azure)"
         st.markdown(
             f'<span style="font-size:11px">📂 <b>{_selected_account}</b> '
             f'<span style="color:{_at_col};font-weight:700">· {_at_badge}</span></span>',
@@ -545,12 +546,12 @@ with st.expander("➕ Open a New Paper Trade", expanded=True):
             "🟡 Neutral momentum"                if _rsi else ""
         )
         st.markdown(
-            f'<div style="background:#0d1f3c;padding:12px 18px;border-radius:10px;'
-            f'border-left:5px solid #2196F3;margin:8px 0">'
+            f'<div style="background:var(--surface);padding:12px 18px;border-radius:10px;'
+            f'border-left:5px solid var(--azure);margin:8px 0">'
             f'<b style="font-size:18px">₹{_p:,.2f}</b>'
-            f'<span style="color:{"#26a69a" if _sugg["chg"]>=0 else "#ef5350"};margin-left:10px">'
+            f'<span style="color:{"var(--bull)" if _sugg["chg"]>=0 else "var(--bear)"};margin-left:10px">'
             f'{"▲" if _sugg["chg"]>=0 else "▼"} {abs(_sugg["chg"]):.2f}% today</span>'
-            f'<br><span style="font-size:12px;color:#aaa">'
+            f'<br><span style="font-size:12px;color:var(--ink-mid)">'
             f'ATR(14): {_atr_str} &nbsp;|&nbsp; RSI: {_rsi_str} {_rsi_label}'
             f' &nbsp;|&nbsp; Trend: {_sugg["trend"]}</span>'
             f'</div>',
@@ -593,14 +594,15 @@ with st.expander("➕ Open a New Paper Trade", expanded=True):
         _rr_ratio = _rew_ps / _risk_ps if _risk_ps > 0 else 0
         _cap_risk = _risk_ps * _form_qty
         _cap_rew  = _rew_ps  * _form_qty
-        _rr_color = "#26a69a" if _rr_ratio >= 1.5 else "#f9a825" if _rr_ratio >= 1.0 else "#ef5350"
+        _rr_color = ("var(--bull)" if _rr_ratio >= 1.5
+                     else "var(--amber)" if _rr_ratio >= 1.0 else "var(--bear)")
         st.markdown(
-            f'<div style="background:#1a1a2a;padding:10px 16px;border-radius:8px;margin:8px 0">'
-            f'Risk/share: <b style="color:#ef5350">₹{_risk_ps:.2f}</b> &nbsp;|&nbsp; '
-            f'Reward/share: <b style="color:#26a69a">₹{_rew_ps:.2f}</b> &nbsp;|&nbsp; '
+            f'<div style="background:var(--sunken);padding:10px 16px;border-radius:8px;margin:8px 0">'
+            f'Risk/share: <b style="color:var(--bear)">₹{_risk_ps:.2f}</b> &nbsp;|&nbsp; '
+            f'Reward/share: <b style="color:var(--bull)">₹{_rew_ps:.2f}</b> &nbsp;|&nbsp; '
             f'<span style="color:{_rr_color}"><b>R:R = {_rr_ratio:.1f}:1</b></span> &nbsp;|&nbsp; '
-            f'Max loss: <b style="color:#ef5350">₹{_cap_risk:,.0f}</b> &nbsp;|&nbsp; '
-            f'Max gain: <b style="color:#26a69a">₹{_cap_rew:,.0f}</b>'
+            f'Max loss: <b style="color:var(--bear)">₹{_cap_risk:,.0f}</b> &nbsp;|&nbsp; '
+            f'Max gain: <b style="color:var(--bull)">₹{_cap_rew:,.0f}</b>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -747,9 +749,9 @@ else:
 
     # Account Dashboard Card
     _ac_name = st.session_state.get("pt_account", "My Account")
-    _ur_col  = "#26a69a" if _pt_unrealised >= 0 else "#ef5350"
-    _re_col  = "#26a69a" if _pt_realised   >= 0 else "#ef5350"
-    _td_col  = "#26a69a" if _pt_today_pnl  >= 0 else "#ef5350"
+    _ur_col  = "var(--bull)" if _pt_unrealised >= 0 else "var(--bear)"
+    _re_col  = "var(--bull)" if _pt_realised   >= 0 else "var(--bear)"
+    _td_col  = "var(--bull)" if _pt_today_pnl  >= 0 else "var(--bear)"
     _ur_arr  = "▲" if _pt_unrealised >= 0 else "▼"
     _re_arr  = "▲" if _pt_realised   >= 0 else "▼"
     _td_arr  = "▲" if _pt_today_pnl  >= 0 else "▼"
@@ -757,40 +759,40 @@ else:
     _n_closed = len(all_closed)
 
     st.markdown(
-        f'<div style="background:#0d1f3c;border-radius:12px;padding:18px 22px;'
-        f'margin-bottom:16px;border-left:5px solid #2196F3">'
-        f'<div style="font-size:11px;color:#5c8dd6;text-transform:uppercase;'
+        f'<div style="background:var(--surface);border-radius:12px;padding:18px 22px;'
+        f'margin-bottom:16px;border-left:5px solid var(--azure)">'
+        f'<div style="font-size:11px;color:var(--azure);text-transform:uppercase;'
         f'letter-spacing:1.5px;margin-bottom:12px">📂 {_ac_name}</div>'
         f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s P&amp;L</div>'
+        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s P&amp;L</div>'
         f'<div style="font-size:22px;font-weight:700;color:{_td_col}">{_td_arr} ₹{abs(_pt_today_pnl):,.0f}'
-        + (" <span style='font-size:10px;color:#888'>·stale</span>" if _prices_stale else "") +
+        + (" <span style='font-size:10px;color:var(--dim)'>·stale</span>" if _prices_stale else "") +
         f'</div></div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Unrealised P&amp;L</div>'
+        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Unrealised P&amp;L</div>'
         f'<div style="font-size:22px;font-weight:700;color:{_ur_col}">{_ur_arr} ₹{abs(_pt_unrealised):,.0f} '
         f'<span style="font-size:13px">({_pt_unr_pct:+.1f}%)</span></div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">'
-        f'Realised P&amp;L &nbsp;<span style="color:#888">({_wins_cnt}/{_n_closed} won)</span></div>'
+        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">'
+        f'Realised P&amp;L &nbsp;<span style="color:var(--dim)">({_wins_cnt}/{_n_closed} won)</span></div>'
         f'<div style="font-size:22px;font-weight:700;color:{_re_col}">{_re_arr} ₹{abs(_pt_realised):,.0f}</div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Deployed Capital</div>'
-        f'<div style="font-size:22px;font-weight:700;color:#fff">₹{_pt_deployed:,.0f}</div>'
+        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Deployed Capital</div>'
+        f'<div style="font-size:22px;font-weight:700;color:var(--ink)">₹{_pt_deployed:,.0f}</div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Positions</div>'
+        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Positions</div>'
         f'<div style="font-size:20px;font-weight:700">'
-        f'<span style="color:#26a69a">{_n_open}</span> open &nbsp; '
-        f'<span style="color:#aaa;font-size:16px">{_n_closed} closed</span></div>'
+        f'<span style="color:var(--bull)">{_n_open}</span> open &nbsp; '
+        f'<span style="color:var(--ink-mid);font-size:16px">{_n_closed} closed</span></div>'
         f'</div>'
         f'</div></div>',
         unsafe_allow_html=True,
@@ -820,18 +822,18 @@ else:
             _tid      = int(_row["id"])
 
             if _tp and _cur >= _tp:
-                _st_badge, _st_bdr = "🎯 TARGET HIT",     "#26a69a"
+                _st_badge, _st_bdr = "🎯 TARGET HIT",     "var(--bull)"
             elif _sl and _cur <= _sl:
-                _st_badge, _st_bdr = "🚨 STOP BREACHED",  "#ef5350"
+                _st_badge, _st_bdr = "🚨 STOP BREACHED",  "var(--bear)"
             elif _unr >= 0:
-                _st_badge, _st_bdr = "🟢 In Profit",      "#26a69a"
+                _st_badge, _st_bdr = "🟢 In Profit",      "var(--bull)"
             else:
-                _st_badge, _st_bdr = "🔴 In Loss",        "#ef5350"
+                _st_badge, _st_bdr = "🔴 In Loss",        "var(--bear)"
 
-            _unr_c   = "#26a69a" if _unr       >= 0 else "#ef5350"
-            _td_c    = "#26a69a" if _today_pnl >= 0 else "#ef5350"
+            _unr_c   = "var(--bull)" if _unr       >= 0 else "var(--bear)"
+            _td_c    = "var(--bull)" if _today_pnl >= 0 else "var(--bear)"
             _ltp_chg = (_cur / _prv - 1) * 100 if _prv > 0 else 0
-            _ltp_c   = "#26a69a" if _ltp_chg  >= 0 else "#ef5350"
+            _ltp_c   = "var(--bull)" if _ltp_chg  >= 0 else "var(--bear)"
             _ltp_arr = "▲" if _ltp_chg >= 0 else "▼"
 
             # Progress bar — FIX P13: clamp dot position to 2–98%
@@ -839,7 +841,7 @@ else:
             _ep_pct   = min(100, max(0,   (_ep  - _sl) / _rng * 100))
             _cur_pct  = min(100, max(0,   (_cur - _sl) / _rng * 100))
             _dot_pct  = min(98,  max(2,   _cur_pct))   # FIX P13
-            _bar_c    = "#26a69a" if _cur >= _ep else "#ef5350"
+            _bar_c    = "var(--bull)" if _cur >= _ep else "var(--bear)"
             _fill_left  = min(_ep_pct, _cur_pct)
             _fill_width = abs(_cur_pct - _ep_pct)
 
@@ -848,17 +850,17 @@ else:
             _reason_disp = (_reason_txt[:80] + "…") if len(_reason_txt) > 80 else _reason_txt
 
             st.markdown(
-                f'<div style="background:#0d1f3c;border-left:5px solid {_st_bdr};'
+                f'<div style="background:var(--surface);border-left:5px solid {_st_bdr};'
                 f'border-radius:10px;padding:13px 16px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
                 f'<div>'
-                f'<span style="font-size:17px;font-weight:700;color:#fff">{_tk.replace(".NS","")}</span>'
+                f'<span style="font-size:17px;font-weight:700;color:var(--ink)">{_tk.replace(".NS","")}</span>'
                 f'&nbsp;<span style="font-size:11px;color:{_st_bdr};font-weight:600">{_st_badge}</span>'
-                f'<span style="font-size:11px;color:#888;margin-left:8px">{_qty} shares</span>'
-                f'<div style="font-size:15px;color:#fff;margin-top:4px">'
+                f'<span style="font-size:11px;color:var(--dim);margin-left:8px">{_qty} shares</span>'
+                f'<div style="font-size:15px;color:var(--ink);margin-top:4px">'
                 f'{"🔴 Live" if _has_live else "⏸ Stale"} <b>₹{_cur:,.2f}</b> '
                 f'<span style="color:{_ltp_c};font-size:12px;font-weight:600">{_ltp_arr}{abs(_ltp_chg):.2f}%</span>'
-                f'<span style="font-size:11px;color:#888;margin-left:8px">vs entry ₹{_ep:,.2f}</span>'
+                f'<span style="font-size:11px;color:var(--dim);margin-left:8px">vs entry ₹{_ep:,.2f}</span>'
                 f'</div></div>'
                 f'<div style="text-align:right">'
                 f'<div style="font-size:17px;font-weight:700;color:{_unr_c}">₹{_unr:+,.0f} ({_unr_pct:+.1f}%)</div>'
@@ -866,20 +868,20 @@ else:
                 f'</div></div>'
                 # Progress bar
                 f'<div style="margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:3px">'
+                f'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-bottom:3px">'
                 f'<span>SL ₹{_sl:,.2f}</span>'
                 f'<span>Entry ₹{_ep:,.2f}</span>'
                 f'<span>Now ₹{_cur:,.2f}</span>'
                 f'<span>Target ₹{_tp:,.2f}</span>'
                 f'</div>'
-                f'<div style="width:100%;height:8px;background:#2a3a4c;border-radius:4px;position:relative;overflow:visible">'
-                f'<div style="position:absolute;left:{_ep_pct:.0f}%;top:-3px;width:2px;height:14px;background:#888;border-radius:1px"></div>'
+                f'<div style="width:100%;height:8px;background:var(--hairline);border-radius:4px;position:relative;overflow:visible">'
+                f'<div style="position:absolute;left:{_ep_pct:.0f}%;top:-3px;width:2px;height:14px;background:var(--dim);border-radius:1px"></div>'
                 f'<div style="position:absolute;left:{_fill_left:.0f}%;width:{_fill_width:.0f}%;height:100%;background:{_bar_c};border-radius:4px;opacity:0.7"></div>'
                 # FIX P13: dot clamped to 2–98%
                 f'<div style="position:absolute;left:{_dot_pct:.0f}%;top:-4px;transform:translateX(-50%);'
-                f'width:16px;height:16px;background:{_bar_c};border-radius:50%;border:2px solid #fff"></div>'
+                f'width:16px;height:16px;background:{_bar_c};border-radius:50%;border:2px solid var(--ink)"></div>'
                 f'</div></div>'
-                + (f'<div style="font-size:11px;color:#888;margin-top:4px">📝 {_reason_disp}</div>'
+                + (f'<div style="font-size:11px;color:var(--dim);margin-top:4px">📝 {_reason_disp}</div>'
                    if _reason_disp else "")
                 + "</div>",
                 unsafe_allow_html=True,
@@ -938,10 +940,10 @@ else:
         if "pnl" in _cl_disp.columns:
             _cl_disp["pnl"] = pd.to_numeric(_cl_disp["pnl"], errors="coerce")
 
-        _CTH = ("background:#1a2744;padding:7px 11px;font-size:11px;color:#aaa;"
-                "font-weight:600;border-bottom:2px solid #2a3a5c;text-align:right;white-space:nowrap")
+        _CTH = ("background:var(--sunken);padding:7px 11px;font-size:11px;color:var(--ink-mid);"
+                "font-weight:600;border-bottom:2px solid var(--hairline);text-align:right;white-space:nowrap")
         _CTL = _CTH.replace("text-align:right", "text-align:left")
-        _CTD = "padding:7px 11px;font-size:12px;border-bottom:1px solid #1a2744;text-align:right"
+        _CTD = "padding:7px 11px;font-size:12px;border-bottom:1px solid var(--sunken);text-align:right"
         _CTX = _CTD.replace("text-align:right", "text-align:left")
         _ct_html = (
             '<table style="width:100%;border-collapse:collapse;margin-bottom:6px">'
@@ -961,7 +963,7 @@ else:
         for _, _cr in _cl_disp.iterrows():
             _c_pnl  = float(_cr.get("pnl",     0) or 0)
             _c_pct  = float(_cr.get("pnl_pct", 0) or 0)
-            _c_col  = "#26a69a" if _c_pnl >= 0 else "#ef5350"
+            _c_col  = "var(--bull)" if _c_pnl >= 0 else "var(--bear)"
             _c_bg   = "rgba(38,166,154,0.06)" if _c_pnl >= 0 else "rgba(239,83,80,0.06)"
             _c_tick = str(_cr.get("ticker", "")).replace(".NS", "")
             _c_ep   = f"₹{float(_cr.get('price', 0)):,.2f}"
@@ -1013,16 +1015,20 @@ else:
                 _eq_df = _eq_df.reset_index(drop=True)
                 _eq_df["trade_no"]   = range(1, len(_eq_df) + 1)
                 _eq_df["cumulative"] = _eq_df["pnl"].cumsum()
+                # F1 audit exception: Plotly colour params don't parse CSS
+                # custom properties -- these hex ARE the current token values
+                # from design.py (--bull #16c784 / --bear #ff4d4d /
+                # --azure #5a8fd6 / --ink #edeef0).
                 _eq_colors = [
-                    "#26a69a" if v >= 0 else "#ef5350"
+                    "#16c784" if v >= 0 else "#ff4d4d"
                     for v in _eq_df["cumulative"]
                 ]
                 _fig_eq = go.Figure()
                 _fig_eq.add_trace(go.Scatter(
                     x=_eq_df["trade_no"], y=_eq_df["cumulative"],
                     mode="lines+markers",
-                    line=dict(color="#2196F3", width=2.5),
-                    marker=dict(color=_eq_colors, size=8, line=dict(width=1, color="#fff")),
+                    line=dict(color="#5a8fd6", width=2.5),
+                    marker=dict(color=_eq_colors, size=8, line=dict(width=1, color="#edeef0")),
                     fill="tozeroy",
                     fillcolor="rgba(33,150,243,0.08)",
                     name="Cumulative P&L",
@@ -1056,28 +1062,28 @@ else:
             _al_ins   = float(_loss_ins.mean()) if not _loss_ins.empty else 0
             _pay_ins  = abs(_aw_ins / _al_ins)  if _al_ins != 0 else 0
             _exp_ins  = (_wr_ins / 100 * _aw_ins) + ((1 - _wr_ins / 100) * _al_ins)
-            _wr_c     = "#26a69a" if _wr_ins  >= 50 else "#ef5350"
-            _exp_c    = "#26a69a" if _exp_ins >= 0  else "#ef5350"
-            _pay_c    = "#26a69a" if _pay_ins >= 1.5 else "#FFC107" if _pay_ins >= 1.0 else "#ef5350"
+            _wr_c     = "var(--bull)" if _wr_ins  >= 50 else "var(--bear)"
+            _exp_c    = "var(--bull)" if _exp_ins >= 0  else "var(--bear)"
+            _pay_c    = "var(--bull)" if _pay_ins >= 1.5 else "var(--amber)" if _pay_ins >= 1.0 else "var(--bear)"
 
             st.markdown(
                 f'<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">'
-                f'<div style="flex:1;min-width:120px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid {_wr_c}">'
-                f'<div style="font-size:10px;color:#888;text-transform:uppercase">Win Rate</div>'
+                f'<div style="flex:1;min-width:120px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid {_wr_c}">'
+                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Win Rate</div>'
                 f'<div style="font-size:22px;font-weight:700;color:{_wr_c}">{_wr_ins:.0f}%</div>'
-                f'<div style="font-size:11px;color:#888">{len(_wins_ins)}/{_n_ins} trades</div></div>'
-                f'<div style="flex:1;min-width:120px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid {_pay_c}">'
-                f'<div style="font-size:10px;color:#888;text-transform:uppercase">Payoff Ratio</div>'
+                f'<div style="font-size:11px;color:var(--dim)">{len(_wins_ins)}/{_n_ins} trades</div></div>'
+                f'<div style="flex:1;min-width:120px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid {_pay_c}">'
+                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Payoff Ratio</div>'
                 f'<div style="font-size:22px;font-weight:700;color:{_pay_c}">{_pay_ins:.2f}:1</div>'
-                f'<div style="font-size:11px;color:#888">avg win / avg loss</div></div>'
-                f'<div style="flex:1;min-width:140px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid {_exp_c}">'
-                f'<div style="font-size:10px;color:#888;text-transform:uppercase">Expectancy</div>'
+                f'<div style="font-size:11px;color:var(--dim)">avg win / avg loss</div></div>'
+                f'<div style="flex:1;min-width:140px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid {_exp_c}">'
+                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Expectancy</div>'
                 f'<div style="font-size:22px;font-weight:700;color:{_exp_c}">₹{_exp_ins:,.0f}</div>'
-                f'<div style="font-size:11px;color:#888">avg ₹ per trade</div></div>'
-                f'<div style="flex:1;min-width:120px;background:#0d1f3c;border-radius:8px;padding:12px 14px;border-top:3px solid #2196F3">'
-                f'<div style="font-size:10px;color:#888;text-transform:uppercase">Avg Win</div>'
-                f'<div style="font-size:22px;font-weight:700;color:#26a69a">₹{_aw_ins:,.0f}</div>'
-                f'<div style="font-size:11px;color:#888">avg loss ₹{abs(_al_ins):,.0f}</div></div>'
+                f'<div style="font-size:11px;color:var(--dim)">avg ₹ per trade</div></div>'
+                f'<div style="flex:1;min-width:120px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid var(--azure)">'
+                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Avg Win</div>'
+                f'<div style="font-size:22px;font-weight:700;color:var(--bull)">₹{_aw_ins:,.0f}</div>'
+                f'<div style="font-size:11px;color:var(--dim)">avg loss ₹{abs(_al_ins):,.0f}</div></div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -1106,13 +1112,13 @@ else:
                 if len(_setup_g) > 1:
                     st.caption("**Top setups by total P&L:**")
                     for _sn, _sr in _setup_g.iterrows():
-                        _s_c = "#26a69a" if _sr["total_pnl"] >= 0 else "#ef5350"
+                        _s_c = "var(--bull)" if _sr["total_pnl"] >= 0 else "var(--bear)"
                         st.markdown(
                             f'<div style="display:flex;justify-content:space-between;'
-                            f'padding:4px 0;border-bottom:1px solid #1a2744;font-size:12px">'
-                            f'<span style="color:#ccc">{_sn}</span>'
+                            f'padding:4px 0;border-bottom:1px solid var(--sunken);font-size:12px">'
+                            f'<span style="color:var(--ink-mid)">{_sn}</span>'
                             f'<span><span style="color:{_s_c};font-weight:700">₹{_sr["total_pnl"]:+,.0f}</span>'
-                            f'&nbsp;<span style="color:#888">{int(_sr["trades"])} trades · '
+                            f'&nbsp;<span style="color:var(--dim)">{int(_sr["trades"])} trades · '
                             f'{_sr["win_rate"]*100:.0f}% WR</span></span>'
                             f'</div>',
                             unsafe_allow_html=True,
