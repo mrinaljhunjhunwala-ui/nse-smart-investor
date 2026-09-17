@@ -91,7 +91,18 @@ with tab_gap:
             _gap_df = _cached_gaps(_gap_min)
 
         if _gap_df.empty:
-            st.info(f"No stocks with gap ≥ {_gap_min}% today. Market opened flat.")
+            # F5 empty-state kit -- soft neutral panel reads as "empty by
+            # design" rather than the blue "info" tone st.info carries.
+            from dashboard.shared.ui_components import empty_state as _empty
+            st.markdown(
+                _empty(
+                    title="Market opened flat",
+                    hint=f"No stocks with a gap of {_gap_min}% or more today. "
+                         "Try lowering the gap threshold above.",
+                    icon="↔️",
+                ),
+                unsafe_allow_html=True,
+            )
         else:
             # Summary metrics
             _gup   = _gap_df[_gap_df["gap_pct"] > 0]
@@ -146,7 +157,16 @@ with tab_gap:
             )
             st.plotly_chart(fig_gap, width="stretch")
     else:
-        st.info("Click **🔍 Scan Gaps** to load today's gap data.")
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="Ready to scan",
+                hint="Click **🔍 Scan Gaps** to see which Nifty 50 stocks "
+                     "opened with a gap larger than the threshold.",
+                icon="🔍",
+            ),
+            unsafe_allow_html=True,
+        )
 
 # ── TAB 2: INTRADAY CHART ─────────────────────────────────────────────────
 with tab_chart:
@@ -398,7 +418,16 @@ with tab_chart:
             st.error(f"Could not load intraday data: {_ic_err}")
             st.caption("Yahoo Finance intraday data is limited to recent days and may be unavailable for some tickers.")
     else:
-        st.info("Enter a ticker and click **📈 Load Chart** to view intraday data.")
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="No chart loaded yet",
+                hint="Enter a ticker above and click **📈 Load Chart** to "
+                     "view intraday candles with CPR, ORB, AVWAP and Supertrend.",
+                icon="📈",
+            ),
+            unsafe_allow_html=True,
+        )
 
 # ── TAB 3: ORB SETUP ─────────────────────────────────────────────────────
 with tab_orb:
@@ -556,7 +585,16 @@ with tab_sigs:
         if _rows:
             st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
     else:
-        st.info("Add stocks (one per line) and click **🎯 Scan All**.")
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="Nothing scanned yet",
+                hint="Add stocks in the box above (one per line) and click "
+                     "**🎯 Scan All** to see intraday signals across the list.",
+                icon="🎯",
+            ),
+            unsafe_allow_html=True,
+        )
 
 # NOTE: the "Live Positions — Angel One" tab that used to live here has been
 # removed as a duplicate. Real-time Angel One positions (MIS + CNC), along
