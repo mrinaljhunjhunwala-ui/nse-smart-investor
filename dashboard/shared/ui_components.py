@@ -484,8 +484,13 @@ def chip_tag(label: str) -> str:
     )
 
 
-def chip_pill(label: str, tone: str = "neutral") -> str:
-    """Rounded semantic-state pill. tone: good/warn/bad/accent/neutral."""
+def chip_pill(label: str, tone: str = "neutral", title: str = "") -> str:
+    """Rounded semantic-state pill. tone: good/warn/bad/accent/neutral.
+
+    Optional `title` renders as a hover tooltip via the standard HTML title
+    attribute -- lets a chip carry secondary context (rationale, confidence,
+    horizon) without forcing it into the visible label.
+    """
     palette = {
         "good":    ("var(--bull)",   "var(--tint-bull)",   "rgba(22,199,132,.4)"),
         "warn":    ("var(--amber)",  "var(--tint-amber)",  "rgba(242,169,59,.4)"),
@@ -494,11 +499,12 @@ def chip_pill(label: str, tone: str = "neutral") -> str:
         "neutral": ("var(--dim)",    "rgba(255,255,255,.06)", "var(--hairline)"),
     }
     fg, bg, border = palette.get(tone, palette["neutral"])
+    title_attr = f' title="{title}"' if title else ""
     return (
         f'<span style="display:inline-flex;align-items:center;'
         f'padding:3px 10px;border-radius:999px;background:{bg};color:{fg};'
         f'border:1px solid {border};font-size:11px;font-weight:600;'
-        f'letter-spacing:0.02em;margin-right:4px">{label}</span>'
+        f'letter-spacing:0.02em;margin-right:4px"{title_attr}>{label}</span>'
     )
 
 

@@ -89,6 +89,7 @@ if _ROOT not in sys.path:
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.ui_components import chip_pill
 from dashboard.shared.trade_utils import (
     _action_emoji,
     _display_label,                # Phase 2 UI honesty
@@ -659,6 +660,15 @@ if _csv_source is not None:
                 "WATCHLIST":  ("#ff9500", "rgba(255,149,0,.09)"), "HOLD": ("#8b8d93", "rgba(255,255,255,.04)"),
                 "CAUTION":    ("#f2a93b", "rgba(242,169,59,.09)"), "EXIT": ("#ff4d4d", "rgba(255,77,77,.10)"),
             }
+            # Chip-vocabulary tone map -- keeps the action pill on holding
+            # cards in the same shape/colours the rest of the app uses.
+            _ACT_CHIP_TONE = {
+                "STRONG BUY": "good", "BUY": "good",
+                "WATCHLIST":  "accent",
+                "HOLD":       "neutral",
+                "CAUTION":    "warn",
+                "EXIT":       "bad",
+            }
             _hc_grid = st.columns(2)
             for _hi, h in enumerate(_hold_sorted):
                 _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#8b8d93", "#1a1a1a"))
@@ -694,15 +704,20 @@ if _csv_source is not None:
                 _h_rr = getattr(h, "risk_reward", None)
                 _h_rr_txt = f"RR {_h_rr:.1f}:1" if _h_rr else ""
 
-                # Phase 2 — honest display label, not raw action string
+                # Phase 2 -- honest display label, not raw action string.
+                # Action badge routed through the shared chip_pill so every
+                # posture across the app uses one vocabulary.
+                _h_chip_tone = _ACT_CHIP_TONE.get(h.action, "neutral")
+                _h_action_chip = chip_pill(
+                    f"{_h_emoji} {_display_label(h.action)}", tone=_h_chip_tone,
+                )
                 _h_html = (
                     f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
                     f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
-                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">'
-                    f'{_h_emoji} {_display_label(h.action)}</span>'
+                    f'&nbsp;&nbsp;{_h_action_chip}'
                     f'</div>'
                     f'<div style="text-align:right">'
                     f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
