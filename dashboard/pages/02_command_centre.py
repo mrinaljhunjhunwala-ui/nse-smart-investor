@@ -806,15 +806,18 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     _n_unavail    = int(_picks_meta.get("n_unavailable", 0) or 0)
     if _n_scanned > 0 and (_n_unavail / _n_scanned) >= _UNAVAIL_WARN_FRACTION:
         _pct = 100.0 * _n_unavail / _n_scanned
+        # DT3 degraded-mode banner -- see dashboard/shared/ui_components.py.
+        from dashboard.shared.ui_components import degraded_banner as _degraded
         st.markdown(
-            f'<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
-            f'padding:8px 14px;margin-bottom:10px">'
-            f'<span style="font-size:12px;color:var(--amber)">⚠ Data quality alert: '
-            f'<b>{_n_unavail}/{_n_scanned}</b> tickers ({_pct:.1f}%) were unavailable this '
-            f'scan — the pick list below is drawn from the remaining '
-            f'<b>{_n_scanned - _n_unavail}</b>. A source (Stooq / Yahoo / Angel) may be '
-            f'throttled or degraded; picks are still valid but the universe is narrower '
-            f'than usual.</span></div>',
+            _degraded(
+                title="Data quality alert",
+                detail=(f"<b>{_n_unavail}/{_n_scanned}</b> tickers ({_pct:.1f}%) "
+                        f"were unavailable this scan — the pick list below is "
+                        f"drawn from the remaining <b>{_n_scanned - _n_unavail}</b>. "
+                        f"A source (Stooq / Yahoo / Angel) may be throttled "
+                        f"or degraded."),
+                fallback="Picks are still valid but the universe is narrower than usual.",
+            ),
             unsafe_allow_html=True,
         )
 

@@ -894,7 +894,17 @@ if _csv_source is not None:
                 with st.spinner("Reconstructing NAV & computing risk metrics…"):
                     _rr = _pf_risk(_risk_holds, _risk_period)
                 if _rr.error:
-                    st.warning(f"⚠️ Risk analytics unavailable: {_rr.error}")
+                    # DT3 degraded-mode banner -- consistent look across the app.
+                    from dashboard.shared.ui_components import degraded_banner as _degraded
+                    st.markdown(
+                        _degraded(
+                            title="Risk analytics unavailable",
+                            detail=str(_rr.error),
+                            fallback="The rest of the portfolio view still works below.",
+                            tone="bad",
+                        ),
+                        unsafe_allow_html=True,
+                    )
                 else:
                     if (_rr.affected_weight_pct or 0) >= 25 or not _rr.purchase_dates_known:
                         st.warning(f"⚠️ {_rr.disclosure}")
