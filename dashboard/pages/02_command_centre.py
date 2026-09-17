@@ -14,6 +14,7 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.ui_components import chip_pill
 from dashboard.shared.cache import (
     get_top_picks,
     _persisted_top_picks_snapshot,   # FIX TP-FAST1 / FIX TP-NOOP1
@@ -872,11 +873,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _card_grad   = ("linear-gradient(135deg,var(--sunken),var(--sunken))" if _is_watch_tier
                             else "linear-gradient(135deg,var(--sunken),var(--sunken))")
             _score_color = "var(--amber)" if _is_watch_tier else "var(--bull)"
-            _tier_badge  = (
-                '<span style="background:var(--tint-amber);color:var(--amber);border:1px solid var(--amber);'
-                'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
-                'WATCHLIST-GRADE</span>'
-            ) if _is_watch_tier else ""
+            _tier_badge = chip_pill("Watchlist-grade", tone="warn") if _is_watch_tier else ""
 
             # FIX FV-PILL — surface the ONE-verdict answer on the pick card.
             # Horizon is inferred from the pick's own "horizon" hint so a
@@ -886,18 +883,18 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _fv_pill = ""
             try:
                 _fv = _compose_fv_for_card(_b, tqs=None)
-                _fv_pill_colors = {
-                    "STRONG BUY": "var(--bull)", "BUY": "var(--bull)", "WATCH": "var(--accent)",
-                    "HOLD": "var(--dim)", "AVOID": "var(--bear)",
+                _fv_pill_tones = {
+                    "STRONG BUY": "good", "BUY": "good", "WATCH": "accent",
+                    "HOLD": "neutral", "AVOID": "bad",
                 }
-                _pc = _fv_pill_colors.get(_fv.verdict, "var(--dim)")
-                _fv_pill = (
-                    f'<span style="background:{_pc}22;color:{_pc};border:1px solid {_pc};'
-                    f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px" '
-                    f'title="FinalVerdict on the {_fv.horizon} horizon — '
-                    f'{_fv.confidence} confidence, conviction {_fv.conviction}/100. '
-                    f'{_fv.primary_reason}">'
-                    f'VERDICT: {_fv.verdict}</span>'
+                _fv_tone = _fv_pill_tones.get(_fv.verdict, "neutral")
+                _fv_title = (
+                    f"FinalVerdict on the {_fv.horizon} horizon -- "
+                    f"{_fv.confidence} confidence, conviction {_fv.conviction}/100. "
+                    f"{_fv.primary_reason}"
+                )
+                _fv_pill = chip_pill(
+                    f"Verdict: {_fv.verdict}", tone=_fv_tone, title=_fv_title,
                 )
             except Exception as _fv_pill_e:
                 import logging
@@ -1072,7 +1069,17 @@ def _render_open_positions_section():
         st.caption(f"⚠️ Couldn't load open paper positions ({_e}).")
     
     if _cc_open_df.empty:
-        st.info("No open paper positions. Use **Paper Trades** or click **Paper Trade** on any BUY signal below.")
+        # F5 empty-state kit -- see dashboard/shared/ui_components.py.
+        from dashboard.shared.ui_components import empty_state as _empty_cc_pt
+        st.markdown(
+            _empty_cc_pt(
+                title="No open paper positions",
+                hint="Use the **Paper Trades** page, or click "
+                     "**Paper Trade** on any BUY signal below.",
+                icon="📌",
+            ),
+            unsafe_allow_html=True,
+        )
     else:
         _cc_syms = tuple(_cc_open_df["ticker"].tolist())
         _cc_lp   = _portfolio_live_prices(_cc_syms)
@@ -1172,10 +1179,28 @@ with st.expander("🔔 Background Alerts (Telegram) — fire even when this app 
                 _al_show.columns = ["Stock", "When price goes", "Level (₹)", "Note"]
                 st.dataframe(_al_show, hide_index=True, width="stretch")
             else:
-                st.info("No active price alerts. All rows are examples (enabled=0). "
-                        "Set `enabled=1` on a row in data/alerts.csv to activate it.")
+                from dashboard.shared.ui_components import empty_state as _empty_al
+                st.markdown(
+                    _empty_al(
+                        title="No active price alerts",
+                        hint="All rows are examples (enabled=0). Set "
+                             "`enabled=1` on a row in `data/alerts.csv` to "
+                             "activate it.",
+                        icon="🔔",
+                    ),
+                    unsafe_allow_html=True,
+                )
         else:
-            st.info("No alerts.csv found yet.")
+            from dashboard.shared.ui_components import empty_state as _empty_al2
+            st.markdown(
+                _empty_al2(
+                    title="No alerts.csv found yet",
+                    hint="Create `data/alerts.csv` with your desired price "
+                         "levels to start getting Telegram notifications.",
+                    icon="📄",
+                ),
+                unsafe_allow_html=True,
+            )
     except Exception as _ale:
         st.caption(f"Could not read alerts.csv: {_ale}")
 

@@ -73,6 +73,7 @@ from dashboard.shared.trade_utils import (
     set_paper_account_type,
 )
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.ui_components import empty_state  # F5
 
 apply_design()
 render_sidebar(current="Paper Trades")
@@ -700,7 +701,16 @@ _autoclose_fragment()
 trades = load_trades_by_account(st.session_state.get("pt_account", "My Account"))
 
 if trades.empty:
-    st.info("No paper trades yet. Open your first trade using the form above.")
+    # F5 empty-state kit -- see dashboard/shared/ui_components.py.
+    st.markdown(
+        empty_state(
+            title="No paper trades yet",
+            hint="Open your first virtual trade using the form above. "
+                 "P&L, R:R and win rate will populate here as trades close.",
+            icon="📝",
+        ),
+        unsafe_allow_html=True,
+    )
 else:
     open_t     = trades[trades["status"] == "OPEN"]    if "status" in trades.columns else pd.DataFrame()
     closed_t   = trades[trades["status"] == "CLOSED"]  if "status" in trades.columns else pd.DataFrame()

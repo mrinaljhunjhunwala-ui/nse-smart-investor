@@ -484,8 +484,13 @@ def chip_tag(label: str) -> str:
     )
 
 
-def chip_pill(label: str, tone: str = "neutral") -> str:
-    """Rounded semantic-state pill. tone: good/warn/bad/accent/neutral."""
+def chip_pill(label: str, tone: str = "neutral", title: str = "") -> str:
+    """Rounded semantic-state pill. tone: good/warn/bad/accent/neutral.
+
+    Optional `title` renders as a hover tooltip via the standard HTML title
+    attribute -- lets a chip carry secondary context (rationale, confidence,
+    horizon) without forcing it into the visible label.
+    """
     palette = {
         "good":    ("var(--bull)",   "var(--tint-bull)",   "rgba(22,199,132,.4)"),
         "warn":    ("var(--amber)",  "var(--tint-amber)",  "rgba(242,169,59,.4)"),
@@ -494,11 +499,12 @@ def chip_pill(label: str, tone: str = "neutral") -> str:
         "neutral": ("var(--dim)",    "rgba(255,255,255,.06)", "var(--hairline)"),
     }
     fg, bg, border = palette.get(tone, palette["neutral"])
+    title_attr = f' title="{title}"' if title else ""
     return (
         f'<span style="display:inline-flex;align-items:center;'
         f'padding:3px 10px;border-radius:999px;background:{bg};color:{fg};'
         f'border:1px solid {border};font-size:11px;font-weight:600;'
-        f'letter-spacing:0.02em;margin-right:4px">{label}</span>'
+        f'letter-spacing:0.02em;margin-right:4px"{title_attr}>{label}</span>'
     )
 
 
@@ -600,4 +606,49 @@ def hero_verdict(posture: str,
         f'border:1px solid var(--hairline);border-radius:var(--r-base);'
         f'overflow:hidden;margin:12px 0 20px 0">'
         f'{lead_html}{score_html}</div>'
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# F5 · empty-state kit (docs/UI_UX_BACKLOG.md)
+# ═══════════════════════════════════════════════════════════════════════════
+# Every page currently degrades differently when it has nothing to show --
+# some use st.info (blue tint = "informational"), some st.warning (amber =
+# "attention"), some a plain caption. An empty list isn't an error and isn't
+# a warning; it's a state the user just hasn't populated yet. This helper
+# gives every such state the same soft, muted panel so "empty by design"
+# reads consistently across the app.
+
+def empty_state(title: str, hint: str = "", icon: str = "") -> str:
+    """Centered soft-neutral empty-state block.
+
+    title: one short line ("Your watchlist is empty").
+    hint:  one-line guidance for the next action.
+    icon:  optional emoji or single glyph rendered above the title.
+
+    Returns raw HTML -- callers stamp via st.markdown(unsafe_allow_html=True).
+    Deliberately quieter than st.info/st.warning so a blank list doesn't
+    read as an error or a warning; use those Streamlit primitives when the
+    message IS informational or an actionable warning.
+    """
+    icon_html = (
+        f'<div style="font-size:32px;line-height:1;margin-bottom:10px;'
+        f'opacity:.7">{icon}</div>'
+        if icon else ""
+    )
+    hint_html = (
+        f'<div style="font-size:12.5px;color:var(--dim);line-height:1.55;'
+        f'max-width:44ch;margin:6px auto 0">{hint}</div>'
+        if hint else ""
+    )
+    return (
+        f'<div style="display:flex;flex-direction:column;align-items:center;'
+        f'justify-content:center;text-align:center;padding:34px 20px;'
+        f'background:var(--sunken);border:1px dashed var(--hairline);'
+        f'border-radius:var(--r-base);margin:12px 0">'
+        f'{icon_html}'
+        f'<div style="font-size:14.5px;font-weight:600;color:var(--ink-mid);'
+        f'letter-spacing:.005em">{title}</div>'
+        f'{hint_html}'
+        f'</div>'
     )

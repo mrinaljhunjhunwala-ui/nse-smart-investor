@@ -50,9 +50,21 @@ if _ROOT not in sys.path:
 
 from analysis import verdict_ledger as _vl        # noqa: E402
 import trade_store as _store                       # noqa: E402
+from dashboard.shared.design import apply_design   # noqa: E402
+from dashboard.shared.nav import render_sidebar    # noqa: E402
+from dashboard.shared.chart_helpers import render_top_bar  # noqa: E402
 
 
-st.set_page_config(page_title="Verdict Calibration", page_icon="📏", layout="wide")
+# FIX: this page previously called st.set_page_config, violating the
+# "only dashboard/app.py may call set_page_config" rule. In practice this
+# crashed the page whenever a user navigated to it after visiting any
+# other page in the same session. Removed, and adding the shared
+# apply_design / render_sidebar / render_top_bar so this internal-facing
+# calibration page picks up the same chrome as every other page.
+apply_design()
+render_sidebar(current="Verdict Calibration")
+render_top_bar()
+
 st.markdown('<h1 class="page-title-serif">Verdict <em>Calibration &amp; Shadow Trades</em></h1>', unsafe_allow_html=True)
 
 st.caption(
