@@ -125,6 +125,53 @@ def apply_design():
       --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
       --font-serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+
+      /* F4 · Motion policy (docs/UI_UX_BACKLOG.md)
+         One motion vocabulary for the whole app:
+           - ≤180 ms so nothing feels "waited on"
+           - ease-out for enter states (fast start, gentle land)
+           - prefers-reduced-motion honoured: durations collapse to 0
+             via the media query below, so no caller has to guard. */
+      --motion-fast:  120ms;   /* hover, chip flip, chevron rotate */
+      --motion-base:  180ms;   /* card fade-in, sheet enter */
+      --motion-slow:  260ms;   /* hero verdict entry, large panels */
+      --ease-out:     cubic-bezier(0.16, 1, 0.3, 1);   /* enter */
+      --ease-in-out:  cubic-bezier(0.65, 0, 0.35, 1);  /* toggles */
+    }
+
+    /* F4 · reduced-motion guard -- flattens every duration to 0. Applies
+       to app CSS, inline styles that use var(--motion-*), and the
+       .motion-fade-in / .motion-slide-up utility classes below. Users
+       who prefer reduced motion get instant states, no animation. */
+    @media (prefers-reduced-motion: reduce) {
+      :root {
+        --motion-fast: 0ms;
+        --motion-base: 0ms;
+        --motion-slow: 0ms;
+      }
+      * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    /* F4 · utility classes. Deliberately small surface -- most UI should
+       not animate at all. Reserve these for entry moments where a soft
+       reveal reads more polished than a hard cut. */
+    @keyframes motion-fade-in-kf {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes motion-slide-up-kf {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .motion-fade-in {
+      animation: motion-fade-in-kf var(--motion-base) var(--ease-out) both;
+    }
+    .motion-slide-up {
+      animation: motion-slide-up-kf var(--motion-slow) var(--ease-out) both;
     }
 
     /* ── Editorial serif · used SPARINGLY on hero moments only ─────────────
