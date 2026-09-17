@@ -610,6 +610,55 @@ def hero_verdict(posture: str,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# DT3 · degraded-mode banner (docs/UI_UX_BACKLOG.md)
+# ═══════════════════════════════════════════════════════════════════════════
+# Every page currently rolls its own "provider unavailable" / "source
+# throttled" / "showing last known data" message -- some as st.warning,
+# some as st.caption, some as raw markdown. That inconsistency reads as
+# unpolished ("is this a real problem or just a hint?"). One shared
+# banner shape means every degraded state carries the same visual weight
+# and the same tone (amber warn by default, red bad for hard failure).
+
+def degraded_banner(title: str,
+                    detail: str = "",
+                    fallback: str = "",
+                    tone: str = "warn") -> str:
+    """Provider-degraded / source-unreachable banner.
+
+    title:    the short headline ("Data quality alert", "Source unreachable").
+    detail:   one-line reason ("14 of 500 tickers were unavailable this scan").
+    fallback: what the page is showing instead ("Picks are still valid but
+              the universe is narrower than usual"). Rendered muted.
+    tone:     'warn' (amber, default -- degraded but usable) or 'bad'
+              (bear red -- hard failure / no data at all).
+
+    Returns raw HTML -- callers stamp via st.markdown(unsafe_allow_html=True).
+    """
+    rail_color = "var(--bear)" if tone == "bad" else "var(--amber)"
+    tint_bg    = "var(--tint-bear)" if tone == "bad" else "var(--tint-amber)"
+    icon       = "⛔" if tone == "bad" else "⚠"
+
+    detail_html = (
+        f'<div style="font-size:12.5px;color:var(--ink-mid);line-height:1.5;'
+        f'margin-top:3px">{detail}</div>'
+        if detail else ""
+    )
+    fallback_html = (
+        f'<div style="font-size:11.5px;color:var(--dim);line-height:1.5;'
+        f'margin-top:6px;font-style:italic">{fallback}</div>'
+        if fallback else ""
+    )
+    return (
+        f'<div style="background:{tint_bg};border-left:4px solid {rail_color};'
+        f'border-radius:var(--r-base);padding:10px 14px;margin:8px 0">'
+        f'<div style="font-size:12px;font-weight:700;color:{rail_color};'
+        f'letter-spacing:.05em;text-transform:uppercase">{icon} {title}</div>'
+        f'{detail_html}{fallback_html}'
+        f'</div>'
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # F5 · empty-state kit (docs/UI_UX_BACKLOG.md)
 # ═══════════════════════════════════════════════════════════════════════════
 # Every page currently degrades differently when it has nothing to show --
