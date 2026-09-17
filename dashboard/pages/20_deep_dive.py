@@ -193,42 +193,42 @@ if _cs is not None and getattr(_cs, "entry", None):
 # trend-quality labels the rest of the app uses — rather than the raw
 # internal action string.
 _grade    = getattr(_cs, "grade", None) if _cs is not None else None
-_border_c = _grade_color(_grade) if _grade else "#3a3a3a"
+_border_c = _grade_color(_grade) if _grade else "var(--hairline)"
 _up       = (_live_chg or 0) >= 0
-_price_c  = "#3ddc84" if _up else "#ef5350"
+_price_c  = "var(--bull)" if _up else "var(--bear)"
 _arrow    = "▲" if _up else "▼"
 
 _price_html = (
-    f'<div style="font-size:24px;font-weight:700;color:#fff">₹{_live_price:,.2f} '
+    f'<div style="font-size:24px;font-weight:700;color:var(--ink)">₹{_live_price:,.2f} '
     f'<span style="font-size:14px;color:{_price_c};font-weight:600">'
     f'{_arrow}{abs(_live_chg or 0):.2f}%</span></div>'
     if _live_price else
-    '<div style="font-size:18px;font-weight:700;color:#888">Price unavailable</div>'
+    '<div style="font-size:18px;font-weight:700;color:var(--dim)">Price unavailable</div>'
 )
-_vol_html = (f'<div style="font-size:12px;color:#888;margin-top:2px">Vol {_live_vol:,.0f}</div>'
-             if _live_vol else '<div style="font-size:12px;color:#666;margin-top:2px">Volume n/a</div>')
+_vol_html = (f'<div style="font-size:12px;color:var(--dim);margin-top:2px">Vol {_live_vol:,.0f}</div>'
+             if _live_vol else '<div style="font-size:12px;color:var(--faint);margin-top:2px">Volume n/a</div>')
 
 if _cs is not None:
     _sig_lbl = _display_label(_cs.action)
     _sig_emo = _action_emoji(_cs.action)
     _sig_html = (
         f'<div style="font-size:16px;font-weight:700;color:{_border_c}">{_sig_emo} {_sig_lbl}</div>'
-        f'<div style="font-size:12px;color:#888;margin-top:2px">{_cs.score:.0f}/90 · Grade {_grade}</div>'
+        f'<div style="font-size:12px;color:var(--dim);margin-top:2px">{_cs.score:.0f}/90 · Grade {_grade}</div>'
     )
 else:
-    _sig_html = '<div style="font-size:16px;font-weight:700;color:#888">Signal unavailable</div>'
+    _sig_html = '<div style="font-size:16px;font-weight:700;color:var(--dim)">Signal unavailable</div>'
 
 _levels_html = ""
 if _entry_disp:
     _levels_html = (
-        f'<div style="font-size:12px;color:#aaa;margin-top:10px;padding-top:10px;'
-        f'border-top:1px solid rgba(255,255,255,.08)">'
+        f'<div style="font-size:12px;color:var(--ink-mid);margin-top:10px;padding-top:10px;'
+        f'border-top:1px solid var(--hairline)">'
         f'Entry ₹{_entry_disp:,.2f} · SL ₹{_sl_disp:,.2f} · TP ₹{_tp_disp:,.2f} '
-        f'<span style="color:#666">{"(live)" if _live_price else "(last close)"}</span></div>'
+        f'<span style="color:var(--faint)">{"(live)" if _live_price else "(last close)"}</span></div>'
     )
 
 st.markdown(
-    f'<div style="background:linear-gradient(135deg,#161616,#1c1c1c);'
+    f'<div style="background:linear-gradient(135deg,var(--surface),var(--sunken));'
     f'border-left:4px solid {_border_c};border-radius:10px;padding:16px 20px;margin-bottom:10px">'
     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">'
     f'<div>{_price_html}{_vol_html}</div>'
@@ -263,16 +263,16 @@ _st_col, _lt_col = st.columns(2)
 with _st_col:
     if _cs is not None:
         st.markdown(
-            f'<div style="background:#141414;border-left:4px solid {_border_c};'
+            f'<div style="background:var(--surface);border-left:4px solid {_border_c};'
             f'border-radius:8px;padding:10px 14px">'
-            f'<div style="font-size:11px;color:#888;text-transform:uppercase;'
+            f'<div style="font-size:11px;color:var(--dim);text-transform:uppercase;'
             f'letter-spacing:.5px">Short-Term (trend &amp; momentum)</div>'
             f'<div style="font-size:15px;font-weight:700;color:{_border_c};margin-top:2px">'
             f'{_sig_emo} {_sig_lbl}</div>'
-            f'<div style="font-size:12px;color:#aaa;margin-top:4px">'
+            f'<div style="font-size:12px;color:var(--ink-mid);margin-top:4px">'
             f'Momentum {_cs.momentum_score:.0f}/25 · RSI {_cs.rsi:.0f} · '
             f'1D {_cs.return_1d:+.1f}%</div>'
-            + (f'<div style="font-size:11px;color:#6a8caf;margin-top:4px">⏱ {_cs.horizon}</div>'
+            + (f'<div style="font-size:11px;color:var(--azure);margin-top:4px">⏱ {_cs.horizon}</div>'
                if _cs.horizon else '')
             + '</div>',
             unsafe_allow_html=True,
@@ -280,8 +280,8 @@ with _st_col:
         st.caption("Reflects trend/momentum health — not a forecast of returns.")
     else:
         st.markdown(
-            '<div style="background:#141414;border-left:4px solid #3a3a3a;'
-            'border-radius:8px;padding:10px 14px;color:#888;font-size:13px">'
+            '<div style="background:var(--surface);border-left:4px solid var(--hairline);'
+            'border-radius:8px;padding:10px 14px;color:var(--dim);font-size:13px">'
             'Short-term read unavailable for this ticker.</div>',
             unsafe_allow_html=True,
         )
@@ -289,27 +289,32 @@ with _st_col:
 with _lt_col:
     _thesis = context.get("thesis")
     if _thesis is not None:
+        # F1 audit -- verdict palette now routes through design.py tokens.
+        # 5-way scale: strong/mid positive both bull, neutral accent (saffron),
+        # mid negative amber (a "friction" step, not a veto), strong negative
+        # bear red. Matches the tone map used on Analyze Stock.
         _verdict_colors = {
-            "Strong Positive": "#26a69a", "Positive": "#4caf7d",
-            "Neutral": "#FF9800", "Negative": "#ef7350", "Strong Negative": "#ef5350",
+            "Strong Positive": "var(--bull)", "Positive": "var(--bull)",
+            "Neutral": "var(--accent)", "Negative": "var(--amber)",
+            "Strong Negative": "var(--bear)",
         }
-        _v_color = _verdict_colors.get(_thesis.verdict, "#888")
+        _v_color = _verdict_colors.get(_thesis.verdict, "var(--dim)")
         _bull_html = "".join(
-            f'<div style="font-size:11px;color:#9fd6b0;margin-top:2px">✅ {html.escape(f.text)}</div>'
+            f'<div style="font-size:11px;color:var(--bull);margin-top:2px">✅ {html.escape(f.text)}</div>'
             for f in (_thesis.bull_factors or [])[:2]
         )
         _bear_html = "".join(
-            f'<div style="font-size:11px;color:#e8a8a8;margin-top:2px">⚠️ {html.escape(f.text)}</div>'
+            f'<div style="font-size:11px;color:var(--bear);margin-top:2px">⚠️ {html.escape(f.text)}</div>'
             for f in (_thesis.bear_factors or [])[:2]
         )
         st.markdown(
-            f'<div style="background:#141414;border-left:4px solid {_v_color};'
+            f'<div style="background:var(--surface);border-left:4px solid {_v_color};'
             f'border-radius:8px;padding:10px 14px">'
-            f'<div style="font-size:11px;color:#888;text-transform:uppercase;'
+            f'<div style="font-size:11px;color:var(--dim);text-transform:uppercase;'
             f'letter-spacing:.5px">Long-Term (fundamentals thesis)</div>'
             f'<div style="font-size:15px;font-weight:700;color:{_v_color};margin-top:2px">'
             f'{html.escape(_thesis.verdict)}</div>'
-            f'<div style="font-size:12px;color:#aaa;margin-top:4px">'
+            f'<div style="font-size:12px;color:var(--ink-mid);margin-top:4px">'
             f'{html.escape((_thesis.verdict_rationale or ""))[:160]}</div>'
             f'{_bull_html}{_bear_html}'
             '</div>',
@@ -319,8 +324,8 @@ with _lt_col:
                    "read from the trend score above, not a rescoring of it.")
     else:
         st.markdown(
-            '<div style="background:#141414;border-left:4px solid #3a3a3a;'
-            'border-radius:8px;padding:10px 14px;color:#888;font-size:13px">'
+            '<div style="background:var(--surface);border-left:4px solid var(--hairline);'
+            'border-radius:8px;padding:10px 14px;color:var(--dim);font-size:13px">'
             'Long-term fundamentals read unavailable — the fundamentals data source '
             'may be down for this ticker.</div>',
             unsafe_allow_html=True,
