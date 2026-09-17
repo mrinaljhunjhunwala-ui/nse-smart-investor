@@ -124,14 +124,18 @@ st.markdown(f"### Regime read: {_regime}")
 st.markdown("---")
 st.subheader("📊 Daily net flows (₹ Cr)")
 
+# F1 audit note: Plotly colour params don't parse CSS custom properties,
+# so these hex are raw. They ARE the current token values from design.py --
+# --bull #16c784, --bear #ff4d4d, --azure #5a8fd6, --amber #f2a93b, --faint
+# #55575e -- so a palette swap needs a matching update here.
 _fig = go.Figure()
 _fig.add_bar(x=_df["date"], y=_df["fii_net"], name="FII net",
-             marker_color=["#26a69a" if v >= 0 else "#ef5350"
+             marker_color=["#16c784" if v >= 0 else "#ff4d4d"
                            for v in _df["fii_net"].fillna(0)])
 _fig.add_bar(x=_df["date"], y=_df["dii_net"], name="DII net",
-             marker_color=["#42a5f5" if v >= 0 else "#ff9800"
+             marker_color=["#5a8fd6" if v >= 0 else "#f2a93b"
                            for v in _df["dii_net"].fillna(0)])
-_fig.add_hline(y=0, line_dash="dash", line_color="#666")
+_fig.add_hline(y=0, line_dash="dash", line_color="#55575e")
 _fig.update_layout(
     barmode="group",
     xaxis_title="", yaxis_title="₹ Crore",
@@ -147,12 +151,14 @@ st.subheader("📈 Cumulative flow (running sum over window)")
 _cum = _df.copy()
 _cum["fii_cum"] = _cum["fii_net"].fillna(0).cumsum()
 _cum["dii_cum"] = _cum["dii_net"].fillna(0).cumsum()
+# F1 audit note: Plotly hex mirrors the daily-bars chart above (design.py
+# tokens --bull #16c784, --azure #5a8fd6, --faint #55575e).
 _fig2 = go.Figure()
 _fig2.add_trace(go.Scatter(x=_cum["date"], y=_cum["fii_cum"], mode="lines",
-                            line=dict(color="#26a69a", width=2), name="FII cumulative"))
+                            line=dict(color="#16c784", width=2), name="FII cumulative"))
 _fig2.add_trace(go.Scatter(x=_cum["date"], y=_cum["dii_cum"], mode="lines",
-                            line=dict(color="#42a5f5", width=2), name="DII cumulative"))
-_fig2.add_hline(y=0, line_dash="dash", line_color="#666")
+                            line=dict(color="#5a8fd6", width=2), name="DII cumulative"))
+_fig2.add_hline(y=0, line_dash="dash", line_color="#55575e")
 _fig2.update_layout(
     xaxis_title="", yaxis_title="₹ Crore (cumulative)",
     height=340, margin=dict(l=40, r=20, t=20, b=40),
