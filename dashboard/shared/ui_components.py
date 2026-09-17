@@ -595,8 +595,12 @@ def hero_verdict(posture: str,
     )
 
     grid_cols = "1.4fr 1fr" if score_html else "1fr"
+    # F4 motion policy · slide-up on entry. The class hooks the shared
+    # keyframes defined in design.py; prefers-reduced-motion collapses the
+    # duration to 0 there, so this stays inert for users who opted out.
     return (
-        f'<div style="display:grid;grid-template-columns:{grid_cols};'
+        f'<div class="motion-slide-up" style="display:grid;'
+        f'grid-template-columns:{grid_cols};'
         f'border:1px solid var(--hairline);border-radius:var(--r-base);'
         f'overflow:hidden;margin:12px 0 20px 0">'
         f'{lead_html}{score_html}</div>'
