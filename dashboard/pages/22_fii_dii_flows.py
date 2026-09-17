@@ -116,27 +116,64 @@ _o3.metric("5-day FII cumulative", f"{_5d['fii_net'].sum():+,.0f}")
 _o4.metric("20-day DII cumulative", f"{_20d['dii_net'].sum():+,.0f}")
 
 # ── Regime interpretation ─────────────────────────────────────────────────────
+# Restructured from a single ### heading into a proper regime card. Same
+# 5-way logic as before, but now carries (title, sub-caption, tone) so the
+# card can render a coloured rail matching the semantic meaning of the
+# regime -- bull green for broad participation, bear red for distribution,
+# amber for the two mixed regimes, neutral grey for undetermined.
 _fii_5 = _5d["fii_net"].sum()
 _dii_5 = _5d["dii_net"].sum()
 if _fii_5 > 0 and _dii_5 > 0:
-    _regime = ("🟢 **Broad participation** — both FII and DII net buyers this "
-               "week. Rallies tend to be persistent in this regime.")
+    _rg_icon, _rg_title, _rg_body, _rg_rail = (
+        "🟢", "Broad participation",
+        "Both FII and DII net buyers this week. Rallies tend to be persistent in this regime.",
+        "var(--bull)",
+    )
 elif _fii_5 < 0 and _dii_5 > 0:
-    _regime = ("🟠 **Domestic-supported dip** — FIIs selling, DIIs buying. "
-               "Classic pullback profile; often a buy-on-dip regime for "
-               "quality names but not for high-beta.")
+    _rg_icon, _rg_title, _rg_body, _rg_rail = (
+        "🟠", "Domestic-supported dip",
+        "FIIs selling, DIIs buying. Classic pullback profile — often a buy-on-dip "
+        "regime for quality names but not for high-beta.",
+        "var(--amber)",
+    )
 elif _fii_5 < 0 and _dii_5 < 0:
-    _regime = ("🔴 **Distribution** — both selling. Historically precedes "
-               "weakness. Trim marginal positions; avoid new BUYs on "
-               "high-beta names.")
+    _rg_icon, _rg_title, _rg_body, _rg_rail = (
+        "🔴", "Distribution",
+        "Both selling. Historically precedes weakness. Trim marginal positions; "
+        "avoid new BUYs on high-beta names.",
+        "var(--bear)",
+    )
 elif _fii_5 > 0 and _dii_5 < 0:
-    _regime = ("🟡 **DII profit-taking rally** — FIIs buying, DIIs selling. "
-               "Rallies tend to be shallower; keep stops tight.")
+    _rg_icon, _rg_title, _rg_body, _rg_rail = (
+        "🟡", "DII profit-taking rally",
+        "FIIs buying, DIIs selling. Rallies tend to be shallower; keep stops tight.",
+        "var(--amber)",
+    )
 else:
-    _regime = "⚪ **Mixed** — no clear directional signal from institutional flows."
+    _rg_icon, _rg_title, _rg_body, _rg_rail = (
+        "⚪", "Mixed",
+        "No clear directional signal from institutional flows.",
+        "var(--dim)",
+    )
 
 st.markdown("---")
-st.markdown(f"### Regime read: {_regime}")
+st.markdown(
+    f'<div style="background:var(--surface);border-left:4px solid {_rg_rail};'
+    f'border-radius:var(--r-base);padding:14px 18px;margin:8px 0 12px 0">'
+    f'<div style="font-size:11px;font-weight:700;color:var(--dim);'
+    f'letter-spacing:.1em;text-transform:uppercase">'
+    f'5-Day Regime Read</div>'
+    f'<div style="font-family:var(--font-serif);font-size:22px;color:var(--ink);'
+    f'font-weight:400;letter-spacing:-.005em;margin:2px 0 6px 0;line-height:1.2">'
+    f'<span style="margin-right:8px">{_rg_icon}</span>'
+    f'<em style="font-style:italic;color:{_rg_rail}">{_rg_title}</em></div>'
+    f'<div style="font-size:13.5px;color:var(--ink-mid);line-height:1.55;max-width:70ch">'
+    f'{_rg_body}</div>'
+    f'<div style="font-family:var(--font-mono);font-size:11px;color:var(--faint);'
+    f'margin-top:8px">FII 5d net {_fii_5:+,.0f} Cr · DII 5d net {_dii_5:+,.0f} Cr</div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 # ── Chart 1 — daily bars + cumulative line ────────────────────────────────────
 st.markdown("---")
