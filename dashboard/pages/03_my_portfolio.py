@@ -89,6 +89,7 @@ if _ROOT not in sys.path:
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.ui_components import chip_pill
 from dashboard.shared.trade_utils import (
     _action_emoji,
     _display_label,                # Phase 2 UI honesty
@@ -376,25 +377,25 @@ if _csv_source is not None:
                     _total_port_value  += _cur * _qty
                     _total_invested    += _buy * _qty
 
-            _td_c = "#16c784" if _total_today_pnl >= 0 else "#ff4d4d"
-            _ov_c = "#16c784" if _total_overall_pnl >= 0 else "#ff4d4d"
+            _td_c = "var(--bull)" if _total_today_pnl >= 0 else "var(--bear)"
+            _ov_c = "var(--bull)" if _total_overall_pnl >= 0 else "var(--bear)"
             _td_a = "▲" if _total_today_pnl >= 0 else "▼"
             _ov_a = "▲" if _total_overall_pnl >= 0 else "▼"
             _ov_p = (_total_overall_pnl / _total_invested * 100) if _total_invested > 0 else 0
             st.markdown(
                 f'<div style="display:flex;gap:14px;margin:0 0 14px 0">'
-                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
-                f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s Change</div>'
+                f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
+                f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s Change</div>'
                 f'<div style="font-size:24px;font-weight:700;color:{_td_c}">{_td_a} ₹{abs(_total_today_pnl):,.0f}</div>'
                 f'</div>'
-                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid {_ov_c}">'
-                f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Overall P&amp;L</div>'
+                f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid {_ov_c}">'
+                f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Overall P&amp;L</div>'
                 f'<div style="font-size:24px;font-weight:700;color:{_ov_c}">{_ov_a} ₹{abs(_total_overall_pnl):,.0f} '
                 f'<span style="font-size:14px">({_ov_p:+.1f}%)</span></div>'
                 f'</div>'
-                f'<div style="flex:1;background:#131316;padding:14px 18px;border-radius:10px;border-left:5px solid #ff9500">'
-                f'<div style="font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Portfolio Value</div>'
-                f'<div style="font-size:24px;font-weight:700;color:#fff">₹{_total_port_value:,.0f}</div>'
+                f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid var(--accent)">'
+                f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Portfolio Value</div>'
+                f'<div style="font-size:24px;font-weight:700;color:var(--ink)">₹{_total_port_value:,.0f}</div>'
                 f'</div>'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -418,7 +419,7 @@ if _csv_source is not None:
             summary = pm.mark_to_market(parallel=True)
 
             pnl_sign  = "+" if summary.total_pnl >= 0 else ""
-            pnl_color = "#16c784" if summary.total_pnl >= 0 else "#ff4d4d"
+            pnl_color = "var(--bull)" if summary.total_pnl >= 0 else "var(--bear)"
 
             # ── UI/UX 2026-09 · editorial KPI-tile row (mockup Portfolio row) ──
             # Replaces the flat st.metric row with the mockup's 5-KPI ceiling
@@ -529,16 +530,16 @@ if _csv_source is not None:
 
             if _pf_flips:
                 _fl_rows = "".join(
-                    f'<div style="font-size:12.5px;color:#fff;margin:2px 0">'
+                    f'<div style="font-size:12.5px;color:var(--ink);margin:2px 0">'
                     f'{"🟢" if _d == "buy" else "🔴"} <b>{_t}</b> '
-                    f'<span style="color:#9aa">{_display_label(_p)}</span> → '
-                    f'<b style="color:{"#16c784" if _d == "buy" else "#ff4d4d"}">{_display_label(_a)}</b></div>'
+                    f'<span style="color:var(--dim)">{_display_label(_p)}</span> → '
+                    f'<b style="color:{"var(--bull)" if _d == "buy" else "var(--bear)"}">{_display_label(_a)}</b></div>'
                     for _t, _p, _a, _d in _pf_flips)
                 st.markdown(
-                    f'<div style="background:rgba(242,169,59,.08);'
-                    f'border-left:4px solid #f2a93b;border-radius:10px;padding:10px 14px;'
+                    f'<div style="background:var(--tint-amber);'
+                    f'border-left:4px solid var(--amber);border-radius:10px;padding:10px 14px;'
                     f'margin:4px 0 8px">'
-                    f'<div style="font-size:12px;font-weight:700;color:#f2a93b;margin-bottom:3px">'
+                    f'<div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:3px">'
                     f'⚡ {len(_pf_flips)} signal change(s) since your last check</div>'
                     f'{_fl_rows}</div>', unsafe_allow_html=True)
                 for _t, _p, _a, _d in _pf_flips:
@@ -654,16 +655,34 @@ if _csv_source is not None:
             # bear #ff4d4d / caution #f2a93b / accent #ff9500) instead of the
             # pre-redesign teal/material-green/blue set, so this page matches
             # the rest of the app now.
+            # F1 audit -- routed through design.py tokens. The (rail, tint)
+            # pairs source from --bull/--bear/--amber/--accent + their
+            # matching --tint-* backgrounds so a palette swap flows through
+            # in one place.
             _ACT_CARD_STYLE = {
-                "STRONG BUY": ("#16c784", "rgba(22,199,132,.10)"), "BUY": ("#3dbd8f", "rgba(61,189,143,.09)"),
-                "WATCHLIST":  ("#ff9500", "rgba(255,149,0,.09)"), "HOLD": ("#8b8d93", "rgba(255,255,255,.04)"),
-                "CAUTION":    ("#f2a93b", "rgba(242,169,59,.09)"), "EXIT": ("#ff4d4d", "rgba(255,77,77,.10)"),
+                "STRONG BUY": ("var(--bull)",   "var(--tint-bull)"),
+                "BUY":        ("var(--bull)",   "var(--tint-bull)"),
+                "WATCHLIST":  ("var(--accent)", "var(--tint-accent)"),
+                "HOLD":       ("var(--dim)",    "rgba(255,255,255,.04)"),
+                "CAUTION":    ("var(--amber)",  "var(--tint-amber)"),
+                "EXIT":       ("var(--bear)",   "var(--tint-bear)"),
+            }
+            # Chip-vocabulary tone map -- keeps the action pill on holding
+            # cards in the same shape/colours the rest of the app uses.
+            _ACT_CHIP_TONE = {
+                "STRONG BUY": "good", "BUY": "good",
+                "WATCHLIST":  "accent",
+                "HOLD":       "neutral",
+                "CAUTION":    "warn",
+                "EXIT":       "bad",
             }
             _hc_grid = st.columns(2)
             for _hi, h in enumerate(_hold_sorted):
-                _h_ac, _h_bg = _ACT_CARD_STYLE.get(h.action, ("#8b8d93", "#1a1a1a"))
+                _h_ac, _h_bg = _ACT_CARD_STYLE.get(
+                    h.action, ("var(--dim)", "var(--sunken)"),
+                )
                 _h_emoji  = _action_emoji(h.action)
-                _h_pnl_c  = "#16c784" if h.pnl >= 0 else "#ff4d4d"
+                _h_pnl_c  = "var(--bull)" if h.pnl >= 0 else "var(--bear)"
                 _h_pnl_a  = "▲" if h.pnl >= 0 else "▼"
                 _h_lbl    = h.ticker.replace(".NS", "")
                 _h_inv    = h.avg_buy_price * h.quantity
@@ -672,10 +691,10 @@ if _csv_source is not None:
                 _h_tp     = h.target    or (h.avg_buy_price * 1.10)
                 _h_rng    = max(_h_tp - _h_sl, 0.01)
                 _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
-                _h_bar_c  = "#16c784" if h.current_price >= h.avg_buy_price else "#ff4d4d"
+                _h_bar_c  = "var(--bull)" if h.current_price >= h.avg_buy_price else "var(--bear)"
                 _h_score_w = min(int(h.score), 100)
                 _h_today  = getattr(h, "today_chg_pct", None)
-                _h_today_c = "#16c784" if (_h_today or 0) >= 0 else "#ff4d4d"
+                _h_today_c = "var(--bull)" if (_h_today or 0) >= 0 else "var(--bear)"
                 # PGF (Portfolio Gap Fix) — the removed live-price table used to be
                 # the only place showing today's ₹ P&L per stock; the cards never
                 # picked that up when the table was dropped. Derived here from
@@ -694,28 +713,33 @@ if _csv_source is not None:
                 _h_rr = getattr(h, "risk_reward", None)
                 _h_rr_txt = f"RR {_h_rr:.1f}:1" if _h_rr else ""
 
-                # Phase 2 — honest display label, not raw action string
+                # Phase 2 -- honest display label, not raw action string.
+                # Action badge routed through the shared chip_pill so every
+                # posture across the app uses one vocabulary.
+                _h_chip_tone = _ACT_CHIP_TONE.get(h.action, "neutral")
+                _h_action_chip = chip_pill(
+                    f"{_h_emoji} {_display_label(h.action)}", tone=_h_chip_tone,
+                )
                 _h_html = (
                     f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
-                    f'<span style="font-size:20px;font-weight:700;color:#fff">{_h_lbl}</span>'
-                    f'&nbsp;&nbsp;<span style="font-size:13px;font-weight:700;color:{_h_ac}">'
-                    f'{_h_emoji} {_display_label(h.action)}</span>'
+                    f'<span style="font-size:20px;font-weight:700;color:var(--ink)">{_h_lbl}</span>'
+                    f'&nbsp;&nbsp;{_h_action_chip}'
                     f'</div>'
                     f'<div style="text-align:right">'
                     f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
-                    f'<div style="width:60px;height:5px;background:#333;border-radius:3px;margin-top:3px">'
+                    f'<div style="width:60px;height:5px;background:var(--hairline);border-radius:3px;margin-top:3px">'
                     f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div>'
                     f'</div></div></div>'
-                    f'<div style="font-size:15px;color:#fff;margin-bottom:4px">'
+                    f'<div style="font-size:15px;color:var(--ink);margin-bottom:4px">'
                     f'<b>₹{h.current_price:,.2f}</b>'
                     f'<span style="font-size:12px;color:{_h_today_c};margin-left:8px;font-weight:600">{_h_today_txt}</span>'
-                    f'<span style="font-size:12px;color:#aaa;margin-left:8px">'
+                    f'<span style="font-size:12px;color:var(--ink-mid);margin-left:8px">'
                     f'{h.quantity:.0f} shares · held {h.days_held}d</span>'
                     f'</div>'
-                    f'<div style="font-size:12px;color:#aaa;margin-bottom:6px">'
+                    f'<div style="font-size:12px;color:var(--ink-mid);margin-bottom:6px">'
                     f'Invested ₹{_h_inv:,.0f} → Now ₹{_h_val:,.0f}'
                     f'{"  ·  " + _h_rr_txt if _h_rr_txt else ""}'
                     f'</div>'
@@ -723,16 +747,16 @@ if _csv_source is not None:
                     f'{_h_pnl_a} ₹{abs(h.pnl):,.0f} ({h.pnl_pct:+.1f}%)'
                     f'</div>'
                     f'<div style="margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-bottom:2px">'
+                    f'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-bottom:2px">'
                     f'<span>SL ₹{_h_sl:,.0f}</span><span>Target ₹{_h_tp:,.0f}</span></div>'
-                    f'<div style="width:100%;height:6px;background:#333;border-radius:3px;position:relative">'
+                    f'<div style="width:100%;height:6px;background:var(--hairline);border-radius:3px;position:relative">'
                     f'<div style="position:absolute;left:0;width:{_h_cur_pct:.0f}%;height:100%;'
                     f'background:{_h_bar_c};border-radius:3px;opacity:0.7"></div>'
                     f'<div style="position:absolute;left:{_h_cur_pct:.0f}%;transform:translateX(-50%);'
                     f'top:-4px;width:14px;height:14px;background:{_h_bar_c};border-radius:50%;'
-                    f'border:2px solid #fff"></div>'
+                    f'border:2px solid var(--ink)"></div>'
                     f'</div></div>'
-                    f'<div style="font-size:12px;color:#ccc;margin-top:6px">{h.headline}</div>'
+                    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:6px">{h.headline}</div>'
                     f'</div>'
                 )
                 with _hc_grid[_hi % 2]:
@@ -821,6 +845,11 @@ if _csv_source is not None:
                 ):
                     _hm_df = pd.DataFrame(_hm_rows)
                     import plotly.express as _px2
+                    # F1 audit exception: Plotly's color_continuous_scale
+                    # requires real colour values (it doesn't parse CSS
+                    # custom properties). These hex ARE the current token
+                    # values from design.py -- --bear #ff4d4d, --faint
+                    # #55575e (approximated as #555555), --bull #16c784.
                     _fig_hm = _px2.treemap(
                         _hm_df, path=["label"], values="value", color="pct",
                         color_continuous_scale=["#ff4d4d", "#555555", "#16c784"],
@@ -986,13 +1015,16 @@ if _csv_source is not None:
                         _conc_holdings.append(_row)
                 _conc  = analyze_concentration(_conc_holdings)
                 _grade = concentration_grade(_conc.hhi)
-                _risk_color = {"LOW": "#16c784", "MEDIUM": "#f2a93b",
-                               "HIGH": "#ff4d4d"}.get(_conc.risk_level, "#8b8d93")
+                _risk_color = {
+                    "LOW":    "var(--bull)",
+                    "MEDIUM": "var(--amber)",
+                    "HIGH":   "var(--bear)",
+                }.get(_conc.risk_level, "var(--dim)")
                 _cc = st.columns(4)
                 _cc[0].markdown(
                     f'<div class="metric-box"><div class="metric-lbl">HHI Index</div>'
                     f'<div class="metric-val" style="color:{_risk_color}">{_conc.hhi:,.0f}</div>'
-                    f'<div style="font-size:11px;color:#8b8d93">{_conc.hhi_category} · Grade {_grade}</div></div>',
+                    f'<div style="font-size:11px;color:var(--dim)">{_conc.hhi_category} · Grade {_grade}</div></div>',
                     unsafe_allow_html=True)
                 _cc[1].metric("Largest Position", f"{_conc.top_1_weight:.1f}%")
                 _cc[2].metric("Top 5 Weight",     f"{_conc.top_5_weight:.1f}%")

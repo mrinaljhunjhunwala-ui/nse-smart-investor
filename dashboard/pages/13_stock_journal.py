@@ -126,11 +126,18 @@ entries = read_entries()
 st.subheader(f"📚 Entries · {len(entries)} total")
 
 if not entries:
-    st.info(
-        "No entries yet. Every time the morning digest surfaces a name you find "
-        "interesting — or the alert flags a holding for EXIT_WATCH — jot it here "
-        "with the thesis. Future digests will reference this log so you always "
-        "have the context of why you cared."
+    # F5 empty-state kit -- see dashboard/shared/ui_components.py.
+    from dashboard.shared.ui_components import empty_state as _empty
+    st.markdown(
+        _empty(
+            title="No journal entries yet",
+            hint="When the morning digest surfaces a name you find "
+                 "interesting -- or the alert flags a holding for EXIT_WATCH "
+                 "-- jot it here with the thesis. Future digests will "
+                 "reference this log so you always have the context.",
+            icon="📓",
+        ),
+        unsafe_allow_html=True,
     )
     st.stop()
 

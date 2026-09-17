@@ -132,11 +132,18 @@ if not df.empty:
         )
         st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info(
-        "No backtest results found.  \n\n"
-        "Run:  `python main.py --mode backtest --portfolio --index nifty50`  \n"
-        "or use the **Run a Backtest** section below.  \n"
-        "Results will appear here automatically."
+    # F5 empty-state kit -- see dashboard/shared/ui_components.py.
+    from dashboard.shared.ui_components import empty_state as _empty
+    st.markdown(
+        _empty(
+            title="No backtest results yet",
+            hint="Use the <b>Run a Backtest</b> section below, or run "
+                 "<code>python main.py --mode backtest --portfolio "
+                 "--index nifty50</code> from the terminal. Results will "
+                 "appear here automatically.",
+            icon="🧪",
+        ),
+        unsafe_allow_html=True,
     )
 
 # ─────────────────────────────────────────────────────────────────────────────

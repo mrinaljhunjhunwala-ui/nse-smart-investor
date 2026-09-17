@@ -91,7 +91,18 @@ with tab_gap:
             _gap_df = _cached_gaps(_gap_min)
 
         if _gap_df.empty:
-            st.info(f"No stocks with gap ≥ {_gap_min}% today. Market opened flat.")
+            # F5 empty-state kit -- soft neutral panel reads as "empty by
+            # design" rather than the blue "info" tone st.info carries.
+            from dashboard.shared.ui_components import empty_state as _empty
+            st.markdown(
+                _empty(
+                    title="Market opened flat",
+                    hint=f"No stocks with a gap of {_gap_min}% or more today. "
+                         "Try lowering the gap threshold above.",
+                    icon="↔️",
+                ),
+                unsafe_allow_html=True,
+            )
         else:
             # Summary metrics
             _gup   = _gap_df[_gap_df["gap_pct"] > 0]
@@ -146,7 +157,16 @@ with tab_gap:
             )
             st.plotly_chart(fig_gap, width="stretch")
     else:
-        st.info("Click **🔍 Scan Gaps** to load today's gap data.")
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="Ready to scan",
+                hint="Click **🔍 Scan Gaps** to see which Nifty 50 stocks "
+                     "opened with a gap larger than the threshold.",
+                icon="🔍",
+            ),
+            unsafe_allow_html=True,
+        )
 
 # ── TAB 2: INTRADAY CHART ─────────────────────────────────────────────────
 with tab_chart:
@@ -398,7 +418,16 @@ with tab_chart:
             st.error(f"Could not load intraday data: {_ic_err}")
             st.caption("Yahoo Finance intraday data is limited to recent days and may be unavailable for some tickers.")
     else:
-        st.info("Enter a ticker and click **📈 Load Chart** to view intraday data.")
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="No chart loaded yet",
+                hint="Enter a ticker above and click **📈 Load Chart** to "
+                     "view intraday candles with CPR, ORB, AVWAP and Supertrend.",
+                icon="📈",
+            ),
+            unsafe_allow_html=True,
+        )
 
 # ── TAB 3: ORB SETUP ─────────────────────────────────────────────────────
 with tab_orb:
@@ -556,7 +585,16 @@ with tab_sigs:
         if _rows:
             st.dataframe(pd.DataFrame(_rows), hide_index=True, width="stretch")
     else:
-        st.info("Add stocks (one per line) and click **🎯 Scan All**.")
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="Nothing scanned yet",
+                hint="Add stocks in the box above (one per line) and click "
+                     "**🎯 Scan All** to see intraday signals across the list.",
+                icon="🎯",
+            ),
+            unsafe_allow_html=True,
+        )
 
 # NOTE: the "Live Positions — Angel One" tab that used to live here has been
 # removed as a duplicate. Real-time Angel One positions (MIS + CNC), along
@@ -611,16 +649,18 @@ with tab_options:
         ("Review setup", "Use defined-risk spreads", "Unclear IV regime"),
     )
 
-    vbc = "#4CAF50" if curr_vix_opt < 16 else ("#FF9800" if curr_vix_opt < 25 else "#F44336")
+    # F1 audit -- VIX-tier accent + card chrome route through design.py tokens.
+    vbc = ("var(--bull)" if curr_vix_opt < 16
+           else "var(--amber)" if curr_vix_opt < 25 else "var(--bear)")
     st.markdown(
-        f'<div style="background:#1a1a2e;padding:18px;border-radius:10px;'
+        f'<div style="background:var(--surface);padding:18px;border-radius:10px;'
         f'border-left:5px solid {vbc};margin:12px 0">'
-        f'<h3 style="margin:0;color:#fff">Recommended: {strat}</h3>'
-        f'<p style="margin:6px 0;color:#ccc"><b>Setup:</b> {setup}</p>'
-        f'<p style="margin:6px 0;color:#aaa"><b>Why:</b> {reason}</p>'
-        f'<hr style="border-color:#333;margin:10px 0">'
-        f'VIX: <b style="color:#fff">{curr_vix_opt:.1f}</b>  |  '
-        f'IV Rank (proxy): <b style="color:#fff">{ivr_proxy:.0f}%</b>  |  '
+        f'<h3 style="margin:0;color:var(--ink)">Recommended: {strat}</h3>'
+        f'<p style="margin:6px 0;color:var(--ink-mid)"><b>Setup:</b> {setup}</p>'
+        f'<p style="margin:6px 0;color:var(--ink-mid)"><b>Why:</b> {reason}</p>'
+        f'<hr style="border-color:var(--hairline);margin:10px 0">'
+        f'VIX: <b style="color:var(--ink)">{curr_vix_opt:.1f}</b>  |  '
+        f'IV Rank (proxy): <b style="color:var(--ink)">{ivr_proxy:.0f}%</b>  |  '
         f'Regime: <b style="color:{vbc}">{iv_regime} IV</b>'
         f'</div>', unsafe_allow_html=True
     )
@@ -710,20 +750,23 @@ with tab_pcr:
 
     pcr_input = st.slider("Current PCR (OI-based)", 0.3, 2.5, 1.0, 0.05, key="pcr_slider")
 
+    # F1 audit -- PCR signal chip carries fg + matching tint bg as a tuple,
+    # so the CSS below sources both from design.py tokens rather than
+    # composing a `{hex}22` alpha suffix (which var(--foo) doesn't support).
     if pcr_input < 0.6:
-        pcr_sig, pcr_hex = "🔴 Extreme Complacency — too many call buyers. Contrarian BEARISH. Correction likely.", "#F44336"
+        pcr_sig, pcr_fg, pcr_bg = "🔴 Extreme Complacency — too many call buyers. Contrarian BEARISH. Correction likely.", "var(--bear)", "var(--tint-bear)"
     elif pcr_input < 0.8:
-        pcr_sig, pcr_hex = "🟡 Mildly Bullish sentiment — neutral with slight upward tilt.", "#FF9800"
+        pcr_sig, pcr_fg, pcr_bg = "🟡 Mildly Bullish sentiment — neutral with slight upward tilt.", "var(--amber)", "var(--tint-amber)"
     elif pcr_input < 1.2:
-        pcr_sig, pcr_hex = "🟢 Healthy range — no extreme reading, normal conditions.", "#4CAF50"
+        pcr_sig, pcr_fg, pcr_bg = "🟢 Healthy range — no extreme reading, normal conditions.", "var(--bull)", "var(--tint-bull)"
     elif pcr_input < 1.5:
-        pcr_sig, pcr_hex = "🟡 Mildly Bearish — fear building. Caution on fresh longs.", "#FF9800"
+        pcr_sig, pcr_fg, pcr_bg = "🟡 Mildly Bearish — fear building. Caution on fresh longs.", "var(--amber)", "var(--tint-amber)"
     else:
-        pcr_sig, pcr_hex = "🟢 Extreme Fear — too many put buyers. Contrarian BULLISH. Bounce setup.", "#4CAF50"
+        pcr_sig, pcr_fg, pcr_bg = "🟢 Extreme Fear — too many put buyers. Contrarian BULLISH. Bounce setup.", "var(--bull)", "var(--tint-bull)"
 
     st.markdown(
-        f'<div style="background:{pcr_hex}22;padding:14px;border-radius:8px;'
-        f'border-left:5px solid {pcr_hex};font-size:16px;margin:10px 0">'
+        f'<div style="background:{pcr_bg};padding:14px;border-radius:8px;'
+        f'border-left:5px solid {pcr_fg};font-size:16px;margin:10px 0">'
         f'PCR = <b>{pcr_input:.2f}</b> → {pcr_sig}'
         f'</div>', unsafe_allow_html=True
     )

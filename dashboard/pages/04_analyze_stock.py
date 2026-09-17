@@ -2333,9 +2333,16 @@ if analyze_btn or _prefill_active or (
                             _pf_holds.append({"ticker": _t, "quantity": _q})
 
                     if not _pf_holds:
-                        st.info(
-                            "No holdings found — add holdings on the **🏠 My Portfolio** page "
-                            "to see how this stock would fit your book."
+                        # F5 empty-state kit -- see dashboard/shared/ui_components.py.
+                        from dashboard.shared.ui_components import empty_state as _empty
+                        st.markdown(
+                            _empty(
+                                title="No holdings found",
+                                hint="Add holdings on the **🏠 My Portfolio** page "
+                                     "to see how this stock would fit your book.",
+                                icon="📂",
+                            ),
+                            unsafe_allow_html=True,
                         )
                     else:
                         from analysis.thesis import build_fit_inputs, assess_fit

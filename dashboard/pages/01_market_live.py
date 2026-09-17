@@ -51,7 +51,7 @@ with col_h2:
     <div style='text-align:right;margin-top:12px'>
     <span style='font-size:22px'>{_ms['color']}</span><br>
     <b style='font-size:16px'>{_ms['status']}</b><br>
-    <span style='font-size:11px;color:#aaa'>{_ms['time_ist']}</span>
+    <span style='font-size:11px;color:var(--ink-mid)'>{_ms['time_ist']}</span>
     </div>""", unsafe_allow_html=True)
     # FIX MKT1: was a blanket st.cache_data.clear() — wiped every other
     # page's cached data (Top Picks, watchlist scans, etc.) along with this
@@ -172,27 +172,31 @@ else:
     _sg_items = []
     _top_gain = snap.iloc[0]   if len(snap) else None       # sorted desc
     _top_lose = snap.iloc[-1]  if len(snap) else None
+    # F1 audit -- semantic-idea cards now source their accent + tint background
+    # from design.py tokens (bull/bear/amber) so the palette is one source of
+    # truth. Tint backgrounds are subtler than the previous hand-mixed near-
+    # black hexes; the border-left rail keeps the semantic intent legible.
     if _top_gain is not None and _top_gain["chg_pct"] >= 1.0:
-        _sg_items.append(("🟢 STRONGEST TODAY", "#26a69a", "#0a2a1a",
+        _sg_items.append(("🟢 STRONGEST TODAY", "var(--bull)", "var(--tint-bull)",
                           _top_gain["ticker"].replace(".NS",""),
                           f"₹{_top_gain['price']:,.2f}  ·  {_top_gain['chg_pct']:+.2f}%",
                           "Leading the market higher — momentum / long-bias candidate"))
     if _top_lose is not None and _top_lose["chg_pct"] <= -1.0:
-        _sg_items.append(("🔴 WEAKEST TODAY", "#ef5350", "#2a0a0a",
+        _sg_items.append(("🔴 WEAKEST TODAY", "var(--bear)", "var(--tint-bear)",
                           _top_lose["ticker"].replace(".NS",""),
                           f"₹{_top_lose['price']:,.2f}  ·  {_top_lose['chg_pct']:+.2f}%",
                           "Under the heaviest selling — avoid / short-bias candidate"))
     # Market-regime idea from breadth
     if _breadth_pct >= 65:
-        _sg_items.append(("📈 BROAD STRENGTH", "#26a69a", "#0a2a1a", "Market-wide",
+        _sg_items.append(("📈 BROAD STRENGTH", "var(--bull)", "var(--tint-bull)", "Market-wide",
                           f"{_breadth_pct:.0f}% of stocks up · avg {avg_chg:+.2f}%",
                           "Risk-on day — trend-following longs favoured"))
     elif _breadth_pct <= 35:
-        _sg_items.append(("📉 BROAD WEAKNESS", "#ef5350", "#2a0a0a", "Market-wide",
+        _sg_items.append(("📉 BROAD WEAKNESS", "var(--bear)", "var(--tint-bear)", "Market-wide",
                           f"{100-_breadth_pct:.0f}% of stocks down · avg {avg_chg:+.2f}%",
                           "Risk-off day — protect capital, avoid fresh longs"))
     else:
-        _sg_items.append(("↔️ MIXED MARKET", "#FFC107", "#1a1400", "Market-wide",
+        _sg_items.append(("↔️ MIXED MARKET", "var(--amber)", "var(--tint-amber)", "Market-wide",
                           f"{_breadth_pct:.0f}% up · avg {avg_chg:+.2f}%",
                           "No clear breadth edge — be selective, stock-specific only"))
 
@@ -203,9 +207,9 @@ else:
             f'border-radius:10px;padding:12px 15px">'
             f'<div style="font-size:10px;color:{_c};text-transform:uppercase;'
             f'letter-spacing:1px;font-weight:700;margin-bottom:2px">{_lbl}</div>'
-            f'<div style="font-size:20px;font-weight:700;color:#fff">{_tk}</div>'
-            f'<div style="font-size:12px;color:#ccc;margin:2px 0">{_sub}</div>'
-            f'<div style="font-size:11px;color:#999">{_why}</div></div>'
+            f'<div style="font-size:20px;font-weight:700;color:var(--ink)">{_tk}</div>'
+            f'<div style="font-size:12px;color:var(--ink-mid);margin:2px 0">{_sub}</div>'
+            f'<div style="font-size:11px;color:var(--dim)">{_why}</div></div>'
         )
     _sg_html += '</div>'
     st.markdown(_sg_html, unsafe_allow_html=True)
@@ -219,22 +223,22 @@ else:
     bot5 = snap.tail(5).iloc[::-1]
 
     def _movers_block(rows, is_gainer):
-        _acc = "#26a69a" if is_gainer else "#ef5350"
+        _acc = "var(--bull)" if is_gainer else "var(--bear)"
         _html = ""
         for _i, (_, _row) in enumerate(rows.iterrows(), 1):
             _ch = _row["chg_pct"]
-            _cc2 = "#26a69a" if _ch >= 0 else "#ef5350"
+            _cc2 = "var(--bull)" if _ch >= 0 else "var(--bear)"
             _ar = "▲" if _ch >= 0 else "▼"
             _nm = str(_row.get("name", ""))[:26]
             _html += (
-                f'<div style="background:#0d1f3c;border-left:4px solid {_acc};'
+                f'<div style="background:var(--sunken);border-left:4px solid {_acc};'
                 f'border-radius:9px;padding:9px 13px;margin-bottom:6px;'
                 f'display:flex;justify-content:space-between;align-items:center">'
-                f'<div><span style="color:#666;font-size:11px;margin-right:6px">#{_i}</span>'
-                f'<span style="font-size:15px;font-weight:700;color:#fff">{_row["ticker"].replace(".NS","")}</span>'
-                f'<div style="font-size:11px;color:#888">{_nm}</div></div>'
+                f'<div><span style="color:var(--faint);font-size:11px;margin-right:6px">#{_i}</span>'
+                f'<span style="font-size:15px;font-weight:700;color:var(--ink)">{_row["ticker"].replace(".NS","")}</span>'
+                f'<div style="font-size:11px;color:var(--dim)">{_nm}</div></div>'
                 f'<div style="text-align:right">'
-                f'<div style="font-size:15px;font-weight:700;color:#fff">₹{_row["price"]:,.2f}</div>'
+                f'<div style="font-size:15px;font-weight:700;color:var(--ink)">₹{_row["price"]:,.2f}</div>'
                 f'<div style="font-size:13px;font-weight:600;color:{_cc2}">{_ar} {abs(_ch):.2f}%</div>'
                 f'</div></div>'
             )
@@ -379,23 +383,28 @@ with st.spinner("Aggregating news from multiple sources…"):
 if mkt_news:
     _srcs = sorted({a.get("publisher", "") for a in mkt_news if a.get("publisher")})
     st.caption(f"🗞️ Aggregated from **{len(_srcs)} sources**: {', '.join(_srcs)}")
+    # F1 audit: the source palette below is a deliberate exception -- it's
+    # a hand-picked distinguishable-colour set assigning each news publisher
+    # a stable identity chip. No semantic meaning per colour; routing through
+    # tokens would collapse the visual distinction that IS the point.
     _src_palette = ["#5b8def", "#00d4aa", "#ff9500", "#a78bfa", "#FFC107",
                     "#26a69a", "#64b5f6", "#ff6b9d", "#ffd700"]
     _src_color = {s: _src_palette[i % len(_src_palette)] for i, s in enumerate(_srcs)}
     for article in mkt_news:
         _s   = article["sentiment"]
-        _sc  = "#00d4aa" if _s == "positive" else "#ff4757" if _s == "negative" else "#8899bb"
+        _sc  = ("var(--bull)" if _s == "positive"
+                else "var(--bear)" if _s == "negative" else "var(--dim)")
         _si  = "▲" if _s == "positive" else "▼" if _s == "negative" else "•"
         _pub = article.get("publisher", "—")
         _pc  = _src_color.get(_pub, "#8899bb")
         st.markdown(
-            f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+            f'<div style="background:var(--surface);border:1px solid var(--hairline-soft);'
             f'border-left:3px solid {_sc};border-radius:8px;padding:10px 14px;margin-bottom:6px">'
             f'<span style="background:{_pc}22;color:{_pc};border:1px solid {_pc};border-radius:5px;'
             f'padding:1px 8px;font-size:10px;font-weight:700">{_pub}</span>'
-            f'<span style="font-size:10px;color:#4a5568">&nbsp; · {article["time"]} · '
+            f'<span style="font-size:10px;color:var(--faint)">&nbsp; · {article["time"]} · '
             f'<span style="color:{_sc};font-weight:600">{_si} {_s}</span></span><br>'
-            f'<a href="{article["link"]}" target="_blank" style="color:#e0e0e0;'
+            f'<a href="{article["link"]}" target="_blank" style="color:var(--ink);'
             f'text-decoration:none;font-size:14px;font-weight:600">{article["title"]}</a></div>',
             unsafe_allow_html=True,
         )

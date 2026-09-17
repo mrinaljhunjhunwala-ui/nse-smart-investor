@@ -27,8 +27,26 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from analysis import fii_dii as _fd     # noqa: E402
+from dashboard.shared.design import apply_design  # noqa: E402
+from dashboard.shared.nav import render_sidebar  # noqa: E402
+from dashboard.shared.chart_helpers import render_top_bar  # noqa: E402
 
-st.set_page_config(page_title="FII / DII Flows", page_icon="🏦", layout="wide")
+# FIX: this page previously called st.set_page_config, which violates the
+# CLAUDE.md rule "only dashboard/app.py may call set_page_config; a second
+# call is a Streamlit crash". In practice the page loaded standalone in
+# smoke tests but crashed as soon as a user navigated to it AFTER visiting
+# any other page (Streamlit raises StreamlitAPIException on the second
+# set_page_config call in a session). Removed. The page-level page-icon
+# and page-title now live only in the shared sidebar+topbar treatment.
+#
+# Also adding apply_design / render_sidebar / render_top_bar so this page
+# picks up the same theme + nav chrome every other page has. Previously
+# this page was rendering bare Streamlit, which is why it looked out of
+# place next to every other page even when it worked.
+apply_design()
+render_sidebar(current="FII / DII Flows")
+render_top_bar()
+
 st.markdown('<h1 class="page-title-serif">FII / DII <em>Cash-Market Flows</em></h1>', unsafe_allow_html=True)
 
 st.caption(

@@ -24,6 +24,7 @@ from dashboard.shared.cache import (
 from dashboard.shared.trade_utils import (
     _display_label,   # Phase 2 UI honesty — was missing on this page
 )
+from dashboard.shared.ui_components import empty_state  # F5
 from dashboard.shared.disclosures import (
     render_score_methodology as _wl_score_methodology,
 )
@@ -118,7 +119,17 @@ with st.expander("➕ Add Stock to Watchlist", expanded=False):
 # Display watchlist with live scores
 _wl_data = _wl_get_all()
 if _wl_data.empty:
-    st.info("Your watchlist is empty. Add stocks using the form above.")
+    # F5 empty-state kit -- soft neutral panel reads as "empty by design"
+    # rather than the blue "info" tone st.info carries.
+    st.markdown(
+        empty_state(
+            title="Your watchlist is empty",
+            hint="Use the form above to add tickers you want to track. "
+                 "Live scores and prices will update automatically once you do.",
+            icon="⭐",
+        ),
+        unsafe_allow_html=True,
+    )
 else:
     _refresh_btn = st.button("🔄 Refresh Scores", key="wl_refresh")
     _wl_score_methodology()  # Phase 2 UI honesty — was missing on this page
