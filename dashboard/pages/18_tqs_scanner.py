@@ -300,6 +300,17 @@ if True:  # top-level guard kept minimal so the following block stays indented a
                 use_container_width=False
             )
     else:
-        st.info("Input your universe parameters and select 'Run Scan' above to process trend scores.")
+        # F5 empty-state kit -- see dashboard/shared/ui_components.py.
+        from dashboard.shared.ui_components import empty_state as _empty
+        st.markdown(
+            _empty(
+                title="Ready to scan",
+                hint="Pick a universe above and click **▶ Run Scan** to "
+                     "score every ticker on the 4-pillar Trend Quality Score "
+                     "(strength · persistence · momentum · confirmation).",
+                icon="🌊",
+            ),
+            unsafe_allow_html=True,
+        )
 
 
