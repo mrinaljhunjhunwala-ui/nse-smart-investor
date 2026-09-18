@@ -1736,19 +1736,31 @@ if analyze_btn or _prefill_active or (
             with st.expander("🔬 Raw technical indicators (RSI · ADX · ATR · Vol · Stoch · VWAP%)",
                              expanded=False):
                 ti_cols = st.columns(6)
+                # SH2 · oversold-RSI caveat driven by the live VIX regime.
+                # Fear-regime oversold labels can invert against the setup
+                # they usually suggest (regime study).
+                try:
+                    from dashboard.shared.disclosures import (
+                        oversold_reliability_suffix as _sh2_ovr,
+                    )
+                    _ovr_suf = _sh2_ovr(getattr(cs, "vix_regime", None))
+                except Exception:
+                    _ovr_suf = ""
+                _rsi_val = latest.get("RSI", 50)
+                _stk_val = latest.get("Stoch_K", 50)
                 indicators_display = [
-                    ("RSI (14)",  f"{latest.get('RSI', 0):.1f}",
-                     "Oversold (<30)"   if latest.get("RSI", 50) < 30
-                     else "Overbought (>70)" if latest.get("RSI", 50) > 70
+                    ("RSI (14)",  f"{_rsi_val:.1f}",
+                     f"Oversold (<30){_ovr_suf}"   if _rsi_val < 30
+                     else "Overbought (>70)" if _rsi_val > 70
                      else "Normal"),
                     ("ADX",       f"{latest.get('ADX', 0):.1f}",
                      "Trending (>25)" if latest.get("ADX", 0) > 25 else "Ranging"),
                     ("ATR",       f"₹{latest.get('ATR', 0):.1f}", "Daily move range"),
                     ("Vol Ratio", f"{latest.get('Volume_Ratio', 0):.2f}x",
                      "High volume" if latest.get("Volume_Ratio", 1) > 1.5 else "Normal"),
-                    ("Stoch K",   f"{latest.get('Stoch_K', 50):.1f}",
-                     "Oversold" if latest.get("Stoch_K", 50) < 20
-                     else "Overbought" if latest.get("Stoch_K", 50) > 80 else ""),
+                    ("Stoch K",   f"{_stk_val:.1f}",
+                     f"Oversold{_ovr_suf}" if _stk_val < 20
+                     else "Overbought" if _stk_val > 80 else ""),
                     ("VWAP %",   f"{latest.get('VWAP_Pct', 0):+.1f}%",
                      "Above VWAP" if latest.get("VWAP_Pct", 0) > 0 else "Below VWAP"),
                 ]
@@ -1765,7 +1777,28 @@ if analyze_btn or _prefill_active or (
                 for c in pat_cols if latest.get(c, 0) == 1
             ]
             if active_pats:
-                st.info(f"📍 **Candlestick signals today:** {', '.join(active_pats)}")
+                # SH2 · evidence-gated candlestick display. Patterns are
+                # informational context, never a signal (40k-obs study removed
+                # them from the composite score). The caveat carries the
+                # volume-confirmation state so users can tell weak context
+                # from at-least-volume-supported context.
+                try:
+                    from dashboard.shared.disclosures import (
+                        evidence_gated_pattern_label as _sh2_pat,
+                    )
+                    _pat_out = _sh2_pat(active_pats,
+                                        latest.get("Volume_Ratio"))
+                except Exception:
+                    _pat_out = None
+                if _pat_out:
+                    _pat_head, _pat_cav = _pat_out
+                    st.info(f"📍 **{_pat_head}**")
+                    st.caption(_pat_cav)
+                else:
+                    # Fallback keeps the surface visible if the helper import
+                    # failed (defensive; the helper itself never raises).
+                    st.info(f"📍 **Candlestick context (informational only):** "
+                            f"{', '.join(active_pats)}")
 
             if latest.get("RSI_Bull_Div", 0):
                 st.success("📈 **Bullish RSI Divergence detected** — momentum improving despite lower price")
