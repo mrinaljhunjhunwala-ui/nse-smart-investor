@@ -295,19 +295,19 @@ def _render_market_pulse_section() -> None:
 
     st.markdown(
         f'<div style="display:flex;gap:12px;margin-bottom:4px">'
-        f'<div style="flex:1;background:var(--surface);border-left:5px solid {_vc};border-radius:10px;padding:14px 16px">'
-        f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">India VIX</div>'
+        f'<div style="flex:1;background:var(--card-lift);border:1px solid var(--hairline);border-left:5px solid {_vc};border-radius:var(--r-base);padding:14px 16px">'
+        f'<div class="t-label" style="margin-bottom:3px">India VIX</div>'
         f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
-        f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
+        f'<div class="t-caption" style="color:var(--ink-mid);margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
         f'</div>'
-        f'<div style="flex:1;background:var(--surface);border-left:5px solid {_nc};border-radius:10px;padding:14px 16px">'
-        f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Nifty 50</div>'
+        f'<div style="flex:1;background:var(--card-lift);border:1px solid var(--hairline);border-left:5px solid {_nc};border-radius:var(--r-base);padding:14px 16px">'
+        f'<div class="t-label" style="margin-bottom:3px">Nifty 50</div>'
         f'<div style="font-size:20px;font-weight:700;color:{_nc}">{_ni} {_nl}</div>'
-        f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">'
+        f'<div class="t-caption" style="color:var(--ink-mid);margin-top:3px">'
         f'{f"{_cc_nifty_val:,.0f}" if _cc_nifty_val else "—"}'
         f'{f"&nbsp;({_cc_nifty_5d:+.1f}% 5d)" if _cc_nifty_val else ""}</div>'
         f'</div>'
-        f'<div style="flex:2;background:{_vbg};border-left:5px solid {_vbdr};border-radius:10px;'
+        f'<div style="flex:2;background:{_vbg};border:1px solid var(--hairline);border-left:5px solid {_vbdr};border-radius:var(--r-base);'
         f'padding:14px 16px;display:flex;align-items:center">'
         f'<div style="font-size:16px;font-weight:600;color:var(--ink)">{_verd}</div>'
         f'</div>'
@@ -325,9 +325,9 @@ def _render_market_pulse_section() -> None:
     elif _mood < 80: _mood_lbl, _mood_c = "Greed", "var(--bull)"
     else:            _mood_lbl, _mood_c = "Extreme Greed", "var(--bull)"
     st.markdown(
-        f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);border-radius:10px;'
+        f'<div style="background:var(--card-lift);border:1px solid var(--hairline-soft);border-radius:var(--r-base);'
         f'padding:12px 18px;margin-top:8px;display:flex;align-items:center;gap:16px">'
-        f'<div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;min-width:96px">Market Mood</div>'
+        f'<div class="t-label" style="min-width:96px">Market Mood</div>'
         f'<div style="flex:1;position:relative;height:10px;border-radius:6px;'
         f'background:linear-gradient(90deg,var(--bear),var(--bear),var(--amber),var(--bull),var(--bull))">'
         f'<div style="position:absolute;left:{_mood}%;top:-5px;transform:translateX(-50%);'
@@ -581,7 +581,15 @@ from dashboard.shared.pick_freshness import (
 def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     _tp_h1, _tp_h2 = st.columns([5, 2])
     with _tp_h1:
-        st.markdown("### 🔥 Today's Top Picks — NSE Scan")
+        # §9.4 typography scale · was st.markdown("### …"). Streamlit's own
+        # h3 rendering doesn't match the scale (bolder, tighter, different
+        # letter-spacing) so anchor headers stamp through the .t-h1 class
+        # for consistency with other pages that will adopt this next.
+        st.markdown(
+            '<div class="t-h1" style="margin:6px 0 4px 0">'
+            '🔥 Today\'s Top Picks — NSE Scan</div>',
+            unsafe_allow_html=True,
+        )
         st.caption("Strongest and weakest **trend-quality** setups today. "
                    "Scores rank trend health — they are **not a forecast of returns**. "
                    "The pick list is regenerated every ~15 min by a scheduled scan and this page "
@@ -865,7 +873,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
 
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
-        st.markdown("#### 🟢 Buy Candidates")
+        st.markdown(
+            '<div class="t-h2" style="margin:8px 0 6px 0">'
+            '🟢 Buy Candidates</div>',
+            unsafe_allow_html=True,
+        )
         if not _picks["buys"]:
             st.caption("No strong buy setups today — market not offering clean entries.")
         for _b in _picks["buys"]:
@@ -993,7 +1005,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 )
             render_pick_analysis(_b, key_prefix=f"cc_buy_{_b['ticker']}")
     with _pk_sell:
-        st.markdown("#### 🔴 Sell / Avoid")
+        st.markdown(
+            '<div class="t-h2" style="margin:8px 0 6px 0">'
+            '🔴 Sell / Avoid</div>',
+            unsafe_allow_html=True,
+        )
         if not _picks["sells"]:
             st.caption("No clear sell signals — nothing flashing red in the scan.")
         for _sv in _picks["sells"]:
@@ -1039,7 +1055,11 @@ def _render_open_positions_section():
     """Own fragment so Close Now / autoclose-toggle clicks only rerun this section, not the whole Command Centre page."""
     # ── 3. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
     _cc_h1, _cc_h2 = st.columns([5, 2])
-    _cc_h1.markdown("### 📌 Open Positions")
+    _cc_h1.markdown(
+        '<div class="t-h1" style="margin:6px 0 4px 0">'
+        '📌 Open Positions</div>',
+        unsafe_allow_html=True,
+    )
     with _cc_h2:
         _cc_autoclose = st.toggle(
             "🤖 Auto-close CNC on SL/TP",
