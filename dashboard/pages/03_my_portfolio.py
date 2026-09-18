@@ -1000,8 +1000,19 @@ if _csv_source is not None:
                         st.caption("Informational analytics — not investment advice.")
 
             # ── Concentration & Diversification (HHI) ─────────────────
+            # IR5 (docs/UI_UX_BACKLOG.md) -- was a plain st.markdown header
+            # + a mix of hand-rolled .metric-box + raw st.metric widgets +
+            # a .card-green/yellow/red narrative div. Migrated to the same
+            # §9 hero-tier treatment used by IR3 above: .t-h1 head + one
+            # glass panel with 4 stat() tiles + a semantic panel() for the
+            # recommendation narrative. Now reads as part of the same
+            # anchor-artifact family as Portfolio Risk & Performance above.
             st.markdown("---")
-            st.markdown("##### 🎯 Concentration & Diversification")
+            st.markdown(
+                '<div class="t-h1" style="margin:6px 0 4px 0">'
+                '🎯 Concentration &amp; Diversification</div>',
+                unsafe_allow_html=True,
+            )
             try:
                 _conc_holdings = []
                 _tot_val = sum(max(h.current_price * h.quantity, 0) for h in summary.holdings)
@@ -1015,26 +1026,58 @@ if _csv_source is not None:
                         _conc_holdings.append(_row)
                 _conc  = analyze_concentration(_conc_holdings)
                 _grade = concentration_grade(_conc.hhi)
-                _risk_color = {
-                    "LOW":    "var(--bull)",
-                    "MEDIUM": "var(--amber)",
-                    "HIGH":   "var(--bear)",
-                }.get(_conc.risk_level, "var(--dim)")
-                _cc = st.columns(4)
-                _cc[0].markdown(
-                    f'<div class="metric-box"><div class="metric-lbl">HHI Index</div>'
-                    f'<div class="metric-val" style="color:{_risk_color}">{_conc.hhi:,.0f}</div>'
-                    f'<div style="font-size:11px;color:var(--dim)">{_conc.hhi_category} · Grade {_grade}</div></div>',
-                    unsafe_allow_html=True)
-                _cc[1].metric("Largest Position", f"{_conc.top_1_weight:.1f}%")
-                _cc[2].metric("Top 5 Weight",     f"{_conc.top_5_weight:.1f}%")
-                _cc[3].metric("Holdings",          _conc.total_holdings)
-                _cm = "card-green" if _conc.risk_level == "LOW" else (
-                    "card-yellow" if _conc.risk_level == "MEDIUM" else "card-red")
+
+                # Semantic tone for each tile:
+                #  - HHI: bull if diversified (<1500), amber if moderate,
+                #    bear if concentrated (>2500) -- matches HHI bands.
+                #  - Largest position: bull <10%, amber <20%, bear >=20%.
+                #  - Top 5 weight: bull <50%, amber <75%, bear >=75%.
+                #  - Holdings count: bull >=15, amber >=8, bear <8 (thin book).
+                _hhi_tone = {"LOW": "bull", "MEDIUM": "amber", "HIGH": "bear"}.get(
+                    _conc.risk_level, "neutral")
+                def _lp_tone(w): return "bull" if w < 10 else "amber" if w < 20 else "bear"
+                def _t5_tone(w): return "bull" if w < 50 else "amber" if w < 75 else "bear"
+                def _n_tone(n):  return "bull" if n >= 15 else "amber" if n >= 8 else "bear"
+
+                from dashboard.shared.ui_components import (
+                    panel as _panel, stat as _stat,
+                )
+                _conc_body = (
+                    '<div style="display:grid;'
+                    'grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
+                    'gap:14px 22px">'
+                    + _stat("HHI Index", f"{_conc.hhi:,.0f}",
+                            sub=f"{_conc.hhi_category} · Grade {_grade}",
+                            tone=_hhi_tone, align="center")
+                    + _stat("Largest Position", f"{_conc.top_1_weight:.1f}%",
+                            tone=_lp_tone(_conc.top_1_weight), align="center")
+                    + _stat("Top 5 Weight", f"{_conc.top_5_weight:.1f}%",
+                            tone=_t5_tone(_conc.top_5_weight), align="center")
+                    + _stat("Holdings", str(_conc.total_holdings),
+                            tone=_n_tone(_conc.total_holdings), align="center")
+                    + '</div>'
+                )
                 st.markdown(
-                    f'<div class="{_cm}"><b>Concentration risk: {_conc.risk_level}</b><br>'
-                    f'<span class="narrative">{_conc.recommendation}</span></div>',
-                    unsafe_allow_html=True)
+                    _panel(_conc_body, kind="glass", tone="neutral",
+                           margin="0 0 12px 0"),
+                    unsafe_allow_html=True,
+                )
+
+                # Recommendation narrative -- semantic-toned panel that ties
+                # to the HHI tile's tone above.
+                _rec_tone = {"LOW": "bull", "MEDIUM": "amber", "HIGH": "bear"}.get(
+                    _conc.risk_level, "neutral")
+                _rec_body = (
+                    f'<div style="font-size:13px;font-weight:700;color:var(--ink);'
+                    f'margin-bottom:4px">Concentration risk: {_conc.risk_level}</div>'
+                    f'<div style="font-size:13px;color:var(--ink-mid);line-height:1.55">'
+                    f'{_conc.recommendation}</div>'
+                )
+                st.markdown(
+                    _panel(_rec_body, kind="flat", tone=_rec_tone,
+                           margin="0 0 8px 0"),
+                    unsafe_allow_html=True,
+                )
                 if _conc.sector_concentration is not None:
                     st.caption(f"Sector HHI: {_conc.sector_concentration:,.0f} "
                                "(higher = more concentrated by sector).")
@@ -1044,7 +1087,11 @@ if _csv_source is not None:
                 st.caption(f"Concentration analysis unavailable: {_conc_err}")
 
             # ── Fundamental Quality ────────────────────────────────────
-            st.markdown("##### 🔬 Fundamental Quality Scores")
+            st.markdown(
+                '<div class="t-h2" style="margin:16px 0 4px 0">'
+                '🔬 Fundamental Quality Scores</div>',
+                unsafe_allow_html=True,
+            )
             st.caption("Quality score (0–100) from ROE/ROCE, revenue & EPS CAGR, "
                        "leverage, and FCF health. Fetches live fundamentals — opt-in.")
             if st.button("📊 Score my holdings on fundamentals", key="pf_fund_btn"):
@@ -1107,25 +1154,47 @@ if _csv_source is not None:
                     st.info("No fundamental data could be retrieved (source may be rate-limited).")
 
             # ── Best / Worst ───────────────────────────────────────────
+            # Migrated to shared panel() so both cards sit on §9 card-lift
+            # with matching hairline + semantic rail (bull green / bear red)
+            # instead of the older .card-green / .card-red utility classes.
             st.markdown("---")
             bw_cols = st.columns(2)
+            from dashboard.shared.ui_components import panel as _bw_panel
             if summary.best_holding:
                 bh = summary.best_holding
                 with bw_cols[0]:
-                    st.markdown(
-                        f'<div class="card-green">'
-                        f'🏆 <b>Best Performer:</b> {bh.ticker.replace(".NS","")} '
-                        f'(+{bh.pnl_pct:.1f}%, ₹+{bh.pnl:,.0f})</div>',
-                        unsafe_allow_html=True)
+                    _bh_body = (
+                        f'<div style="font-size:11px;color:var(--dim);'
+                        f'letter-spacing:.12em;text-transform:uppercase;'
+                        f'font-weight:600">🏆 Best Performer</div>'
+                        f'<div style="font-size:16px;font-weight:700;color:var(--ink);'
+                        f'margin-top:4px">{bh.ticker.replace(".NS", "")}</div>'
+                        f'<div style="font-family:var(--font-mono);font-size:14px;'
+                        f'color:var(--bull);font-weight:600;margin-top:2px">'
+                        f'+{bh.pnl_pct:.1f}% · ₹+{bh.pnl:,.0f}</div>'
+                    )
+                    st.markdown(_bw_panel(_bh_body, kind="flat", tone="bull",
+                                          margin="6px 0"),
+                                unsafe_allow_html=True)
             if summary.worst_holding:
                 wh = summary.worst_holding
                 with bw_cols[1]:
                     sign = "+" if wh.pnl_pct >= 0 else ""
-                    st.markdown(
-                        f'<div class="card-red">'
-                        f'📉 <b>Needs Attention:</b> {wh.ticker.replace(".NS","")} '
-                        f'({sign}{wh.pnl_pct:.1f}%, ₹{sign}{wh.pnl:,.0f})</div>',
-                        unsafe_allow_html=True)
+                    _wh_tone = "bear" if wh.pnl_pct < 0 else "amber"
+                    _wh_color = "var(--bear)" if wh.pnl_pct < 0 else "var(--amber)"
+                    _wh_body = (
+                        f'<div style="font-size:11px;color:var(--dim);'
+                        f'letter-spacing:.12em;text-transform:uppercase;'
+                        f'font-weight:600">📉 Needs Attention</div>'
+                        f'<div style="font-size:16px;font-weight:700;color:var(--ink);'
+                        f'margin-top:4px">{wh.ticker.replace(".NS", "")}</div>'
+                        f'<div style="font-family:var(--font-mono);font-size:14px;'
+                        f'color:{_wh_color};font-weight:600;margin-top:2px">'
+                        f'{sign}{wh.pnl_pct:.1f}% · ₹{sign}{wh.pnl:,.0f}</div>'
+                    )
+                    st.markdown(_bw_panel(_wh_body, kind="flat", tone=_wh_tone,
+                                          margin="6px 0"),
+                                unsafe_allow_html=True)
 
             # ── Export ─────────────────────────────────────────────────
             st.markdown("---")
