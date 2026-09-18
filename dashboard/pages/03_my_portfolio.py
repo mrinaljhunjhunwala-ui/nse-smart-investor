@@ -1106,6 +1106,124 @@ if _csv_source is not None:
                 else:
                     st.info("No fundamental data could be retrieved (source may be rate-limited).")
 
+            # ── IR6 · Contribution to return + risk-contribution bar ────
+            # Backlog IR6 (UI_UX_BACKLOG.md · 🟨 P2 · M). Per-holding P&L is
+            # already computed on summary.holdings (avg_buy_price, quantity,
+            # current_price → pnl in ₹), and per-holding risk contribution
+            # sits on _rr.risk_contributions from analysis/portfolio_risk.py.
+            # The two together answer "which positions built or ate the
+            # book's return, and which ones drove its variance?"
+            st.markdown("---")
+            st.markdown("##### 📊 Contribution to return & risk")
+            try:
+                _ir6_rows = []
+                _tot_pnl = 0.0
+                for _h in summary.holdings:
+                    _pnl = float(getattr(_h, "pnl", 0.0) or 0.0)
+                    _tot_pnl += _pnl
+                    _ir6_rows.append({
+                        "Stock": _h.ticker.replace(".NS", ""),
+                        "P&L (₹)": _pnl,
+                    })
+                if _ir6_rows and abs(_tot_pnl) > 1e-6:
+                    for _row in _ir6_rows:
+                        _row["Contrib %"] = round(
+                            _row["P&L (₹)"] / _tot_pnl * 100.0, 2)
+                elif _ir6_rows:
+                    for _row in _ir6_rows:
+                        _row["Contrib %"] = 0.0
+
+                # Merge in risk contribution from _rr where available.
+                _rc_map = {}
+                try:
+                    for _p in _rr.risk_contributions:
+                        _rc_map[_p.ticker.replace(".NS", "")] = (
+                            float(_p.risk_contribution_pct or 0.0))
+                except Exception:
+                    _rc_map = {}
+                for _row in _ir6_rows:
+                    _row["Risk %"] = _rc_map.get(_row["Stock"])
+
+                # Sort by absolute P&L descending — biggest movers first.
+                _ir6_rows.sort(key=lambda r: -abs(r["P&L (₹)"]))
+                _ir6_df = pd.DataFrame(_ir6_rows)
+
+                _c1, _c2 = st.columns([1, 1])
+                with _c1:
+                    st.markdown("**Return contribution** — who built or ate the book's P&L")
+                    if _tot_pnl != 0:
+                        _cr_df = _ir6_df.copy()
+                        _cr_df["_tone"] = _cr_df["P&L (₹)"].apply(
+                            lambda v: "gain" if v > 0
+                            else "loss" if v < 0 else "flat"
+                        )
+                        _cr_sorted = _cr_df.sort_values("P&L (₹)", ascending=True)
+                        _fig_cr = px.bar(
+                            _cr_sorted, x="P&L (₹)", y="Stock",
+                            color="_tone", orientation="h",
+                            color_discrete_map={
+                                "gain": "#16c784", "loss": "#ff4d4d",
+                                "flat": "#8b8d93",
+                            },
+                            hover_data={"Contrib %": ":.1f", "_tone": False},
+                            title=None,
+                        )
+                        _fig_cr.add_vline(
+                            x=0, line_dash="dot", line_color="#ffffff",
+                            opacity=0.5,
+                        )
+                        _fig_cr.update_layout(
+                            template="nse_pro",
+                            height=max(180, 30 * len(_cr_sorted) + 60),
+                            margin=dict(l=0, r=0, t=8, b=0),
+                            showlegend=False,
+                        )
+                        st.plotly_chart(_fig_cr, width="stretch")
+                        st.caption(
+                            f"Total book P&L: **₹{_tot_pnl:,.0f}**. Bars show "
+                            "each position's contribution — capital gainers vs "
+                            "the drag on the book."
+                        )
+                    else:
+                        st.caption(
+                            "Total P&L is zero — contribution attribution needs "
+                            "non-zero positions."
+                        )
+                with _c2:
+                    st.markdown("**Risk contribution** — who drives portfolio variance")
+                    if any(r.get("Risk %") is not None for r in _ir6_rows):
+                        _rk_df = pd.DataFrame([
+                            {"Stock": r["Stock"], "Risk %": r["Risk %"]}
+                            for r in _ir6_rows if r.get("Risk %") is not None
+                        ]).sort_values("Risk %", ascending=True)
+                        _fig_rk = px.bar(
+                            _rk_df, x="Risk %", y="Stock", orientation="h",
+                            color="Risk %", color_continuous_scale="Oranges",
+                            title=None,
+                        )
+                        _fig_rk.update_layout(
+                            template="nse_pro",
+                            height=max(180, 30 * len(_rk_df) + 60),
+                            margin=dict(l=0, r=0, t=8, b=0),
+                            coloraxis_showscale=False,
+                        )
+                        st.plotly_chart(_fig_rk, width="stretch")
+                        st.caption(
+                            "Risk % = share of portfolio **variance** each name "
+                            "contributes. When it's much bigger than capital "
+                            "weight, that name is doing outsized damage on down "
+                            "days — a hedge or trim target."
+                        )
+                    else:
+                        st.caption(
+                            "Risk contribution needs the Portfolio Risk block "
+                            "above to compute — enable holdings with ≥2 tickers."
+                        )
+            except Exception as _ir6_e:  # noqa: BLE001
+                import logging as _ir6_log
+                _ir6_log.getLogger("dashboard.my_portfolio").debug(
+                    "IR6 contribution section render failed: %s", _ir6_e)
+
             # ── Best / Worst ───────────────────────────────────────────
             st.markdown("---")
             bw_cols = st.columns(2)
