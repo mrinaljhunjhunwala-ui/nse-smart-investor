@@ -1105,6 +1105,94 @@ if _csv_source is not None:
                                margin="0 0 12px 0"),
                         unsafe_allow_html=True,
                     )
+
+                    # ── IR2 · Beta Exposure hero ────────────────────────────
+                    # Re-frames portfolio β from the Risk Profile row above
+                    # with tone (defensive / market / aggressive) and pairs
+                    # it with a per-holding β bar chart against a reference
+                    # line at 1.0 so users can see WHICH positions push the
+                    # book above or below market beta. Backlog IR2.
+                    try:
+                        from dashboard.shared.ui_components import (
+                            panel as _ir2_panel, stat as _ir2_stat,
+                        )
+                        _pb = _rr.portfolio_beta
+                        if _pb is not None:
+                            if _pb < 0.85:
+                                _pb_tone, _pb_word = "bull", "defensive vs Nifty"
+                            elif _pb <= 1.15:
+                                _pb_tone, _pb_word = "neutral", "tracks Nifty closely"
+                            else:
+                                _pb_tone, _pb_word = "bear", "amplifies market moves"
+                            _beta_hero_html = _ir2_panel(
+                                _ir2_stat(
+                                    "Portfolio β vs Nifty",
+                                    f"{_pb:.2f}",
+                                    sub=_pb_word,
+                                    tone=_pb_tone,
+                                    align="left",
+                                ),
+                                kind="glass",
+                                tone=_pb_tone,
+                                title="🎯 Beta Exposure",
+                            )
+                            st.markdown(_beta_hero_html, unsafe_allow_html=True)
+                            _bh_rows = [
+                                {"Stock": p.ticker.replace(".NS", ""),
+                                 "β": round(float(p.beta or 0.0), 3),
+                                 "β contrib": round(float(p.weight_pct or 0.0)
+                                                    * float(p.beta or 0.0) / 100.0, 3)}
+                                for p in _rr.risk_contributions
+                                if p.beta is not None
+                            ]
+                            if _bh_rows:
+                                _bh_df = pd.DataFrame(_bh_rows).sort_values(
+                                    "β", ascending=True)
+                                _bh_df["_tone"] = _bh_df["β"].apply(
+                                    lambda b: "defensive" if b < 0.85
+                                    else "market" if b <= 1.15
+                                    else "aggressive"
+                                )
+                                _fig_beta = px.bar(
+                                    _bh_df, x="β", y="Stock", color="_tone",
+                                    orientation="h",
+                                    color_discrete_map={
+                                        "defensive": "#3fb27f",
+                                        "market":    "#8899bb",
+                                        "aggressive": "#e26d5c",
+                                    },
+                                    hover_data={"β contrib": True, "_tone": False},
+                                    title=None,
+                                )
+                                _fig_beta.add_vline(
+                                    x=1.0, line_dash="dot",
+                                    line_color="#ffffff",
+                                    annotation_text="Nifty β = 1.0",
+                                    annotation_position="top",
+                                    annotation_font_size=10,
+                                    annotation_font_color="#ffffff",
+                                )
+                                _fig_beta.update_layout(
+                                    template="nse_pro",
+                                    height=max(180, 30 * len(_bh_df) + 90),
+                                    margin=dict(l=0, r=0, t=10, b=0),
+                                    showlegend=False,
+                                )
+                                st.plotly_chart(_fig_beta, width="stretch")
+                                st.caption(
+                                    "**β** = sensitivity to Nifty moves "
+                                    "(1.0 = market). **β contrib** = weight × β "
+                                    "— each position's push on portfolio β."
+                                )
+                        else:
+                            st.caption(
+                                "Beta unavailable — Nifty history could not be "
+                                "loaded for this lookback."
+                            )
+                    except Exception as _ir2_e:
+                        import logging as _ir2_log
+                        _ir2_log.getLogger("dashboard.my_portfolio").debug(
+                            "IR2 beta hero render failed: %s", _ir2_e)
                     _rcL, _rcR = st.columns([1, 1])
                     with _rcL:
                         if _rr.correlation_matrix is not None:
@@ -1121,12 +1209,20 @@ if _csv_source is not None:
                         st.markdown("**Risk contribution by position**")
                         _rc_df = pd.DataFrame(
                             [{"Stock": p.ticker, "Weight %": p.weight_pct,
-                              "Beta": p.beta, "Risk %": p.risk_contribution_pct}
+                              "Beta": p.beta,
+                              # IR2: contribution to portfolio beta =
+                              # weight × beta. Different from Risk %, which is
+                              # variance-based.
+                              "β Contrib": (round(float(p.weight_pct or 0.0)
+                                                  * float(p.beta or 0.0) / 100.0, 3)
+                                            if p.beta is not None else None),
+                              "Risk %": p.risk_contribution_pct}
                              for p in _rr.risk_contributions])
                         st.dataframe(_rc_df, width="stretch", hide_index=True)
                         st.caption("**Risk %** = share of portfolio *variance* from each "
-                                   "position — concentration of risk, which can differ from "
-                                   "capital weight.")
+                                   "position — concentration of risk, which can differ "
+                                   "from capital weight. **β Contrib** = weight × β — "
+                                   "additive to portfolio β.")
 
                     with st.expander("ℹ️ Methodology & assumptions", expanded=False):
                         st.markdown("**Two metric groups, two interpretations:**")
