@@ -549,6 +549,34 @@ def apply_design():
         font-size:13px; font-family:'IBM Plex Mono','Courier New',monospace; letter-spacing:.2px;
     }
     .ticker-wrap:hover .ticker-content { animation-play-state:paused; }
+
+    /* ── F6 · Loading skeletons — shimmer placeholders for slow surfaces ───── */
+    @keyframes cc-skel-shimmer {
+        0%   { background-position: -420px 0 }
+        100% { background-position:  420px 0 }
+    }
+    .cc-skel {
+        background: linear-gradient(90deg,
+            rgba(255,255,255,0.02) 0%,
+            rgba(255,255,255,0.06) 45%,
+            rgba(255,255,255,0.12) 50%,
+            rgba(255,255,255,0.06) 55%,
+            rgba(255,255,255,0.02) 100%);
+        background-size: 840px 100%;
+        animation: cc-skel-shimmer 1.6s linear infinite;
+        border-radius: 6px;
+        display: block;
+    }
+    .cc-skel-card {
+        background: var(--card-lift, rgba(255,255,255,0.02));
+        border: 1px solid var(--hairline-soft, rgba(255,255,255,0.08));
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin: 8px 0;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .cc-skel { animation: none; }
+    }
     </style>""",
         unsafe_allow_html=True,
     )
