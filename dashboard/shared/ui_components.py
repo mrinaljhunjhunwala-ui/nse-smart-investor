@@ -130,6 +130,110 @@ def freshness_stamp(scored_at: str = "",
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# DT1 · Source pill — "via <source>" tag for data-heavy cards
+# DT2 · data_as_of  — canonical "Data as of ..." freshness stamp
+# Backlog UI_UX_BACKLOG.md · both 🟨 P2 · S. Every card that loads
+# externally-sourced data should carry both: WHERE the data came from and
+# WHEN it was fetched. Prior state had inconsistent, hand-rolled variants
+# on ~10 pages; these are the single source of truth.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SOURCE_META = {
+    # Known sources with a short, readable label + tone. Colour maps to the
+    # data-provider's semantic weight, not the numbers themselves — Angel One
+    # (broker, high trust for live prices) reads as accent; scraped/aggregator
+    # sources read as dim.
+    "nse":       {"label": "NSE",       "tone": "accent"},
+    "bse":       {"label": "BSE",       "tone": "accent"},
+    "angel_one": {"label": "Angel One", "tone": "accent"},
+    "yfinance":  {"label": "Yahoo",     "tone": "dim"},
+    "yahoo":     {"label": "Yahoo",     "tone": "dim"},
+    "stooq":     {"label": "Stooq",     "tone": "dim"},
+    "screener":  {"label": "Screener",  "tone": "dim"},
+    "rss":       {"label": "RSS feed",  "tone": "dim"},
+    "google":    {"label": "Google",    "tone": "dim"},
+    "cache":     {"label": "cache",     "tone": "faint"},
+    "manual":    {"label": "manual entry", "tone": "faint"},
+}
+
+_SOURCE_TONE_COLOR = {
+    "accent": "#ff9500",
+    "dim":    "#8b8d93",
+    "faint":  "#55575e",
+}
+
+
+def source_pill(source: str,
+                ttl_hint: str = "",
+                extra_title: str = "") -> str:
+    """A compact "via <source>" pill for data-heavy cards (DT1).
+
+    source: a key from `_SOURCE_META` (case-insensitive) OR a free-form
+        string. Unknown values render as the plain string with the dim
+        tone — the pill never fails or omits itself for an unknown source,
+        so callers can always emit one.
+    ttl_hint: optional short string ("60s cache", "5m cache", "TTL 3600s")
+        shown on hover — helps advanced users know how stale the value can
+        be. Kept out of the visible pill to save horizontal space.
+    extra_title: optional additional hover text appended after ttl_hint.
+
+    Renders as a small chip: `<span>via NSE</span>`. Callers stamp with
+    st.markdown(..., unsafe_allow_html=True) inside any container.
+    """
+    key = (source or "").strip().lower().replace(" ", "_").replace("-", "_")
+    meta = _SOURCE_META.get(key)
+    if meta is None:
+        label = (source or "unknown").strip() or "unknown"
+        tone = "dim"
+    else:
+        label = meta["label"]
+        tone = meta["tone"]
+    colour = _SOURCE_TONE_COLOR.get(tone, _SOURCE_TONE_COLOR["dim"])
+
+    title_bits = [f"Data source: {label}"]
+    if ttl_hint:
+        title_bits.append(ttl_hint)
+    if extra_title:
+        title_bits.append(extra_title)
+    title = " · ".join(title_bits)
+
+    return (
+        f'<span title="{title}" '
+        f'style="display:inline-block;font-family:\'IBM Plex Mono\',monospace;'
+        f'font-size:10px;letter-spacing:.4px;color:{colour};'
+        f'border:1px solid {colour}55;background:{colour}12;'
+        f'border-radius:4px;padding:1px 6px;margin-left:6px;'
+        f'vertical-align:baseline">'
+        f'via {label}</span>'
+    )
+
+
+def data_as_of(when: str = "",
+               source: str = "",
+               ttl_hint: str = "") -> str:
+    """Canonical "Data as of <when>" freshness stamp (DT2).
+
+    when: display-ready timestamp string. Callers format however they want
+        ("14:32 IST", "2026-09-19 09:15", "3 min ago"); this helper does
+        NOT do the formatting — that's a page decision (some surfaces want
+        relative time, others absolute).
+    source: optional — when passed, appends a `source_pill()` to the same
+        line so a card can carry both DT1 + DT2 in one stamp.
+    ttl_hint: forwarded to `source_pill()` when source is set.
+
+    Returns raw HTML. Sits at the bottom of a card, subdued.
+    """
+    when_txt = (when or "").strip() or "unknown"
+    pill_html = source_pill(source, ttl_hint=ttl_hint) if source else ""
+    return (
+        f'<div style="font-size:10px;color:#8b8d93;'
+        f'font-family:\'IBM Plex Mono\',monospace;margin-top:4px">'
+        f'Data as of {when_txt}{pill_html}'
+        f'</div>'
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Risk-reward line with gross + cost-adjusted variants
 # ─────────────────────────────────────────────────────────────────────────────
 
