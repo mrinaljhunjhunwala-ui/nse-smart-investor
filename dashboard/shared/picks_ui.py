@@ -69,15 +69,16 @@ def render_pick_analysis(pick: dict, key_prefix: str):
         for e, txt in pick_pointers(pick))
     st.markdown(f'<div style="margin:-2px 0 4px 2px">{pts_html}</div>', unsafe_allow_html=True)
 
-    # FIX CC-LOAD1 / FIX PICKS-VIS1: routes to Deep Dive Analysis (not
-    # Analyze Stock) — that page has the live price, live chart, re-anchored
-    # entry/SL/TP, and suggested qty Command Centre no longer computes per-
-    # card. Analyze Stock is still reachable from Deep Dive itself or the
-    # sidebar for its own deeper indicator/pattern view.
+    # Slice 2 (docs/UI_UX_DESIGN_2026-09.md): the "Deep Dive Analysis" page
+    # is folded into Analyze Stock as a tab. Analyze Stock renders live
+    # price, chart, re-anchored entry/SL/TP + suggested qty, plus the
+    # full thesis / fundamentals / valuation tabs -- everything Command
+    # Centre no longer computes per-card. Route straight there; the Deep
+    # Dive tab is one click away for anyone who wants the LLM-prompt flow.
     if st.button(f"📊 Open full analysis for {tkr} (live price + qty)",
                  key=f"{key_prefix}_full", width="stretch"):
         st.session_state["analyze_ticker"] = pick["ticker"]
-        st.session_state["_goto_page"] = "📑 Deep Dive Analysis"
+        st.session_state["_goto_page"] = "🔍 Analyze Stock"
         st.rerun()
 
     with st.expander(f"🔍 Deep Dive — why {tkr}?", expanded=False):
