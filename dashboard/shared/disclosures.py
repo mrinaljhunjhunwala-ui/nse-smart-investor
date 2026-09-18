@@ -143,6 +143,63 @@ def render_regime_reliability_note() -> None:
     # "normal" VIX deliberately gets no message here — see docstring above.
 
 
+def evidence_gated_pattern_label(
+    patterns: list[str] | tuple[str, ...] | None,
+    volume_ratio: float | None,
+) -> tuple[str, str] | None:
+    """Return (headline, caveat) for a candlestick-pattern display, or None
+    when there is nothing to show.
+
+    SH2 rule: patterns are informational context, never "signals". A pattern
+    without volume confirmation is even weaker; the caveat must say so. The
+    5-year study (RESEARCH_SCORE_VARIANTS.md, 40,663 obs) found the pattern
+    component had zero-to-negative ranking power and was removed from the
+    composite. This helper keeps the display honest wherever patterns are
+    still surfaced for narrative context.
+
+    Contract:
+      - patterns empty/None → return None (nothing to render)
+      - volume_ratio >= 1.5 → "volume confirms" caveat (still context, not signal)
+      - volume_ratio < 1.5 or unknown → "no volume confirmation" caveat
+      - headline never contains the word "signal"
+    """
+    if not patterns:
+        return None
+    joined = ", ".join(str(p) for p in patterns if p)
+    if not joined:
+        return None
+    headline = f"Candlestick context (informational only): {joined}"
+    try:
+        vr = float(volume_ratio) if volume_ratio is not None else None
+    except (TypeError, ValueError):
+        vr = None
+    if vr is not None and vr >= 1.5:
+        caveat = (f"Volume {vr:.2f}× the 20-day average — pattern has some "
+                  "volume support. Not a scored input.")
+    elif vr is not None:
+        caveat = (f"Volume only {vr:.2f}× the 20-day average — pattern is "
+                  "unconfirmed context, not a trading signal.")
+    else:
+        caveat = ("Volume data unavailable — treat as unconfirmed context, "
+                  "not a trading signal.")
+    return headline, caveat
+
+
+def oversold_reliability_suffix(regime: str | None) -> str:
+    """Return a caveat suffix for oversold labels (RSI/Stoch) that reflects
+    the VIX regime, or '' when no caveat is warranted.
+
+    The 5-year regime study (REGIME_STUDY_REPORT.md) found that trend-quality
+    rankings — the same family the oversold-bounce heuristic sits in — degrade
+    or invert as VIX rises. An "Oversold" label in a fear regime therefore
+    reads more like noise than a signal; SH2 requires the display to say so.
+    """
+    r = (regime or "").strip().lower()
+    if r in ("elevated", "fear", "panic"):
+        return " · reliability reduced in high-fear regime"
+    return ""
+
+
 def render_revenue_growth_evidence() -> None:
     """Brief evidence disclosure for revenue growth (Revenue Growth Visibility
     Phase 1, R4). Same honesty discipline as the trend-quality components:

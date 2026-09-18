@@ -12,9 +12,18 @@ import streamlit as st
 
 
 def pick_pointers(pick: dict) -> list[tuple[str, str]]:
-    """Turn the component-score breakdown into human-readable (emoji, text) bullets."""
+    """Turn the component-score breakdown into human-readable (emoji, text) bullets.
+
+    SH2 · no candlestick "confirmation" bullet. The pattern component was
+    removed from the composite score by PATTERN_REMOVAL_MIGRATION (40k-obs
+    study, zero-to-negative ranking power); the "Bullish candlestick
+    confirmation" bullet the old code emitted here was dead post-migration
+    and its wording read as a trading signal. Patterns are still shown as
+    informational context on the Analyze Stock raw-indicators panel via
+    disclosures.evidence_gated_pattern_label.
+    """
     t = pick.get("technical", 0); m = pick.get("momentum", 0)
-    v = pick.get("volume", 0); p = pick.get("pattern", 0)
+    v = pick.get("volume", 0)
     pts: list[tuple[str, str]] = []
 
     if t >= 30:
@@ -35,9 +44,6 @@ def pick_pointers(pick: dict) -> list[tuple[str, str]]:
         pts.append(("✅", "Above-average volume — real buyer participation"))
     elif v < 6:
         pts.append(("⚠️", "Below-average volume — move needs confirmation"))
-
-    if p >= 5:
-        pts.append(("✅", "Bullish candlestick confirmation on the chart"))
 
     if pick.get("entry"):
         pts.append(("🎯", f"Risk:Reward {pick.get('rr', 0):.1f}:1 — entry ₹{pick['entry']:,.0f}, "
