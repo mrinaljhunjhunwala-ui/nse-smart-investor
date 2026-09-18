@@ -434,9 +434,19 @@ if analyze_btn or _prefill_active or (
         st.session_state["_as_clear_pending"] = True
         st.rerun()
 
+    # F6 · loading skeleton preview above the spinner. Scoring can take
+    # 3–10 s on a cold cache; the skeleton renders the verdict-card shape
+    # so users see what's arriving instead of a naked spinner over blank.
+    _skel_ph = st.empty()
+    try:
+        from dashboard.shared.ui_components import loading_skeleton as _f6_skel
+        _skel_ph.markdown(_f6_skel(kind="hero"), unsafe_allow_html=True)
+    except Exception:
+        pass
     with st.spinner(f"Scoring {ticker}…"):
         try:
             cs = get_composite_score(ticker)
+            _skel_ph.empty()
 
             # BUGFIX: get_composite_score() already catches fetch failures
             # internally and returns an UNAVAILABLE sentinel rather than
@@ -1526,8 +1536,19 @@ if analyze_btn or _prefill_active or (
             # scrolling required to read the same data twice.)
 
             # ── Multi-signal confirmation ──────────────────────────────────
+            # F6 · skeleton — deep confirmation runs MTF + regime + hedge probes.
+            _dc_skel = st.empty()
+            try:
+                from dashboard.shared.ui_components import (
+                    loading_skeleton as _f6_skel_dc,
+                )
+                _dc_skel.markdown(_f6_skel_dc(kind="table"),
+                                  unsafe_allow_html=True)
+            except Exception:
+                pass
             with st.spinner("Running deep confirmation…"):
                 _dc = _deep_confirmation(ticker)
+            _dc_skel.empty()
 
             # LAYOUT-REORDER: compute the liquidity context here too, so the
             # Investment Thesis section (moved up to run BEFORE Fundamentals
@@ -1948,9 +1969,20 @@ if analyze_btn or _prefill_active or (
                                 unsafe_allow_html=True,
                             )
 
+                # F6 · news skeleton — RSS fetch is slow-ish and blocks the tab.
+                _news_skel = st.empty()
+                try:
+                    from dashboard.shared.ui_components import (
+                        loading_skeleton as _f6_skel_news,
+                    )
+                    _news_skel.markdown(_f6_skel_news(kind="card", count=3),
+                                        unsafe_allow_html=True)
+                except Exception:
+                    pass
                 with st.spinner("Loading news…"):
                     from utils.news import get_stock_news as _gsn
                     articles = _gsn(ticker, max_articles=6)
+                _news_skel.empty()
                 if articles:
                     for art in articles:
                         s      = art["sentiment"]
@@ -2422,10 +2454,21 @@ if analyze_btn or _prefill_active or (
                         )
                     else:
                         from analysis.thesis import build_fit_inputs, assess_fit
+                        # F6 · skeleton — portfolio-fit needs per-holding data.
+                        _pf_skel = st.empty()
+                        try:
+                            from dashboard.shared.ui_components import (
+                                loading_skeleton as _f6_skel_pf,
+                            )
+                            _pf_skel.markdown(_f6_skel_pf(kind="card", count=2),
+                                              unsafe_allow_html=True)
+                        except Exception:
+                            pass
                         with st.spinner("Assessing fit against your portfolio…"):
                             _fit = assess_fit(
                                 build_fit_inputs(ticker, _pf_holds, candidate_thesis=_th)
                             )
+                        _pf_skel.empty()
 
                         # Portfolio fit rating routed through chip_pill --
                         # mirrors the thesis verdict pill above so the two
@@ -2528,6 +2571,13 @@ if analyze_btn or _prefill_active or (
                 _frag_deep_dive()
 
         except Exception as e:
+            # F6 · make sure the loading skeleton clears even on the score /
+            # render failure path — otherwise the shimmer sits above the
+            # error message.
+            try:
+                _skel_ph.empty()
+            except Exception:
+                pass
             # BUGFIX: previously every failure here — including a simple
             # misspelled/unknown ticker reaching this point via some other
             # path — dumped "Analysis failed: <raw exception>" plus a full
