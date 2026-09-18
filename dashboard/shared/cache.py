@@ -1031,6 +1031,7 @@ def _persisted_top_picks_snapshot() -> dict | None:
     if not (isinstance(data, dict) and "buys" in data):
         return None
     out = dict(data)
+    out.setdefault("sells", [])
     out["source"] = "persisted"
     out["generated_at"] = _gen_at
     if _age > _TOP_PICKS_MAX_AGE_SECONDS:
