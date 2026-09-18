@@ -197,20 +197,22 @@ except Exception as _mc_err:
     logging.getLogger("dashboard.analyze_stock").debug(
         "market context strip render failed: %s", _mc_err)
 
-# FIX ANL-XREF — the per-ticker analytics surface is spread across a few pages
-# (this one, Quality Watch, Deep Dive) and the reason they each exist isn't
-# obvious from the sidebar labels. Explicit map here so someone starting on
-# any of them learns the shape. (Swing Checklist was folded into this page
-# as the "🎯 Pre-trade go/no-go" expander — Analysis-page-consolidation #5.)
-with st.expander("↔️ Related per-ticker views: Deep Dive · Quality Watch", expanded=False):
+# FIX ANL-XREF — the per-ticker analytics surface is spread across this
+# page (with its several tabs) and Quality Watch. Explicit map here so
+# someone starting on any of them learns the shape. (Swing Checklist was
+# folded into this page as the "🎯 Pre-trade go/no-go" expander —
+# Analysis-page-consolidation #5. Deep Dive was folded in as the
+# "🔬 Deep Dive" tab below — Slice 2, docs/UI_UX_DESIGN_2026-09.md.)
+with st.expander("↔️ Related per-ticker views: Deep Dive tab · Quality Watch", expanded=False):
     st.markdown(
         "- **This page (Analyze Stock)** — headline read: composite score, "
         "chart, entry/SL/target, narrative, plus the 8-factor swing-trade "
         "go/no-go checklist as an inline expander.\n"
-        "- **Deep Dive** — prepares a full equity-research prompt (all this "
-        "page's outputs + fundamentals + governance flags + thesis verdict) "
-        "for you to paste into a Claude conversation with the annual report / "
-        "concall PDFs attached. Save the write-up back with a date.\n"
+        "- **🔬 Deep Dive tab (below)** — prepares a full equity-research "
+        "prompt (all this page's outputs + fundamentals + governance flags "
+        "+ thesis verdict) for you to paste into a Claude conversation with "
+        "the annual report / concall PDFs attached. Save the write-up back "
+        "with a date.\n"
         "- **Quality Watch** — long-term-hold suitability lens (fundamental "
         "quality flags, governance, event risk). Use for a name you plan to sit in."
     )
@@ -1077,7 +1079,7 @@ if analyze_btn or _prefill_active or (
                             _fresh_msg = (f"🔴 **Thesis stale** — last Deep Dive **{_age_days} days ago** "
                                           f"({_label}). Refresh before adding to this position.")
                             _fresh_color = "error"
-                        _fresh_msg += " Refresh via the **📑 Deep Dive Analysis** page."
+                        _fresh_msg += " Refresh via the **🔬 Deep Dive** tab below."
                         if _fresh_color == "success":
                             st.success(_fresh_msg)
                         elif _fresh_color == "warning":
@@ -1087,7 +1089,7 @@ if analyze_btn or _prefill_active or (
                 else:
                     st.caption(
                         "💡 No structured Deep Dive saved for this ticker yet. "
-                        "The **📑 Deep Dive Analysis** page generates a research "
+                        "The **🔬 Deep Dive** tab below generates a research "
                         "prompt you can run in Claude with your own AR / concall PDFs, "
                         "then paste the result back to save it with a date."
                     )
@@ -1780,10 +1782,17 @@ if analyze_btn or _prefill_active or (
             # body on every rerun (compute-gating is PR C.2's job); this ships
             # the visual/DOM win first as a low-risk incremental improvement.
             # ────────────────────────────────────────────────────────────────
-            tab_chart, tab_news, tab_thesis, tab_fund, tab_val, tab_liq, tab_pf = st.tabs([
+            # Slice 2 (docs/UI_UX_DESIGN_2026-09.md) -- the old standalone
+            # "Deep Dive Analysis" page now folds into Analyze Stock as an
+            # 8th tab. Everything Deep Dive used to render on its own page
+            # (live price / chart / signal / short-term-vs-long-term compare)
+            # was already duplicated across the other tabs on this page;
+            # what stays unique is the LLM prompt builder + saved-research
+            # history, now inside "🔬 Deep Dive" below.
+            tab_chart, tab_news, tab_thesis, tab_fund, tab_val, tab_liq, tab_pf, tab_dd = st.tabs([
                 "📊 Chart", "📰 News & Flags", "🧭 Thesis",
                 "🏢 Fundamentals", "💰 Valuation", "💧 Liquidity",
-                "🧩 Portfolio Fit",
+                "🧩 Portfolio Fit", "🔬 Deep Dive",
             ])
 
             # ────────────────────────────────────────────────────────────────
@@ -2451,6 +2460,16 @@ if analyze_btn or _prefill_active or (
                     st.caption(f"⚠️ Portfolio fit unavailable: {_pf_e}")
             with tab_pf:
                 _frag_pf()
+
+            @st.fragment
+            def _frag_deep_dive():
+                # Slice 2 -- Deep Dive folded in from the old page 20.
+                # See dashboard/shared/deep_dive_tab.py for the unique
+                # bits (LLM prompt builder + saved research history).
+                from dashboard.shared.deep_dive_tab import render_deep_dive_tab
+                render_deep_dive_tab(ticker)
+            with tab_dd:
+                _frag_deep_dive()
 
         except Exception as e:
             # BUGFIX: previously every failure here — including a simple
