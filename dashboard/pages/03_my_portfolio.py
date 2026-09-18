@@ -1195,14 +1195,113 @@ if _csv_source is not None:
                             "IR2 beta hero render failed: %s", _ir2_e)
                     _rcL, _rcR = st.columns([1, 1])
                     with _rcL:
-                        if _rr.correlation_matrix is not None:
-                            _figc = px.imshow(_rr.correlation_matrix, text_auto=True,
+                        # ── IR4 · Holdings correlation heatmap hero ─────────
+                        # Adds: cleaner heatmap dressing (labels without the
+                        # .NS suffix, tighter margins, RdBu_r kept for the
+                        # bull/bear polarity users already read on this app),
+                        # a plain-English diversification score derived from
+                        # the average off-diagonal correlation, and named
+                        # callouts for the most- and least-correlated pair.
+                        # Skill: dataviz.
+                        _cm = _rr.correlation_matrix
+                        if _cm is not None and hasattr(_cm, "shape") and _cm.shape[0] >= 2:
+                            # Clean labels
+                            _cm_clean = _cm.copy()
+                            _cm_clean.index = [str(i).replace(".NS", "")
+                                               for i in _cm_clean.index]
+                            _cm_clean.columns = [str(c).replace(".NS", "")
+                                                 for c in _cm_clean.columns]
+                            _figc = px.imshow(_cm_clean, text_auto=".2f",
                                               color_continuous_scale="RdBu_r",
-                                              zmin=-1, zmax=1, aspect="auto",
-                                              title="Holdings Correlation")
-                            _figc.update_layout(template="nse_pro", height=360,
-                                                margin=dict(l=0, r=0, t=40, b=0))
+                                              zmin=-1, zmax=1, aspect="auto")
+                            _figc.update_layout(
+                                template="nse_pro",
+                                height=360,
+                                margin=dict(l=0, r=0, t=8, b=0),
+                                coloraxis_colorbar=dict(
+                                    title="ρ", thickness=10, len=0.9,
+                                    tickvals=[-1, -0.5, 0, 0.5, 1],
+                                ),
+                            )
+                            _figc.update_xaxes(side="bottom", tickangle=-30)
+
+                            # Diversification score from off-diagonal average.
+                            try:
+                                import numpy as _np
+                                _vals = _cm.values.astype(float)
+                                _mask = ~_np.eye(_vals.shape[0], dtype=bool)
+                                _off = _vals[_mask]
+                                _off = _off[~_np.isnan(_off)]
+                                _avg_corr = float(_off.mean()) if _off.size else None
+                            except Exception:
+                                _avg_corr = None
+
+                            if _avg_corr is not None:
+                                if _avg_corr < 0.30:
+                                    _div_tone, _div_word = "bull", "well diversified"
+                                elif _avg_corr < 0.60:
+                                    _div_tone, _div_word = "amber", "moderately diversified"
+                                else:
+                                    _div_tone, _div_word = "bear", "highly correlated"
+                                try:
+                                    from dashboard.shared.ui_components import (
+                                        panel as _ir4_panel, stat as _ir4_stat,
+                                    )
+                                    st.markdown(
+                                        _ir4_panel(
+                                            _ir4_stat(
+                                                "Avg pairwise ρ",
+                                                f"{_avg_corr:.2f}",
+                                                sub=_div_word,
+                                                tone=_div_tone,
+                                                align="left",
+                                            ),
+                                            kind="flat",
+                                            tone=_div_tone,
+                                            title="🔗 Holdings Correlation",
+                                            margin="0 0 8px 0",
+                                        ),
+                                        unsafe_allow_html=True,
+                                    )
+                                except Exception:
+                                    st.markdown(
+                                        f"**🔗 Holdings Correlation** — avg pairwise ρ "
+                                        f"= **{_avg_corr:.2f}** ({_div_word})."
+                                    )
                             st.plotly_chart(_figc, width="stretch")
+
+                            # Named callouts — most- and least-correlated pair.
+                            try:
+                                import numpy as _np
+                                _vals = _cm.values.astype(float)
+                                _np.fill_diagonal(_vals, _np.nan)
+                                _flat = _np.where(_np.isnan(_vals), -_np.inf, _vals)
+                                _i, _j = _np.unravel_index(_np.argmax(_flat), _vals.shape)
+                                _hi_pair = (
+                                    str(_cm.index[_i]).replace(".NS", ""),
+                                    str(_cm.columns[_j]).replace(".NS", ""),
+                                    float(_vals[_i, _j]),
+                                )
+                                _flat_lo = _np.where(_np.isnan(_vals), _np.inf, _vals)
+                                _i2, _j2 = _np.unravel_index(_np.argmin(_flat_lo), _vals.shape)
+                                _lo_pair = (
+                                    str(_cm.index[_i2]).replace(".NS", ""),
+                                    str(_cm.columns[_j2]).replace(".NS", ""),
+                                    float(_vals[_i2, _j2]),
+                                )
+                                st.caption(
+                                    f"**Most correlated:** {_hi_pair[0]} ↔ "
+                                    f"{_hi_pair[1]} (ρ = {_hi_pair[2]:+.2f}) · "
+                                    f"**Least:** {_lo_pair[0]} ↔ {_lo_pair[1]} "
+                                    f"(ρ = {_lo_pair[2]:+.2f}). Diversification "
+                                    "cuts drawdowns; high ρ means positions move together."
+                                )
+                            except Exception:
+                                pass
+                        elif _cm is not None:
+                            st.caption(
+                                "Correlation heatmap needs ≥2 holdings with shared history."
+                            )
                         else:
                             st.caption("Correlation needs ≥2 holdings with shared history.")
                     with _rcR:
