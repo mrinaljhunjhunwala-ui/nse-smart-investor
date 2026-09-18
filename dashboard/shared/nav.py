@@ -25,8 +25,10 @@ import trade_store as _store
 #   - Tomorrow's Watchlist moves Portfolio -> Scanners & Signals
 #   - TQS moves Analysis -> Scanners & Signals
 #   - Verdict Calibration moves Analysis -> Tools & Ops
-#   - Deep Dive removed from sidebar (fold into Analyze Stock as a tab in
-#     a follow-up slice); page file + switch_page routing kept intact
+#   - Deep Dive removed from sidebar AND folded into Analyze Stock as
+#     the "🔬 Deep Dive" tab (Slice 2 landed). The old pages/20_deep_dive.py
+#     is deleted; xrefs (picks_ui full-analysis button, staleness prompt
+#     on Analyze Stock's PortfolioFit tab) now route to Analyze Stock.
 #   - "Market Live" -> "Live Ticker"; "Overview" -> "Market Breadth"
 #   - TQS emoji retagged 📊 -> 📈 to resolve the emoji collision with
 #     the old "Overview" (now "Market Breadth")
@@ -60,7 +62,6 @@ _PAGE_EMOJI: dict = {
     "Angel One":       "🔗",
     "Investor Guide":  "📖",
     "Trend Quality Score": "📈",  # retagged from 📊 (collision with Market Breadth)
-    "Deep Dive Analysis": "📑",   # not in nav; kept for st.switch_page routing
     "Verdict Calibration": "📏",
     "FII / DII Flows":     "🏦",
 }
@@ -83,7 +84,6 @@ _PAGE_FULL_NAME: dict = {
     "Angel One":       "🔗 Angel One",
     "Investor Guide":  "📖 Investor Guide",
     "Trend Quality Score": "📈 Trend Quality Score",
-    "Deep Dive Analysis": "📑 Deep Dive Analysis",
     "Verdict Calibration": "📏 Verdict Calibration",
     "FII / DII Flows":     "🏦 FII / DII Flows",
 }
@@ -120,7 +120,8 @@ _PAGE_FILE = {
     "Tomorrow's Watchlist": "pages/17_tomorrow_watchlist.py",
     "Trend Quality Score": "pages/18_tqs_scanner.py", # <-- Added File Route Mapping
     "Quality Watch":   "pages/19_quality_watch.py",  # NEW: Long-Term Holds + Quality Watch
-    "Deep Dive Analysis": "pages/20_deep_dive.py",
+    # "Deep Dive Analysis" removed -- Slice 2 folded it into Analyze Stock as
+    # the "🔬 Deep Dive" tab. dashboard/pages/20_deep_dive.py DELETED.
     # 2026-08-30 sprint: durable-persistence-backed learning pages
     "Verdict Calibration": "pages/21_verdict_calibration.py",
     "FII / DII Flows":     "pages/22_fii_dii_flows.py",
