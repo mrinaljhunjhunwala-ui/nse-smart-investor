@@ -86,7 +86,12 @@ def test_all_pages_present():
     #     alerts/journal_store.py (already shipped in PR #74). Weekly
     #     digest reads entries added in the last 7 days and reviews due
     #     in the next 7 days.
-    assert len(_PAGES) == 20, f"expected 20 pages, found {len(_PAGES)}: {_IDS}"
+    #
+    # 2026-09-18 (Slice 2 · Deep Dive fold-in): −1 page
+    #   * 20_deep_dive.py removed — its indicators / candlestick / mini-
+    #     report views were folded into 04_analyze_stock.py as an 8th tab
+    #     via dashboard/shared/deep_dive_tab.py. See PR #115.
+    assert len(_PAGES) == 19, f"expected 19 pages, found {len(_PAGES)}: {_IDS}"
 
 
 @pytest.mark.smoke
