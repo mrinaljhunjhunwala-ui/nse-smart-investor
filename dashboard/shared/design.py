@@ -70,15 +70,26 @@ def apply_design():
        #00d4aa, #3ddc84 …) drifting page-to-page. New rule: no raw hex in
        page files. See docs/UI_AUDIT_2026-09.md → Cluster B. ─────────────── */
     :root {
-      /* Surfaces */
-      --ground:    #09090b;
-      --surface:   #131316;
+      /* Surfaces — §9.2 texture layers (docs/UI_UX_DESIGN_2026-09.md).
+         Pure #0a0a0a ground lets amber / cyan / red pop with real chromatic
+         weight; cards float above it as a 2% white overlay (borrowed from
+         NSVisualEffectView) instead of a heavier tinted rectangle. */
+      --ground:    #0a0a0a;
+      --surface:   #131316;                    /* legacy card bg — pages migrating to --card-lift */
+      --card-lift: rgba(255,255,255,.02);      /* §9.2.2 — floated card fill on ground */
       --sunken:    #0e0e10;
       --rail:      #0a0a0c;
-      --hairline:  rgba(255,255,255,.08);
-      --hairline-soft: rgba(255,255,255,.05);
 
-      /* Ink */
+      /* Hairline system — §9.2.3 three widths.
+         Semantic mapping: -soft for section dividers (barely there),
+         -base for interactive borders (buttons, chips), -strong for
+         active-focus (inputs, active nav). Old --hairline stays as an
+         alias on -base for callers not yet migrated. */
+      --hairline-soft:   rgba(255,255,255,.04);
+      --hairline:        rgba(255,255,255,.08);
+      --hairline-strong: rgba(255,255,255,.16);
+
+      /* Ink — four densities, §9.3 colour table. */
       --ink:       #edeef0;
       --ink-mid:   #c8cad0;
       --dim:       #8b8d93;
@@ -174,6 +185,33 @@ def apply_design():
       animation: motion-slide-up-kf var(--motion-slow) var(--ease-out) both;
     }
 
+    /* ── §9.4 · Typography scale (docs/UI_UX_DESIGN_2026-09.md) ─────────────
+       One axis, formalised. Every card / heading / label picks from here so
+       Command Centre's 11 px caption stack, Investor Guide's flat 14 px,
+       and Analyze Stock's 20 px hero can't drift apart again. */
+    .t-display  { font-family: var(--font-sans); font-size: 32px; font-weight: 700;
+                  letter-spacing: -0.02em; line-height: 1.05; color: var(--ink); }
+    .t-h1       { font-family: var(--font-sans); font-size: 22px; font-weight: 700;
+                  letter-spacing: -0.01em; line-height: 1.15; color: var(--ink); }
+    .t-h2       { font-family: var(--font-sans); font-size: 16px; font-weight: 600;
+                  line-height: 1.3;  color: var(--ink); }
+    .t-body     { font-family: var(--font-sans); font-size: 14px; font-weight: 400;
+                  line-height: 1.5;  color: var(--ink-mid); }
+    .t-label    { font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+                  letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+    .t-value    { font-family: var(--font-mono); font-size: 20px; font-weight: 700;
+                  letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .t-value-sm { font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+                  color: var(--ink); font-variant-numeric: tabular-nums; }
+    .t-caption  { font-family: var(--font-sans); font-size: 12px; font-weight: 400;
+                  line-height: 1.3;  color: var(--dim); }
+
+    /* ── §9.2.4 · Grain overlay (SVG noise at 3% opacity on the body).
+       Imperceptible in isolation; stops the "empty dark rectangle" flatness
+       that reads as amateur on pure black. Bloomberg terminals had physical
+       CRT grain; this is the digital equivalent. Zero runtime cost —
+       inline SVG data-URI, single background-image. */
+
     /* ── Editorial serif · used SPARINGLY on hero moments only ─────────────
        - Page-title-serif on the H1 of anchor pages (Command Centre,
          Analyze Stock, Portfolio, Investor Guide).
@@ -226,9 +264,15 @@ def apply_design():
         -webkit-font-smoothing: antialiased;
     }
     .stApp {
-        background: #09090b;
-        background-image: radial-gradient(ellipse 90% 40% at 50% -10%, rgba(255,149,0,0.05) 0%, transparent 60%);
+        background: var(--ground);
+        /* §9.2.1 pure-black ground + §9.2.4 SVG noise grain at 3% opacity +
+           the existing saffron aurora at the top-centre. Stacked in a
+           single background: shorthand so it stays as one paint pass. */
+        background-image:
+          radial-gradient(ellipse 90% 40% at 50% -10%, rgba(255,149,0,0.05) 0%, transparent 60%),
+          url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.03 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
         background-attachment: fixed;
+        background-size: auto, 160px 160px;
     }
     .mono { font-family:'IBM Plex Mono','Courier New',monospace !important; font-variant-numeric: tabular-nums; }
 
@@ -273,11 +317,14 @@ def apply_design():
     .ao-badge-on  { background:rgba(22,199,132,.08); border:1px solid rgba(22,199,132,.4); border-radius:8px; padding:10px 14px; font-size:12px; color:#16c784; margin:4px 0; display:flex; align-items:center; gap:8px; }
     .ao-badge-off { background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 14px; font-size:12px; color:#55575e; margin:4px 0; display:block; }
 
-    /* ── Streamlit metric override ───────────────────────────────────────────── */
+    /* ── Streamlit metric override ─────────────────────────────────────────────
+       §9.2 · sits on the pure-black ground as a 2% white lift instead of
+       a heavier tinted rectangle. Reads as a floated card without the
+       chrome. */
     [data-testid="stMetric"] {
-        background: #131316;
-        border: 1px solid rgba(255,255,255,.07);
-        border-radius: 10px; padding: 14px 18px;
+        background: var(--card-lift);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-base); padding: 14px 18px;
     }
     [data-testid="stMetricValue"] { font-family:'IBM Plex Mono',monospace; font-weight:700; letter-spacing:-.3px; font-size:20px; }
     [data-testid="stMetricLabel"] { font-size:11px; color:#55575e; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
@@ -376,7 +423,10 @@ def apply_design():
         color: #edeef0 !important;
         border-left-color: rgba(255,149,0,.35) !important;
     }
-    /* Active page: leading-edge saffron pill on the disabled (current) button. */
+    /* Active page: leading-edge saffron pill on the disabled (current) button.
+       §9.2 optional glow layer — 12 px soft saffron halo at 22% opacity so
+       the active-page pill reads as lit rather than just tinted. Never on
+       hover (would fire on every mouse move); only on the current page. */
     [data-testid="stSidebar"] .stButton > button:disabled {
         background: linear-gradient(90deg, rgba(255,149,0,.14), transparent 60%) !important;
         color: #edeef0 !important;
@@ -387,6 +437,7 @@ def apply_design():
         text-align: left !important;
         opacity: 1 !important;
         cursor: default !important;
+        box-shadow: 0 0 12px 0 rgba(255,149,0,.22) !important;
     }
     [data-testid="stSidebar"] .stButton > button:disabled:hover {
         color: #edeef0 !important;
@@ -407,12 +458,25 @@ def apply_design():
         background: #0e0e10; border-color: rgba(255,255,255,.1);
         border-radius: 6px; color: #edeef0; font-family:'IBM Plex Mono',monospace;
     }
+    /* §9.2 · focus-visible glow — only on the input actually being keyed,
+       never on hover. Matches the active-nav pill's saffron halo so the
+       whole app teaches the same "you can act here" affordance. */
+    .stTextInput > div > div > input:focus-visible,
+    .stNumberInput > div > div > input:focus-visible,
+    [data-baseweb="select"] > div:first-child:focus-within {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px rgba(255,149,0,.15) !important;
+        outline: none !important;
+    }
 
-    /* ── Expanders ───────────────────────────────────────────────────────────── */
+    /* ── Expanders ─────────────────────────────────────────────────────────────
+       §9.2 · same card-lift + hairline pairing as .glass-panel and stMetric,
+       so a collapsed "Data health" tile reads as part of the same surface
+       vocabulary rather than a Streamlit default. */
     [data-testid="stExpander"] {
-        background: rgba(255,255,255,.015);
-        border: 1px solid rgba(255,255,255,.06) !important;
-        border-radius: 8px;
+        background: var(--card-lift);
+        border: 1px solid var(--hairline) !important;
+        border-radius: var(--r-base);
     }
 
     /* ── DataFrames ──────────────────────────────────────────────────────────── */
@@ -429,23 +493,32 @@ def apply_design():
     .order-buy  { background:rgba(22,199,132,.06); border:1px solid rgba(22,199,132,.3); border-radius:10px; padding:18px; }
     .order-sell { background:rgba(255,77,77,.06);  border:1px solid rgba(255,77,77,.3);  border-radius:10px; padding:18px; }
 
-    /* ── Custom metric box ───────────────────────────────────────────────────── */
-    .metric-box       { background:#131316; border-radius:10px; padding:16px; text-align:center; border:1px solid rgba(255,255,255,.06); }
-    .metric-val       { font-family:'IBM Plex Mono',monospace; font-size:27px; font-weight:700; margin:4px 0; letter-spacing:-.3px; }
-    .metric-lbl       { font-size:11px; color:#55575e; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
-    .metric-delta-pos { color:#16c784; font-size:13px; font-weight:600; font-family:'IBM Plex Mono',monospace; }
-    .metric-delta-neg { color:#ff4d4d; font-size:13px; font-weight:600; font-family:'IBM Plex Mono',monospace; }
+    /* ── Custom metric box ─────────────────────────────────────────────────────
+       §9.2 · card-lift + hairline pairing. Label size / letter-spacing
+       aligned with .t-label so the two vocabularies read as one. */
+    .metric-box       { background: var(--card-lift); border-radius: var(--r-base); padding:16px; text-align:center; border:1px solid var(--hairline); }
+    .metric-val       { font-family: var(--font-mono); font-size:27px; font-weight:700; margin:4px 0; letter-spacing:-.3px; color: var(--ink); }
+    .metric-lbl       { font-size:11px; color: var(--dim); text-transform:uppercase; letter-spacing:.12em; font-weight:600; }
+    .metric-delta-pos { color: var(--bull); font-size:13px; font-weight:600; font-family: var(--font-mono); }
+    .metric-delta-neg { color: var(--bear); font-size:13px; font-weight:600; font-family: var(--font-mono); }
 
     /* ── Section divider ─────────────────────────────────────────────────────── */
     .sec-div { display:flex; align-items:center; gap:12px; margin:28px 0 18px; }
     .sec-div-label { font-size:11px; font-weight:700; color:#55575e; text-transform:uppercase; letter-spacing:1.5px; white-space:nowrap; }
     .sec-div-line  { flex:1; height:1px; background:linear-gradient(90deg,rgba(255,255,255,.09),transparent); }
 
-    /* ── Glass panel — reserved for hero/summary panels only (soft radius tier) ── */
+    /* ── Glass panel — reserved for hero/summary panels only (soft radius tier).
+       §9.2.2 — the "NSVisualEffectView" trick: a barely-visible 2 % white
+       overlay on the pure-black ground gives depth without a heavier card
+       fill, and the amber aurora at the top of the page shows through
+       cleanly. Every subsequent hero, morning-brief, and posture card
+       inherits this. */
     .glass-panel {
-        background: #131316;
-        border: 1px solid rgba(255,255,255,.08);
-        border-radius: 18px; padding: 20px;
+        background: var(--card-lift);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-soft); padding: 20px;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
     }
 
     /* ── Scrollbars ──────────────────────────────────────────────────────────── */
