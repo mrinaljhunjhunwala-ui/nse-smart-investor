@@ -327,3 +327,30 @@ def test_chat_raises_when_key_missing(monkeypatch):
         pytest.skip("key set via streamlit secrets; can't test missing path")
     with pytest.raises(ai_client.CopilotUnavailable):
         ai_client.chat([ai_client.Message(role="user", content="hi")])
+
+
+# ── regression: collect_for_analyze_stock must not raise on DataFrame return ─
+
+def test_collect_for_analyze_stock_no_dataframe_truth_ambiguity(monkeypatch):
+    """Regression for the "truth value of a DataFrame is ambiguous" caption on
+    the Analyze Stock page. `_try(add_all_indicators, df) or df` evaluated
+    a DataFrame's truthiness, which raises. Guard: collector completes with
+    both mocks returning real frames and does not raise."""
+    import pandas as pd
+    from dashboard.shared.ai import context_builder as cb
+
+    idx = pd.date_range("2025-01-01", periods=5, freq="B")
+    base = pd.DataFrame({"Close": [100.0, 101, 102, 103, 104]}, index=idx)
+    enriched = base.assign(RSI_14=[30, 40, 50, 60, 70])
+
+    monkeypatch.setattr(cb, "_try", lambda fn, *a, **kw: {
+        "fetch_single": base,
+        "add_all_indicators": enriched,
+        "score_stock": None,
+        "get_india_vix_regime": {},
+        "snapshot_live": None,
+    }.get(getattr(fn, "__name__", ""), None))
+
+    # Must not raise.
+    inputs = cb.collect_for_analyze_stock("RELIANCE")
+    assert inputs.stock.symbol == "RELIANCE"

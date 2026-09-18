@@ -298,7 +298,11 @@ def collect_for_analyze_stock(symbol: str) -> ContextInputs:
     if fetch_single is not None:
         df = _try(fetch_single, yf_ticker, "2y")
         if df is not None and add_all_indicators is not None and not df.empty:
-            df = _try(add_all_indicators, df) or df
+            # `_try(...) or df` would evaluate the truthiness of a DataFrame,
+            # which raises "The truth value of a DataFrame is ambiguous".
+            _enriched = _try(add_all_indicators, df)
+            if _enriched is not None:
+                df = _enriched
 
     prev_close = None
     day_change_pct = None
