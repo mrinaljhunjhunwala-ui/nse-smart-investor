@@ -724,6 +724,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         st.caption("Waiting for the first scan to start…")
         return
 
+    # Legacy persisted snapshots can be missing the "sells" list (see
+    # cache._persisted_top_picks_snapshot — historically only required
+    # "buys"). Normalize once so downstream accesses can't KeyError.
+    _picks.setdefault("buys", [])
+    _picks.setdefault("sells", [])
+
     if _fetching:
         st.markdown(
             '<div style="background:var(--sunken);border:1px solid var(--sunken);border-radius:8px;'
