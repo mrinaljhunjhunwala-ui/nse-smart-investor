@@ -563,6 +563,29 @@ if analyze_btn or _prefill_active or (
                 logging.getLogger("dashboard.analyze_stock").debug(
                     "verdict card render failed: %s", _vc_err)
 
+            # ── IR1: Bull / Bear / Risk hero card (docs/UI_UX_BACKLOG.md) ────
+            # The thesis engine already emits bull_factors + bear_factors +
+            # key_risks; historically these lived only inside the Thesis tab.
+            # Promoted here so the shape of the thesis is above-the-fold
+            # alongside the Verdict Card -- a user answering "so what's the
+            # story on this ticker" doesn't have to click into a tab.
+            # Full list + rules-provenance caption stay in the Thesis tab.
+            try:
+                from dashboard.shared.ui_components import bull_bear_risk_card as _bbr_card
+                _bbr_th = _cached_thesis_banner(ticker, cs.score, cs.action)
+                st.markdown(
+                    _bbr_card(
+                        bull_factors=getattr(_bbr_th, "bull_factors", []) or [],
+                        bear_factors=getattr(_bbr_th, "bear_factors", []) or [],
+                        key_risks=getattr(_bbr_th, "key_risks",     []) or [],
+                    ),
+                    unsafe_allow_html=True,
+                )
+            except Exception as _bbr_err:
+                import logging
+                logging.getLogger("dashboard.analyze_stock").debug(
+                    "bull/bear/risk hero card render failed: %s", _bbr_err)
+
             # ── AI Co-Pilot panel (moved 2026-09-04, portfolio wiring 2026-09-06) ─
             # Was at the bottom of the file behind ~2260 lines of page
             # content, inside a collapsed expander. Users reasonably said
