@@ -169,11 +169,15 @@ _PANEL_TONE_ACCENT = {
 }
 
 _PANEL_KINDS = {
-    "flat":   {"bg": "var(--surface)",  "radius": "var(--r-base)",
+    # §9.2 Dealing Room texture layers -- flat/glass panels float above the
+    # pure-black ground as a 2% white lift, not a heavier tinted rectangle.
+    # sunken stays on --sunken for secondary surfaces (data-health inners,
+    # code snippets, etc.) where a slight recess reads correctly.
+    "flat":   {"bg": "var(--card-lift)", "radius": "var(--r-base)",
                "border": "1px solid var(--hairline)"},
-    "glass":  {"bg": "var(--surface)",  "radius": "var(--r-soft)",
+    "glass":  {"bg": "var(--card-lift)", "radius": "var(--r-soft)",
                "border": "1px solid var(--hairline)"},
-    "sunken": {"bg": "var(--sunken)",   "radius": "var(--r-base)",
+    "sunken": {"bg": "var(--sunken)",    "radius": "var(--r-base)",
                "border": "1px solid var(--hairline-soft)"},
 }
 
