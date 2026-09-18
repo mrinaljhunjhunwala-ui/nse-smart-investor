@@ -224,6 +224,79 @@ _STAT_TONE_COLOR = {
 }
 
 
+def loading_skeleton(kind: str = "card", count: int = 1) -> str:
+    """Return CSS-shimmer skeleton HTML for slow surfaces (F6).
+
+    Pages that trigger a >1s network/compute call (scoring a ticker, running
+    the deep-confirmation pass, fetching news, portfolio-fit assessment)
+    render one of these into an `st.empty()` placeholder BEFORE the slow
+    work starts, then clear the placeholder when the real content arrives.
+    Users see a shape-of-what's-coming preview instead of a naked spinner
+    over a blank page — the top-4 slowest surfaces in the app.
+
+    Kinds:
+      - 'card'  : one glass-panel card with 3 short lines (default)
+      - 'hero'  : tall verdict-card shape — big title + 4 tile grid
+      - 'chart' : 280px chart-shaped block
+      - 'table' : 6-row table shape
+      - 'text'  : 3 short paragraph lines
+    Set `count` >1 to repeat the same shape (e.g. 3 news cards).
+
+    The shimmer honours prefers-reduced-motion via CSS in design.py.
+    """
+    def _line(w_pct: int, h: int = 12, mt: int = 8) -> str:
+        return (f'<span class="cc-skel" style="height:{h}px;width:{w_pct}%;'
+                f'margin-top:{mt}px"></span>')
+
+    def _card() -> str:
+        return ('<div class="cc-skel-card">'
+                f'{_line(38, 14, 0)}'
+                f'{_line(72, 12, 10)}'
+                f'{_line(56, 12, 6)}'
+                '</div>')
+
+    def _hero() -> str:
+        tiles = "".join(
+            f'<div style="flex:1;min-width:120px">{_line(60, 10, 0)}'
+            f'{_line(80, 22, 8)}</div>'
+            for _ in range(4)
+        )
+        return ('<div class="cc-skel-card" style="padding:18px 22px">'
+                f'{_line(48, 22, 0)}'
+                f'{_line(72, 14, 10)}'
+                f'<div style="display:flex;gap:18px;margin-top:18px;'
+                'flex-wrap:wrap">'
+                f'{tiles}'
+                '</div></div>')
+
+    def _chart() -> str:
+        return ('<div class="cc-skel-card" style="padding:12px 14px">'
+                f'{_line(30, 12, 0)}'
+                '<span class="cc-skel" style="display:block;height:260px;'
+                'width:100%;margin-top:10px;border-radius:8px"></span>'
+                '</div>')
+
+    def _table() -> str:
+        rows = "".join(
+            f'<div style="display:flex;gap:12px;margin-top:8px">'
+            f'{_line(20, 12, 0)}{_line(14, 12, 0)}'
+            f'{_line(16, 12, 0)}{_line(18, 12, 0)}</div>'
+            for _ in range(6)
+        )
+        return f'<div class="cc-skel-card">{rows}</div>'
+
+    def _text() -> str:
+        return ('<div class="cc-skel-card">'
+                f'{_line(80, 12, 0)}'
+                f'{_line(92, 12, 8)}'
+                f'{_line(70, 12, 8)}'
+                '</div>')
+
+    builder = {"card": _card, "hero": _hero, "chart": _chart,
+               "table": _table, "text": _text}.get(kind, _card)
+    return "".join(builder() for _ in range(max(1, int(count))))
+
+
 def stat(label: str, value: str,
          delta: str = "",
          delta_positive: Optional[bool] = None,
