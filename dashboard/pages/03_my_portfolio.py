@@ -869,7 +869,14 @@ if _csv_source is not None:
             # ── Portfolio Risk & Performance ───────────────────────────
             st.markdown("---")
             _rh1, _rh2 = st.columns([5, 2])
-            _rh1.subheader("📉 Portfolio Risk & Performance")
+            # §9.4 typography scale · Streamlit's own st.subheader renders
+            # its own h3 that doesn't match the anchor scale used on
+            # Command Centre.
+            _rh1.markdown(
+                '<div class="t-h1" style="margin:6px 0 4px 0">'
+                '📉 Portfolio Risk &amp; Performance</div>',
+                unsafe_allow_html=True,
+            )
             with _rh2:
                 _risk_period = st.selectbox(
                     "Lookback", ["6mo", "1y", "2y", "3y"], index=1,
@@ -909,13 +916,38 @@ if _csv_source is not None:
                     [{"ticker": t, "quantity": q, "date_bought": db}
                      for t, q, db in _holds], period=_period, price_loader=_tz_safe_loader)
 
-            def _rm(_col, _label, _val, _unit=""):
-                if _val is None:
-                    _col.metric(_label, "N/A")
-                elif _unit == "%":
-                    _col.metric(_label, f"{_val:.1f}%")
-                else:
-                    _col.metric(_label, f"{_val:.2f}")
+            # IR3 (docs/UI_UX_BACKLOG.md) -- perf & risk tiles used to render
+            # as raw st.metric cells; replaced with the shared stat() helper
+            # so they read as anchor artifacts and pick up semantic tone
+            # from meaningful thresholds (Sharpe > 1 = bull, Max DD < -30%
+            # = bear, etc.) rather than a uniform grey wall.
+            def _perf_tone(name: str, val):
+                """Semantic tone per metric based on published thresholds."""
+                if val is None:
+                    return "neutral"
+                n = name.lower()
+                if "sharpe" in n:   # >1 great · 0.5-1 mid · <0.5 poor
+                    return "bull" if val >= 1.0 else "amber" if val >= 0.5 else "bear"
+                if "sortino" in n:  # tighter: downside-only variance
+                    return "bull" if val >= 1.5 else "amber" if val >= 0.7 else "bear"
+                if "calmar" in n:   # CAGR / max-DD -- >0.5 is very good
+                    return "bull" if val >= 0.5 else "amber" if val >= 0.2 else "bear"
+                if "max drawdown" in n:  # value is a NEGATIVE %; less-negative is better
+                    return "bear" if val <= -30 else "amber" if val <= -15 else "bull"
+                if "cagr" in n or "total return" in n:  # roughly index-relative
+                    return "bull" if val >= 12 else "amber" if val >= 4 else "bear"
+                if "beta" in n:  # <1 below-market · 1-1.5 mid · >1.5 high
+                    return "bull" if val <= 1.0 else "amber" if val <= 1.5 else "bear"
+                if "vol" in n:   # <15% low · 15-25% mid · >25% high
+                    return "bull" if val <= 15 else "amber" if val <= 25 else "bear"
+                return "neutral"
+
+            def _fmt_metric(val, unit: str) -> str:
+                if val is None:
+                    return "—"
+                if unit == "%":
+                    return f"{val:+.1f}%" if abs(val) < 1000 else f"{val:.0f}%"
+                return f"{val:.2f}"
 
             if not _risk_holds:
                 st.caption("No holdings with quantity to analyze.")
@@ -941,30 +973,138 @@ if _csv_source is not None:
                         st.info(f"ℹ️ {_rr.disclosure}")
                     st.caption(f"Confidence: **{_rr.confidence}** — {_rr.confidence_reason}")
 
-                    st.markdown("##### 📈 Hypothetical Performance — *if you'd held today's exact book*")
+                    from dashboard.shared.ui_components import (
+                        panel as _panel, stat as _stat,
+                    )
+
+                    # ── Performance tiles (IR3) ────────────────────────────
+                    st.markdown(
+                        '<div class="t-h2" style="margin:14px 0 6px 0">'
+                        '📈 Hypothetical Performance '
+                        '<span style="color:var(--dim);font-weight:400;font-size:12px">'
+                        'if you\'d held today\'s exact book</span></div>',
+                        unsafe_allow_html=True,
+                    )
                     _perf = _rr.performance_metrics()
-                    _p1 = st.columns(3)
-                    for _i, (_l, _v, _u) in enumerate(_perf[:3]):
-                        _rm(_p1[_i], _l, _v, _u)
-                    _p2 = st.columns(3)
-                    for _i, (_l, _v, _u) in enumerate(_perf[3:]):
-                        _rm(_p2[_i], _l, _v, _u)
+                    _perf_body = (
+                        '<div style="display:grid;'
+                        'grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
+                        'gap:14px 22px">'
+                        + "".join(
+                            _stat(_l, _fmt_metric(_v, _u),
+                                  tone=_perf_tone(_l, _v), align="center")
+                            for (_l, _v, _u) in _perf
+                        )
+                        + '</div>'
+                    )
+                    st.markdown(
+                        _panel(_perf_body, kind="glass", tone="neutral",
+                               margin="0 0 12px 0"),
+                        unsafe_allow_html=True,
+                    )
+
+                    # ── NAV curve (IR3) with peak/trough drawdown markers ──
                     if _rr.nav_curve is not None:
                         _nav_df = _rr.nav_curve.rename("NAV").reset_index()
                         _nav_df.columns = ["Date", "NAV"]
-                        _fig_nav = px.area(_nav_df, x="Date", y="NAV",
-                                           title="Portfolio NAV / Equity Curve (reconstructed)")
-                        _fig_nav.update_layout(template="nse_pro", height=280,
-                                               margin=dict(l=0, r=0, t=40, b=0))
-                        st.plotly_chart(_fig_nav, width="stretch")
+                        import plotly.graph_objects as _go
+                        _fig_nav = _go.Figure()
+                        # Bull-tinted fill under the NAV line -- muted, so
+                        # attention lands on the line and drawdown region.
+                        _fig_nav.add_trace(_go.Scatter(
+                            x=_nav_df["Date"], y=_nav_df["NAV"],
+                            mode="lines", name="NAV",
+                            line=dict(color="#ff9500", width=2),
+                            fill="tozeroy",
+                            fillcolor="rgba(255,149,0,0.06)",
+                            hovertemplate="%{x|%d %b %Y}<br>NAV Rs.%{y:,.0f}<extra></extra>",
+                        ))
+                        # Peak → trough drawdown band -- ties the Max Drawdown
+                        # tile above to the visible worst-case period.
+                        if (_rr.max_dd_peak and _rr.max_dd_trough
+                                and _rr.max_dd_peak != _rr.max_dd_trough):
+                            _fig_nav.add_vrect(
+                                x0=_rr.max_dd_peak, x1=_rr.max_dd_trough,
+                                fillcolor="rgba(255,77,77,0.10)",
+                                line_width=0,
+                                annotation_text=(
+                                    f"Max DD "
+                                    f"{(_rr.max_drawdown_pct or 0):.1f}%"
+                                ),
+                                annotation_position="top left",
+                                annotation_font=dict(
+                                    color="#ff4d4d", size=11,
+                                    family="IBM Plex Mono",
+                                ),
+                            )
+                            _fig_nav.add_trace(_go.Scatter(
+                                x=[_rr.max_dd_peak, _rr.max_dd_trough],
+                                y=[_nav_df.loc[_nav_df["Date"].astype("datetime64[ns]")
+                                               == pd.Timestamp(_rr.max_dd_peak),
+                                               "NAV"].iloc[0]
+                                   if not _nav_df[_nav_df["Date"].astype("datetime64[ns]")
+                                                  == pd.Timestamp(_rr.max_dd_peak)].empty
+                                   else _nav_df["NAV"].max(),
+                                   _nav_df.loc[_nav_df["Date"].astype("datetime64[ns]")
+                                               == pd.Timestamp(_rr.max_dd_trough),
+                                               "NAV"].iloc[0]
+                                   if not _nav_df[_nav_df["Date"].astype("datetime64[ns]")
+                                                  == pd.Timestamp(_rr.max_dd_trough)].empty
+                                   else _nav_df["NAV"].min()],
+                                mode="markers",
+                                marker=dict(size=[8, 10],
+                                            color=["#16c784", "#ff4d4d"],
+                                            line=dict(color="#0a0a0a", width=1.5)),
+                                hovertemplate="%{x|%d %b %Y}<br>Rs.%{y:,.0f}<extra></extra>",
+                                showlegend=False,
+                            ))
+                        _fig_nav.update_layout(
+                            template="nse_pro",
+                            height=320,
+                            margin=dict(l=6, r=6, t=8, b=0),
+                            showlegend=False,
+                            hovermode="x unified",
+                        )
+                        _fig_nav.update_yaxes(
+                            tickprefix="₹", tickformat=",.0f",
+                            gridcolor="rgba(255,255,255,0.04)",
+                        )
+                        _fig_nav.update_xaxes(
+                            gridcolor="rgba(255,255,255,0.04)",
+                        )
+                        st.plotly_chart(_fig_nav, width="stretch",
+                                        config={"displayModeBar": False})
 
-                    st.markdown("##### 🛡️ Risk Profile (current book) — *robust to the holdings assumption*")
+                    # ── Risk-profile tiles (IR3) ───────────────────────────
+                    st.markdown(
+                        '<div class="t-h2" style="margin:14px 0 6px 0">'
+                        '🛡️ Risk Profile '
+                        '<span style="color:var(--dim);font-weight:400;font-size:12px">'
+                        'current book · robust to the holdings assumption</span></div>',
+                        unsafe_allow_html=True,
+                    )
                     _rk = _rr.risk_metrics()
-                    _rcols = st.columns(4)
-                    _rm(_rcols[0], _rk[0][0], _rk[0][1], _rk[0][2])
-                    _rm(_rcols[1], _rk[1][0], _rk[1][1], _rk[1][2])
-                    _rcols[2].metric("Holdings analysed", len(_rr.holdings_used))
-                    _rcols[3].metric("Lookback (days)", _rr.n_days)
+                    _risk_body = (
+                        '<div style="display:grid;'
+                        'grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
+                        'gap:14px 22px">'
+                        + _stat(_rk[0][0], _fmt_metric(_rk[0][1], _rk[0][2]),
+                                tone=_perf_tone(_rk[0][0], _rk[0][1]),
+                                align="center")
+                        + _stat(_rk[1][0], _fmt_metric(_rk[1][1], _rk[1][2]),
+                                tone=_perf_tone(_rk[1][0], _rk[1][1]),
+                                align="center")
+                        + _stat("Holdings Analysed", str(len(_rr.holdings_used)),
+                                tone="neutral", align="center")
+                        + _stat("Lookback (Days)", str(_rr.n_days),
+                                tone="neutral", align="center")
+                        + '</div>'
+                    )
+                    st.markdown(
+                        _panel(_risk_body, kind="glass", tone="neutral",
+                               margin="0 0 12px 0"),
+                        unsafe_allow_html=True,
+                    )
                     _rcL, _rcR = st.columns([1, 1])
                     with _rcL:
                         if _rr.correlation_matrix is not None:
