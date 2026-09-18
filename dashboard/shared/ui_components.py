@@ -709,3 +709,137 @@ def empty_state(title: str, hint: str = "", icon: str = "") -> str:
         f'{hint_html}'
         f'</div>'
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# IR1 · Structured Bull / Bear / Risk card (docs/UI_UX_BACKLOG.md)
+# ═══════════════════════════════════════════════════════════════════════════
+# The thesis engine in analysis/thesis/ already produces bull_factors +
+# bear_factors + key_risks as typed Factor lists, each with source and
+# evidence. Analyze Stock renders them inside the "Thesis" tab as three
+# stacked chip lists -- a user has to click into the tab to see them.
+#
+# IR1 promotes the same payload to a proper hero-tier card that can sit
+# above the fold alongside the Verdict Card. Three columns (bull / bear /
+# risks) each with a semantic left-rail, count badge, and up to `limit`
+# factors as inline chip-cards. The Thesis tab keeps the full list and its
+# rules-provenance caption; this card is the at-a-glance summary.
+#
+# Deliberately no dependency on the ThesisResult dataclass -- takes plain
+# lists of dict-shaped factors so the helper is unit-testable without the
+# engine and future callers (screener rows, watchlist deep-hover) can pass
+# a hand-built list.
+
+_BBR_COL_STYLES = {
+    # (rail, tint bg for the column header pill, icon)
+    "bull": ("var(--bull)",  "var(--tint-bull)",  "🟢"),
+    "bear": ("var(--bear)",  "var(--tint-bear)",  "🔴"),
+    "risk": ("var(--amber)", "var(--tint-amber)", "⚠"),
+}
+_BBR_COL_TITLE = {"bull": "Bull case", "bear": "Bear case", "risk": "Key risks"}
+_BBR_COL_EMPTY = {
+    "bull": "No bull factors triggered.",
+    "bear": "No bear factors triggered.",
+    "risk": "No specific risks flagged.",
+}
+
+
+def _bbr_factor_chip(text: str, source: str, evidence: str, rail: str) -> str:
+    """One factor row inside a bull/bear/risk column."""
+    source_pill = (
+        f'<span style="display:inline-block;background:var(--sunken);'
+        f'border:1px solid var(--hairline);border-radius:4px;'
+        f'padding:1px 6px;font-size:10px;color:var(--dim);'
+        f'font-weight:600;letter-spacing:.04em">{source}</span>'
+        if source else ""
+    )
+    evidence_html = (
+        f'<span style="margin-left:6px;font-size:11px;color:var(--dim);'
+        f'font-family:var(--font-mono)">{evidence}</span>'
+        if evidence else ""
+    )
+    return (
+        f'<div style="background:var(--sunken);border-left:3px solid {rail};'
+        f'border-radius:6px;padding:7px 10px;margin:5px 0">'
+        f'<div style="font-size:12.5px;line-height:1.4;color:var(--ink-mid)">'
+        f'{text}</div>'
+        f'<div style="margin-top:4px">{source_pill}{evidence_html}</div>'
+        f'</div>'
+    )
+
+
+def _bbr_column(kind: str, factors: list, limit: int = 4) -> str:
+    """One of the three columns (bull | bear | risk)."""
+    rail, tint, icon = _BBR_COL_STYLES[kind]
+    title = _BBR_COL_TITLE[kind]
+    count = len(factors) if factors else 0
+    count_badge = (
+        f'<span style="display:inline-block;background:{tint};color:{rail};'
+        f'border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700;'
+        f'font-family:var(--font-mono);margin-left:6px">{count}</span>'
+    )
+    header = (
+        f'<div style="display:flex;align-items:center;margin-bottom:8px">'
+        f'<span style="color:{rail};font-weight:700;letter-spacing:.12em;'
+        f'text-transform:uppercase;font-size:11px">'
+        f'{icon} {title}</span>{count_badge}</div>'
+    )
+    if not factors:
+        body = (
+            f'<div style="font-size:12px;color:var(--faint);font-style:italic;'
+            f'padding:8px 4px">{_BBR_COL_EMPTY[kind]}</div>'
+        )
+    else:
+        shown = factors[:limit]
+        rows = "".join(
+            _bbr_factor_chip(
+                _get(_f, "text", ""), _get(_f, "source", ""),
+                _get(_f, "evidence", ""), rail,
+            )
+            for _f in shown
+        )
+        overflow = ""
+        if len(factors) > limit:
+            overflow = (
+                f'<div style="font-size:11px;color:var(--dim);text-align:right;'
+                f'margin-top:4px">+{len(factors) - limit} more in Thesis tab</div>'
+            )
+        body = rows + overflow
+    return (
+        f'<div style="background:var(--card-lift);border:1px solid var(--hairline);'
+        f'border-radius:var(--r-base);padding:12px 14px;height:100%">'
+        f'{header}{body}</div>'
+    )
+
+
+def _get(obj, key: str, default=""):
+    """Read `key` off either a Factor dataclass (attribute) or a plain dict."""
+    if hasattr(obj, key):
+        return getattr(obj, key, default) or default
+    if isinstance(obj, dict):
+        return obj.get(key, default) or default
+    return default
+
+
+def bull_bear_risk_card(bull_factors: list,
+                        bear_factors: list,
+                        key_risks: list,
+                        limit_per_column: int = 4) -> str:
+    """Three-column hero-tier Bull / Bear / Risk card (IR1).
+
+    Each list holds either Factor dataclass instances (from analysis.thesis)
+    or plain dicts with 'text' / 'source' / 'evidence' keys. Returns raw
+    HTML -- caller stamps via st.markdown(unsafe_allow_html=True).
+
+    limit_per_column caps the visible factors per column; overflow gets a
+    "+N more in Thesis tab" hint so the card stays scannable when a stock
+    has ~12 bull triggers.
+    """
+    return (
+        f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;'
+        f'gap:12px;margin:10px 0">'
+        f'{_bbr_column("bull", bull_factors or [], limit_per_column)}'
+        f'{_bbr_column("bear", bear_factors or [], limit_per_column)}'
+        f'{_bbr_column("risk", key_risks     or [], limit_per_column)}'
+        f'</div>'
+    )
