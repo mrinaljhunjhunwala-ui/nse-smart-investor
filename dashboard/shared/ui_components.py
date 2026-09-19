@@ -608,6 +608,20 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
             + '</div>'
         )
 
+    # DT1 + DT2 · attribution stamp on the verdict card. The composite
+    # score is scored from data/fetcher.py's tiered pipeline (Angel One →
+    # Stooq → Yahoo) with a warm in-process cache — surface WHERE and
+    # WHEN so users know how stale the number can be.
+    _ts = str(getattr(cs, "timestamp", "") or "").strip()
+    _src = str(getattr(cs, "source", "") or "").strip() or "yfinance"
+    _when = _ts[11:16] + " IST" if len(_ts) >= 16 else (_ts or "unknown")
+    body += (
+        '<div style="margin-top:14px;padding-top:10px;'
+        'border-top:1px solid var(--hairline-soft)">'
+        + data_as_of(_when, source=_src, ttl_hint="score cache 5 min")
+        + '</div>'
+    )
+
     return panel(body, kind="glass", tone=tone, margin="12px 0")
 
 
