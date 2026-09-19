@@ -43,6 +43,7 @@ if _ROOT not in sys.path:
 from data.nse_fno_bhavcopy import (   # noqa: E402
     _fetch_bhavcopy, _parse_bhavcopy, _persist, ensure_schema,
 )
+from data.fno_universe import check_universe_drift   # noqa: E402
 
 _log = logging.getLogger("scripts.fetch_nse_fno_bhavcopy")
 
@@ -126,6 +127,32 @@ def main(argv: List[str] | None = None) -> int:
             time.sleep(random.uniform(1.5, 3.5))
 
     _log.info("done. requested=%d, failed=%d", len(dates), failed)
+
+    # Drift check — warn when data/fno_universe.py has fallen out of sync
+    # with the actual NSE F&O universe. Prevents the "WAF-blocked" red
+    # herring where the fetcher iterates symbols NSE has already delisted.
+    try:
+        drift = check_universe_drift()
+        if drift["db_date"]:
+            if drift["stale"]:
+                _log.warning(
+                    "fno_universe drift: %d symbol(s) in _FNO_TICKERS but NOT in "
+                    "bhavcopy %s — candidates to REMOVE from data/fno_universe.py: %s",
+                    len(drift["stale"]), drift["db_date"],
+                    ", ".join(sorted(drift["stale"])),
+                )
+            if drift["missing"]:
+                # By design _FNO_TICKERS is a small curated subset — see the
+                # file header comment. Log at DEBUG so it's visible with -v
+                # but doesn't spam the daily task log.
+                _log.debug(
+                    "fno_universe: %d F&O symbol(s) not in curated _FNO_TICKERS: %s",
+                    len(drift["missing"]),
+                    ", ".join(sorted(drift["missing"])),
+                )
+    except Exception as e:
+        _log.debug("drift check skipped: %s", e)
+
     return 1 if failed > 0 else 0
 
 
