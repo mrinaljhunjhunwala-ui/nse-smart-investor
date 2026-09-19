@@ -150,7 +150,11 @@ else:
 # FIX B1 — Non-blocking in-app backtest runner
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.subheader("⚡ Run a Backtest — in the app")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '⚡ Run a Backtest — in the app</div>',
+    unsafe_allow_html=True,
+)
 
 _bt_c1, _bt_c2, _bt_c3, _bt_c4 = st.columns([2, 2, 1, 1])
 with _bt_c1:
@@ -544,7 +548,11 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
 # FIX B3 — Normalised comparison with common-date alignment
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.subheader("🔍 Quick Chart Comparison")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '🔍 Quick Chart Comparison</div>',
+    unsafe_allow_html=True,
+)
 raw2 = st.text_input(
     "Compare tickers (space-separated)",
     value="RELIANCE.NS TCS.NS HDFCBANK.NS",
