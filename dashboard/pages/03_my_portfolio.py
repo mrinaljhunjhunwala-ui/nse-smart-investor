@@ -650,6 +650,19 @@ if _csv_source is not None:
                 "scoring pass — just laid out for a quick scan across every "
                 "holding at once."
             )
+            # DT1 + DT2 · attribution on the holdings table. Prices flow
+            # through data/fetcher.py's tiered pipeline (Angel One → Stooq
+            # → Yahoo); scores come out of PortfolioManager's per-run pass.
+            try:
+                from dashboard.shared.ui_components import data_as_of as _mp_asof
+                _mp_when = _dt.datetime.now().strftime("%H:%M IST")
+                st.markdown(
+                    _mp_asof(_mp_when, source="yfinance",
+                             ttl_hint="live-price cache 60 s · score cache 5 min"),
+                    unsafe_allow_html=True,
+                )
+            except Exception:
+                pass
 
             # Aligned to design.py's "Dealing Room v2" tokens (bull #16c784 /
             # bear #ff4d4d / caution #f2a93b / accent #ff9500) instead of the

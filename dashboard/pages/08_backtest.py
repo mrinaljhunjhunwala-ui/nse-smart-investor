@@ -498,6 +498,20 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
             "Sorted by return. Green = better. "
             "'Beat Buy&Hold' = how often the strategy outperformed simply holding."
         )
+        # DT1 + DT2 · attribution on the strategy backtest table. Historical
+        # OHLCV comes from data/fetcher.py's tiered pipeline (Yahoo primary
+        # for daily history). Backtests run per invocation — no cache hint.
+        try:
+            from dashboard.shared.ui_components import data_as_of as _bt_asof
+            import datetime as _bt_dt
+            _bt_when = _bt_dt.datetime.now().strftime("%H:%M IST")
+            st.markdown(
+                _bt_asof(_bt_when, source="yfinance",
+                         ttl_hint="daily-bars history · no cache"),
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
 
     # FIX B6 — failure breakdown. Previously any ticker that failed (data
     # fetch failure, or fetched but too little history) was silently
