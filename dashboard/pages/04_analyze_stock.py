@@ -1905,7 +1905,13 @@ if analyze_btn or _prefill_active or (
                 #   • expander with the flag detail (headline, category, sentiment)
                 #   • the news list below (unchanged)
                 st.markdown("---")
-                st.subheader(f"📰 News & Flags — {get_display_name(ticker)}")
+                st.markdown(
+                    f'<div class="t-h2" style="margin:14px 0 6px 0">'
+                    f'📰 News &amp; Flags <span style="color:var(--dim);'
+                    f'font-weight:400;font-size:12px">'
+                    f'{get_display_name(ticker)}</span></div>',
+                    unsafe_allow_html=True,
+                )
 
                 # Flag summary strip (from the same 6h-cached helper the pre-fix
                 # standalone strip used). SPEED FIX: setting the warm marker here

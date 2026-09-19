@@ -123,7 +123,12 @@ with st.expander("➕ Add a new entry", expanded=False):
 
 entries = read_entries()
 
-st.subheader(f"📚 Entries · {len(entries)} total")
+st.markdown(
+    f'<div class="t-h2" style="margin:14px 0 6px 0">'
+    f'📚 Entries <span style="color:var(--dim);font-weight:400;font-size:12px">'
+    f'{len(entries)} total</span></div>',
+    unsafe_allow_html=True,
+)
 
 if not entries:
     # F5 empty-state kit -- see dashboard/shared/ui_components.py.
