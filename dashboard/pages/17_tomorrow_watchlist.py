@@ -299,6 +299,17 @@ st.caption(
     + " · Runs EOD, cached until the next session · not intraday. "
       "Levels are based on today's daily close."
 )
+# DT1 + DT2 · scan-time attribution with the source pill.
+try:
+    from dashboard.shared.ui_components import data_as_of as _tw_asof
+    _tw_when = str(_wl.get("scan_time") or "unknown")
+    st.markdown(
+        _tw_asof(_tw_when, source="yfinance",
+                 ttl_hint="EOD scan cached until next session"),
+        unsafe_allow_html=True,
+    )
+except Exception:
+    pass
 
 from dashboard.shared.disclosures import (
     render_regime_reliability_note as _tw_regime_note,

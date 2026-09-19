@@ -210,6 +210,19 @@ else:
 
     _wl_display_df = pd.DataFrame(_merged)
     st.dataframe(_wl_display_df, hide_index=True, width="stretch", height=420)
+    # DT1 + DT2 · watchlist scores are computed via a 15-min piggyback
+    # scan (see commit 5594fd1); surface the cadence + source here.
+    try:
+        from dashboard.shared.ui_components import data_as_of as _wl_asof
+        import datetime as _wl_dt
+        _wl_when = _wl_dt.datetime.now().strftime("%H:%M IST")
+        st.markdown(
+            _wl_asof(_wl_when, source="yfinance",
+                     ttl_hint="piggyback scan 15 min"),
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
 
     # Remove ticker
     st.markdown("---")
