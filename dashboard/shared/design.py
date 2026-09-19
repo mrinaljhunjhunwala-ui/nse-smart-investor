@@ -344,10 +344,23 @@ def apply_design():
         background: rgba(255,255,255,.04);
     }
     .stButton > button:hover { border-color: rgba(255,149,0,.5); color:#ff9500; }
+    /* F7 · keyboard focus ring — matches the saffron halo used on inputs so
+       "you can act here" reads the same on click, tab-through, and hover.
+       :focus-visible fires only on keyboard nav (never on mouse click), so
+       pointer users don't see the ring unless they Tab to a button. */
+    .stButton > button:focus-visible {
+        outline: none !important;
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px rgba(255,149,0,.20) !important;
+    }
     .stButton > button[kind="primary"] {
         background: #ff9500; border:none; color:#09090b; font-weight:700;
     }
     .stButton > button[kind="primary"]:hover { background:#ffb340; color:#09090b; }
+    .stButton > button[kind="primary"]:focus-visible {
+        outline: none !important;
+        box-shadow: 0 0 0 3px rgba(255,149,0,.30) !important;
+    }
 
     /* ── Tabs ────────────────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] {
@@ -361,6 +374,11 @@ def apply_design():
     }
     .stTabs [aria-selected="true"] {
         background: #131316; font-weight: 700; color: #ff9500;
+    }
+    /* F7 · focus-visible ring on tab buttons — keyboard nav only. */
+    .stTabs [data-baseweb="tab"]:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(255,149,0,.35) inset;
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
