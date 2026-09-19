@@ -88,7 +88,15 @@ with _tab_snapshot:
             else:
                 div_txt = "✅ Normal correction — fear rising with selling"
 
-            st.subheader("🌡️ Fear Gauge — India VIX")
+            st.markdown(
+
+                '<div class="t-h2" style="margin:14px 0 6px 0">'
+
+                '🌡️ Fear Gauge — India VIX</div>',
+
+                unsafe_allow_html=True,
+
+            )
             st.markdown(
                 f'<div style="background:{reg_color};padding:12px 18px;border-radius:10px;'
                 f'color:#000;font-weight:700;font-size:18px;text-align:center;">'
@@ -133,7 +141,11 @@ with _tab_snapshot:
 
     # ── Sector Rotation ──────────────────────────────────────────────
     st.markdown("---")
-    st.subheader("🔄 Sector Momentum Heatmap")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '🔄 Sector Momentum Heatmap</div>',
+        unsafe_allow_html=True,
+    )
 
     @st.cache_data(ttl=1800)
     def get_sector_data():
@@ -178,7 +190,11 @@ with _tab_snapshot:
 
     # ── Top movers from broad NSE universe ──────────────────────────
     st.markdown("---")
-    st.subheader("🚀 NSE Top Movers")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '🚀 NSE Top Movers</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("Scanning ~750 stocks across Nifty Total Market universe")
 
     @st.cache_data(ttl=180)
@@ -307,7 +323,15 @@ with _tab_macro:
                         f"{len(macro_df.columns)} that loaded successfully."
                     )
 
-                st.subheader("Current Levels & Daily Change")
+                st.markdown(
+
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+
+                    'Current Levels & Daily Change</div>',
+
+                    unsafe_allow_html=True,
+
+                )
                 card_cols = st.columns(min(len(macro_df.columns), 7))
                 for i, col_name in enumerate(macro_df.columns):
                     series = macro_df[col_name].dropna()
@@ -332,7 +356,15 @@ with _tab_macro:
                 else:
                     _macro_use = macro_df[_usable_cols]
 
-                    st.subheader("3-Month Performance (Normalised to 100)")
+                    st.markdown(
+
+                        '<div class="t-h2" style="margin:14px 0 6px 0">'
+
+                        '3-Month Performance (Normalised to 100)</div>',
+
+                        unsafe_allow_html=True,
+
+                    )
                     first_valid = _macro_use.apply(
                         lambda s: s.dropna().iloc[0] if not s.dropna().empty else 1
                     )
@@ -355,7 +387,15 @@ with _tab_macro:
 
                     st.markdown("---")
 
-                    st.subheader("30-Day Return Correlation Matrix")
+                    st.markdown(
+
+                        '<div class="t-h2" style="margin:14px 0 6px 0">'
+
+                        '30-Day Return Correlation Matrix</div>',
+
+                        unsafe_allow_html=True,
+
+                    )
                     rets_30 = _macro_use.pct_change().tail(30)
                     rets_30 = rets_30.dropna(axis=1, how="all")
                     if rets_30.shape[1] < 2:
@@ -378,7 +418,15 @@ with _tab_macro:
 
                 st.markdown("---")
 
-                st.subheader("India Market Impact Guide")
+                st.markdown(
+
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+
+                    'India Market Impact Guide</div>',
+
+                    unsafe_allow_html=True,
+
+                )
                 st.dataframe(pd.DataFrame([
                     {"Move": "Brent Crude ↑", "Sector Impact": "Aviation/Paint/Tyre/FMCG ↓",
                      "INR Effect": "INR weakens (imports 85%)", "Nifty Bias": "🔴 Bearish"},
@@ -427,7 +475,11 @@ with _tab_breadth:
         c4.metric("Near 52W High / Low", f"{breadth['near_52w_high']} / {breadth['near_52w_low']}")
 
         st.markdown("---")
-        st.subheader("% of Nifty 50 Stocks Above Key Moving Averages")
+        st.markdown(
+            '<div class="t-h2" style="margin:14px 0 6px 0">'
+            '% of Nifty 50 Stocks Above Key Moving Averages</div>',
+            unsafe_allow_html=True,
+        )
         bvals = {
             "Above SMA20":  breadth["pct_above_20"],
             "Above SMA50":  breadth["pct_above_50"],
@@ -471,7 +523,11 @@ with _tab_breadth:
         st.markdown("---")
         col_pie, col_tbl = st.columns([1, 1])
         with col_pie:
-            st.subheader("Today's Advance / Decline")
+            st.markdown(
+                '<div class="t-h2" style="margin:14px 0 6px 0">'
+                'Today's Advance / Decline</div>',
+                unsafe_allow_html=True,
+            )
             pie_fig = go.Figure(data=go.Pie(
                 labels=["Advancing", "Declining"],
                 values=[breadth["advance"], breadth["decline"]],
@@ -483,7 +539,11 @@ with _tab_breadth:
             )
             st.plotly_chart(pie_fig, width="stretch")
         with col_tbl:
-            st.subheader("Breadth Interpretation Guide")
+            st.markdown(
+                '<div class="t-h2" style="margin:14px 0 6px 0">'
+                'Breadth Interpretation Guide</div>',
+                unsafe_allow_html=True,
+            )
             st.dataframe(pd.DataFrame([
                 {"% Above SMA200": "> 70%",  "Signal": "Strong Bull",    "Action": "Full long — buy dips"},
                 {"% Above SMA200": "50–70%", "Signal": "Healthy uptrend","Action": "Long bias, trail stops"},
@@ -492,7 +552,11 @@ with _tab_breadth:
             ]), hide_index=True)
 
         st.markdown("---")
-        st.subheader("52-Week High / Low Distribution")
+        st.markdown(
+            '<div class="t-h2" style="margin:14px 0 6px 0">'
+            '52-Week High / Low Distribution</div>',
+            unsafe_allow_html=True,
+        )
         hl_fig = go.Figure(go.Bar(
             x=["Near 52W High (within 5%)", "Near 52W Low (within 5%)"],
             y=[breadth["near_52w_high"], breadth["near_52w_low"]],
