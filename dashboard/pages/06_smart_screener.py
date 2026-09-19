@@ -273,6 +273,20 @@ if scan_btn:
                         unsafe_allow_html=True
                     )
 
+        # DT1 + DT2 · attribution below the screener results. Prices come
+        # from data/fetcher.py's tiered pipeline; screens run per-scan.
+        try:
+            from dashboard.shared.ui_components import data_as_of as _scr_asof
+            import datetime as _scr_dt
+            _scr_when = _scr_dt.datetime.now().strftime("%H:%M IST")
+            st.markdown(
+                _scr_asof(_scr_when, source="yfinance",
+                          ttl_hint="scan cache 15 min"),
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
+
         # Download results
         result_df = pd.DataFrame(signals)
         if not result_df.empty:
