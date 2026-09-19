@@ -220,7 +220,7 @@ with tab_ao2:
 with tab_ao3:
     st.markdown(
         '<div class="t-h2" style="margin:14px 0 6px 0">'
-        'Today's Positions</div>',
+        "Today's Positions</div>",
         unsafe_allow_html=True,
     )
     with st.spinner("Fetching positions…"):
@@ -265,7 +265,7 @@ with tab_ao3:
 with tab_ao4:
     st.markdown(
         '<div class="t-h2" style="margin:14px 0 6px 0">'
-        'Today's Orders & Trades</div>',
+        "Today's Orders &amp; Trades</div>",
         unsafe_allow_html=True,
     )
     ord_t1, ord_t2, ord_t3 = st.tabs(["📑 Order Book", "✅ Trade Book", "🎯 GTT Orders"])

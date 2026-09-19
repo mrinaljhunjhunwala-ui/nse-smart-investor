@@ -525,7 +525,7 @@ with _tab_breadth:
         with col_pie:
             st.markdown(
                 '<div class="t-h2" style="margin:14px 0 6px 0">'
-                'Today's Advance / Decline</div>',
+                "Today's Advance / Decline</div>",
                 unsafe_allow_html=True,
             )
             pie_fig = go.Figure(data=go.Pie(
