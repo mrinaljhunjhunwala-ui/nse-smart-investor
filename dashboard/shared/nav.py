@@ -297,10 +297,98 @@ def _qv_holding_field(row, *names, default=0):
     return default
 
 
+def _cmdbar_match(query: str) -> list[tuple[str, str, str]]:
+    """Fuzzy-search across pages and (best-effort) NSE tickers.
+
+    Returns up to 8 tuples of (display, kind, target) where:
+      kind = "page"   → target is a nav page name (feeds _nav_to)
+      kind = "ticker" → target is a symbol (e.g. "RELIANCE"), the caller
+                        routes to Analyze Stock with the ticker preloaded.
+
+    Case-insensitive substring match. Pages ranked first, tickers after.
+    Ticker lookup falls back silently if the search map cannot be
+    imported (Analyze Stock has its own fallback anyway).
+    """
+    q = (query or "").strip().lower()
+    if not q or len(q) < 2:
+        return []
+
+    matches: list[tuple[str, str, str]] = []
+    for _grp, _ps in _NAV_GROUPS.items():
+        for _p in _ps:
+            hay = f"{_p} {_PAGE_FULL_NAME.get(_p, _p)}".lower()
+            if q in hay:
+                matches.append(
+                    (f"{_PAGE_EMOJI.get(_p, '·')} {_p}",
+                     "page", _p)
+                )
+                if len(matches) >= 4:
+                    break
+        if len(matches) >= 4:
+            break
+
+    try:
+        from dashboard.shared.cache import STOCK_SEARCH_MAP as _SSM
+    except Exception:
+        _SSM = {}
+    _ticker_hits = 0
+    for _name, _sym in _SSM.items():
+        if _ticker_hits >= 4:
+            break
+        if q in _name.lower() or q in str(_sym).lower():
+            _clean = str(_sym).replace(".NS", "")
+            matches.append(
+                (f"🔍 Analyze {_clean} · {_name}",
+                 "ticker", _clean)
+            )
+            _ticker_hits += 1
+
+    return matches[:8]
+
+
+def _render_command_bar() -> None:
+    """Sidebar command bar (§10 UX ideas: command-palette lite).
+
+    Text input at the top of the sidebar. Two chars triggers matching;
+    matched pages/tickers appear as buttons that navigate on click.
+    No JS/HTML — native Streamlit only, so it works inside AppTest and
+    doesn't need st.components.v1.
+    """
+    q = st.sidebar.text_input(
+        "🔎 Jump to…",
+        key="__cmdbar_q",
+        placeholder="page or ticker (min 2 chars)",
+        label_visibility="collapsed",
+    )
+    hits = _cmdbar_match(q)
+    if not hits:
+        return
+
+    for _display, _kind, _target in hits:
+        if st.sidebar.button(
+            _display, key=f"__cmdbar_{_kind}_{_target}",
+            use_container_width=True,
+        ):
+            if _kind == "page":
+                _t = _PAGE_FILE.get(_target)
+                if _t:
+                    st.session_state["__cmdbar_q"] = ""
+                    st.switch_page(_t)
+            elif _kind == "ticker":
+                st.session_state["analyze_ticker"] = f"{_target}.NS"
+                st.session_state["_goto_page"] = _PAGE_FULL_NAME.get(
+                    "Analyze Stock", "🔍 Analyze Stock")
+                st.session_state["__cmdbar_q"] = ""
+                _t = _PAGE_FILE.get("Analyze Stock")
+                if _t:
+                    st.switch_page(_t)
+
+
 def render_sidebar(current: str = None) -> None:
     """Render the full sidebar. `current` = this page's name (for routing)."""
     st.sidebar.title("NSE Smart Investor")
     st.sidebar.markdown("*AI-powered equity companion*")
+    _render_command_bar()
     st.sidebar.markdown("---")
 
     # Two-level grouped navigation — Home + 5 sections
