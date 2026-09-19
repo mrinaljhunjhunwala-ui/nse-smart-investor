@@ -121,7 +121,11 @@ _o4.metric("Played out ≥60d", f"{_played_60d:,}")
 st.markdown("---")
 
 # ── Section A — Calibration by verdict × horizon ─────────────────────────────
-st.subheader("📊 Hit rate by verdict")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '📊 Hit rate by verdict</div>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "For each verdict, what percent of calls closed positive, and what did "
     "the average call earn vs NIFTY? Wilson lower-bound is the honest floor "
@@ -170,7 +174,11 @@ else:
 
 # ── Section B — Conviction calibration ────────────────────────────────────────
 st.markdown("---")
-st.subheader("📈 Conviction calibration")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '📈 Conviction calibration</div>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "Does higher conviction actually correlate with higher forward return? "
     "A well-calibrated model shows a clear upward slope. A flat line means "
@@ -210,7 +218,11 @@ else:
 
 # ── Section C — Per-subsystem hit rate ────────────────────────────────────────
 st.markdown("---")
-st.subheader("🧪 Which subsystem is right most often?")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '🧪 Which subsystem is right most often?</div>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "The composite verdict is a decision tree over subsystems. If Technical "
     "BUY has a great hit rate but Thesis Positive has a poor one, that tells "
@@ -246,7 +258,11 @@ else:
 
 # ── Section C-bis — Per-signal-tag hit rate (Tier 1 #3) ──────────────────────
 st.markdown("---")
-st.subheader("🔬 Per-signal-tag calibration")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '🔬 Per-signal-tag calibration</div>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "Every verdict is a bundle of individual rules that fired — RSI oversold, "
     "volume surge, a BullEngulfing pattern, a valuation posture, etc. This "
@@ -278,7 +294,11 @@ else:
 
 # ── Section D — Shadow trades P&L ─────────────────────────────────────────────
 st.markdown("---")
-st.subheader("👥 Shadow trades — the winners you skipped")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '👥 Shadow trades — the winners you skipped</div>',
+    unsafe_allow_html=True,
+)
 st.caption(
     "Every STRONG BUY / BUY the model surfaced (whether or not you paper-"
     "traded it), with the actual return had you held to the horizon."

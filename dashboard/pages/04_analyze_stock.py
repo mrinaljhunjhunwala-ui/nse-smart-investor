@@ -1884,7 +1884,11 @@ if analyze_btn or _prefill_active or (
             def _frag_chart():
                 # ── Chart ──────────────────────────────────────────────────────
                 st.markdown("---")
-                st.subheader("📊 Price Chart")
+                st.markdown(
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+                    '📊 Price Chart</div>',
+                    unsafe_allow_html=True,
+                )
                 st.plotly_chart(build_price_chart(df_chart, ticker, period=period),
                                 width="stretch")
             with tab_chart:
@@ -2023,7 +2027,11 @@ if analyze_btn or _prefill_active or (
                 # the same `_th` object (unchanged), so the semantic ordering is
                 # now: verdict → why (Thesis) → context (F/V/L) → fit.
                 st.markdown("---")
-                st.subheader("🧭 Investment Thesis (structured)")
+                st.markdown(
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+                    '🧭 Investment Thesis (structured)</div>',
+                    unsafe_allow_html=True,
+                )
                 st.caption(
                     "Rules-based synthesis of the signals above — Bull / Bear / Risks with a "
                     "single verdict. Every point is traceable to its source. Not investment advice."
@@ -2142,7 +2150,11 @@ if analyze_btn or _prefill_active or (
             def _frag_fund():
                 # ── Fundamentals ───────────────────────────────────────────────
                 st.markdown("---")
-                st.subheader("📊 Fundamentals")
+                st.markdown(
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+                    '📊 Fundamentals</div>',
+                    unsafe_allow_html=True,
+                )
                 try:
                     import datetime as _f_dt
                     _f_cf  = _fund_service().get_fundamentals(ticker)
@@ -2266,7 +2278,11 @@ if analyze_btn or _prefill_active or (
             def _frag_val():
                 # ── Valuation Context ──────────────────────────────────────────
                 st.markdown("---")
-                st.subheader("💰 Valuation Context")
+                st.markdown(
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+                    '💰 Valuation Context</div>',
+                    unsafe_allow_html=True,
+                )
                 st.caption(
                     "Valuation multiples already available from the fundamentals provider. "
                     "Factual context only — no cheap/expensive judgment, no peer comparison yet."
@@ -2376,7 +2392,11 @@ if analyze_btn or _prefill_active or (
                 # Investment Thesis section can consume it; this render block just
                 # displays what was already computed. Do not re-compute here.
                 st.markdown("---")
-                st.subheader("💧 Liquidity Context")
+                st.markdown(
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+                    '💧 Liquidity Context</div>',
+                    unsafe_allow_html=True,
+                )
                 try:
                     from analysis.liquidity import format_turnover
                     if _liq_ctx is None:
@@ -2423,7 +2443,11 @@ if analyze_btn or _prefill_active or (
             def _frag_pf():
                 # ── Portfolio Fit — FIX A5 + A9: cached, reads manual holdings ──
                 st.markdown("---")
-                st.subheader("🧩 Portfolio Fit Assessment")
+                st.markdown(
+                    '<div class="t-h2" style="margin:14px 0 6px 0">'
+                    '🧩 Portfolio Fit Assessment</div>',
+                    unsafe_allow_html=True,
+                )
                 st.caption(
                     "Is this a good *addition* to your current book? Marginal impact on "
                     "diversification, sector mix, beta and concentration. Not investment advice."
