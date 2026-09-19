@@ -416,6 +416,13 @@ if analyze_btn or _prefill_active or (
     and st.session_state.last_analyzed == ticker
 ):
     st.session_state.last_analyzed = ticker
+    # Recent-tickers ring buffer (5 max) — feeds the sidebar command bar
+    # (dashboard/shared/nav._render_command_bar) with quick-jump chips
+    # when the search box is empty. Newest first; dedup on ticker.
+    _rt = st.session_state.get("__recent_tickers", [])
+    _sym = ticker.replace(".NS", "")
+    _rt = [_sym] + [t for t in _rt if t != _sym]
+    st.session_state["__recent_tickers"] = _rt[:5]
 
     if analyze_btn:
         # FIX A9: the search boxes only ever cleared when explicitly

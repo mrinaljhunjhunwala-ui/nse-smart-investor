@@ -361,6 +361,27 @@ def _render_command_bar() -> None:
         label_visibility="collapsed",
     )
     hits = _cmdbar_match(q)
+
+    # When the box is empty and the user has previously analyzed some
+    # tickers this session, surface them as quick-jump buttons. Writing
+    # side lives on Analyze Stock (04_analyze_stock.py) — see
+    # st.session_state['__recent_tickers'].
+    if not hits and not (q or "").strip():
+        _recent = st.session_state.get("__recent_tickers", [])
+        if _recent:
+            st.sidebar.caption("Recent")
+            for _sym in _recent[:5]:
+                if st.sidebar.button(
+                    f"🔍 {_sym}", key=f"__cmdbar_recent_{_sym}",
+                    use_container_width=True,
+                ):
+                    st.session_state["analyze_ticker"] = f"{_sym}.NS"
+                    st.session_state["_goto_page"] = _PAGE_FULL_NAME.get(
+                        "Analyze Stock", "🔍 Analyze Stock")
+                    _t = _PAGE_FILE.get("Analyze Stock")
+                    if _t:
+                        st.switch_page(_t)
+        return
     if not hits:
         return
 
