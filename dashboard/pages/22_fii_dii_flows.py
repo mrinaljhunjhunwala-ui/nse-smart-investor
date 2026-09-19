@@ -200,6 +200,23 @@ _fig.update_layout(
 )
 st.plotly_chart(_fig, width="stretch")
 
+# DT1 + DT2 · flows are scraped from NSE — surface WHERE + WHEN.
+try:
+    from dashboard.shared.ui_components import data_as_of as _fd_asof
+    import datetime as _fd_dt
+    if pd.notna(_latest.get("date")):
+        _fd_when = _fd_dt.datetime.fromisoformat(
+            str(_latest["date"])).strftime("%d %b %Y")
+    else:
+        _fd_when = _fd_dt.datetime.now().strftime("%H:%M IST")
+    st.markdown(
+        _fd_asof(_fd_when, source="nse",
+                 ttl_hint="daily provisional · updated after close"),
+        unsafe_allow_html=True,
+    )
+except Exception:
+    pass
+
 # ── Chart 2 — cumulative ──────────────────────────────────────────────────────
 st.markdown("---")
 st.subheader("📈 Cumulative flow (running sum over window)")
