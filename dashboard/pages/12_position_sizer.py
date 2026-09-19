@@ -40,7 +40,11 @@ st.markdown(
 _ps_tab1, _ps_tab2 = st.tabs(["💰 Fixed Risk Calculator", "📊 Kelly Criterion"])
 
 with _ps_tab1:
-    st.subheader("Fixed-Risk Position Sizing")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Fixed-Risk Position Sizing</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("Most common approach: risk a fixed % of capital per trade.")
 
     # ── Optional: auto-fill entry/SL/TP from a stock's LIVE price ──────────────
@@ -125,7 +129,11 @@ with _ps_tab1:
         st.warning("Entry price must be greater than stop-loss price.")
 
 with _ps_tab2:
-    st.subheader("Kelly Criterion Position Sizing")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Kelly Criterion Position Sizing</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("Mathematically optimal position size based on your historical win rate and R:R.")
     st.markdown("""
     **Kelly Formula:**  `f* = (b × p − q) / b`  where `b` = R:R ratio, `p` = win rate, `q` = 1 − p

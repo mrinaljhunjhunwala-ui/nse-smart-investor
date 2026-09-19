@@ -814,7 +814,11 @@ else:
     # OPEN POSITIONS
     # ─────────────────────────────────────────────────────────────────────
     if not open_t.empty:
-        st.subheader("📌 Open Positions")
+        st.markdown(
+            '<div class="t-h2" style="margin:14px 0 6px 0">'
+            '📌 Open Positions</div>',
+            unsafe_allow_html=True,
+        )
 
         for _, _row in open_t.iterrows():
             _tk   = _row["ticker"]
@@ -940,7 +944,11 @@ else:
     # CLOSED TRADE HISTORY
     # ─────────────────────────────────────────────────────────────────────
     if not all_closed.empty:
-        st.subheader("📋 Closed Trade History")
+        st.markdown(
+            '<div class="t-h2" style="margin:14px 0 6px 0">'
+            '📋 Closed Trade History</div>',
+            unsafe_allow_html=True,
+        )
         _cl_disp = all_closed[
             [c for c in ["id", "ticker", "price", "quantity", "sl", "tp",
                           "exit_price", "exit_reason", "pnl", "pnl_pct",

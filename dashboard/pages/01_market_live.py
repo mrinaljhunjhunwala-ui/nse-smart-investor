@@ -388,7 +388,11 @@ else:
 
 # ── Market News (multi-source, with source badges) ─────────────────────────
 st.markdown("---")
-st.subheader("📰 Latest Market News")
+st.markdown(
+    '<div class="t-h2" style="margin:14px 0 6px 0">'
+    '📰 Latest Market News</div>',
+    unsafe_allow_html=True,
+)
 with st.spinner("Aggregating news from multiple sources…"):
     mkt_news = get_market_news(max_articles=14)
 
