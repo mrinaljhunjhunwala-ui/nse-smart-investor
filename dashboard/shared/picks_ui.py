@@ -69,6 +69,22 @@ def render_pick_analysis(pick: dict, key_prefix: str):
         for e, txt in pick_pointers(pick))
     st.markdown(f'<div style="margin:-2px 0 4px 2px">{pts_html}</div>', unsafe_allow_html=True)
 
+    # DT1 + DT2 · source + freshness attribution on each pick. The scan
+    # runs from data/fetcher.py's tiered pipeline; the shared helper
+    # renders "Data as of ... via <src>" so users can see where the
+    # underlying prices came from and how stale they can be.
+    try:
+        from dashboard.shared.ui_components import data_as_of as _pk_asof
+        _ts  = str(pick.get("timestamp") or "").strip()
+        _src = str(pick.get("source") or "").strip() or "yfinance"
+        _when = _ts[11:16] + " IST" if len(_ts) >= 16 else (_ts or "unknown")
+        st.markdown(
+            _pk_asof(_when, source=_src, ttl_hint="cache 15 min"),
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
+
     # Slice 2 (docs/UI_UX_DESIGN_2026-09.md): the "Deep Dive Analysis" page
     # is folded into Analyze Stock as a tab. Analyze Stock renders live
     # price, chart, re-anchored entry/SL/TP + suggested qty, plus the
