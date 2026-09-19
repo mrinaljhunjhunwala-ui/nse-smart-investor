@@ -36,8 +36,8 @@ _FNO_TICKERS: Set[str] = frozenset({
     "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI",
     "NESTLEIND", "NTPC", "ONGC", "POWERGRID", "RELIANCE",
     "SBILIFE", "SBIN", "SHRIRAMFIN", "SUNPHARMA", "TATACONSUM",
-    "TATAMOTORS", "TATASTEEL", "TCS", "TECHM", "TITAN",
-    "TRENT", "ULTRACEMCO", "UPL", "WIPRO",
+    "TATASTEEL", "TCS", "TECHM", "TITAN",
+    "TRENT", "ULTRACEMCO", "UPL", "WIPRO",  # NB: TATAMOTORS removed 2026-09-18 (demerger — no F&O contracts)
     # Bank Nifty additions
     "BANDHANBNK", "FEDERALBNK", "IDFCFIRSTB", "PNB", "RBLBANK",
     # High-conviction mid-caps continuously F&O since 2023
@@ -55,8 +55,9 @@ _FNO_TICKERS: Set[str] = frozenset({
     "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND",
     "PNBHOUSING", "POLYCAB", "RECLTD", "SAIL", "SBICARD",
     "SIEMENS", "SRF", "SUNTV", "SYNGENE", "TATACHEM",
-    "TATACOMM", "TATAPOWER", "TIINDIA", "TORNTPHARM", "TORNTPOWER",
-    "TVSMOTOR", "UBL", "VBL", "VEDL", "VOLTAS", "ZYDUSLIFE",
+    "TATACOMM", "TATAPOWER", "TIINDIA", "TORNTPHARM",
+    "TVSMOTOR", "VBL", "VEDL", "VOLTAS", "ZYDUSLIFE",
+    # TORNTPOWER and UBL removed 2026-09-18 — dropped from NSE F&O universe
 })
 
 
@@ -92,3 +93,47 @@ def add_fno_tickers(extra: Iterable[str]) -> None:
     """
     global _FNO_TICKERS
     _FNO_TICKERS = frozenset(_FNO_TICKERS | {_normalize(t) for t in extra if t})
+
+
+def check_universe_drift(date=None):
+    """Compare _FNO_TICKERS against the most recent F&O bhavcopy in the DB.
+
+    Returns a dict with:
+      - db_date:   the bhavcopy date used for comparison (or None if empty)
+      - db_count:  symbols in that day's bhavcopy
+      - stale:     symbols in _FNO_TICKERS but NOT in the bhavcopy (candidates to remove)
+      - missing:   symbols in the bhavcopy but NOT in _FNO_TICKERS (candidates to add)
+
+    Kept import-light: uses sqlite3 + the shared trade_store path resolver.
+    Returns an empty result silently if the bhavcopy table doesn't exist yet.
+    """
+    import sqlite3
+    import os as _os
+    db = _os.environ.get("TRADE_STORE_DB") or "trades.db"
+    if not _os.path.exists(db):
+        return {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
+    con = sqlite3.connect(db)
+    try:
+        row = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='nse_fno_oi_daily'"
+        ).fetchone()
+        if not row:
+            return {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
+        if date is None:
+            r = con.execute("SELECT MAX(date) FROM nse_fno_oi_daily").fetchone()
+            date = r[0] if r else None
+        if not date:
+            return {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
+        rows = con.execute(
+            "SELECT DISTINCT symbol FROM nse_fno_oi_daily WHERE date=?", (date,)
+        ).fetchall()
+    finally:
+        con.close()
+    db_set = {_normalize(r[0]) for r in rows if r[0]}
+    static = set(_FNO_TICKERS)
+    return {
+        "db_date": date,
+        "db_count": len(db_set),
+        "stale": static - db_set,
+        "missing": db_set - static,
+    }
