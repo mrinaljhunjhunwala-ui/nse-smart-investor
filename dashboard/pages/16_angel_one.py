@@ -98,7 +98,11 @@ tab_ao1, tab_ao2, tab_ao3, tab_ao4, tab_ao5, tab_ao6 = st.tabs([
 
 # ── TAB 1: ACCOUNT OVERVIEW ───────────────────────────────────────────────
 with tab_ao1:
-    st.subheader("Account Overview")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Account Overview</div>',
+        unsafe_allow_html=True,
+    )
     col_p, col_f = st.columns(2)
 
     with col_p:
@@ -151,7 +155,11 @@ with tab_ao1:
 
 # ── TAB 2: HOLDINGS ────────────────────────────────────────────────────────
 with tab_ao2:
-    st.subheader("Demat Holdings")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Demat Holdings</div>',
+        unsafe_allow_html=True,
+    )
     with st.spinner("Fetching holdings from Angel One…"):
         _holdings = _ao_get_holdings()
 
@@ -210,7 +218,11 @@ with tab_ao2:
 
 # ── TAB 3: TODAY'S POSITIONS ───────────────────────────────────────────────
 with tab_ao3:
-    st.subheader("Today's Positions")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Today's Positions</div>',
+        unsafe_allow_html=True,
+    )
     with st.spinner("Fetching positions…"):
         _positions = _ao_get_positions()
 
@@ -251,7 +263,11 @@ with tab_ao3:
 
 # ── TAB 4: ORDERS & TRADES ─────────────────────────────────────────────────
 with tab_ao4:
-    st.subheader("Today's Orders & Trades")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Today's Orders & Trades</div>',
+        unsafe_allow_html=True,
+    )
     ord_t1, ord_t2, ord_t3 = st.tabs(["📑 Order Book", "✅ Trade Book", "🎯 GTT Orders"])
 
     with ord_t1:
@@ -348,7 +364,11 @@ with tab_ao4:
 
 # ── TAB 5: QUICK ORDER ─────────────────────────────────────────────────────
 with tab_ao5:
-    st.subheader("Quick Order")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Quick Order</div>',
+        unsafe_allow_html=True,
+    )
     st.warning(
         "This places a **real order** in your Angel One account using live funds. "
         "Double-check all details before confirming.",
@@ -413,7 +433,11 @@ with tab_ao5:
 # decayed. Pure analysis (no order side-effects). See
 # analysis/portfolio_posture.py for the classifier.
 with tab_ao6:
-    st.subheader("Posture Analysis")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Posture Analysis</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Descriptive posture per holding using the same 55-day breakout + "
         "1.5× volume + RSI 55–75 + trend + VWAP + ATR filters the momentum "
