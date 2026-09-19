@@ -739,7 +739,13 @@ else:
             ranked = ranked.sort_values(by="quality_score", ascending=False)
 
             st.markdown("---")
-            st.subheader(f"📋 Ranked Results ({len(ranked)} of {len(df)})")
+            st.markdown(
+                f'<div class="t-h2" style="margin:14px 0 6px 0">'
+                f'📋 Ranked Results <span style="color:var(--dim);'
+                f'font-weight:400;font-size:12px">{len(ranked)} of {len(df)}'
+                f'</span></div>',
+                unsafe_allow_html=True,
+            )
             st.caption(
                 "Sorted by Quality Score (0-100), highest first. Technical "
                 "momentum is NOT a factor. Click **Deep Dive** for the full "
