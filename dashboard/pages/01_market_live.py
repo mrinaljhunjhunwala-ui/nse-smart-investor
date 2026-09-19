@@ -373,6 +373,18 @@ else:
         disp["Price (₹)"] = disp["Price (₹)"].map("₹{:,.2f}".format)
         disp["Change %"]  = disp["Change %"].map("{:+.2f}%".format)
         st.dataframe(disp, hide_index=True, use_container_width=True, height=400)
+        # DT1 + DT2 · movers table attribution.
+        try:
+            from dashboard.shared.ui_components import data_as_of as _ml_asof
+            import datetime as _ml_dt
+            _ml_when = _ml_dt.datetime.now().strftime("%H:%M IST")
+            st.markdown(
+                _ml_asof(_ml_when, source="yfinance",
+                         ttl_hint="live-price cache 60 s"),
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
 
 # ── Market News (multi-source, with source badges) ─────────────────────────
 st.markdown("---")
