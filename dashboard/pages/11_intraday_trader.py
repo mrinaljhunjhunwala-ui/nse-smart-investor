@@ -69,7 +69,11 @@ tab_pcr     = _tab_objs[6]
 
 # ── TAB 1: GAP SCANNER ────────────────────────────────────────────────────
 with tab_gap:
-    st.subheader("📊 Overnight Gap Scanner — Nifty 50")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '📊 Overnight Gap Scanner — Nifty 50</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("Shows stocks with opening gap ≥ 0.5%. Run at 9:15 AM for best results.")
 
     col_gap_thresh, col_gap_btn = st.columns([2, 1])
@@ -170,7 +174,11 @@ with tab_gap:
 
 # ── TAB 2: INTRADAY CHART ─────────────────────────────────────────────────
 with tab_chart:
-    st.subheader("📈 Intraday Chart — CPR + ORB + AVWAP + Supertrend")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '📈 Intraday Chart — CPR + ORB + AVWAP + Supertrend</div>',
+        unsafe_allow_html=True,
+    )
 
     _ic_search_opts = sorted(
         f"{name}  ({sym.replace('.NS', '')})"
@@ -431,7 +439,11 @@ with tab_chart:
 
 # ── TAB 3: ORB SETUP ─────────────────────────────────────────────────────
 with tab_orb:
-    st.subheader("⚡ Opening Range Breakout (ORB) — How to Trade It")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '⚡ Opening Range Breakout (ORB) — How to Trade It</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown("""
     **ORB Strategy:** Define the first **15 minutes** of trading (9:15–9:30 AM IST) as the *Opening Range*.
     Trade the breakout when price moves outside this range with strong volume.
@@ -449,7 +461,11 @@ with tab_orb:
     """)
 
     st.markdown("---")
-    st.subheader("ORB Quick Reference — Nifty 50 Watchlist")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'ORB Quick Reference — Nifty 50 Watchlist</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("Paste tickers below, click Scan to see today's ORB levels.")
 
     _orb_tickers_input = st.text_area(
@@ -496,7 +512,11 @@ with tab_orb:
 
 # ── TAB 4: LIVE INTRADAY SIGNALS ─────────────────────────────────────────
 with tab_sigs:
-    st.subheader("🎯 Live Intraday Signals — scan a list (ORB + VWAP + Supertrend)")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '🎯 Live Intraday Signals — scan a list (ORB + VWAP + Supertrend)</div>',
+        unsafe_allow_html=True,
+    )
 
     # Data-source indicator — intraday data prefers Angel One (real-time)
     try:
@@ -603,7 +623,11 @@ with tab_sigs:
 
 # ── TAB 5: Options Strategy Selector (FIX MERGE1 — from old OI & Options page) ──
 with tab_options:
-    st.subheader("Options Strategy Selector")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Options Strategy Selector</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "IV regime (VIX-based) + directional bias → right strategy.  "
         "Max Pain calculator + PCR zone reference for expiry planning."
@@ -666,7 +690,11 @@ with tab_options:
     )
 
     st.markdown("---")
-    st.subheader("Greeks Quick Reference")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Greeks Quick Reference</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Greek": "Delta (Δ)", "Measures": "₹ change per ₹1 underlying move",   "Rule of Thumb": "ATM ≈ 0.50. OTM 2 strikes ≈ 0.30"},
         {"Greek": "Gamma (Γ)", "Measures": "Rate delta changes",                 "Rule of Thumb": "Highest near ATM + near expiry — P&L swings fast"},
@@ -675,7 +703,11 @@ with tab_options:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("NSE Lot Sizes *(verify quarterly)*")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'NSE Lot Sizes *(verify quarterly)*</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Contract": "Nifty 50",  "Lot Size": 75,  "Approx Margin": "₹1.0–1.5L"},
         {"Contract": "BankNifty", "Lot Size": 30,  "Approx Margin": "₹0.8–1.2L"},
@@ -688,7 +720,11 @@ with tab_options:
 
 # ── TAB 6: Max Pain Calculator (FIX MERGE1 — from old OI & Options page) ──
 with tab_maxpain:
-    st.subheader("Max Pain Calculator")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Max Pain Calculator</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Max Pain = strike where option buyers lose the most (writers profit most).  "
         "Price gravitates toward Max Pain near expiry — strongest in the last hour."
@@ -745,7 +781,11 @@ with tab_maxpain:
 
 # ── TAB 7: PCR Zone Reference (FIX MERGE1 — from old OI & Options page) ──
 with tab_pcr:
-    st.subheader("Put-Call Ratio (PCR) Zone Reference")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Put-Call Ratio (PCR) Zone Reference</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("PCR = Total Put OI / Total Call OI. Contrarian indicator — extremes signal reversals.")
 
     pcr_input = st.slider("Current PCR (OI-based)", 0.3, 2.5, 1.0, 0.05, key="pcr_slider")
@@ -781,7 +821,11 @@ with tab_pcr:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("OI Price Interpretation Framework")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'OI Price Interpretation Framework</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Price": "↑ Rising", "OI": "↑ Rising",  "Meaning": "Long Buildup — fresh bulls entering",  "Signal": "🟢 Strongly Bullish"},
         {"Price": "↓ Falling","OI": "↑ Rising",  "Meaning": "Short Buildup — fresh bears entering", "Signal": "🔴 Strongly Bearish"},

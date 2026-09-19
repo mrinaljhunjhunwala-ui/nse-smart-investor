@@ -41,7 +41,11 @@ tab_g1, tab_g2, tab_g3, tab_g4, tab_g5, tab_g6, tab_g7 = st.tabs([
 
 # ── TAB 1: SCORES & SIGNALS ───────────────────────────────────────────────
 with tab_g1:
-    st.subheader("Trend Quality Score (0 – 90)")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Trend Quality Score (0 – 90)</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "Every stock gets a **Trend Quality Score (maximum 90)**. "
         "This combines four factors: Technical (40 pts) + Momentum (25 pts) + "
@@ -72,7 +76,11 @@ with tab_g1:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("Score Sub-Components")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Score Sub-Components</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Component":    "Technical (40 pts)",  "What It Measures": "RSI, MACD, Bollinger Bands, SMA trends — is the stock in a healthy uptrend?"},
         {"Component":    "Momentum (25 pts)",   "What It Measures": "Recent price performance over 5/20/60 days. Is the trend persisting?"},
@@ -82,7 +90,11 @@ with tab_g1:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("Fundamentals — and the Revenue Growth signal")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Fundamentals — and the Revenue Growth signal</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "The **Analyze Stock** page also shows fundamentals (Revenue growth, EPS "
         "growth, ROE, Debt/Equity) from audited financial statements. These are "
@@ -103,7 +115,11 @@ with tab_g1:
     )
 
     st.markdown("---")
-    st.subheader("VIX Regime — Market Fear Gauge")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'VIX Regime — Market Fear Gauge</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "**India VIX** measures how much volatility the market expects over the next 30 days. "
         "High VIX = fear = caution. Low VIX = complacency = also caution (different reason)."
@@ -118,7 +134,11 @@ with tab_g1:
 
 # ── TAB 2: INDICATORS ─────────────────────────────────────────────────────
 with tab_g2:
-    st.subheader("Technical Indicators — Plain English")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Technical Indicators — Plain English</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Indicator": "RSI (14)",          "Range": "0 – 100",    "Normal": "30–70",     "Meaning": "Relative Strength Index. Below 30 = oversold (potential bounce). Above 70 = overbought (potential pullback). Not a standalone signal."},
         {"Indicator": "MACD",              "Range": "Positive/Neg","Normal": "Near zero", "Meaning": "Moving Average Convergence Divergence. MACD crossing above its signal line = bullish. Below = bearish."},
@@ -132,7 +152,11 @@ with tab_g2:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("Candlestick Patterns")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Candlestick Patterns</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Pattern": "Hammer 🔨",          "Type": "Bullish Reversal", "Reliability": "★★★★", "What It Means": "Long lower wick at a low. Sellers tried to push lower but buyers stepped in. Bullish at support."},
         {"Pattern": "Shooting Star ⭐",   "Type": "Bearish Reversal", "Reliability": "★★★★", "What It Means": "Long upper wick at a high. Buyers tried to push higher but sellers overwhelmed them. Bearish at resistance."},
@@ -146,7 +170,11 @@ with tab_g2:
 
 # ── TAB 3: STOP-LOSS & RISK ───────────────────────────────────────────────
 with tab_g3:
-    st.subheader("Stop-Loss — Protecting Your Capital")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Stop-Loss — Protecting Your Capital</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "A **stop-loss** is the price at which you exit a losing trade to prevent further losses.  \n"
         "**Never trade without a stop-loss.** It is not optional — it is your safety net."
@@ -160,7 +188,11 @@ with tab_g3:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("Risk : Reward (R:R) — The Most Important Concept")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Risk : Reward (R:R) — The Most Important Concept</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "**Risk:Reward ratio** compares how much you could lose (risk) vs how much you could gain (reward).  \n"
         "**Always aim for at least 1.5:1**. This means for every ₹100 you risk, you aim to gain ₹150."
@@ -174,7 +206,11 @@ with tab_g3:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("Position Sizing — How Much to Buy")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Position Sizing — How Much to Buy</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "**Never risk more than 1–2% of your total capital on a single trade.**  \n\n"
         "**Formula:** Shares to buy = (Capital × Risk%) ÷ (Entry Price − Stop-Loss Price)  \n\n"
@@ -184,7 +220,11 @@ with tab_g3:
     )
 
     st.markdown("---")
-    st.subheader("Common Mistakes — What to Avoid")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Common Mistakes — What to Avoid</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Mistake": "No stop-loss",              "Consequence": "One bad trade can wipe out months of gains", "Fix": "Always set a stop before entering"},
         {"Mistake": "Moving stop-loss down",     "Consequence": "Turns a small loss into a disaster",         "Fix": "Only move stops UP (in the trade's favour), never down"},
@@ -196,7 +236,11 @@ with tab_g3:
 
 # ── TAB 4: NEWS SIGNALS ───────────────────────────────────────────────────
 with tab_g4:
-    st.subheader("How News Affects Stock Prices")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'How News Affects Stock Prices</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "News is one of the **fastest-moving market catalysts**. The dashboard fetches "
         "real-time news for each stock and tags it with a sentiment: Positive, Negative, or Neutral."
@@ -208,7 +252,11 @@ with tab_g4:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("How to Use News Alongside Scores")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'How to Use News Alongside Scores</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Score Signal": "BUY 🟢", "News Sentiment": "Positive 🟢", "Combined Signal": "Strong BUY — fundamentals + technicals aligned",       "Action": "Enter with full position size"},
         {"Score Signal": "BUY 🟢", "News Sentiment": "Negative 🔴", "Combined Signal": "Conflict — technical buy but fundamental headwind",    "Action": "Wait or use half position"},
@@ -219,7 +267,11 @@ with tab_g4:
     ]), hide_index=True)
 
     st.markdown("---")
-    st.subheader("Key News Events Calendar (Indian Markets)")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Key News Events Calendar (Indian Markets)</div>',
+        unsafe_allow_html=True,
+    )
     st.dataframe(pd.DataFrame([
         {"Event": "Quarterly Results (Q1, Q2, Q3, Q4)", "When": "Apr/Jul/Oct/Jan", "Impact": "HIGH — stock can move 5–20% in one day. Avoid holding through results unless you understand the company well."},
         {"Event": "RBI Monetary Policy Committee (MPC)", "When": "Every 2 months",  "Impact": "HIGH — affects banking stocks, rate-sensitive sectors (real estate, auto, NBFCs)"},
@@ -230,7 +282,11 @@ with tab_g4:
 
 # ── TAB 5: PAPER TRADING SOP ──────────────────────────────────────────────
 with tab_g5:
-    st.subheader("📌 How to Use Paper Trading — Step by Step")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '📌 How to Use Paper Trading — Step by Step</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "**Paper trading** lets you practice decision-making with zero financial risk.  \n"
         "Think of it as a flight simulator before flying a real plane."
@@ -270,7 +326,15 @@ with tab_g5:
 ---
 """)
 
-    st.subheader("📊 The 3 Numbers That Define Your Edge")
+    st.markdown(
+
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+
+        '📊 The 3 Numbers That Define Your Edge</div>',
+
+        unsafe_allow_html=True,
+
+    )
     _edge_col1, _edge_col2, _edge_col3 = st.columns(3)
     with _edge_col1:
         st.markdown(
@@ -306,7 +370,11 @@ with tab_g5:
 
 # ── TAB 6: UNIVERSE & COVERAGE ────────────────────────────────────────────
 with tab_g6:
-    st.subheader("How Many Stocks Does the Platform Actually Scan?")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'How Many Stocks Does the Platform Actually Scan?</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "Pages like **Market Live**, **Smart Screener**, **Top Picks**, and "
         "**Tomorrow's Watchlist** scan a *universe* — a defined list of NSE "
@@ -338,7 +406,11 @@ with tab_g6:
 
 # ── TAB 7: TQS SCANNER ────────────────────────────────────────────────────
 with tab_g7:
-    st.subheader("Trend Quality Score (TQS) Scanner — A Separate Model")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Trend Quality Score (TQS) Scanner — A Separate Model</div>',
+        unsafe_allow_html=True,
+    )
     st.warning(
         "⚠️ **Don't confuse this with the Trend Quality Score (0–90) described "
         "in the Scores & Signals tab.** They share a name but are two distinct "
@@ -361,7 +433,11 @@ with tab_g7:
         {"Pillar": "P4 — Technical Confirmation","What It Measures": "OBV z-score and slope percentile (is volume confirming the move?), plus the volume ratio vs. the 20-day average."},
     ]), hide_index=True)
     st.markdown("---")
-    st.subheader("Grades & Signals")
+    st.markdown(
+        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        'Grades & Signals</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "**Note:** Grade and Signal come from two separate threshold scales in "
         "the underlying model, so they don't line up row-for-row — a score of "
