@@ -96,7 +96,9 @@ GRADE_COLOUR = {
 # UNIVERSE SCANNER (Deep Dive tab moved into Analyze Stock — see file docstring)
 # ═════════════════════════════════════════════════════════════════════════════
 if True:  # top-level guard kept minimal so the following block stays indented as before
-    st.subheader("Universe Scanner")
+    st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
+                'Universe Scanner</div>',
+                unsafe_allow_html=True)
 
     # FIX TQS1 — this page previously had no way to scan a real universe at
     # all: the only options were a hardcoded 20-ticker blue-chip sample
@@ -262,7 +264,11 @@ if True:  # top-level guard kept minimal so the following block stays indented a
             st.dataframe(styled, use_container_width=True, height=500)
 
             # ── Pillar breakdown — top 10 ─────────────────────────────────────
-            st.subheader("Pillar breakdown — top 10")
+            st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
+                        'Pillar breakdown '
+                        '<span style="color:var(--dim);font-weight:400;'
+                        'font-size:12px">top 10</span></div>',
+                        unsafe_allow_html=True)
             top10 = df_scan.head(10)
             fig = go.Figure()
             pillars = ["p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation"]

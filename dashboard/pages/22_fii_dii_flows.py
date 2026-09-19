@@ -177,7 +177,10 @@ st.markdown(
 
 # ── Chart 1 — daily bars + cumulative line ────────────────────────────────────
 st.markdown("---")
-st.subheader("📊 Daily net flows (₹ Cr)")
+st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
+            '📊 Daily net flows <span style="color:var(--dim);font-weight:400;'
+            'font-size:12px">₹ Cr</span></div>',
+            unsafe_allow_html=True)
 
 # F1 audit note: Plotly colour params don't parse CSS custom properties,
 # so these hex are raw. They ARE the current token values from design.py --
@@ -219,7 +222,11 @@ except Exception:
 
 # ── Chart 2 — cumulative ──────────────────────────────────────────────────────
 st.markdown("---")
-st.subheader("📈 Cumulative flow (running sum over window)")
+st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
+            '📈 Cumulative flow '
+            '<span style="color:var(--dim);font-weight:400;font-size:12px">'
+            'running sum over window</span></div>',
+            unsafe_allow_html=True)
 _cum = _df.copy()
 _cum["fii_cum"] = _cum["fii_net"].fillna(0).cumsum()
 _cum["dii_cum"] = _cum["dii_net"].fillna(0).cumsum()
