@@ -71,9 +71,11 @@ def apply_design():
        page files. See docs/UI_AUDIT_2026-09.md → Cluster B. ─────────────── */
     :root {
       /* Surfaces — §9.2 texture layers (docs/UI_UX_DESIGN_2026-09.md).
-         Pure #0a0a0a ground lets amber / cyan / red pop with real chromatic
-         weight; cards float above it as a 2% white overlay (borrowed from
-         NSVisualEffectView) instead of a heavier tinted rectangle. */
+         Pure #0a0a0a ground lets saffron / bull / bear pop with real
+         chromatic weight; cards float above it as a 2% white overlay
+         (borrowed from NSVisualEffectView) instead of a heavier tinted
+         rectangle. Cyan was in an earlier draft; #103 explicitly rejected
+         it for saffron as the single interactive hue. */
       --ground:    #0a0a0a;
       --surface:   #131316;                    /* legacy card bg — pages migrating to --card-lift */
       --card-lift: rgba(255,255,255,.02);      /* §9.2.2 — floated card fill on ground */
