@@ -462,6 +462,12 @@ def _live_top_bar():
             pass
 
         _idx = _index_strip_data()
+        # UX3 · live-tick pulse — remember last-seen value per index label
+        # in session state so the next rerun can compare and fire a one-shot
+        # halo on the chip when the value moves. Bounded to just the labels
+        # we render this pass so stale entries can't accumulate.
+        _prev = st.session_state.setdefault("_topbar_prev_vals", {})
+        _new_prev = {}
         for _lbl, _val, _chg in (_idx or []):
             _c = "#00d4aa" if _chg >= 0 else "#ff4757"
             _a = "▲" if _chg >= 0 else "▼"
@@ -470,14 +476,22 @@ def _live_top_bar():
             # The arrow glyph is decorative once the direction is in the label.
             _dir = "up" if _chg >= 0 else "down"
             _aria = f"{_lbl}: {_val:,.0f}, {_dir} {abs(_chg):.2f} percent"
+            # UX3 tick class — only when there's a previous value AND it
+            # differs. First render never pulses (nothing to compare against).
+            _tick_cls = ""
+            _prev_val = _prev.get(_lbl)
+            if _prev_val is not None and _val != _prev_val:
+                _tick_cls = " tick-pulse-up" if _val > _prev_val else " tick-pulse-down"
+            _new_prev[_lbl] = _val
             _chips += (
-                f'<div role="group" aria-label="{_aria}" '
+                f'<div class="topbar-chip{_tick_cls}" role="group" aria-label="{_aria}" '
                 f'style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
                 f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
                 f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
                 f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
                 f'<span style="font-size:11px;color:{_c}"><span aria-hidden="true">{_a}</span>{abs(_chg):.2f}%</span></div></div>'
             )
+        st.session_state["_topbar_prev_vals"] = _new_prev
         if _chips:
             st.markdown(
                 f'<div role="region" aria-label="Live market indices" '

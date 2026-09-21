@@ -644,6 +644,26 @@ def apply_design():
     .pulse-green { animation:pulse-green 2s infinite; }
     .pulse-red   { animation:pulse-red 2s infinite; }
 
+    /* UX3 · live-tick one-shot pulse — fires once when a tracked value
+       ticks up or down between reruns. Distinct from .pulse-green/red
+       (which loop for card-state emphasis on Paper Trades). The tick
+       variant is a single 1.4s pass so the eye catches the change
+       without a permanent aura. Callers set the class conditionally
+       based on session-state diff — the animation runs on the next
+       paint and stops on its own. */
+    @keyframes tick-pulse-up-kf {
+        0%   { box-shadow: 0 0 0 0 rgba(22,199,132,.55); }
+        60%  { box-shadow: 0 0 0 10px rgba(22,199,132,0); }
+        100% { box-shadow: 0 0 0 0 rgba(22,199,132,0); }
+    }
+    @keyframes tick-pulse-down-kf {
+        0%   { box-shadow: 0 0 0 0 rgba(255,77,77,.55); }
+        60%  { box-shadow: 0 0 0 10px rgba(255,77,77,0); }
+        100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); }
+    }
+    .tick-pulse-up   { animation: tick-pulse-up-kf   1.4s ease-out 1; }
+    .tick-pulse-down { animation: tick-pulse-down-kf 1.4s ease-out 1; }
+
     /* ── Ticker tape — the one signature element: a lit "dealing room" strip ──── */
     @keyframes ticker-scroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
     .ticker-wrap {
