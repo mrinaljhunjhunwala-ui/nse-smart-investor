@@ -1,6 +1,6 @@
 # UI / UX Backlog — NSE Smart Investor
 
-Last updated: 2026-09-06 · Owner: @mrinaljhunjhunwala-ui
+Last updated: 2026-09-21 · Owner: @mrinaljhunjhunwala-ui
 Living doc. Sourced from [`FEATURE_ROADMAP.md`](FEATURE_ROADMAP.md), [`PHASE1_UI_HONESTY.md`](PHASE1_UI_HONESTY.md), the `trading-dashboard-design` skill, and a walk of `dashboard/pages/` + `dashboard/shared/`.
 
 Skills referenced below (all installed under `~/.claude/skills/`):
@@ -11,9 +11,11 @@ Skills referenced below (all installed under `~/.claude/skills/`):
 
 ## Baseline — what we already have
 
-The app is **not** starting from scratch. [`dashboard/shared/design.py`](../dashboard/shared/design.py) already ships an "NSE Pro v2 — Dealing Room" theme: Bloomberg-heritage black + phosphor, IBM Plex Sans / Mono, semantic-only red/green, single cyan accent (`#2fd1e0`). A shared Plotly template (`nse_pro`) is registered on every page via `apply_design()`. Sidebar nav is centralised in [`dashboard/shared/nav.py`](../dashboard/shared/nav.py). Reusable card / chip / metric primitives live in [`dashboard/shared/ui_components.py`](../dashboard/shared/ui_components.py).
+The app is **not** starting from scratch. [`dashboard/shared/design.py`](../dashboard/shared/design.py) ships an "NSE Pro v2 — Dealing Room" theme built on the §9 visual-language foundation (#103): pure-black ground with a `--card-lift` overlay, three-width hairline system, saffron `--accent` (`#ff9500`) as the single interactive hue, semantic-only `--bull` / `--bear`, IBM Plex Sans / Mono, and a typography scale utility set (`.t-display / .t-h1 / .t-h2 / .t-body / .t-label / .t-value / .t-value-sm / .t-caption`). A shared Plotly template (`nse_pro`) is registered on every page via `apply_design()`. Sidebar nav is centralised in [`dashboard/shared/nav.py`](../dashboard/shared/nav.py). Reusable card / chip / metric primitives live in [`dashboard/shared/ui_components.py`](../dashboard/shared/ui_components.py).
 
 So the backlog is **consistency + coverage**, not a re-skin.
+
+> **Sept 2026 design sprint — what shipped:** #102–#139. Foundation (#103 §9), IR family (#116–#122 IR1–IR6), DT helpers (#114) wired across 9 surfaces (#124–#127), F1/F3/F4/F5/F6/F7 all closed, SH2 shipped, DT3 degraded-banner, chip vocabulary (#89–#91), Slice 2 Deep Dive fold into Analyze Stock (#115 — 22 → 20 pages), §9.4 typography sweep across every `st.subheader()` (#128–#133), sidebar command bar (#135, #137). Details below.
 
 ---
 
@@ -32,41 +34,42 @@ Effort: S ≤ ½ day · M ≤ 2 days · L > 2 days
 
 ## 1. Cross-cutting foundations
 
-| # | Item | Pri | Effort | Skill to invoke |
+| # | Item | Pri | Effort | Skill / status |
 |---|---|---|---|---|
-| F1 | **Design-token audit** — walk every `dashboard/pages/*.py` for hard-coded hex (`#26a69a`, `#ef5350`, inline `background:`) and route through `design.py` tokens. `ripgrep '#[0-9a-fA-F]{6}' dashboard/pages` returns a lot. | 🟧 P1 | M | `trading-dashboard-design` (references/css-themes.md) + `taste-skill` |
-| F2 | **Mobile / narrow-viewport pass (<900 px)**. Streamlit's default column stacking gets ugly. Add media queries in `design.py`, collapse the top-bar to a compact strip, force single-column card grids under 768 px. | 🟧 P1 | M | `apple-design` (feedback + restraint) + `trading-dashboard-design` (references/layout-patterns.md) |
-| F3 | **Dark-mode parity** — Portfolio, Command Centre, Analyze Stock are terminal-grade; Paper Trades, Intraday, Angel One still show default Streamlit widget chrome (light borders, wrong hover). | 🟧 P1 | M | `trading-dashboard-design` |
-| F4 | **Motion policy** — no consistent stance on hover / tape scroll / loading skeletons. Define one (`prefers-reduced-motion` honoured, ≤180 ms, ease-out only for enter). | 🟨 P2 | S | `animate` + `find-animation-opportunities` |
-| F5 | **Empty-state kit** — every page currently degrades differently when the network is stubbed (per `test_pages_smoke.py`). Add a shared `empty_state(icon, title, hint)` helper in `ui_components.py`. | 🟨 P2 | S | `taste-skill` |
-| F6 | **Loading skeletons** replacing `st.spinner()` on the top 4 slow pages (Analyze Stock, Command Centre, TQS Scanner, Tomorrow's Watchlist). | 🟨 P2 | M | `animate` |
-| F7 | **Focus / a11y sweep** — visible focus rings on custom buttons, `aria-label` on ticker-tape spans, colour-blind check for red/green metrics. | 🟨 P2 | M | `frontend-ui-engineering` |
+| F1 | ✅ **Design-token audit** — hex routed through `design.py` tokens across all pages. Shipped in #92 (Quality Watch + Deep Dive), #94 (Market Live / My Portfolio / Paper Trades / Intraday), #100 (FII/DII Plotly). F1 hook in `.claude/hooks/block_page_hex.py` prevents regressions. | ✅ Done | — | `trading-dashboard-design` |
+| F2 | **Mobile / narrow-viewport pass (<900 px)**. Streamlit's default column stacking gets ugly. Add media queries in `design.py`, collapse the top-bar to a compact strip, force single-column card grids under 768 px. | 🟧 P1 | M | `apple-design` + `trading-dashboard-design` |
+| F3 | ✅ **Dark-mode parity** — default Streamlit widget chrome (light borders, wrong hover) that was bleeding through on Paper Trades / Intraday / Angel One. Shipped in #139 (widget-parity block in `design.py` for `text_area`, `slider`, `radio`, `checkbox`, `toggle`, `download_button`). | ✅ Done | — | — |
+| F4 | ✅ **Motion policy** — `prefers-reduced-motion` guard + shared tokens wired on `hero_verdict`. Shipped in #97. | ✅ Done | — | — |
+| F5 | ✅ **Empty-state kit** — `empty_state(icon, title, hint)` helper in `ui_components.py` (#95) + rollout across 6 pages including Watchlist and Paper Trades (#96). | ✅ Done | — | — |
+| F6 | ✅ **Loading skeletons** on Analyze Stock's four slow spinners. Shipped in #120. Extending to Command Centre / TQS Scanner / Tomorrow's Watchlist stays opportunistic. | ✅ Done (Analyze Stock) | — | — |
+| F7 | ✅ **Focus rings** on buttons + tabs via `:focus-visible` saffron halo. Shipped in #136. `aria-label` on ticker-tape spans + colour-blind check for red/green metrics — **still open** (see F7b below). | ✅ Focus rings done | — | `frontend-ui-engineering` |
+| F7b | **A11y follow-up** — `aria-label` on ticker-tape spans, colour-blind pattern (icon or hatch) for red/green metrics so `--bull`/`--bear` aren't the only signal. | 🟨 P2 | S | `frontend-ui-engineering` |
 
 ---
 
 ## 2. Score-honesty rollout (per `PHASE1_UI_HONESTY.md`)
 
-Phase 1 shipped 2026-06-11. Two open:
+Phase 1 shipped 2026-06-11.
 
-| # | Item | Pri | Effort | Skill |
+| # | Item | Pri | Effort | Skill / status |
 |---|---|---|---|---|
-| SH1 | **Phase 2 — action-label display mapping** on every score surface (Analyze Stock, Command Centre, Smart Screener, TQS Scanner, Tomorrow's Watchlist, Watchlist). Chips must read as *posture* (Bullish/Neutral/Bearish), never as instruction. | 🟥 P0 | M | project rule per [`CLAUDE.md`](../CLAUDE.md) + [`PATTERN_REMOVAL_MIGRATION.md`](PATTERN_REMOVAL_MIGRATION.md) |
-| SH2 | **Phase 3 — evidence-gated component changes** for pattern & oversold-RSI display (only surface when the underlying signal has evidence weight). | 🟥 P0 | M | same |
+| SH1 | ✅ **Phase 2 — action-label display mapping** rolled across score surfaces via the chip-vocabulary sweep: chip_pill + chip_tag wired on Tomorrow's Watchlist (#89), Analyze Stock (#90), Command Centre + My Portfolio (#91). Chips now read as *posture* (Bullish/Neutral/Bearish), never as instruction. | ✅ Done | — | — |
+| SH2 | ✅ **Phase 3 — evidence-gated candlestick + oversold-RSI display**. Shipped in #109 (display-only — do NOT reintroduce to composite scoring, per `PATTERN_REMOVAL_MIGRATION.md`). | ✅ Done | — | — |
 
 ---
 
-## 3. Investor-reporting surfaces still missing UI
+## 3. Investor-reporting surfaces — SHIPPED
 
-Engine code exists; the pages don't render it.
+All six IR items shipped in the Sept 2026 sprint. Left here for provenance.
 
-| # | Item | Pri | Effort | Skill |
-|---|---|---|---|---|
-| IR1 | **Structured Bull / Bear / Risk card** on Analyze Stock. `analysis/thesis/` produces the payload; no dedicated block on the page. | 🟧 P1 | M | `trading-dashboard-design` (references/components.md — signal-badge, section card) |
-| IR2 | **Beta surfacing** on My Portfolio. Already computed in `analysis/hedging.py`; no UI. Show stock β, portfolio β vs Nifty, and per-holding contribution. | 🟧 P1 | S | `dataviz` (bar with reference line) |
-| IR3 | **NAV curve + Sharpe / Sortino / Calmar / Max DD tiles** on My Portfolio. Roadmap item B — highest single-lever build. | 🟧 P1 | M | `dataviz` + `trading-dashboard-design` |
-| IR4 | **Holdings correlation heatmap** on My Portfolio (component exists on Macro page; reuse on real returns). | 🟨 P2 | S | `dataviz` |
-| IR5 | **HHI + stock-level concentration widget** — upgrade the qualitative sector label. | 🟨 P2 | S | `dataviz` |
-| IR6 | **Contribution-to-return table** and **risk-contribution bar** — Phase 2 of the finance roadmap. | 🟨 P2 | M | `dataviz` |
+| # | Item | Status |
+|---|---|---|
+| IR1 | ✅ Structured Bull / Bear / Risk hero card on Analyze Stock — #116 |
+| IR2 | ✅ Beta Exposure hero + β Contrib column on My Portfolio — #119 |
+| IR3 | ✅ Portfolio Risk & Performance hero cards + NAV drawdown chart (Sharpe / Sortino / Calmar / Max DD) — #117 |
+| IR4 | ✅ Holdings correlation heatmap dressing on My Portfolio — #121 |
+| IR5 | ✅ Concentration & Diversification hero + Best/Worst polish — #118 |
+| IR6 | ✅ Contribution-to-return + risk-contribution bar — #122 |
 
 ---
 
@@ -83,12 +86,14 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - 🟨 Top-picks cards: 6 metrics per card is > "5 above the fold" rule. Demote 2 to expander per `references/layout-patterns.md`.
 
 ### [`03_my_portfolio.py`](../dashboard/pages/03_my_portfolio.py) — My Portfolio
-- 🟧 IR2 + IR3 + IR4 + IR5 + IR6 all land here — biggest single-page upgrade in the app.
+- ✅ IR2 + IR3 + IR4 + IR5 + IR6 all landed here (see §3).
 - 🟨 Holdings table: default Streamlit df; convert to the "P&L table" pattern (row background tinted by return, monospaced ₹ column, sticky first column).
 
 ### [`04_analyze_stock.py`](../dashboard/pages/04_analyze_stock.py) — Analyze Stock
-- 🟥 SH1/SH2 chips.
-- 🟧 IR1 Bull/Bear/Risk card.
+- ✅ SH1/SH2 chips (SH1: chip vocabulary #90; SH2: evidence-gated #109).
+- ✅ IR1 Bull/Bear/Risk card (#116).
+- ✅ Deep Dive absorbed as a tab (Slice 2, #115).
+- ✅ F6 loading skeletons on the four slow spinners (#120).
 - 🟧 Live drift caption (FIX A2) is a plain `st.caption`; promote to a small dismissible amber banner so it doesn't get lost in the top-bar noise.
 - 🟨 Conviction section (FIX A3) — "confirmation unavailable" branch renders as neutral grey text; distinguish with an iconography convention (⏸ = insufficient data ≠ ⚠ = adverse).
 - 🟨 Earnings-date pill (FIX A4) needs the shared "signal-badge" component so "Results 3d ago" reads consistently with every other status chip.
@@ -100,7 +105,8 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - 🟧 Result df has no colour semantics; adopt "signal table" pattern (rank chip, posture chip, sector chip, sparkline column).
 
 ### [`07_paper_trades.py`](../dashboard/pages/07_paper_trades.py) — Paper Trades
-- 🟧 F3 — default Streamlit widget chrome still visible (light input borders on dark).
+- ✅ F3 widget chrome (#139).
+- ✅ F5 empty state (#96).
 - 🟨 P&L column: needs Indian-comma + explicit sign per skill's number rules.
 
 ### [`08_backtest.py`](../dashboard/pages/08_backtest.py) — Backtest
@@ -108,70 +114,90 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - 🟨 Trade-log table: same table upgrade as Smart Screener.
 
 ### [`11_intraday_trader.py`](../dashboard/pages/11_intraday_trader.py) — Intraday Trader
-- 🟧 F3 — one of the worst offenders. Full Streamlit-default look.
+- ✅ F3 widget chrome (#139).
 - 🟧 No "market is closed" state — page just returns empty widgets outside RTH. Use F5 empty-state kit + `dashboard/shared/market_hours.py`.
 
 ### [`12_position_sizer.py`](../dashboard/pages/12_position_sizer.py) — Position Sizer
 - 🟨 Form-heavy; sliders + numeric inputs need the same restyle F1 applies elsewhere.
 
 ### [`14_my_watchlist.py`](../dashboard/pages/14_my_watchlist.py) — Watchlist
-- 🟧 15-min piggyback scan (commit 5594fd1) added scoring; the *badges* now on the table need SH1 posture-mapping.
-- 🟨 Empty state before first symbol added is a plain paragraph — use F5.
+- ✅ SH1 posture chips (chip vocabulary sweep).
+- ✅ F5 empty state (#95/#96).
+- ✅ DT1/DT2 source pill + data-as-of (#127).
 
 ### [`15_investor_guide.py`](../dashboard/pages/15_investor_guide.py) — Investor Guide
 - 🟨 Long-form document; typography scale is default (14px everywhere). Apply hierarchy from skill (H1 32/700, H2 22/700, body 15/1.6).
 
 ### [`16_angel_one.py`](../dashboard/pages/16_angel_one.py) — Angel One
-- 🟧 Broker-integration page; F3 fully applies. Also needs a clear "not connected" empty state with wire-up steps.
+- ✅ F3 widget chrome (#139).
+- 🟨 "Not connected" state currently uses `st.warning` + `st.expander` markdown. Consider migrating to the F5 `empty_state()` helper so the wire-up steps read consistently with other stub states.
+
+### [`13_stock_journal.py`](../dashboard/pages/13_stock_journal.py) — Stock Journal
+- New page shipped since last backlog write. No specific UI action items filed yet — audit against §9.4 typography + DT1/DT2 next pass.
 
 ### [`17_tomorrow_watchlist.py`](../dashboard/pages/17_tomorrow_watchlist.py) — Tomorrow's Watchlist
-- 🟧 SH1 chips.
-- 🟨 Refresh timestamp isn't visible — add a "freshness" badge (last-updated pill) from `dashboard/shared/pick_freshness.py`.
+- ✅ SH1 chips (#89).
+- ✅ DT1/DT2 source pill + data-as-of (#127).
+- ✅ Freshness badge via `dashboard/shared/pick_freshness.py`.
 
 ### [`18_tqs_scanner.py`](../dashboard/pages/18_tqs_scanner.py) — TQS Scanner
-- 🟧 SH1 chips (score is 0–90; label must be descriptive).
+- ✅ SH1 chips.
+- ✅ §9.4 typography sweep (#128).
 - 🟨 4-pillar breakdown: currently 4 numbers side-by-side. Convert to a compact radar or 4-segment bar for one-glance read.
 
 ### [`19_quality_watch.py`](../dashboard/pages/19_quality_watch.py) — Quality Watch
+- ✅ §9.4 typography sweep (#128).
 - 🟨 List view lacks visual grouping by flag colour (RAG); apply the RAG chip pattern from `references/components.md`.
 
-### [`20_deep_dive.py`](../dashboard/pages/20_deep_dive.py) — Deep Dive
-- 🟨 Long scroll — introduce anchored TOC on the right (position:sticky) for the section headers.
+### `20_deep_dive.py` — Deep Dive
+- ✅ Removed. Folded into Analyze Stock as a tab in Slice 2 (#115). Page count went 22 → 20.
 
 ### [`21_verdict_calibration.py`](../dashboard/pages/21_verdict_calibration.py) — Verdict Calibration
+- ✅ §9.4 typography sweep (#131).
 - 🟨 Internal-facing tool; low visual priority but the summary chart should adopt `nse_pro` template.
 
 ### [`22_fii_dii_flows.py`](../dashboard/pages/22_fii_dii_flows.py) — FII/DII Flows
+- ✅ Regime card (#101), F1 Plotly hex → tokens (#100), DT1/DT2 wired (#126), §9.4 typography (#128).
 - 🟨 Bars + tables layout; time-series chart needs the diverging colour rule from `dataviz` skill.
 
 ---
 
-## 5. Data-transparency micro-UX
+## 5. Data-transparency micro-UX — SHIPPED
 
-Not "pretty" work but user-trust work:
-
-| # | Item | Pri | Effort |
-|---|---|---|---|
-| DT1 | **Source pill** on every data-heavy card ("via NSE" / "via Screener" / "via Angel One" — cache TTL on hover). | 🟨 P2 | S |
-| DT2 | **"Data as of ..." freshness stamp** consistent across pages (currently varies). | 🟨 P2 | S |
-| DT3 | **Degraded-mode banner** — one shared component when a provider fails (per `data-provenance-auditor` subagent output). | 🟨 P2 | S |
+| # | Item | Status |
+|---|---|---|
+| DT1 | ✅ Source pill helper (#114) wired on verdict card + Command Centre (#124), My Portfolio + Smart Screener + Backtest (#125), Market Live + FII/DII (#126), Tomorrow's + My Watchlist (#127). |
+| DT2 | ✅ `data_as_of` freshness stamp — same batches as DT1. |
+| DT3 | ✅ Degraded-mode banner shared helper wired on Command Centre + My Portfolio (#99). |
 
 ---
 
-## 6. Suggested execution order
+## 6. What's next — Sept 2026 sprint backlog
 
-1. **F3 dark-mode parity** on Paper Trades, Intraday, Angel One — biggest visible inconsistency, ~1 day.
-2. **SH1 + SH2** score-honesty rollout — compliance and tone are project non-negotiables.
-3. **IR1 Bull/Bear/Risk card** on Analyze Stock — engine is done, purely UI wiring.
-4. **IR2 + IR3 Portfolio Beta + NAV/Sharpe stack** — highest-value single build.
-5. **F1 design-token audit** — do it while you're already in every page from #1–4.
-6. **F2 mobile pass** — after tokens are unified, media queries are cheap.
-7. **F5/F6 empty-states + skeletons** — polish sweep.
-8. IR4–IR6 + per-page P2 items — opportunistic.
+Everything above under a ✅ has shipped. Remaining active work:
+
+1. **F2 mobile pass** (`<900 px`) — the biggest untouched foundation item. Needs real device viewport testing, not just DevTools. ~1 day.
+2. **§10 UX ideas** (see below) — Ctrl+K palette upgrade, hover previews, live-tick pulse animation.
+3. **F7b a11y follow-up** — ticker-tape `aria-label`, colour-blind pattern layer on red/green metrics.
+4. **Copy polish sweep** — audit ambient caption text for staleness after the design foundation landed.
+5. Per-page P2 residuals — most flagged with 🟨 above; opportunistic.
 
 ---
 
-## 7. How to invoke the skills against a specific page
+## 7. §10 — UX ideas from the design foundation
+
+Follow-ups seeded during the Sept 2026 sprint but not yet shipped:
+
+| # | Item | Pri | Effort | Notes |
+|---|---|---|---|---|
+| UX1 | **Ctrl+K command palette modal** — upgrade the sidebar command bar (#135, #137) to a proper overlay. | 🟨 P2 | M | Needs `st.components.v1.html` + event plumbing back to Streamlit. Not native — plan the custom-component boundary before starting. |
+| UX2 | **Hover preview cards on tickers** — show a mini-chart + score chip on hover. | 🟨 P2 | M | Custom HTML component. |
+| UX3 | **Live-tick pulse animation** — `.pulse-green` / `.pulse-red` classes already in `design.py` but not wired. | 🟨 P2 | S | Needs prev-vs-current price tracking in `st.session_state`. |
+| UX4 | ~~Ticker drag-and-drop~~ | ❌ Deferred | — | Streamlit doesn't support natively; needs full custom component. |
+
+---
+
+## 8. How to invoke the skills against a specific page
 
 Every page-level item above pairs with a concrete skill call. Example runbook for Analyze Stock:
 
