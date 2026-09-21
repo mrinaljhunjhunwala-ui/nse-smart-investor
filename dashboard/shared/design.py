@@ -624,6 +624,20 @@ def apply_design():
     /* ── Alerts & info boxes ─────────────────────────────────────────────────── */
     [data-testid="stAlert"] { border-radius: 8px; }
 
+    /* ── F7b · colour-blind pattern layer ──────────────────────────────────────
+       --bull / --bear are the only signal on many delta surfaces; ~5% of men
+       have red-green colour vision deficiency. These utility classes pair
+       the colour with a shape signal (up/down triangle) via ::before so any
+       new caller can get shape+colour just by adding the class — no need to
+       remember to prefix the string with ▲/▼. The existing `.metric-delta-
+       pos/neg` classes already had callers prefixing the arrow manually;
+       these are the migration target for anything new. */
+    .delta-pos, .delta-neg { font-variant-numeric: tabular-nums; }
+    .delta-pos { color: var(--bull); }
+    .delta-neg { color: var(--bear); }
+    .delta-pos::before { content: "\25B2  "; font-size: 0.85em; }  /* ▲ */
+    .delta-neg::before { content: "\25BC  "; font-size: 0.85em; }  /* ▼ */
+
     /* ── Animations — functional only (live-signal pulse), not decorative ──────── */
     @keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(22,199,132,.35)} 50%{box-shadow:0 0 0 8px rgba(22,199,132,0)} }
     @keyframes pulse-red   { 0%,100%{box-shadow:0 0 0 0 rgba(255,77,77,.35)}  50%{box-shadow:0 0 0 8px rgba(255,77,77,0)}  }

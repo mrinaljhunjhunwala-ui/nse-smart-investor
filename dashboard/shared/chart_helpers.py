@@ -465,16 +465,23 @@ def _live_top_bar():
         for _lbl, _val, _chg in (_idx or []):
             _c = "#00d4aa" if _chg >= 0 else "#ff4757"
             _a = "▲" if _chg >= 0 else "▼"
+            # F7b · a11y — the chip is primary data (indices strip), so it
+            # should be announced with a semantic label rather than hidden.
+            # The arrow glyph is decorative once the direction is in the label.
+            _dir = "up" if _chg >= 0 else "down"
+            _aria = f"{_lbl}: {_val:,.0f}, {_dir} {abs(_chg):.2f} percent"
             _chips += (
-                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                f'<div role="group" aria-label="{_aria}" '
+                f'style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
                 f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
                 f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
                 f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
-                f'<span style="font-size:11px;color:{_c}">{_a}{abs(_chg):.2f}%</span></div></div>'
+                f'<span style="font-size:11px;color:{_c}"><span aria-hidden="true">{_a}</span>{abs(_chg):.2f}%</span></div></div>'
             )
         if _chips:
             st.markdown(
-                f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
+                f'<div role="region" aria-label="Live market indices" '
+                f'style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
                 unsafe_allow_html=True,
             )
     except Exception as _e:
@@ -494,8 +501,12 @@ def _live_top_bar():
                     f'<span style="color:#c8d0e0">₹{_px:,.2f}</span> '
                     f'<span style="color:{_tc}">{_ta}{abs(_chg):.2f}%</span></span>'
                 )
+            # F7b · a11y — the auto-scrolling ticker is decorative visual
+            # cruft for screen readers (the same tickers are available in
+            # structured form on Market Live). aria-hidden lets AT skip it
+            # entirely rather than announce a garbled 20-symbol scroll.
             st.markdown(
-                f'<div class="ticker-wrap"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
+                f'<div class="ticker-wrap" aria-hidden="true"><div class="ticker-content">{_tt_items}{_tt_items}</div></div>',
                 unsafe_allow_html=True,
             )
     except Exception as _e:
