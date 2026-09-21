@@ -487,6 +487,82 @@ def apply_design():
         outline: none !important;
     }
 
+    /* ── F3 · widget parity — Paper Trades / Intraday / Angel One ──────────────
+       Streamlit ships default (light) chrome for the widgets below. Before F3
+       those defaults bled through the dark ground on the three pages that use
+       them heavily. Same vocabulary as stTextInput/stNumberInput above:
+       card-lift fill, hairline border, saffron accent on focus/checked. */
+
+    /* text_area — Intraday ORB ticker list. */
+    .stTextArea textarea {
+        background: #0e0e10 !important;
+        border-color: rgba(255,255,255,.1) !important;
+        border-radius: 6px;
+        color: var(--ink) !important;
+        font-family: var(--font-mono);
+    }
+    .stTextArea textarea:focus-visible {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px rgba(255,149,0,.15) !important;
+        outline: none !important;
+    }
+
+    /* slider — Intraday scan range. */
+    .stSlider [data-baseweb="slider"] [role="slider"] {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px rgba(255,149,0,.12);
+    }
+    .stSlider [data-baseweb="slider"] > div > div:first-child {
+        background: var(--accent) !important;
+    }
+    .stSlider [data-baseweb="slider"] > div > div:last-child {
+        background: rgba(255,255,255,.12) !important;
+    }
+
+    /* radio + checkbox + toggle — Paper Trades / Angel One controls. */
+    .stRadio label, .stCheckbox label {
+        color: var(--ink-mid) !important;
+    }
+    .stRadio [data-baseweb="radio"] [role="radio"][aria-checked="true"] > div,
+    .stRadio [data-baseweb="radio"] [aria-checked="true"] {
+        border-color: var(--accent) !important;
+        background: var(--accent) !important;
+    }
+    .stCheckbox [data-baseweb="checkbox"] [aria-checked="true"] {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+    }
+    .stRadio [role="radio"]:focus-visible,
+    .stCheckbox [role="checkbox"]:focus-visible {
+        outline: 3px solid rgba(255,149,0,.25) !important;
+        outline-offset: 2px;
+    }
+    /* toggle — Streamlit renders this as a BaseWeb switch. */
+    [data-baseweb="switch"][aria-checked="true"] > div:first-child {
+        background: var(--accent) !important;
+    }
+    [data-baseweb="switch"] > div:first-child > div {
+        background: var(--ink) !important;
+    }
+
+    /* download_button — matches stButton chrome (Streamlit renders it as a
+       separate testid otherwise the primary/secondary rules don't reach it). */
+    [data-testid="stDownloadButton"] button {
+        border-radius: 10px; font-weight: 600; letter-spacing: .2px;
+        border: 1px solid rgba(255,255,255,.08);
+        background: rgba(255,255,255,.04);
+        color: var(--ink);
+        transition: all .15s ease;
+    }
+    [data-testid="stDownloadButton"] button:hover {
+        border-color: rgba(255,149,0,.5); color: var(--accent);
+    }
+    [data-testid="stDownloadButton"] button:focus-visible {
+        outline: 3px solid rgba(255,149,0,.25) !important;
+        outline-offset: 2px;
+    }
+
     /* ── Expanders ─────────────────────────────────────────────────────────────
        §9.2 · same card-lift + hairline pairing as .glass-panel and stMetric,
        so a collapsed "Data health" tile reads as part of the same surface
