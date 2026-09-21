@@ -643,8 +643,14 @@ def render_deep_dive(ticker: str, quality_score: int, score_breakdown: dict):
 
     short = ticker.replace(".NS", "")
     with title_col:
-        st.markdown(f"### 🔎 {short} — {bundle.get('company_name') or 'Deep Dive'}  ·  "
-                   f"**{quality_score}/100**")
+        # Copy polish — the fallback used to read "— Deep Dive" when
+        # company_name was missing. Deep Dive is no longer a standalone
+        # page (folded into Analyze Stock in Slice 2, #115), so surfacing
+        # that name to users is confusing. Drop the em-dash suffix
+        # entirely when we don't have a proper company name.
+        _co = bundle.get("company_name")
+        _title_tail = f" — {_co}" if _co else ""
+        st.markdown(f"### 🔎 {short}{_title_tail}  ·  **{quality_score}/100**")
         if bundle.get("sector"):
             st.caption(f"Sector: {bundle['sector']}")
 
