@@ -383,7 +383,7 @@ if _csv_source is not None:
             _ov_a = "▲" if _total_overall_pnl >= 0 else "▼"
             _ov_p = (_total_overall_pnl / _total_invested * 100) if _total_invested > 0 else 0
             st.markdown(
-                f'<div style="display:flex;gap:14px;margin:0 0 14px 0">'
+                f'<div class="mobile-stack" style="display:flex;gap:14px;margin:0 0 14px 0">'
                 f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
                 f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s Change</div>'
                 f'<div style="font-size:24px;font-weight:700;color:{_td_c}">{_td_a} ₹{abs(_total_today_pnl):,.0f}</div>'
