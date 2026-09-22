@@ -101,7 +101,7 @@ from dashboard.shared.trade_utils import (
     load_manual_holdings,          # FIX MH1
     save_manual_holdings,          # FIX MH1
 )
-from dashboard.shared.chart_helpers import _ROOT, render_top_bar, rdylgn_bg
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar, rdylgn_bg, tick_pulse_tracker
 from dashboard.shared.squareoff_monitor import render_squareoff_monitor
 from dashboard.shared.cache import STOCK_SEARCH_MAP  # FIX MH6
 from analysis.portfolio_concentration import analyze_concentration, concentration_grade
@@ -689,6 +689,12 @@ if _csv_source is not None:
                 "CAUTION":    "warn",
                 "EXIT":       "bad",
             }
+            # UX3 · live-tick pulse on holdings cards. Fires a one-shot halo
+            # when a holding's current_price ticks between reruns. Scoring is
+            # cached ~5 min so most reruns will see identical prices and no
+            # pulse — that's correct (nothing ticked). commit() at loop end
+            # prunes any tickers removed from the manual holdings list.
+            _pf_pulse, _pf_pulse_commit = tick_pulse_tracker("_pf_holdings_prev")
             _hc_grid = st.columns(2)
             for _hi, h in enumerate(_hold_sorted):
                 _h_ac, _h_bg = _ACT_CARD_STYLE.get(
@@ -733,8 +739,10 @@ if _csv_source is not None:
                 _h_action_chip = chip_pill(
                     f"{_h_emoji} {_display_label(h.action)}", tone=_h_chip_tone,
                 )
+                _h_tick_cls = _pf_pulse(h.ticker, h.current_price)
                 _h_html = (
-                    f'<div style="background:{_h_bg};border-left:5px solid {_h_ac};'
+                    f'<div class="holding-card{_h_tick_cls}" '
+                    f'style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
@@ -796,6 +804,7 @@ if _csv_source is not None:
                             st.caption(h.narrative or h.headline)
                     if h.error:
                         st.caption(f"⚠️ {h.error}")
+            _pf_pulse_commit()
 
             # ══════════════════════════════════════════════════════════════
             # DC1 — DEEPER ANALYSIS (optional), everything below unchanged

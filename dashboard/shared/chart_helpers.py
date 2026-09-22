@@ -427,6 +427,43 @@ def _ticker_tape_data():
     return out
 
 
+def tick_pulse_tracker(key: str):
+    """Track one-shot .tick-pulse-{up,down} halos on values that tick between reruns.
+
+    Returns a ``(pulse_cls, commit)`` pair. ``pulse_cls(symbol, value)`` returns
+    ``" tick-pulse-up"`` / ``" tick-pulse-down"`` / ``""`` — never pulses on first
+    sight of a symbol (nothing to compare) or when the value is unchanged. Callers
+    concatenate the returned class onto the outer card ``<div class="...">``. After
+    the render loop, ``commit()`` freezes only the symbols seen this pass into
+    session state, so symbols that drop out of the visible set (e.g. a stock that
+    stops being a top-5 mover) can't accumulate stale prev-values indefinitely.
+
+    Session-state schema: st.session_state[key] is a ``{symbol: last_value}`` dict.
+    Pair this with the CSS classes defined in ``design.py`` (see ``UX3 · live-tick
+    one-shot pulse``). The pattern mirrors ``_live_top_bar``'s inline impl for the
+    top-bar chips — extracted here so other surfaces can adopt it without duping
+    the diff logic.
+    """
+    _prev = st.session_state.setdefault(key, {})
+    _new: dict = {}
+
+    def _pulse_cls(symbol, value) -> str:
+        try:
+            _v = float(value)
+        except (TypeError, ValueError):
+            return ""
+        _new[symbol] = _v
+        _p = _prev.get(symbol)
+        if _p is None or _p == _v:
+            return ""
+        return " tick-pulse-up" if _v > _p else " tick-pulse-down"
+
+    def _commit() -> None:
+        st.session_state[key] = _new
+
+    return _pulse_cls, _commit
+
+
 @st.fragment(run_every="5s")     # auto-updates ONLY this bar every 5 s, no page reload
 def _live_top_bar():
     try:

@@ -22,6 +22,7 @@ from dashboard.shared.cache import (
 from dashboard.shared.chart_helpers import (
     _ROOT,
     render_top_bar,
+    tick_pulse_tracker,
 )
 
 apply_design()
@@ -222,6 +223,12 @@ else:
     top5 = snap.head(5)
     bot5 = snap.tail(5).iloc[::-1]
 
+    # UX3 · live-tick pulse — one shared tracker across gainers + losers so a
+    # stock that flips from gainer to loser (or back) still compares against
+    # its own last-seen price rather than starting fresh. commit() at the end
+    # of the render prunes symbols that dropped out of both top-5 lists.
+    _mv_pulse, _mv_pulse_commit = tick_pulse_tracker("_ml_movers_prev")
+
     def _movers_block(rows, is_gainer):
         _acc = "var(--bull)" if is_gainer else "var(--bear)"
         _html = ""
@@ -230,8 +237,10 @@ else:
             _cc2 = "var(--bull)" if _ch >= 0 else "var(--bear)"
             _ar = "▲" if _ch >= 0 else "▼"
             _nm = str(_row.get("name", ""))[:26]
+            _tick_cls = _mv_pulse(_row["ticker"], _row["price"])
             _html += (
-                f'<div style="background:var(--sunken);border-left:4px solid {_acc};'
+                f'<div class="mover-card{_tick_cls}" '
+                f'style="background:var(--sunken);border-left:4px solid {_acc};'
                 f'border-radius:9px;padding:9px 13px;margin-bottom:6px;'
                 f'display:flex;justify-content:space-between;align-items:center">'
                 f'<div><span style="color:var(--faint);font-size:11px;margin-right:6px">#{_i}</span>'
@@ -251,6 +260,7 @@ else:
     with _mc2:
         st.markdown("#### 🔴 Top Losers")
         st.markdown(_movers_block(bot5, False), unsafe_allow_html=True)
+    _mv_pulse_commit()
 
     @st.cache_data(ttl=300, show_spinner=False)
     def _explain_mover(ticker: str, chg_pct: float, vol_ratio: float) -> list:
