@@ -13,7 +13,7 @@ import trade_store as _store
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.picks_ui import render_pick_analysis
-from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.chart_helpers import render_top_bar, tick_pulse_tracker
 from dashboard.shared.ui_components import chip_pill
 from dashboard.shared.cache import (
     get_top_picks,
@@ -871,6 +871,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                                {s["ticker"] for s in _picks["sells"]}))
     _pk_live = _picks_live_prices(_pk_tickers)
 
+    # UX3 · live-tick pulse — one shared tracker for both Buy and Sell card
+    # loops so a symbol that moves between the two lists compares against its
+    # own last-seen price rather than starting over. commit() at the end of
+    # the fragment tick prunes symbols no longer in the picks output.
+    _pk_pulse, _pk_pulse_commit = tick_pulse_tracker("_cc_picks_prev")
+
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
         st.markdown(
@@ -970,8 +976,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'</div>'
             )
 
+            # UX3 · pulse the card when the live price ticks. Falls back to
+            # "" (no pulse) when live-price is unavailable — matches the honest
+            # "(last close)" fallback rather than pretending a tick happened.
+            _b_tick_cls = _pk_pulse(_b["ticker"], _b_live_price) if _b_live_price else ""
             st.markdown(
-                f'<div style="background:{_card_grad};'
+                f'<div class="pick-card{_b_tick_cls}" style="background:{_card_grad};'
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<span><span style="font-size:16px;font-weight:700;color:var(--ink)">{_bl}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
@@ -1029,8 +1039,10 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 )
             else:
                 _sv_live_html = ""
+            _sv_live_price = float(_sv_lp["price"]) if _sv_lp else None
+            _sv_tick_cls = _pk_pulse(_sv["ticker"], _sv_live_price) if _sv_live_price else ""
             st.markdown(
-                f'<div style="background:linear-gradient(135deg,var(--sunken),var(--sunken));'
+                f'<div class="pick-card{_sv_tick_cls}" style="background:linear-gradient(135deg,var(--sunken),var(--sunken));'
                 f'border-left:4px solid var(--bear);border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_svl}</span>'
@@ -1042,6 +1054,10 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 unsafe_allow_html=True,
             )
             render_pick_analysis(_sv, key_prefix=f"cc_sell_{_sv['ticker']}")
+
+    # UX3 · freeze this pass' seen set. Symbols that dropped out of _picks
+    # (e.g. a scan reshuffled the buy list) don't survive to next tick.
+    _pk_pulse_commit()
 
 
 _sec_tuple = _sector_ranks_tuple()
