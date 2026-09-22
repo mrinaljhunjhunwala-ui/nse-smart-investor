@@ -346,13 +346,35 @@ def _cmdbar_match(query: str) -> list[tuple[str, str, str]]:
     return matches[:8]
 
 
+def _cmdbar_navigate(kind: str, target: str, q_state_key: str) -> None:
+    """Shared post-click nav — used by both the sidebar bar and the ⌘K modal.
+
+    Clears the caller's query-input state key so the box comes back empty on the
+    landing page, then routes: "page" → st.switch_page, "ticker" → set
+    analyze_ticker + switch to Analyze Stock.
+    """
+    st.session_state[q_state_key] = ""
+    if kind == "page":
+        _t = _PAGE_FILE.get(target)
+        if _t:
+            st.switch_page(_t)
+    elif kind == "ticker":
+        st.session_state["analyze_ticker"] = f"{target}.NS"
+        st.session_state["_goto_page"] = _PAGE_FULL_NAME.get(
+            "Analyze Stock", "🔍 Analyze Stock")
+        _t = _PAGE_FILE.get("Analyze Stock")
+        if _t:
+            st.switch_page(_t)
+
+
 def _render_command_bar() -> None:
     """Sidebar command bar (§10 UX ideas: command-palette lite).
 
     Text input at the top of the sidebar. Two chars triggers matching;
     matched pages/tickers appear as buttons that navigate on click.
     No JS/HTML — native Streamlit only, so it works inside AppTest and
-    doesn't need st.components.v1.
+    doesn't need st.components.v1. Paired with _render_ctrlk_palette()
+    below which upgrades this to a Ctrl+K modal on real browsers.
     """
     q = st.sidebar.text_input(
         "🔎 Jump to…",
@@ -375,12 +397,7 @@ def _render_command_bar() -> None:
                     f"🔍 {_sym}", key=f"__cmdbar_recent_{_sym}",
                     use_container_width=True,
                 ):
-                    st.session_state["analyze_ticker"] = f"{_sym}.NS"
-                    st.session_state["_goto_page"] = _PAGE_FULL_NAME.get(
-                        "Analyze Stock", "🔍 Analyze Stock")
-                    _t = _PAGE_FILE.get("Analyze Stock")
-                    if _t:
-                        st.switch_page(_t)
+                    _cmdbar_navigate("ticker", _sym, "__cmdbar_q")
         return
     if not hits:
         return
@@ -390,19 +407,133 @@ def _render_command_bar() -> None:
             _display, key=f"__cmdbar_{_kind}_{_target}",
             use_container_width=True,
         ):
-            if _kind == "page":
-                _t = _PAGE_FILE.get(_target)
-                if _t:
-                    st.session_state["__cmdbar_q"] = ""
-                    st.switch_page(_t)
-            elif _kind == "ticker":
-                st.session_state["analyze_ticker"] = f"{_target}.NS"
-                st.session_state["_goto_page"] = _PAGE_FULL_NAME.get(
-                    "Analyze Stock", "🔍 Analyze Stock")
-                st.session_state["__cmdbar_q"] = ""
-                _t = _PAGE_FILE.get("Analyze Stock")
-                if _t:
-                    st.switch_page(_t)
+            _cmdbar_navigate(_kind, _target, "__cmdbar_q")
+
+
+# ── UX1 · Ctrl+K command palette ─────────────────────────────────────────────
+# Modal upgrade of the sidebar command bar. On real browsers, Ctrl/Cmd+K opens
+# an st.dialog anywhere on the page; the sidebar bar stays as the AppTest-safe
+# fallback (native widgets only, no JS). Both share _cmdbar_match + the
+# _cmdbar_navigate handler, so search behaviour is identical.
+#
+# JS→server plumbing: a small "⌘ K" trigger button in the sidebar is what the
+# keydown listener .click()s to open the dialog. Kept visible (not hidden) so
+# it doubles as a discoverable affordance for touch/mouse users and works
+# without a keyboard binding at all.
+def _command_palette_dialog_body() -> None:
+    """Body of the palette modal — invoked by the @st.dialog wrapper below.
+
+    Kept as a standalone function (not the decorated one directly) so its logic
+    can be unit-tested without opening a real Streamlit dialog runtime.
+    """
+    q = st.text_input(
+        "Search pages and tickers",
+        key="__palette_q",
+        placeholder="Start typing a page name or ticker (min 2 chars)…",
+        label_visibility="collapsed",
+    )
+    hits = _cmdbar_match(q)
+
+    if not hits and not (q or "").strip():
+        _recent = st.session_state.get("__recent_tickers", [])
+        if _recent:
+            st.caption("Recent")
+            for _sym in _recent[:5]:
+                if st.button(
+                    f"🔍 {_sym}", key=f"__palette_recent_{_sym}",
+                    use_container_width=True,
+                ):
+                    _cmdbar_navigate("ticker", _sym, "__palette_q")
+        else:
+            st.caption(
+                "Type a page name (e.g. **portfolio**, **screener**) or an "
+                "NSE ticker (e.g. **RELIANCE**). Two characters minimum."
+            )
+        return
+
+    if not hits:
+        st.caption("No matches. Try a different page name or ticker.")
+        return
+
+    for _display, _kind, _target in hits:
+        if st.button(
+            _display, key=f"__palette_{_kind}_{_target}",
+            use_container_width=True,
+        ):
+            _cmdbar_navigate(_kind, _target, "__palette_q")
+
+
+@st.dialog("Jump to…", width="large")
+def _command_palette_dialog() -> None:
+    _command_palette_dialog_body()
+
+
+def _render_ctrlk_palette() -> None:
+    """Add the ⌘K trigger to the sidebar and bind the keyboard shortcut.
+
+    The trigger is a real, visible sidebar button — clicking it (with a mouse,
+    tap, or a JS-driven .click() from the Ctrl+K listener) invokes the dialog.
+    Streamlit treats a programmatic .click() the same as a user click, which
+    is exactly the plumbing we need to bridge JS → Streamlit script rerun.
+    """
+    # Trigger button — mid-sidebar, right under the always-visible search bar.
+    # Fires on real click AND on Ctrl+K (JS clicks it programmatically).
+    if st.sidebar.button(
+        "⌘ K  ·  Command palette",
+        key="__palette_trigger",
+        use_container_width=True,
+        help="Open command palette (Ctrl+K / ⌘+K)",
+    ):
+        _command_palette_dialog()
+
+    # Keybind — one-time listener on the parent document. Guarded by a flag on
+    # window so it isn't rebound across Streamlit's iframe reloads (which fire
+    # on every rerun); rebinding would cascade to N clicks on one keystroke.
+    #
+    # Kept out of the AppTest path — st.components.v1.html renders an iframe
+    # AppTest ignores, so pages still test cleanly. The button above still
+    # works in AppTest as a plain sidebar button.
+    try:
+        import streamlit.components.v1 as _components
+        _components.html(
+            """
+            <script>
+            (function() {
+                const doc = (window.parent && window.parent.document) || document;
+                if (doc.__nse_ctrlk_bound) return;
+                doc.__nse_ctrlk_bound = true;
+                doc.addEventListener('keydown', function(e) {
+                    if (!((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K'))) return;
+                    // Don't hijack the shortcut while the user is inside an
+                    // input, textarea, or contenteditable — leaves the browser
+                    // default alone (address-bar autofill toggle, etc.) and
+                    // gives an escape hatch on shortcut collisions.
+                    const t = e.target;
+                    const inField = t && (t.tagName === 'INPUT'
+                        || t.tagName === 'TEXTAREA'
+                        || t.isContentEditable);
+                    if (inField) return;
+                    e.preventDefault();
+                    // Find the trigger button by its text — Streamlit renders
+                    // the label as the button's inner text, and the ⌘ K string
+                    // is unique on the page.
+                    const btns = doc.querySelectorAll('button');
+                    for (const b of btns) {
+                        if ((b.textContent || '').trim().startsWith('⌘ K')) {
+                            b.click();
+                            break;
+                        }
+                    }
+                });
+            })();
+            </script>
+            """,
+            height=0,
+        )
+    except Exception:
+        # AppTest / older Streamlit / anything without components — the
+        # trigger button above still works as a plain click affordance.
+        pass
 
 
 def render_sidebar(current: str = None) -> None:
@@ -410,6 +541,7 @@ def render_sidebar(current: str = None) -> None:
     st.sidebar.title("NSE Smart Investor")
     st.sidebar.markdown("*AI-powered equity companion*")
     _render_command_bar()
+    _render_ctrlk_palette()
     st.sidebar.markdown("---")
 
     # Two-level grouped navigation — Home + 5 sections
