@@ -189,18 +189,35 @@ with tab_ao2:
         _hdf.columns = ["Symbol", "Qty", "Avg Price", "LTP", "P&L (Rs)", "P&L %", "Value (Rs)"]
 
         def _color_pnl(val):
+            # F7b · font-weight bump acts as a non-colour cue reinforcing the
+            # ▲/▼ prefix added by the formatters below — so P&L direction is
+            # legible without relying on the red/green channel alone.
             if isinstance(val, (int, float)):
                 color = "#26a69a" if val >= 0 else "#ef5350"
-                return f"color: {color}; font-weight:600"
+                return f"color: {color}; font-weight:700"
             return ""
+
+        def _fmt_pnl_rs(val):
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return val
+            return f"{'▲' if v >= 0 else '▼'} Rs {abs(v):,.0f}"
+
+        def _fmt_pnl_pct(val):
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return val
+            return f"{'▲' if v >= 0 else '▼'} {abs(v):.2f}%"
 
         _hdf_styled = (
             _hdf.style
             .format({
                 "Avg Price": "Rs {:.2f}",
                 "LTP":       "Rs {:.2f}",
-                "P&L (Rs)":  "Rs {:.0f}",
-                "P&L %":     "{:.2f}%",
+                "P&L (Rs)":  _fmt_pnl_rs,
+                "P&L %":     _fmt_pnl_pct,
                 "Value (Rs)":"Rs {:.0f}",
             })
             .map(_color_pnl, subset=["P&L (Rs)", "P&L %"])
@@ -247,15 +264,25 @@ with tab_ao3:
                           f"{sum(1 for p in _net_pos if p['qty']>0)} / "
                           f"{sum(1 for p in _net_pos if p['qty']<0)}")
 
+            # F7b · same colour-blind pattern as the Holdings tab above —
+            # ▲/▼ prefix in the P&L display + font-weight:700 so direction
+            # survives red-green colour-vision deficiency.
+            def _fmt_pos_pnl(val):
+                try:
+                    v = float(val)
+                except (ValueError, TypeError):
+                    return val
+                return f"{'▲' if v >= 0 else '▼'} Rs {abs(v):,.0f}"
+
             st.dataframe(
                 _pos_df.style
                 .format({
                     "Avg Price": "Rs {:.2f}",
                     "LTP":       "Rs {:.2f}",
-                    "P&L":       "Rs {:.0f}",
+                    "P&L":       _fmt_pos_pnl,
                 })
-                .map(lambda v: "color:#26a69a;font-weight:600" if isinstance(v, (int,float)) and v >= 0
-                     else ("color:#ef5350;font-weight:600" if isinstance(v, (int,float)) else ""),
+                .map(lambda v: "color:#26a69a;font-weight:700" if isinstance(v, (int,float)) and v >= 0
+                     else ("color:#ef5350;font-weight:700" if isinstance(v, (int,float)) else ""),
                      subset=["P&L"]),
                 hide_index=True,
                 width="stretch",
