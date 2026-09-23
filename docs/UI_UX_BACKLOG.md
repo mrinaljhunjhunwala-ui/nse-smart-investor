@@ -177,7 +177,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 Everything above under a ✅ has shipped. Remaining active work:
 
 1. ✅ **F2 mobile pass** (`<768 px`) — shipped in #146. `st.columns` collapse below 768, `.mobile-stack` utility for raw flex grids, top-bar chip shrink, hero-text scale-down, tight block-container padding. Real device pass still open.
-2. **§10 UX ideas** (see below) — Ctrl+K palette + UX3 live-tick shipped; hover previews (UX2) still open.
+2. **§10 UX ideas** (see below) — Ctrl+K palette + UX3 live-tick shipped; hover previews (UX2) shipped on Command Centre, My Portfolio holdings cards, My Watchlist (chip strip above table) and Analyze Stock hero.
 3. ✅ **F7b a11y follow-up** — shipped in #141 + #147.
 4. ✅ **Copy polish sweep** — shipped in #143 (Deep-Dive fallback removed, cyan-in-comment fixed).
 5. Per-page P2 residuals — most flagged with 🟨 above; opportunistic.
@@ -191,7 +191,7 @@ Follow-ups seeded during the Sept 2026 sprint but not yet shipped:
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | UX1 | ✅ **Ctrl+K command palette modal** — shipped in #145. `st.dialog`-based modal, JS keybind via `components.v1.html`, sidebar `⌘ K` trigger button, sidebar bar retained as AppTest fallback. | ✅ Shipped | — | — |
-| UX2 | **Hover preview cards on tickers** — show a mini-chart + score chip on hover. | 🟨 P2 | M | Custom HTML component. |
+| UX2 | **Hover preview cards on tickers** — show a mini-chart + score chip on hover. | 🟨 P2 | M | ✅ Shipped — `ticker_hover_wrap` (pure-CSS). Live on 02 top picks, 03 holdings cards, 14 watchlist chip strip, 04 hero kicker. Not possible inside st.dataframe cells. |
 | UX3 | ✅ **Live-tick pulse** — `.tick-pulse-{up,down}` one-shot classes shipped in #142 (top-bar chips) and extended in #144 to Market Live movers + Command Centre top picks + My Portfolio holdings. Shared helper `tick_pulse_tracker(key)` in `chart_helpers.py`. | ✅ Shipped | — | — |
 | UX4 | ~~Ticker drag-and-drop~~ | ❌ Deferred | — | Streamlit doesn't support natively; needs full custom component. |
 

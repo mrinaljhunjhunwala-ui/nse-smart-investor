@@ -24,7 +24,7 @@ from dashboard.shared.cache import (
 from dashboard.shared.trade_utils import (
     _display_label,   # Phase 2 UI honesty — was missing on this page
 )
-from dashboard.shared.ui_components import empty_state  # F5
+from dashboard.shared.ui_components import empty_state, ticker_hover_wrap  # F5, UX2
 from dashboard.shared.disclosures import (
     render_score_methodology as _wl_score_methodology,
 )
@@ -207,6 +207,27 @@ else:
             "Notes":        row["notes"] or "",
             "Added":        str(row["added_at"])[:10],
         })
+
+    # UX2 · hover-preview strip — st.dataframe cells can't host HTML hover,
+    # so the watchlist symbols are echoed as a compact chip row above the
+    # table. Uses the score rows already loaded above (no extra fetch).
+    _wl_hover_bits = []
+    for _tkr in _tickers_tuple:
+        _sc = _score_map.get(_tkr, {})
+        _wl_hover_bits.append(ticker_hover_wrap(
+            str(_tkr).replace(".NS", ""),
+            price=_sc.get("price") or None,
+            chg_pct=_sc.get("change_1d"),
+            score=_sc.get("score"),
+        ))
+    if _wl_hover_bits:
+        st.markdown(
+            '<div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-weight:600;'
+            'font-size:13px;margin:4px 0 8px">'
+            '<span style="color:var(--faint);font-weight:400">Hover for preview:</span>'
+            + "".join(_wl_hover_bits) + '</div>',
+            unsafe_allow_html=True,
+        )
 
     _wl_display_df = pd.DataFrame(_merged)
     st.dataframe(_wl_display_df, hide_index=True, width="stretch", height=420)
