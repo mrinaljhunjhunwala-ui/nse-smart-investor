@@ -743,6 +743,79 @@ def fmt_inr(value: float, decimals: int = 0) -> str:
     return f"-{out}" if neg else out
 
 
+def ticker_hover_wrap(display_label: str,
+                      sparkline_svg: str = "",
+                      price: Optional[float] = None,
+                      chg_pct: Optional[float] = None,
+                      score: Optional[float] = None,
+                      sector: str = "",
+                      ) -> str:
+    """UX2 · Wrap a ticker label in a hover preview.
+
+    Renders as ``<span class="ticker-hover">LABEL<span class="ticker-hover-card">
+    sparkline + price + delta + optional score chip + optional sector
+    </span></span>``.
+
+    Anchors to whatever text the caller passes as ``display_label`` — usually
+    the ticker's clean symbol ("RELIANCE") but any HTML-safe string works.
+    The preview is a pure-CSS ``:hover`` tooltip (see design.py UX2 block);
+    all data is baked into the span at render time — no JS, no lazy fetch,
+    no custom Streamlit component.
+
+    Every field is optional; missing fields collapse cleanly. If nothing
+    beyond the label is worth showing, this still returns a functional
+    hover wrapper — it just shows the sector line (if any) and nothing else.
+
+    Callers that do NOT want the hover behaviour at a given site should stop
+    calling this helper — there is no ``enabled=False`` flag. Keeps the HTML
+    surface predictable and the caller in control of the data dependencies
+    (a ``sparkline_svg`` needs a ``_sparkline_svg(_sparkline_closes(t))``
+    call — spec that at the caller site, not here).
+    """
+    rows_html = ""
+    if price is not None or chg_pct is not None:
+        _p_txt = f"₹{price:,.2f}" if price is not None else "—"
+        if chg_pct is not None:
+            _d_col = "var(--bull, #16c784)" if chg_pct >= 0 else "var(--bear, #ff4d4d)"
+            _d_arr = "▲" if chg_pct >= 0 else "▼"
+            _d_html = (f'<span class="thc-delta" style="color:{_d_col}">'
+                       f'{_d_arr} {abs(chg_pct):.2f}%</span>')
+        else:
+            _d_html = ""
+        rows_html += (
+            f'<div class="thc-row">'
+            f'<span class="thc-price">{_p_txt}</span>{_d_html}'
+            f'</div>'
+        )
+    if score is not None:
+        if score >= 65:
+            _s_col, _s_bg = "var(--bull, #16c784)", "var(--tint-bull, rgba(22,199,132,.16))"
+        elif score >= 45:
+            _s_col, _s_bg = "var(--amber, #f2a93b)", "var(--tint-amber, rgba(242,169,59,.16))"
+        else:
+            _s_col, _s_bg = "var(--bear, #ff4d4d)", "var(--tint-bear, rgba(255,77,77,.16))"
+        rows_html += (
+            f'<div class="thc-row">'
+            f'<span class="thc-sym">Score</span>'
+            f'<span class="thc-score" style="background:{_s_bg};color:{_s_col}">'
+            f'{score:.0f}/100</span>'
+            f'</div>'
+        )
+    if sparkline_svg:
+        rows_html += sparkline_svg
+    if sector:
+        rows_html += f'<div class="thc-sector">{sector}</div>'
+    header = f'<div class="thc-row"><span class="thc-sym">{display_label}</span></div>'
+    return (
+        f'<span class="ticker-hover" tabindex="0">'
+        f'{display_label}'
+        f'<span class="ticker-hover-card" role="tooltip">'
+        f'{header}{rows_html}'
+        f'</span>'
+        f'</span>'
+    )
+
+
 def chip_delta(value: float, unit: str = "%") -> str:
     """Mono numeric-change chip. Auto-signed. Bull >0, bear <0, dim ==0."""
     if value > 0:
