@@ -25,6 +25,8 @@ import plotly.express as px
 import plotly.io as pio
 from plotly.subplots import make_subplots
 import streamlit as st
+
+from dashboard.shared.tokens import COLORS as _C, css_vars as _css_vars
 # FIX WARN1 — narrowed from a blanket `filterwarnings("ignore")` so numpy's
 # RuntimeWarnings (invalid value / divide by zero / all-NaN slice) stay visible.
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -42,18 +44,18 @@ def apply_design():
             layout=dict(
                 paper_bgcolor="#09090b",
                 plot_bgcolor="#0c0c0f",
-                font=dict(family="IBM Plex Sans, -apple-system, sans-serif", color="#8b8d93", size=12),
-                title=dict(font=dict(size=15, color="#edeef0")),
+                font=dict(family="IBM Plex Sans, -apple-system, sans-serif", color=_C["dim"], size=12),
+                title=dict(font=dict(size=15, color=_C["ink"])),
                 xaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.07)",
-                           tickfont=dict(color="#55575e", size=11), zeroline=False),
+                           tickfont=dict(color=_C["faint"], size=11), zeroline=False),
                 yaxis=dict(gridcolor="rgba(255,255,255,0.05)", linecolor="rgba(255,255,255,0.07)",
-                           tickfont=dict(color="#55575e", size=11), zeroline=False),
+                           tickfont=dict(color=_C["faint"], size=11), zeroline=False),
                 legend=dict(bgcolor="rgba(14,14,16,0.9)", bordercolor="rgba(255,255,255,0.07)",
                             borderwidth=1, font=dict(color="#8b8d93", size=11)),
                 hoverlabel=dict(bgcolor="#131316", bordercolor="rgba(255,255,255,0.14)",
                                 font=dict(color="#edeef0", family="IBM Plex Mono", size=12)),
-                colorway=["#ff9500", "#16c784", "#f2a93b", "#ff4d4d", "#8b8d93", "#5a8fd6",
-                          "#c77dff", "#edeef0"],
+                colorway=[_C["accent"], _C["bull"], _C["amber"], _C["bear"], _C["dim"], _C["azure"],
+                          _C["violet"], _C["ink"]],
             )
         )
         pio.templates.default = "nse_pro"
@@ -70,17 +72,14 @@ def apply_design():
        #00d4aa, #3ddc84 …) drifting page-to-page. New rule: no raw hex in
        page files. See docs/UI_AUDIT_2026-09.md → Cluster B. ─────────────── */
     :root {
+/*__COLOR_TOKENS__*/
       /* Surfaces — §9.2 texture layers (docs/UI_UX_DESIGN_2026-09.md).
          Pure #0a0a0a ground lets saffron / bull / bear pop with real
          chromatic weight; cards float above it as a 2% white overlay
          (borrowed from NSVisualEffectView) instead of a heavier tinted
          rectangle. Cyan was in an earlier draft; #103 explicitly rejected
          it for saffron as the single interactive hue. */
-      --ground:    #0a0a0a;
-      --surface:   #131316;                    /* legacy card bg — pages migrating to --card-lift */
       --card-lift: rgba(255,255,255,.02);      /* §9.2.2 — floated card fill on ground */
-      --sunken:    #0e0e10;
-      --rail:      #0a0a0c;
 
       /* Hairline system — §9.2.3 three widths.
          Semantic mapping: -soft for section dividers (barely there),
@@ -92,23 +91,12 @@ def apply_design():
       --hairline-strong: rgba(255,255,255,.16);
 
       /* Ink — four densities, §9.3 colour table. */
-      --ink:       #edeef0;
-      --ink-mid:   #c8cad0;
-      --dim:       #8b8d93;
-      --faint:     #55575e;
 
       /* Signal — reserved strictly for buy/sell/warn semantics */
-      --bull:      #16c784;
-      --bear:      #ff4d4d;
-      --amber:     #f2a93b;
 
       /* Accent — one hue for all interactive/brand chrome */
-      --accent:    #ff9500;
-      --accent-hi: #ffb340;
 
       /* Purple/blue kept for categorical fills only (charts, sector tags) */
-      --violet:    #c77dff;
-      --azure:     #5a8fd6;
 
       /* Semantic aliases (map onto signal, so pages read intent, not hue) */
       --pos:       var(--bull);
@@ -874,7 +862,7 @@ def apply_design():
         .score-big        { font-size: 32px !important; }
         .ticker-content   { font-size: 11px !important; }
     }
-    </style>""",
+    </style>""".replace("/*__COLOR_TOKENS__*/", f"      /* colour tokens: dashboard/shared/tokens.py */\n{_css_vars()}"),
         unsafe_allow_html=True,
     )
 

@@ -223,6 +223,19 @@ if scan_btn:
         # P2 · signal-table pattern — one-glance ranked summary above the
         # per-setup cards: rank chip, posture (shape + honest label), sector,
         # score bar, R:R and revenue growth. Same `signals` list, same order.
+        # R:R computed once per signal, reused by the summary table and cards.
+        # Falls back to None ("—") whenever the risk leg isn't a sane long —
+        # never clamps a zero/negative risk up to 0.01 (inflated R:R bug).
+        for _sg in (signals or [])[:30]:
+            _rr = _sg.get("rr_ratio")
+            if _rr is None:
+                _px = _sg.get("price", 0) or 0
+                _sl = _sg.get("sl", _sg.get("stop_loss", 0)) or 0
+                _tp = _sg.get("tp", _sg.get("target", None))
+                _risk = _px - _sl
+                _rr = round((_tp - _px) / _risk, 1) if (_tp and _risk > 0.01) else None
+            _sg["_rr"] = _rr
+
         if signals:
             from dashboard.shared.table_styles import (
                 posture_label as _ts_posture, pinned_text_col as _ts_pin,
@@ -230,11 +243,6 @@ if scan_btn:
             _sig_rows = []
             for _rank, _sg in enumerate(signals[:30], start=1):
                 _sg_px = _sg.get("price", 0) or 0
-                _sg_sl = _sg.get("sl", _sg.get("stop_loss", 0)) or 0
-                _sg_tp = _sg.get("tp", _sg.get("target", None))
-                _sg_rr = _sg.get("rr_ratio")
-                if _sg_rr is None and _sg_tp and (_sg_px - _sg_sl) > 0.01:
-                    _sg_rr = (_sg_tp - _sg_px) / (_sg_px - _sg_sl)
                 _sig_rows.append({
                     "#": f"#{_rank}",
                     "Ticker": _sg["ticker"].replace(".NS", ""),
@@ -243,7 +251,7 @@ if scan_btn:
                     "Sector": _sg.get("sector", "") or "—",
                     "Score": _sg.get("composite_score") if enrich_scores else None,
                     "Price": _sg_px,
-                    "R:R": _sg_rr,
+                    "R:R": _sg["_rr"],
                     "Rev Growth /yr": _sg.get("rev_growth"),
                 })
             _sig_df = pd.DataFrame(_sig_rows)
@@ -275,15 +283,7 @@ if scan_btn:
             _s_price = sig.get("price", 0)
             _s_sl    = sig.get("sl", sig.get("stop_loss", 0)) or 0
             _s_tp    = sig.get("tp", sig.get("target", None))
-            # BUGFIX: previously max(_s_price - _s_sl, 0.01) clamped a negative
-            # or zero risk denominator (stop-loss at/above price) up to 0.01,
-            # which inflated R:R into misleadingly huge numbers instead of
-            # signalling "this setup's risk is invalid". Now falls back to
-            # None ("—" downstream) whenever the risk leg isn't a sane long.
-            _s_rr = sig.get("rr_ratio")
-            if _s_rr is None and _s_tp:
-                _risk = _s_price - _s_sl
-                _s_rr = round((_s_tp - _s_price) / _risk, 1) if _risk > 0.01 else None
+            _s_rr = sig.get("_rr")
             _s_sector    = sig.get("sector", "")
             _s_stop_type = sig.get("stop_type", "atr")
             _s_score_str = (f"Score {sig.get('composite_score','?')}/100 "

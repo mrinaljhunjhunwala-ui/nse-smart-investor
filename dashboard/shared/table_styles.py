@@ -11,7 +11,7 @@ Screener (06), Backtest (08):
 
 Hex values live here (not in pages) because pandas Styler CSS is rendered
 inside the glide-data-grid canvas, where `var(--bull)` doesn't resolve.
-They mirror the design.py tokens: bull #16c784 · bear #ff4d4d.
+Values come from dashboard/shared/tokens.py (same source as design.py).
 """
 from __future__ import annotations
 
@@ -21,10 +21,12 @@ from typing import Iterable, Optional
 import pandas as pd
 import streamlit as st
 
-_BULL_RGB = (22, 199, 132)   # --bull
-_BEAR_RGB = (255, 77, 77)    # --bear
-_BULL = "#16c784"
-_BEAR = "#ff4d4d"
+from dashboard.shared.tokens import COLORS, hex_to_rgb
+
+_BULL = COLORS["bull"]
+_BEAR = COLORS["bear"]
+_BULL_RGB = hex_to_rgb(_BULL)
+_BEAR_RGB = hex_to_rgb(_BEAR)
 
 
 def _num(v) -> Optional[float]:
@@ -102,14 +104,8 @@ def pnl_styler(df: pd.DataFrame,
 
 def pinned_text_col(label: Optional[str] = None, **kw):
     """TextColumn pinned to the left edge (sticky first column).
-
-    `pinned` landed in Streamlit 1.45; requirements allow >=1.35, so fall
-    back to an unpinned column rather than crash on older installs.
-    """
-    try:
-        return st.column_config.TextColumn(label, pinned=True, **kw)
-    except TypeError:
-        return st.column_config.TextColumn(label, **kw)
+    `pinned` needs Streamlit >=1.45 — guaranteed by requirements.txt."""
+    return st.column_config.TextColumn(label, pinned=True, **kw)
 
 
 def posture_label(action: str) -> str:

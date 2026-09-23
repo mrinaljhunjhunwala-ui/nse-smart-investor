@@ -373,7 +373,7 @@ def _render_command_bar() -> None:
     Text input at the top of the sidebar. Two chars triggers matching;
     matched pages/tickers appear as buttons that navigate on click.
     No JS/HTML — native Streamlit only, so it works inside AppTest and
-    doesn't need st.components.v1. Paired with _render_ctrlk_palette()
+    doesn't need injected JS. Paired with _render_ctrlk_palette()
     below which upgrades this to a Ctrl+K modal on real browsers.
     """
     q = st.sidebar.text_input(
@@ -490,12 +490,13 @@ def _render_ctrlk_palette() -> None:
     # window so it isn't rebound across Streamlit's iframe reloads (which fire
     # on every rerun); rebinding would cascade to N clicks on one keystroke.
     #
-    # Kept out of the AppTest path — st.components.v1.html renders an iframe
-    # AppTest ignores, so pages still test cleanly. The button above still
-    # works in AppTest as a plain sidebar button.
+    # st.html(unsafe_allow_javascript=True) (Streamlit >=1.51) runs the script
+    # directly in the app document (no iframe), replacing the deprecated
+    # st.components.v1.html. window.parent === window there, so `doc` resolves
+    # to the app document either way. The button above still works in
+    # AppTest as a plain sidebar button.
     try:
-        import streamlit.components.v1 as _components
-        _components.html(
+        st.html(
             """
             <script>
             (function() {
@@ -528,10 +529,10 @@ def _render_ctrlk_palette() -> None:
             })();
             </script>
             """,
-            height=0,
+            unsafe_allow_javascript=True,
         )
     except Exception:
-        # AppTest / older Streamlit / anything without components — the
+        # AppTest / anything that can't render JS — the
         # trigger button above still works as a plain click affordance.
         pass
 
@@ -931,9 +932,8 @@ def render_sidebar(current: str = None) -> None:
         _alert_key = "|".join(sorted(_sltp))
         if _sltp and st.session_state.get("_last_alert_key") != _alert_key:
             st.session_state["_last_alert_key"] = _alert_key
-            import streamlit.components.v1 as _components
             _amsg = _sltp[0].replace('"', "'")[:90]
-            _components.html(
+            st.html(
                 f"""<script>
                 try {{
                     var ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -955,7 +955,7 @@ def render_sidebar(current: str = None) -> None:
                     }}
                 }} catch(e) {{}}
                 </script>""",
-                height=0,
+                unsafe_allow_javascript=True,
             )
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "render_sidebar", _e)

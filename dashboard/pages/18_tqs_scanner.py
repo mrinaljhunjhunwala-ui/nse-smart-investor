@@ -78,17 +78,19 @@ DEFAULT_TICKERS = [
     "SUNPHARMA.NS","HCLTECH.NS",     "LT.NS",         "ULTRACEMCO.NS",
 ]
 
+from dashboard.shared.tokens import COLORS as TOKENS  # noqa: E402
+
 SIGNAL_COLOUR = {
-    "STRONG TREND": "#16a34a",
-    "TRENDING":     "#65a30d",
-    "NEUTRAL":      "#ca8a04",
-    "WEAK":         "#ea580c",
-    "AVOID":        "#dc2626",
+    "STRONG TREND": TOKENS["bull"],
+    "TRENDING":     TOKENS["bull"],
+    "NEUTRAL":      TOKENS["amber"],
+    "WEAK":         TOKENS["accent"],
+    "AVOID":        TOKENS["bear"],
 }
 
 GRADE_COLOUR = {
-    "A+": "#16a34a", "A": "#65a30d", "B": "#ca8a04",
-    "C":  "#ea580c", "D": "#dc2626", "F": "#991b1b",
+    "A+": TOKENS["bull"], "A": TOKENS["bull"], "B": TOKENS["amber"],
+    "C":  TOKENS["accent"], "D": TOKENS["bear"], "F": TOKENS["bear"],
 }
 
 
@@ -215,11 +217,11 @@ if True:  # top-level guard kept minimal so the following block stays indented a
 
             # Color styling helper functions
             def _colour_signal(val):
-                c = SIGNAL_COLOUR.get(str(val).upper(), "#6b7280")
+                c = SIGNAL_COLOUR.get(str(val).upper(), TOKENS["dim"])
                 return f"color: {c}; font-weight: 600"
 
             def _colour_grade(val):
-                c = GRADE_COLOUR.get(str(val).upper(), "#6b7280")
+                c = GRADE_COLOUR.get(str(val).upper(), TOKENS["dim"])
                 return f"color: {c}; font-weight: 700"
 
             def _bar_tqs(val):
