@@ -129,16 +129,38 @@ st.markdown(
 )
 st.caption(
     "For each verdict, what percent of calls closed positive, and what did "
-    "the average call earn vs NIFTY? Wilson lower-bound is the honest floor "
-    "on win rate given the sample size — a 100% win rate on 3 trades is a "
-    "Wilson lower of ~44%, not 100%."
+    "the average call earn vs NIFTY? **Win % (raw)** = forward return > 0; "
+    "**Win vs NIFTY %** = beat the index (α > 0), counted only over rows "
+    "where the NIFTY return is available (**N α**) — α is shown as blank, "
+    "not the raw return, when NIFTY is missing. Wilson lower-bound is the "
+    "floor on win rate given the sample size — a 100% win rate on 3 trades "
+    "is a Wilson lower of ~44%, not 100%. Horizons are **trading sessions** "
+    "after the verdict date."
 )
+st.caption(
+    "⚠️ **Overlap caveat:** a ticker viewed on several consecutive days "
+    "contributes several rows whose forward windows overlap, so the samples "
+    "are not independent. The Wilson bounds treat them as independent and "
+    "are therefore **optimistic** (too narrow), especially at 20/60/250 "
+    "sessions."
+)
+
+# Shared column labels: raw win vs win-vs-NIFTY are labelled distinctly.
+_WIN_COLS = {
+    "mean_alpha": "α vs NIFTY %",
+    "n_alpha": "N α",
+    "win_rate": "Win % (raw)",
+    "wilson_lower_win": "Wilson lower % (raw)",
+    "win_vs_nifty": "Win vs NIFTY %",
+    "wilson_lower_vs_nifty": "Wilson lower vs NIFTY %",
+    "wins": "Wins (raw)",
+}
 
 _horizon_choice = st.radio(
     "Horizon",
     options=[1, 5, 20, 60, 250],
-    format_func=lambda h: {1: "1d", 5: "5d", 20: "20d (1 mo)",
-                            60: "60d (~1 qtr)", 250: "250d (~1 yr)"}[h],
+    format_func=lambda h: {1: "1 session", 5: "5 sessions", 20: "20 sessions (~1 mo)",
+                            60: "60 sessions (~1 qtr)", 250: "250 sessions (~1 yr)"}[h],
     index=2,
     horizontal=True,
     key="_cal_horizon",
@@ -147,30 +169,31 @@ _horizon_choice = st.radio(
 _cal = _vl.calibration_by(group_col="verdict", horizon_days=_horizon_choice)
 if _cal.empty:
     st.info(
-        f"No verdicts have played out for the **{_horizon_choice}-day** horizon "
-        f"yet. Try a shorter horizon (1d/5d), or wait a few sessions."
+        f"No verdicts have played out for the **{_horizon_choice}-session** horizon "
+        f"yet. Try a shorter horizon (1/5 sessions), or wait a few sessions."
     )
 else:
     _cal = _cal.rename(columns={
         "n": "N",
-        "mean_ret": f"Mean {_horizon_choice}d %",
-        "median_ret": f"Median {_horizon_choice}d %",
-        "mean_alpha": f"α vs NIFTY %",
-        "win_rate": "Win %",
-        "wilson_lower_win": "Wilson lower %",
-        "wins": "Wins",
+        "mean_ret": f"Mean {_horizon_choice}-session %",
+        "median_ret": f"Median {_horizon_choice}-session %",
+        **_WIN_COLS,
     })
     st.dataframe(_cal, hide_index=True, width="stretch")
 
     # A brief interpretation line so the user doesn't have to squint.
     _buy_row = _cal[_cal["verdict"].isin(["BUY", "STRONG BUY"])]
     if not _buy_row.empty:
-        _bw = _buy_row["Wilson lower %"].max()
-        _ba = _buy_row[f"α vs NIFTY %"].max()
+        _bw = _buy_row["Wilson lower % (raw)"].max()
+        _bwn = _buy_row["Wilson lower vs NIFTY %"].max()
+        _ba = _buy_row["α vs NIFTY %"].max()
+        _ba_txt = "unavailable" if pd.isna(_ba) else f"{_ba:+.2f}%"
+        _bwn_txt = "unavailable" if pd.isna(_bwn) else f"{_bwn:.1f}%"
         st.caption(
-            f"👀 Wilson-lower on BUY/STRONG BUY at {_horizon_choice}d: **{_bw:.1f}% "
-            f"win rate**, best mean α **{_ba:+.2f}%**. Anything below "
-            "50% Wilson lower means the signal isn't yet reliably better than a coin flip."
+            f"👀 BUY/STRONG BUY at {_horizon_choice} sessions: Wilson-lower raw win "
+            f"rate **{_bw:.1f}%**, Wilson-lower win vs NIFTY **{_bwn_txt}**, best "
+            f"mean α **{_ba_txt}**. Below 50% Wilson lower means not yet reliably "
+            "better than a coin flip (and the overlap caveat above makes these bounds optimistic)."
         )
 
 # ── Section B — Conviction calibration ────────────────────────────────────────
@@ -250,12 +273,9 @@ if _sub_tbl.empty:
 else:
     _sub_tbl = _sub_tbl.rename(columns={
         "n": "N",
-        "mean_ret":         f"Mean {_horizon_choice}d %",
-        "median_ret":       f"Median {_horizon_choice}d %",
-        "mean_alpha":       f"α vs NIFTY %",
-        "win_rate":         "Win %",
-        "wilson_lower_win": "Wilson lower %",
-        "wins":             "Wins",
+        "mean_ret":         f"Mean {_horizon_choice}-session %",
+        "median_ret":       f"Median {_horizon_choice}-session %",
+        **_WIN_COLS,
     })
     st.dataframe(_sub_tbl, hide_index=True, width="stretch")
 
@@ -286,12 +306,9 @@ if _tag_tbl.empty:
 else:
     _tag_tbl = _tag_tbl.rename(columns={
         "n": "N", "tag": "Signal tag",
-        "mean_ret":         f"Mean {_horizon_choice}d %",
-        "median_ret":       f"Median {_horizon_choice}d %",
-        "mean_alpha":       "α vs NIFTY %",
-        "win_rate":         "Win %",
-        "wilson_lower_win": "Wilson lower %",
-        "wins":             "Wins",
+        "mean_ret":         f"Mean {_horizon_choice}-session %",
+        "median_ret":       f"Median {_horizon_choice}-session %",
+        **_WIN_COLS,
     })
     st.dataframe(_tag_tbl, hide_index=True, width="stretch")
 
@@ -310,7 +327,7 @@ _sh_horizon = st.select_slider(
     "Hold horizon",
     options=[1, 5, 20, 60, 250],
     value=20,
-    format_func=lambda h: f"{h}d",
+    format_func=lambda h: f"{h} sessions",
     key="_sh_horizon",
 )
 _sh = _vl.shadow_pnl(horizon_days=_sh_horizon)
@@ -323,12 +340,15 @@ if _sh.empty:
 else:
     _c1, _c2, _c3, _c4 = st.columns(4)
     _c1.metric("Shadow trades", f"{len(_sh):,}")
-    _c2.metric(f"Mean {_sh_horizon}d return",
+    _c2.metric(f"Mean {_sh_horizon}-session return",
                f"{_sh[f'return_{_sh_horizon}d_pct'].mean():+.2f}%")
     if "alpha" in _sh.columns:
-        _c3.metric(f"Mean α vs NIFTY", f"{_sh['alpha'].mean():+.2f}%")
+        _alpha_ok = _sh["alpha"].dropna()
+        _c3.metric("Mean α vs NIFTY",
+                   f"{_alpha_ok.mean():+.2f}%" if len(_alpha_ok) else "unavailable",
+                   f"n={len(_alpha_ok)}" if len(_alpha_ok) else None)
     _wins = int((_sh[f'return_{_sh_horizon}d_pct'] > 0).sum())
-    _c4.metric("Win rate", f"{(_wins/len(_sh)*100):.1f}%",
+    _c4.metric("Win rate (raw, return > 0)", f"{(_wins/len(_sh)*100):.1f}%",
                f"{_wins}/{len(_sh)}")
 
     # Colour-code the return column
@@ -370,6 +390,7 @@ st.caption(
     "**Sampling caveat:** this ledger reflects tickers you *actually looked at* "
     "or that surfaced in Top Picks / Watchlist — not a uniform sample of the "
     "NSE universe. Use it to judge whether the model was right on the calls "
-    "it made to you, not as a market-wide backtest. For that, use the "
-    "**🧪 Backtest** page."
+    "it made to you, not as a market-wide backtest. Note the **🧪 Backtest** "
+    "page is not a substitute either: it replays the separate rule-based "
+    "RSI-MACD / Momentum strategies, not the composite score or these verdicts."
 )

@@ -52,6 +52,7 @@ import datetime as _dt
 import logging
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 import trade_store as _store
@@ -59,14 +60,22 @@ from utils.sql import read_sql_df
 
 _log = logging.getLogger("analysis.verdict_ledger")
 
-# ── Horizons we track (calendar days). Chosen to match the user's real
-# horizons — short-term validation (1d, 5d) plus long-term conviction
-# validation (60d = quarter, 250d = ~1 trading year). The long horizons are
-# the ones that actually matter for a buy-and-hold-oriented app; the short
-# ones tell us if the technical setup was right about the immediate next
-# few sessions.
+# ── Horizons we track, in TRADING days (sessions). Short-term validation
+# (1, 5 sessions), ~1 month (20), ~1 quarter (60), ~1 year (250).
+#
+# FIX LEDGER-TD (2026-09-24) — these used to be added as CALENDAR days
+# (logged + timedelta(days=h)) while the UI labelled them like trading
+# periods, so "20d (1 mo)" was really ~14 sessions and "250d (~1 yr)" was
+# ~8 months. Targets are now logged_date + h business days (weekday offset;
+# NSE holidays are absorbed by _find_bar's "first bar on-or-after").
+# Rows back-filled before this fix keep their calendar-day values.
 HORIZONS_DAYS = (1, 5, 20, 60, 250)
 NIFTY_BENCH = "^NSEI"
+
+
+def horizon_target_date(logged: _dt.date, h: int) -> _dt.date:
+    """logged_date + h trading (business) days."""
+    return (pd.Timestamp(logged) + pd.offsets.BDay(int(h))).date()
 
 _schema_ready_for: Optional[str] = None
 
@@ -337,7 +346,8 @@ def _fetch_history(ticker: str) -> Optional[pd.DataFrame]:
     """One-year history through today. Errors → None (silent skip)."""
     try:
         from data.fetcher import fetch_single
-        df = fetch_single(ticker, period="1y", interval="1d")
+        # 2y: a 250-trading-day horizon needs more than a calendar year back.
+        df = fetch_single(ticker, period="2y", interval="1d")
         if df is None or df.empty:
             return None
         # Normalize index to DatetimeIndex ordered ascending
@@ -418,7 +428,7 @@ def backfill_returns(*, max_rows: int = 200) -> Dict[str, int]:
 
                 updates: Dict[str, Optional[float]] = {}
                 for h in HORIZONS_DAYS:
-                    target = logged + _dt.timedelta(days=h)
+                    target = horizon_target_date(logged, h)
                     if target > today:
                         continue     # horizon not yet reached
                     # Skip horizons already filled (row-existence per horizon)
@@ -506,25 +516,56 @@ def calibration_by(*, group_col: str, horizon_days: int,
     df = df[df[ret_col].notna()].copy()
     if df.empty:
         return pd.DataFrame()
-    df["alpha"] = df[ret_col] - df.get(nifty_col, 0).fillna(0)
-    df["is_win"] = (df[ret_col] > 0).astype(int)
+    n_ret = df[nifty_col] if nifty_col in df.columns else pd.Series(np.nan, index=df.index)
+    out = _aggregate(df.rename(columns={ret_col: "ret_val"}).assign(n_ret_val=n_ret),
+                     group_col=group_col, id_col="id")
+    return out.sort_values("n", ascending=False)
 
+
+def _aggregate(df: pd.DataFrame, *, group_col: str, id_col: str) -> pd.DataFrame:
+    """Shared calibration aggregation over columns ret_val / n_ret_val.
+
+    FIX LEDGER-ALPHA (2026-09-24):
+      * alpha = ret - nifty_ret ONLY when the Nifty return exists; otherwise
+        alpha is NaN ("unavailable") instead of silently falling back to the
+        raw return (the old `.fillna(0)`), which credited market moves as
+        skill. `n_alpha` counts rows with a usable alpha.
+      * two win rates, labelled distinctly:
+          win_rate      — raw: forward return > 0
+          win_vs_nifty  — alpha > 0 (beat the index), over n_alpha rows
+        each with its own Wilson lower bound.
+    """
+    df = df.copy()
+    df["alpha"] = df["ret_val"] - df["n_ret_val"]          # NaN when Nifty missing
+    df["is_win"] = (df["ret_val"] > 0).astype(int)
+    df["has_alpha"] = df["alpha"].notna().astype(int)
+    df["is_alpha_win"] = (df["alpha"] > 0).astype(int)     # NaN > 0 is False
     out = df.groupby(group_col, dropna=False).agg(
-        n=("id", "count"),
-        mean_ret=(ret_col, "mean"),
-        median_ret=(ret_col, "median"),
-        mean_alpha=("alpha", "mean"),
+        n=(id_col, "count"),
+        mean_ret=("ret_val", "mean"),
+        median_ret=("ret_val", "median"),
+        mean_alpha=("alpha", "mean"),                       # skips NaN
+        n_alpha=("has_alpha", "sum"),
         win_rate=("is_win", "mean"),
         wins=("is_win", "sum"),
+        alpha_wins=("is_alpha_win", "sum"),
     ).reset_index()
     out["wilson_lower_win"] = out.apply(
         lambda r: _wilson_lower(int(r["wins"]), int(r["n"])), axis=1)
+    out["win_vs_nifty"] = out.apply(
+        lambda r: (r["alpha_wins"] / r["n_alpha"]) if r["n_alpha"] > 0 else np.nan, axis=1)
+    out["wilson_lower_vs_nifty"] = out.apply(
+        lambda r: _wilson_lower(int(r["alpha_wins"]), int(r["n_alpha"]))
+        if r["n_alpha"] > 0 else np.nan, axis=1)
     out["mean_ret"] = out["mean_ret"].round(2)
     out["median_ret"] = out["median_ret"].round(2)
     out["mean_alpha"] = out["mean_alpha"].round(2)
     out["win_rate"] = (out["win_rate"] * 100).round(1)
     out["wilson_lower_win"] = (out["wilson_lower_win"] * 100).round(1)
-    return out.sort_values("n", ascending=False)
+    out["win_vs_nifty"] = (out["win_vs_nifty"].astype(float) * 100).round(1)
+    out["wilson_lower_vs_nifty"] = (out["wilson_lower_vs_nifty"].astype(float) * 100).round(1)
+    out["n_alpha"] = out["n_alpha"].astype(int)
+    return out.drop(columns=["alpha_wins"])
 
 
 def tag_calibration(*, horizon_days: int, min_n: int = 5) -> pd.DataFrame:
@@ -558,24 +599,8 @@ def tag_calibration(*, horizon_days: int, min_n: int = 5) -> pd.DataFrame:
 
     if df.empty:
         return df
-    df["alpha"]  = df["ret_val"] - df["n_ret_val"].fillna(0)
-    df["is_win"] = (df["ret_val"] > 0).astype(int)
-    agg = df.groupby("tag").agg(
-        n=("log_id", "count"),
-        mean_ret=("ret_val", "mean"),
-        median_ret=("ret_val", "median"),
-        mean_alpha=("alpha", "mean"),
-        win_rate=("is_win", "mean"),
-        wins=("is_win", "sum"),
-    ).reset_index()
-    agg["wilson_lower_win"] = agg.apply(
-        lambda r: _wilson_lower(int(r["wins"]), int(r["n"])), axis=1)
+    agg = _aggregate(df, group_col="tag", id_col="log_id")
     agg = agg[agg["n"] >= min_n]
-    agg["mean_ret"]   = agg["mean_ret"].round(2)
-    agg["median_ret"] = agg["median_ret"].round(2)
-    agg["mean_alpha"] = agg["mean_alpha"].round(2)
-    agg["win_rate"]   = (agg["win_rate"] * 100).round(1)
-    agg["wilson_lower_win"] = (agg["wilson_lower_win"] * 100).round(1)
     return agg.sort_values("wilson_lower_win", ascending=False)
 
 
@@ -596,8 +621,9 @@ def shadow_pnl(*, horizon_days: int = 20) -> pd.DataFrame:
     df = df[df[ret_col].notna()].copy()
     if df.empty:
         return df
-    df["alpha"] = df[ret_col] - df.get(nifty_col, 0).fillna(0)
-    keep = ["logged_date", "ticker", "verdict", "conviction", "horizon",
+    # FIX LEDGER-ALPHA: alpha is NaN (unavailable) when Nifty return is missing.
+    df["alpha"] = df[ret_col] - (df[nifty_col] if nifty_col in df.columns else np.nan)
+    keep =["logged_date", "ticker", "verdict", "conviction", "horizon",
             "entry_price", f"price_{horizon_days}d", ret_col, nifty_col, "alpha",
             "primary_reason"]
     keep = [c for c in keep if c in df.columns]

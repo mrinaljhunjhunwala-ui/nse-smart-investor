@@ -159,6 +159,26 @@ def _compute_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int 
     return adx
 
 
+_VOL_RATIO_CAP = 3.0
+
+
+def _up_down_volume_ratio(up_vol: pd.Series, down_vol: pd.Series,
+                          window: int = 20) -> pd.Series:
+    """20-bar up-volume / down-volume ratio, capped at _VOL_RATIO_CAP.
+
+    FIX TQS-VOLRATIO (2026-09-24) — zero down-volume used to divide by NaN and
+    get filled with 1.0 (-> 1.125 pts), so a window with ONLY up-days scored
+    like a neutral one. Same shape as the earlier RSI zero-loss fix: positive
+    up-volume with zero down-volume is the strongest possible reading and
+    maps to the cap; zero up AND zero down (no movement) stays neutral 1.0.
+    """
+    up = up_vol.rolling(window, min_periods=5).sum()
+    dn = down_vol.rolling(window, min_periods=5).sum()
+    ratio = up / dn.replace(0, np.nan)
+    ratio = ratio.mask((dn == 0) & (up > 0), _VOL_RATIO_CAP)
+    return ratio.fillna(1.0).clip(upper=_VOL_RATIO_CAP)
+
+
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
@@ -206,9 +226,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     up_vol   = ret.gt(0) * df["Volume"]
     down_vol = ret.lt(0) * df["Volume"]
-    df["Vol_Ratio"] = (
-        up_vol.rolling(20, min_periods=5).sum() / down_vol.rolling(20, min_periods=5).sum().replace(0, np.nan)
-    ).fillna(1.0).clip(upper=3.0)
+    df["Vol_Ratio"] = _up_down_volume_ratio(up_vol, down_vol)
 
     # Clean missing variables before parsing TQS
     df.dropna(subset=["SMA200", "ADX", "RSI", "Sharpe_20"], inplace=True)
