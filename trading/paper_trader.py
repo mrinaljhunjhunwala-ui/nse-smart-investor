@@ -22,6 +22,7 @@ from typing import List, Dict, Optional
 import numpy as np
 import pandas as pd
 
+from utils.sql import read_sql_df
 from utils.telegram import TelegramAlerter
 
 DB_FILE    = "trades.db"
@@ -121,7 +122,7 @@ class PaperTrader:
         """
         try:
             with self._conn() as conn:
-                rows = pd.read_sql_query(
+                rows = read_sql_df(
                     "SELECT ticker, price, quantity, sl, tp, strategy, status, exit_price "
                     "FROM trades",
                     conn,
@@ -298,7 +299,7 @@ class PaperTrader:
     def get_trade_history(self) -> pd.DataFrame:
         """Return all trades from SQLite as DataFrame."""
         with self._conn() as conn:
-            df = pd.read_sql_query("SELECT * FROM trades ORDER BY id", conn)
+            df = read_sql_df("SELECT * FROM trades ORDER BY id", conn)
         return df
 
     def print_trade_history(self):
@@ -341,7 +342,7 @@ class PaperTrader:
 
         updates = []
         with self._conn() as conn:
-            open_trades = pd.read_sql_query(
+            open_trades = read_sql_df(
                 "SELECT * FROM trades WHERE status='OPEN' AND action='BUY'", conn
             )
 

@@ -44,6 +44,7 @@ st.markdown("Save stocks you're tracking. Scores and prices update automatically
 
 # SQLite-backed watchlist (same DB as paper trades)
 import sqlite3 as _sql
+from utils.sql import read_sql_df  # noqa: E402
 _WL_DB = os.path.join(_ROOT, "dashboard", "paper_trades.db")
 
 def _wl_init():
@@ -79,7 +80,7 @@ def _wl_remove(ticker: str):
     _wl_con.commit()
 
 def _wl_get_all():
-    return pd.read_sql("SELECT * FROM watchlist ORDER BY added_at DESC", _wl_con)
+    return read_sql_df("SELECT * FROM watchlist ORDER BY added_at DESC", _wl_con)
 
 # Add to watchlist form
 # FIX WL2 — none of these four fields cleared after a successful add.

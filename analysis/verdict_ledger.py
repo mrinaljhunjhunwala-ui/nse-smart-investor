@@ -55,6 +55,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 import trade_store as _store
+from utils.sql import read_sql_df
 
 _log = logging.getLogger("analysis.verdict_ledger")
 
@@ -303,7 +304,7 @@ def load_ledger(*, ticker: Optional[str] = None,
         """)
         params.append(int(limit))
         with _store._get_conn() as conn:
-            return pd.read_sql_query(sql, conn, params=tuple(params))
+            return read_sql_df(sql, conn, params=tuple(params))
     except Exception as e:
         _log.warning("load_ledger failed: %s: %s", type(e).__name__, e)
         return pd.DataFrame()
@@ -381,7 +382,7 @@ def backfill_returns(*, max_rows: int = 200) -> Dict[str, int]:
             LIMIT ?
         """)
         with _store._get_conn() as conn:
-            rows = pd.read_sql_query(sql, conn, params=(max_rows,))
+            rows = read_sql_df(sql, conn, params=(max_rows,))
         if rows.empty:
             return stats
         stats["scanned"] = len(rows)
@@ -550,7 +551,7 @@ def tag_calibration(*, horizon_days: int, min_n: int = 5) -> pd.DataFrame:
             WHERE r.{ret_col} IS NOT NULL
         """)
         with _store._get_conn() as conn:
-            df = pd.read_sql_query(sql, conn)
+            df = read_sql_df(sql, conn)
     except Exception as e:
         _log.warning("tag_calibration failed: %s: %s", type(e).__name__, e)
         return pd.DataFrame()

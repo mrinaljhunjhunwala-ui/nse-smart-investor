@@ -105,9 +105,29 @@ def test_page_loads_without_exception(page):
     # keeps a comfortable ceiling for the slowest page on the slowest
     # runner without hiding any real regression (a genuine hang is minutes,
     # not just tens of seconds over the old ceiling).
+    name = os.path.basename(page)
+
+    # Compile first. Streamlit's ScriptRunner catches compile errors (SyntaxError,
+    # IndentationError, ...) itself: it logs "Script compilation error" and fires
+    # SCRIPT_STOPPED_WITH_COMPILE_ERROR instead of emitting an exception element.
+    # AppTest ignores that event, so ``at.exception`` stays EMPTY and the test
+    # used to pass on a page that could not even parse (16_angel_one.py regression).
+    with open(page, encoding="utf-8") as fh:
+        source = fh.read()
+    try:
+        compile(source, page, "exec")
+    except SyntaxError as e:
+        pytest.fail(f"{name} failed to compile: {type(e).__name__}: {e}")
+
     at = AppTest.from_file(page, default_timeout=240).run()
     # AppTest.exception is an ElementList (falsy when empty), not None.
     assert not at.exception, (
-        f"{os.path.basename(page)} raised an uncaught exception: "
+        f"{name} raised an uncaught exception: "
         + "; ".join(str(e.value) for e in at.exception)
     )
+    # Belt-and-braces for any other silent bail-out (compile error on a
+    # Streamlit version whose handling differs, script never started, ...):
+    # every page renders at least its sidebar nav / title, so an empty
+    # element tree means the script did not actually run.
+    rendered = len(at.main.children) + len(at.sidebar.children)
+    assert rendered > 0, f"{name} rendered no elements — script did not run"

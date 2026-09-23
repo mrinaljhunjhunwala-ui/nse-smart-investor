@@ -56,6 +56,7 @@ import pandas as pd
 import requests
 
 import trade_store as _store
+from utils.sql import read_sql_df
 
 _log = logging.getLogger("data.nse_option_chain")
 
@@ -543,7 +544,7 @@ def load_symbol_latest(symbol: str) -> pd.DataFrame:
     sym = (symbol or "").upper().replace(".NS", "")
     try:
         with _store._get_conn() as conn:
-            return pd.read_sql_query(_store._q("""
+            return read_sql_df(_store._q("""
                 SELECT * FROM nse_option_chain_daily
                 WHERE symbol = ?
                 ORDER BY date DESC LIMIT 1
