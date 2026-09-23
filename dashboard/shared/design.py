@@ -862,6 +862,65 @@ def apply_design():
         .score-big        { font-size: 32px !important; }
         .ticker-content   { font-size: 11px !important; }
     }
+
+    /* ── P2 · Investor Guide long-form typography (15_investor_guide.py) ───
+       Self-contained block. Scoped via the .guide-doc marker on the page H1
+       so no other page's markdown picks up the 15/1.6 body scale.
+       H1 32/700 · H2 22/700 · body 15/1.6. */
+    .page-title-serif.guide-doc { font-size: 32px; font-weight: 700; }
+    .t-h2.guide-h2 { font-size: 22px; font-weight: 700; line-height: 1.25;
+                     margin-top: 22px !important; }
+    [data-testid="stMain"]:has(.guide-doc) [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMain"]:has(.guide-doc) [data-testid="stMarkdownContainer"] li {
+        font-size: 15px; line-height: 1.6;
+    }
+    @media (max-width: 480px) {
+        .page-title-serif.guide-doc { font-size: 24px !important; }
+        .t-h2.guide-h2 { font-size: 18px; }
+    }
+
+    /* ── P2 · Market Live tape + Command Centre regime strip / pick-more ──
+       Self-contained block (01_market_live.py, 02_command_centre.py). */
+    .ml-tape {
+        height: 32px; overflow: hidden; position: relative;
+        background: var(--sunken); border: 1px solid var(--hairline-soft);
+        border-radius: 6px; margin: 10px 0 4px 0;
+        font-family: var(--font-mono); font-size: 12px; line-height: 32px;
+        -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+                mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    }
+    .ml-tape-track {
+        display: inline-flex; white-space: nowrap;
+        animation: ml-tape-scroll 60s linear infinite;
+    }
+    .ml-tape:hover .ml-tape-track { animation-play-state: paused; }
+    .ml-tape-item { padding: 0 18px; color: var(--ink-mid); font-variant-numeric: tabular-nums; }
+    .ml-tape-item b { color: var(--ink); font-weight: 600; }
+    .ml-tape-up { color: var(--bull); }
+    .ml-tape-dn { color: var(--bear); }
+    @keyframes ml-tape-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @media (prefers-reduced-motion: reduce) { .ml-tape-track { animation: none; } }
+
+    .regime-strip {
+        display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center;
+        padding: 6px 12px; margin: -4px 0 10px 0;
+        background: var(--sunken); border: 1px solid var(--hairline-soft); border-radius: 8px;
+    }
+    .regime-strip-cell { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+    .regime-strip-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .regime-strip-k {
+        color: var(--dim); font-size: 10px; font-weight: 700;
+        letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .regime-strip-v { font-weight: 600; font-family: var(--font-mono); }
+
+    .pick-card details.pick-more { margin-top: 4px; }
+    .pick-card details.pick-more > summary {
+        cursor: pointer; font-size: 10px; color: var(--faint);
+        letter-spacing: 0.4px; text-transform: uppercase; list-style: none;
+    }
+    .pick-card details.pick-more > summary::before { content: "▸ "; }
+    .pick-card details.pick-more[open] > summary::before { content: "▾ "; }
     </style>""".replace("/*__COLOR_TOKENS__*/", f"      /* colour tokens: dashboard/shared/tokens.py */\n{_css_vars()}"),
         unsafe_allow_html=True,
     )

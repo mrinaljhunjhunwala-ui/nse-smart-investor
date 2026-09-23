@@ -513,6 +513,7 @@ if analyze_btn or _prefill_active or (
             # composite thresholds (grade thresholds match analysis/score.py).
             try:
                 from dashboard.shared.ui_components import hero_verdict as _hero_verdict
+                from dashboard.shared.ui_components import ticker_hover_wrap as _thw
                 _score = float(getattr(cs, "score", 0) or 0)
                 if _score >= 70:
                     _posture, _qual, _tone = (
@@ -539,7 +540,15 @@ if analyze_btn or _prefill_active or (
                         posture_qualifier=_qual,
                         composite=_score,
                         max_score=90,
-                        kicker=f"Posture · {ticker.replace('.NS','')}",
+                        # UX2 · hover preview on the hero ticker — data from
+                        # the already-computed CompositeScore, no new fetch.
+                        kicker="Posture · " + _thw(
+                            ticker.replace('.NS', ''),
+                            price=(float(cs.price) if getattr(cs, "price", None) else None),
+                            chg_pct=getattr(cs, "return_1d", None),
+                            score=_score,
+                            sector=str(getattr(cs, "sector", "") or ""),
+                        ),
                         why=_hv_why,
                         tone=_tone,
                     ),
