@@ -9,7 +9,11 @@ from streamlit.testing.v1 import AppTest
 
 from dashboard.shared.ui_components import ticker_hover_wrap
 
-PAGE22 = "dashboard/pages/22_fii_dii_flows.py"
+import pathlib as _pl
+
+# Absolute: AppTest resolves relative paths against the calling test file on
+# some Streamlit versions (CI), not the repo root.
+PAGE22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "22_fii_dii_flows.py")
 
 
 def _fd_frame(nets):
