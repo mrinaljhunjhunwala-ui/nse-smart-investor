@@ -537,6 +537,14 @@ def _render_ctrlk_palette() -> None:
         pass
 
 
+def _alert_js_literal(msg: str) -> str:
+    """Encode an alert message as a safe JS string literal for inline <script>.
+
+    json.dumps handles quotes / backslashes / newlines; escaping ``</`` stops a
+    message containing ``</script>`` from closing the script element early."""
+    return json.dumps(str(msg)[:90]).replace("</", "<\\/")
+
+
 def render_sidebar(current: str = None) -> None:
     """Render the full sidebar. `current` = this page's name (for routing)."""
     st.sidebar.title("NSE Smart Investor")
@@ -932,7 +940,7 @@ def render_sidebar(current: str = None) -> None:
         _alert_key = "|".join(sorted(_sltp))
         if _sltp and st.session_state.get("_last_alert_key") != _alert_key:
             st.session_state["_last_alert_key"] = _alert_key
-            _amsg = _sltp[0].replace('"', "'")[:90]
+            _amsg = _alert_js_literal(_sltp[0])
             st.html(
                 f"""<script>
                 try {{
@@ -947,7 +955,7 @@ def render_sidebar(current: str = None) -> None:
                     }});
                 }} catch(e) {{}}
                 try {{
-                    var show = function() {{ new Notification("📈 NSE Smart Investor", {{ body: "{_amsg}" }}); }};
+                    var show = function() {{ new Notification("📈 NSE Smart Investor", {{ body: {_amsg} }}); }};
                     if (window.Notification) {{
                         if (Notification.permission === "granted") show();
                         else if (Notification.permission !== "denied")

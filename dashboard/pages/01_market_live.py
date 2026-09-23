@@ -23,6 +23,7 @@ from dashboard.shared.chart_helpers import (
     _ROOT,
     PLOT_COLORS,
     diverging_colors,
+    finite_abs_peak,
     render_top_bar,
     tick_pulse_tracker,
 )
@@ -265,10 +266,12 @@ else:
             _ar = "▲" if _ch >= 0 else "▼"
             _nm = str(_row.get("name", ""))[:26]
             _tick_cls = _mv_pulse(_row["ticker"], _row["price"])
+            _mv_price = pd.to_numeric(_row["price"], errors="coerce")
+            _mv_chg = pd.to_numeric(_ch, errors="coerce")
             _mv_label = ticker_hover_wrap(
                 _row["ticker"].replace(".NS", ""),
-                price=float(_row["price"]),
-                chg_pct=float(_ch),
+                price=float(_mv_price) if math.isfinite(_mv_price) else None,
+                chg_pct=float(_mv_chg) if math.isfinite(_mv_chg) else None,
                 sector=_sector_of(_row["ticker"]),
             )
             _html += (
@@ -305,7 +308,8 @@ else:
         if not _sec_agg.empty:
             import plotly.graph_objects as _go
             from dashboard.shared.tokens import COLORS as _TOK
-            _peak = max(float(_sec_agg["chg"].abs().max()), 1.0)
+            _sec_agg["chg"] = pd.to_numeric(_sec_agg["chg"], errors="coerce")
+            _peak = max(finite_abs_peak(_sec_agg["chg"]) or 0.0, 1.0)
             _fig = _go.Figure(_go.Treemap(
                 labels=_sec_agg["sector"],
                 parents=[""] * len(_sec_agg),
