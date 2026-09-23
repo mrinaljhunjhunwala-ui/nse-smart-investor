@@ -87,7 +87,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 ### [`03_my_portfolio.py`](../dashboard/pages/03_my_portfolio.py) — My Portfolio
 - ✅ IR2 + IR3 + IR4 + IR5 + IR6 all landed here (see §3).
-- 🟨 Holdings table: default Streamlit df; convert to the "P&L table" pattern (row background tinted by return, monospaced ₹ column, sticky first column).
+- ✅ Holdings table → P&L table pattern: rows tinted by P&L %, ▲/▼ + bold on big moves, Indian ₹ grouping, pinned Ticker column (shared `table_styles.py`).
 
 ### [`04_analyze_stock.py`](../dashboard/pages/04_analyze_stock.py) — Analyze Stock
 - ✅ SH1/SH2 chips (SH1: chip vocabulary #90; SH2: evidence-gated #109).
@@ -102,7 +102,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - 🟨 Two-column layout collapses badly on mobile (F2).
 
 ### [`06_smart_screener.py`](../dashboard/pages/06_smart_screener.py) — Smart Screener
-- 🟧 Result df has no colour semantics; adopt "signal table" pattern (rank chip, posture chip, sector chip, sparkline column).
+- ✅ Signal-table summary above setup cards: rank, shape-coded posture, sector, score bar, R:R, rev growth. (Sparkline column deferred — screener doesn't carry a price series per signal.)
 
 ### [`07_paper_trades.py`](../dashboard/pages/07_paper_trades.py) — Paper Trades
 - ✅ F3 widget chrome (#139).
@@ -111,7 +111,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 ### [`08_backtest.py`](../dashboard/pages/08_backtest.py) — Backtest
 - 🟨 Equity curve: default Plotly axes; migrate to `nse_pro` template (should already inherit, verify).
-- 🟨 Trade-log table: same table upgrade as Smart Screener.
+- ✅ Results tables: RdYlGn gradient replaced with the P&L pattern (row tint + ▲/▼ + bold beyond ±10%).
 
 ### [`11_intraday_trader.py`](../dashboard/pages/11_intraday_trader.py) — Intraday Trader
 - ✅ F3 widget chrome (#139).
@@ -147,7 +147,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 ### [`19_quality_watch.py`](../dashboard/pages/19_quality_watch.py) — Quality Watch
 - ✅ §9.4 typography sweep (#128).
-- 🟨 List view lacks visual grouping by flag colour (RAG); apply the RAG chip pattern from `references/components.md`.
+- ✅ Ranked list grouped into Clean / Amber / Red bands; flag counts are `chip_pill`s with ●/◆/✓ glyphs.
 
 ### `20_deep_dive.py` — Deep Dive
 - ✅ Removed. Folded into Analyze Stock as a tab in Slice 2 (#115). Page count went 22 → 20.

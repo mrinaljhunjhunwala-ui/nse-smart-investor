@@ -61,7 +61,8 @@ import sys
 
 from dashboard.shared.design import apply_design
 from dashboard.shared.cache import load_ticker_df
-from dashboard.shared.chart_helpers import _ROOT, render_top_bar, rdylgn_bg
+from dashboard.shared.chart_helpers import _ROOT, render_top_bar
+from dashboard.shared.table_styles import arrow_fmt, pnl_styler
 
 apply_design()
 render_sidebar(current="Backtest")
@@ -86,6 +87,22 @@ def load_backtest_csv(path: str = "portfolio_results.csv") -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _bt_table_styler(frame: pd.DataFrame, ret_col):
+    """P2 · P&L table pattern for backtest results — rows tinted by return,
+    ▲/▼ + sign colour on return columns (bold beyond ±10%), 2dp elsewhere.
+    Replaces the RdYlGn gradient, which relied on red/green hue alone."""
+    _signed = [c for c in frame.columns
+               if c == ret_col or "Buy & Hold" in str(c) or "Return" in str(c)]
+    _fmts = {}
+    for c in frame.columns:
+        if not pd.api.types.is_numeric_dtype(frame[c]):
+            continue
+        _fmts[c] = arrow_fmt(2, "%") if c in _signed else "{:.2f}"
+    return pnl_styler(frame, tint_col=ret_col or "", signed_cols=_signed,
+                      formats=_fmts, bold_at={c: 10.0 for c in _signed},
+                      full_at=30.0)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX B2: unified display — always load file result into session_state so
 # the detailed table renders whether data came from file or in-app run.
@@ -108,12 +125,7 @@ if not df.empty:
     bt3.metric("Avg Sharpe",  f"{df[s_col].mean():.2f}"  if s_col else "—")
     bt4.metric("Total Trades",f"{df[t_col].sum():,.0f}"  if t_col else "—")
 
-    grad_cols = [r_col] if r_col else []
-    _styler = df.style.format("{:.2f}")
-    for _gc in grad_cols:
-        _vmin, _vmax = df[_gc].min(), df[_gc].max()
-        _styler = _styler.map(lambda v, _lo=_vmin, _hi=_vmax: rdylgn_bg(v, _lo, _hi),
-                              subset=[_gc])
+    _styler = _bt_table_styler(df, r_col)
     st.dataframe(
         _styler,
         use_container_width=True,
@@ -487,19 +499,14 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
             ).sum()
             _rb4.metric("Beat Buy&Hold", f"{_beat}/{len(_bt_res)}")
 
-        _grad_cols2 = [c for c in [_r_col2, _s_col2] if c]
         _bt_sorted  = _bt_res.sort_values(_r_col2, ascending=False) if _r_col2 else _bt_res
-        _styler2 = _bt_sorted.style
-        for _gc2 in _grad_cols2:
-            _vmin2, _vmax2 = _bt_sorted[_gc2].min(), _bt_sorted[_gc2].max()
-            _styler2 = _styler2.map(lambda v, _lo=_vmin2, _hi=_vmax2: rdylgn_bg(v, _lo, _hi),
-                                    subset=[_gc2])
+        _styler2 = _bt_table_styler(_bt_sorted, _r_col2)
         st.dataframe(
             _styler2,
             use_container_width=True, height=380,
         )
         st.caption(
-            "Sorted by return. Green = better. "
+            "Sorted by return. ▲ = gain, ▼ = loss; row tint deepens with size. "
             "'Beat Buy&Hold' = how often the strategy outperformed simply holding."
         )
         # DT1 + DT2 · attribution on the strategy backtest table. Historical

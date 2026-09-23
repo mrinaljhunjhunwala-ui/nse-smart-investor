@@ -758,51 +758,79 @@ else:
                 "picture including suggested sizing/duration for that stock."
             )
 
-            for _, row in ranked.iterrows():
-                short = row["ticker"].replace(".NS", "")
-                color = _POSTURE_COLOR.get(row["posture"], "var(--dim)")
-                score = int(row["quality_score"])
-                flag_bits = []
-                if row["red_flags"]:
-                    flag_bits.append(f"🔴 {int(row['red_flags'])}")
-                if row["amber_flags"]:
-                    flag_bits.append(f"🟡 {int(row['amber_flags'])}")
-                if row["green_flags"]:
-                    flag_bits.append(f"🟢 {int(row['green_flags'])}")
-                flag_str = "  ".join(flag_bits) if flag_bits else "no flags"
+            # P2 · RAG grouping — bucket by worst flag colour (red > amber >
+            # clean) so governance risk is visible before the score. Within a
+            # bucket the Quality Score order is unchanged. Flag counts render
+            # as chip_pill with a shape glyph (●/◆/✓), not colour alone.
+            from dashboard.shared.ui_components import chip_pill
 
-                card_col, btn_col1, btn_col2 = st.columns([4, 1, 1])
-                with card_col:
-                    st.markdown(
-                        f'<div style="border-left:4px solid {color};padding:10px 14px;'
-                        f'margin:4px 0;background:var(--surface);border-radius:6px">'
-                        f'<b style="font-size:18px;color:{color}">{score}</b>'
-                        f'<span style="font-size:11px;color:var(--faint)">/100</span>  '
-                        f'<b style="font-size:15px">{short}</b>'
-                        f'<span style="color:var(--dim);font-size:12px"> '
-                        f'{row.get("company_name") or ""}</span>'
-                        f'<span style="float:right;font-size:12px;color:var(--ink-mid)">{flag_str}</span>'
-                        f'<br><span style="font-size:13px;color:{color}">{row["phrase"]}</span>'
-                        f'<br><span style="font-size:11px;color:var(--faint)">'
-                        f'confidence: {row["confidence"]}'
-                        + (f' · P/E {row["pe"]:.1f}x' if pd.notna(row["pe"]) else '')
-                        + (f' · P/B {row["pb"]:.1f}x' if pd.notna(row["pb"]) else '')
-                        + '</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                with btn_col1:
-                    if st.button("🔎 Deep Dive", key=f"qw_dd_{row['ticker']}",
-                                  use_container_width=True):
-                        st.session_state["_qw_selected_ticker"] = row["ticker"]
-                        st.session_state["_qw_selected_score"] = score
-                        st.session_state["_qw_selected_breakdown"] = row["score_breakdown"]
-                        st.rerun()
-                with btn_col2:
-                    if st.button("📊 Analyze", key=f"qw_analyze_{row['ticker']}",
-                                  use_container_width=True):
-                        st.session_state["analyze_ticker"] = row["ticker"]
-                        st.session_state["_goto_page"] = "🔍 Analyze Stock"
-                        st.rerun()
+            def _rag(r):
+                if r["red_flags"]:
+                    return "red"
+                return "amber" if r["amber_flags"] else "clean"
+
+            ranked["_rag"] = ranked.apply(_rag, axis=1)
+            _RAG_GROUPS = [
+                ("clean", "✓ No red/amber flags", "good"),
+                ("amber", "◆ Amber flags — review before sizing", "warn"),
+                ("red",   "● Red flags — governance risk", "bad"),
+            ]
+            for _g_key, _g_title, _g_tone in _RAG_GROUPS:
+                _grp = ranked[ranked["_rag"] == _g_key]
+                if _grp.empty:
+                    continue
+                st.markdown(
+                    f'<div style="margin:14px 0 4px 0">'
+                    f'{chip_pill(_g_title, _g_tone)}'
+                    f'<span style="color:var(--dim);font-size:12px">'
+                    f'{len(_grp)} stock{"s" if len(_grp) != 1 else ""}</span></div>',
+                    unsafe_allow_html=True,
+                )
+                for _, row in _grp.iterrows():
+                    short = row["ticker"].replace(".NS", "")
+                    color = _POSTURE_COLOR.get(row["posture"], "var(--dim)")
+                    score = int(row["quality_score"])
+                    flag_bits = []
+                    if row["red_flags"]:
+                        flag_bits.append(chip_pill(f"● {int(row['red_flags'])} red", "bad"))
+                    if row["amber_flags"]:
+                        flag_bits.append(chip_pill(f"◆ {int(row['amber_flags'])} amber", "warn"))
+                    if row["green_flags"]:
+                        flag_bits.append(chip_pill(f"✓ {int(row['green_flags'])} green", "good"))
+                    flag_str = "".join(flag_bits) if flag_bits else chip_pill("no flags")
+
+                    card_col, btn_col1, btn_col2 = st.columns([4, 1, 1])
+                    with card_col:
+                        st.markdown(
+                            f'<div style="border-left:4px solid {color};padding:10px 14px;'
+                            f'margin:4px 0;background:var(--surface);border-radius:6px">'
+                            f'<b style="font-size:18px;color:{color}">{score}</b>'
+                            f'<span style="font-size:11px;color:var(--faint)">/100</span>  '
+                            f'<b style="font-size:15px">{short}</b>'
+                            f'<span style="color:var(--dim);font-size:12px"> '
+                            f'{row.get("company_name") or ""}</span>'
+                            f'<span style="float:right">{flag_str}</span>'
+                            f'<br><span style="font-size:13px;color:{color}">{row["phrase"]}</span>'
+                            f'<br><span style="font-size:11px;color:var(--faint)">'
+                            f'confidence: {row["confidence"]}'
+                            + (f' · P/E {row["pe"]:.1f}x' if pd.notna(row["pe"]) else '')
+                            + (f' · P/B {row["pb"]:.1f}x' if pd.notna(row["pb"]) else '')
+                            + '</span></div>',
+                            unsafe_allow_html=True,
+                        )
+                    with btn_col1:
+                        if st.button("🔎 Deep Dive", key=f"qw_dd_{row['ticker']}",
+                                      use_container_width=True):
+                            st.session_state["_qw_selected_ticker"] = row["ticker"]
+                            st.session_state["_qw_selected_score"] = score
+                            st.session_state["_qw_selected_breakdown"] = row["score_breakdown"]
+                            st.rerun()
+                    with btn_col2:
+                        if st.button("📊 Analyze", key=f"qw_analyze_{row['ticker']}",
+                                      use_container_width=True):
+                            st.session_state["analyze_ticker"] = row["ticker"]
+                            st.session_state["_goto_page"] = "🔍 Analyze Stock"
+                            st.rerun()
 
             if not errored.empty:
                 with st.expander(f"⚠️ {len(errored)} ticker(s) with fetch errors"):
