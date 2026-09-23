@@ -707,6 +707,80 @@ def apply_design():
     @media (prefers-reduced-motion: reduce) {
         .cc-skel { animation: none; }
     }
+
+    /* ── F2 · Mobile responsive pass ────────────────────────────────────────
+       The app is desktop-first (portfolio work, chart reading). Below 768 px
+       the two-column card grids stack, the top-bar chips shrink, hero text
+       scales down, and container padding tightens so content fits without
+       a horizontal scrollbar. 481–768 is "tablet"; ≤480 is phone.
+
+       Streamlit's own st.columns does NOT auto-collapse on narrow viewports
+       even with layout="wide" — flipping [data-testid="stHorizontalBlock"]
+       to flex-direction:column is what stacks the 2-column card grids
+       (holdings, top picks, movers). Chip/text inline-styles from Python
+       need !important to override.
+
+       Not touched: st.tabs (already horizontal-scrollable), sidebar (users
+       expect it collapsed on phones — Streamlit's own toggle handles that),
+       the ticker tape animation itself (scrolls fine at any width). */
+    @media (max-width: 768px) {
+        /* Collapse every st.columns() row to a single-column stack. */
+        [data-testid="stHorizontalBlock"] {
+            flex-direction: column !important;
+            gap: 8px !important;
+        }
+        [data-testid="stColumn"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 0 !important;
+        }
+
+        /* Opt-in utility for raw <div style="display:flex"> card grids that
+           can't reach data-testid. Pages that hand-wrote a 2- or 3-card row
+           with inline flex (Command Centre Market Pulse, My Portfolio stat
+           tiles) tag their outer div with class="mobile-stack" to opt in. */
+        .mobile-stack {
+            flex-direction: column !important;
+        }
+
+        /* Top-bar chips (F7b .topbar-chip hook + rendered by
+           chart_helpers._live_top_bar). The Python side sets an inline
+           min-width:118px which overflows a 375 px viewport with 5+ chips;
+           let them shrink to their content width instead. */
+        .topbar-chip {
+            min-width: 0 !important;
+            padding: 5px 9px !important;
+        }
+
+        /* Typography scale — the biggest text ("Live Ticker" hero, score
+           dial) is what triggers horizontal scroll on phones. Pull it in. */
+        .t-display        { font-size: 24px !important; }
+        .t-h1             { font-size: 18px !important; }
+        .page-title-serif { font-size: 28px !important; line-height: 1.05 !important; }
+        .score-big        { font-size: 40px !important; }
+
+        /* Ticker tape — narrower gap between symbols so more fit per screen
+           without changing the overall scroll cadence. */
+        .ticker-content { font-size: 12px !important; }
+
+        /* Streamlit's default block-container padding is calibrated for a
+           1200 px+ viewport. On phones the ~5rem side padding wastes half
+           the screen; tighten to a 12 px gutter so cards go edge-to-edge. */
+        .stApp .main .block-container,
+        [data-testid="stAppViewContainer"] .main .block-container {
+            padding-left: 12px !important;
+            padding-right: 12px !important;
+            padding-top: 12px !important;
+        }
+    }
+
+    @media (max-width: 480px) {
+        /* Phone-only tightening on top of the tablet rules above. */
+        .page-title-serif { font-size: 22px !important; }
+        .t-display        { font-size: 20px !important; }
+        .score-big        { font-size: 32px !important; }
+        .ticker-content   { font-size: 11px !important; }
+    }
     </style>""",
         unsafe_allow_html=True,
     )

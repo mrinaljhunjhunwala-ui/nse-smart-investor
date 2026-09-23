@@ -294,7 +294,7 @@ def _render_market_pulse_section() -> None:
         _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "var(--sunken)", "var(--amber)"
 
     st.markdown(
-        f'<div style="display:flex;gap:12px;margin-bottom:4px">'
+        f'<div class="mobile-stack" style="display:flex;gap:12px;margin-bottom:4px">'
         f'<div style="flex:1;background:var(--card-lift);border:1px solid var(--hairline);border-left:5px solid {_vc};border-radius:var(--r-base);padding:14px 16px">'
         f'<div class="t-label" style="margin-bottom:3px">India VIX</div>'
         f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
