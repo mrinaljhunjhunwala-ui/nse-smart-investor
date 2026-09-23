@@ -512,9 +512,9 @@ with _tab_breadth:
         elif pct200 >= 50:
             sig_txt, sig_clr = "🟡 **Moderate breadth** — More than half in uptrend. Leadership is narrower; moves are more stock-specific.", "amber"
         elif pct200 >= 30:
-            sig_txt, sig_clr = "🟠 **Weakening breadth** — Over half below SMA200. Reduce position sizes.", "accent"
+            sig_txt, sig_clr = "🟠 **Weakening breadth** — Over half below SMA200; historically a higher-drawdown regime.", "accent"
         else:
-            sig_txt, sig_clr = "🔴 **Bear market breadth** — Most below SMA200. Defensive posture; consider hedges.", "bear"
+            sig_txt, sig_clr = "🔴 **Bear market breadth** — Most below SMA200 — a broad downtrend across the index.", "bear"
         st.markdown(
             f'<div style="background:var(--tint-{sig_clr});padding:12px;border-radius:8px;'
             f'border-left:4px solid var(--{sig_clr});font-size:15px;margin:10px 0">'

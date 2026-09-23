@@ -26,6 +26,7 @@ import streamlit as st
 
 import trade_store as _store
 from dashboard.shared.cache import get_composite_score
+from dashboard.shared.trade_utils import _display_label
 from data.universe import get_sector
 
 _log = logging.getLogger("dashboard.deep_dive")
@@ -100,7 +101,7 @@ def _context_to_prompt_text(ctx: dict) -> str:
     cs = ctx["cs"]
     if cs is not None and getattr(cs, "action", "UNAVAILABLE") != "UNAVAILABLE":
         lines.append(
-            f"Trend Quality Score: {cs.score:.1f}/90 ({cs.action}, grade {cs.grade}). "
+            f"Composite Score: {cs.score:.1f}/90 ({_display_label(cs.action)}, grade {cs.grade}). "
             f"Technical {cs.technical_score:.0f}/40, Momentum {cs.momentum_score:.0f}/25, "
             f"Volume {cs.volume_score:.0f}/15, Sentiment {cs.sentiment_score:.0f}/10."
         )

@@ -482,7 +482,7 @@ if _csv_source is not None:
                 # Health score
                 f'<div style="{_tile_common}">'
                 f'<div style="{_k_lbl}">Health score</div>'
-                f'<div style="{_k_v}">{summary.portfolio_score:.0f}<span style="{_k_ccy};font-size:14px"> /100</span></div>'
+                f'<div style="{_k_v}">{summary.portfolio_score:.0f}<span style="{_k_ccy};font-size:14px"> /90</span></div>'
                 f'<div style="{_k_d};color:{_grade_col}">Grade {_grade_letter}</div>'
                 f'</div>'
                 # Diversification
@@ -552,7 +552,7 @@ if _csv_source is not None:
 
             st.caption(
                 f"📡 **{len(_pf_buys)}** holding(s) in an **Uptrend / Strong Trend**, "
-                f"**{len(_pf_sells)}** showing **Weakening / Exit Signal** right now — see the cards below. "
+                f"**{len(_pf_sells)}** showing **Weakening / Broken Trend** right now — see the cards below. "
                 "Trend-quality scores only; the app never auto-executes real trades. "
                 "Toggle **Auto-refresh** to keep this live while the page is open.")
 
@@ -655,7 +655,7 @@ if _csv_source is not None:
                         "Value (₹)":    _inr0,
                         "P&L (₹)":      _ts_arrow(0, "", prefix="₹", indian=True),
                         "P&L %":        _ts_arrow(2, "%"),
-                        "Score":        "{:.0f}/100",
+                        "Score":        "{:.0f}/90",
                     },
                 ),
                 width="stretch",
@@ -728,7 +728,7 @@ if _csv_source is not None:
                 _h_rng    = max(_h_tp - _h_sl, 0.01)
                 _h_cur_pct = min(100, max(0, (h.current_price - _h_sl) / _h_rng * 100))
                 _h_bar_c  = "var(--bull)" if h.current_price >= h.avg_buy_price else "var(--bear)"
-                _h_score_w = min(int(h.score), 100)
+                _h_score_w = min(int(round(h.score * 100 / 90)), 100)  # composite is 0–90 → bar %
                 _h_today  = getattr(h, "today_chg_pct", None)
                 _h_today_c = "var(--bull)" if (_h_today or 0) >= 0 else "var(--bear)"
                 # PGF (Portfolio Gap Fix) — the removed live-price table used to be
@@ -776,7 +776,7 @@ if _csv_source is not None:
                     f'&nbsp;&nbsp;{_h_action_chip}'
                     f'</div>'
                     f'<div style="text-align:right">'
-                    f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/100</span>'
+                    f'<span style="font-size:13px;font-weight:700;color:{_h_ac}">{h.score:.0f}/90</span>'
                     f'<div style="width:60px;height:5px;background:var(--hairline);border-radius:3px;margin-top:3px">'
                     f'<div style="width:{_h_score_w}%;height:100%;background:{_h_ac};border-radius:3px"></div>'
                     f'</div></div></div>'
@@ -820,7 +820,7 @@ if _csv_source is not None:
                         _ph_price = h.current_price or h.avg_buy_price
                         _paper_trade_popover(
                             h.ticker, _ph_price, h.stop_loss or _ph_price * 0.95, h.target,
-                            reason=f"{h.action}: {h.headline}",
+                            reason=f"{_display_label(h.action)}: {h.headline}",
                             key=f"ph_pt_{h.ticker}",
                         )
                     with _hb3:
@@ -1738,8 +1738,8 @@ else:
         "**What you'll see once added:**  \n"
         "- 🚀 Strong Trend / Uptrend = strong, persistent trend momentum  \n"
         "- 🟡 Neutral = mixed signals, no clear edge  \n"
-        "- ⚠️ Weakening / Exit Signal = trend deteriorating  \n"
-        "- Trend-quality score (0–100) — higher = stronger trend (not a return forecast)  \n"
+        "- ⚠️ Weakening / Broken Trend = trend deteriorating  \n"
+        "- Composite score (0–90) — higher = stronger trend (not a return forecast)  \n"
         "- Plain English explanation and suggested stop-loss / target per holding"
     )
     col_ex1, col_ex2, col_ex3 = st.columns(3)
@@ -1762,7 +1762,7 @@ else:
     with col_ex3:
         st.markdown("""
         <div class="card-red">
-        <b>⚠️ Weakening ▼ / Exit Signal ▼▼ (Score &lt; 40)</b><br>
+        <b>⚠️ Weakening ▼ / Broken Trend ▼▼ (Score &lt; 40)</b><br>
         Trend quality is deteriorating.
         Consider reviewing your position size or tightening your stop-loss.
         </div>

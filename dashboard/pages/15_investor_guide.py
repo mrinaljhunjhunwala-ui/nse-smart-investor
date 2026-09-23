@@ -43,11 +43,11 @@ tab_g1, tab_g2, tab_g3, tab_g4, tab_g5, tab_g6, tab_g7 = st.tabs([
 with tab_g1:
     st.markdown(
         '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
-        'Trend Quality Score (0 – 90)</div>',
+        'Composite Score (0 – 90)</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        "Every stock gets a **Trend Quality Score (maximum 90)**. "
+        "Every stock gets a **Composite Score (maximum 90)** describing trend quality. "
         "This combines four factors: Technical (40 pts) + Momentum (25 pts) + "
         "Volume (15 pts) + Market Sentiment (10 pts — VIX regime + sector "
         "strength). Candlestick patterns are still detected and shown in the "
@@ -66,14 +66,39 @@ with tab_g1:
         "apply your own entry and risk rules.",
         icon="🔬",
     )
-    st.dataframe(pd.DataFrame([
-        {"Score Range": "80 – 100", "Grade": "A+", "Signal": f"{_display_label('STRONG BUY')} {_action_emoji('STRONG BUY')}", "What It Means": "Very strong trend quality — everything aligned and historically likely to keep trending. Not a return forecast."},
-        {"Score Range": "65 – 79",  "Grade": "A",  "Signal": f"{_display_label('BUY')} {_action_emoji('BUY')}",               "What It Means": "Strong trend quality — healthy uptrend with good momentum. Structure is consistent with an established trend."},
-        {"Score Range": "50 – 64",  "Grade": "B",  "Signal": f"{_display_label('WATCHLIST')} {_action_emoji('WATCHLIST')}",   "What It Means": "Moderate trend quality — mixed signals. Confirmation is incomplete."},
-        {"Score Range": "40 – 49",  "Grade": "C",  "Signal": f"{_display_label('HOLD')} {_action_emoji('HOLD')}",             "What It Means": "Neutral trend — no edge either way on current readings."},
-        {"Score Range": "25 – 39",  "Grade": "D",  "Signal": f"{_display_label('CAUTION')} {_action_emoji('CAUTION')}",       "What It Means": "Weak/deteriorating trend — momentum fading."},
-        {"Score Range": "0 – 24",   "Grade": "F",  "Signal": f"{_display_label('EXIT')} {_action_emoji('EXIT')}",             "What It Means": "Trend broken — though beaten-down names can rebound sharply in fear regimes."},
-    ]), hide_index=True)
+    st.warning(
+        "📉 **Honest caveat.** This repo's own efficacy study "
+        "(docs/SCORE_EFFICACY_REPORT.md) found the score's labels did **not** "
+        "predict 20-day forward returns — in that window the lowest band even "
+        "outperformed the highest. Scores describe *trend quality today*, not "
+        "future returns.",
+        icon="⚖️",
+    )
+    st.markdown(
+        "**Note:** Grade and trend label come from two separate threshold scales "
+        "in `analysis/score.py`, so they don't line up row-for-row."
+    )
+    _cs_g1, _cs_g2 = st.columns(2)
+    with _cs_g1:
+        st.markdown("**Grade scale (composite, 0–90)**")
+        st.dataframe(pd.DataFrame([
+            {"Score Range": "88 – 90", "Grade": "A+"},
+            {"Score Range": "75 – 87", "Grade": "A"},
+            {"Score Range": "62 – 74", "Grade": "B"},
+            {"Score Range": "48 – 61", "Grade": "C"},
+            {"Score Range": "32 – 47", "Grade": "D"},
+            {"Score Range": "0 – 31",  "Grade": "F"},
+        ]), hide_index=True)
+    with _cs_g2:
+        st.markdown("**Trend label scale (composite, 0–90)**")
+        st.dataframe(pd.DataFrame([
+            {"Score Range": "80 – 90", "Label": f"{_display_label('STRONG BUY')} {_action_emoji('STRONG BUY')}", "What It Means": "Very strong trend quality — everything aligned. Not a return forecast."},
+            {"Score Range": "65 – 79", "Label": f"{_display_label('BUY')} {_action_emoji('BUY')}",               "What It Means": "Healthy uptrend with good momentum."},
+            {"Score Range": "52 – 64", "Label": f"{_display_label('WATCHLIST')} {_action_emoji('WATCHLIST')}",   "What It Means": "Mixed signals — confirmation incomplete."},
+            {"Score Range": "40 – 51", "Label": f"{_display_label('HOLD')} {_action_emoji('HOLD')}",             "What It Means": "Neutral trend — no edge either way on current readings."},
+            {"Score Range": "25 – 39", "Label": f"{_display_label('CAUTION')} {_action_emoji('CAUTION')}",       "What It Means": "Weak/deteriorating trend — momentum fading."},
+            {"Score Range": "0 – 24",  "Label": f"{_display_label('EXIT')} {_action_emoji('EXIT')}",             "What It Means": "Trend broken — though beaten-down names can rebound sharply in fear regimes."},
+        ]), hide_index=True)
 
     st.markdown("---")
     st.markdown(
@@ -125,11 +150,11 @@ with tab_g1:
         "High VIX = fear = caution. Low VIX = complacency = also caution (different reason)."
     )
     st.dataframe(pd.DataFrame([
-        {"VIX Level": "< 12",   "Regime": "Complacency", "Meaning": "Market too relaxed — be careful, corrections start here"},
-        {"VIX Level": "12–16",  "Regime": "Normal 🟢",   "Meaning": "Healthy range — good conditions for long trades"},
-        {"VIX Level": "16–22",  "Regime": "Elevated 🟡", "Meaning": "Some fear — be selective, reduce position sizes"},
-        {"VIX Level": "22–28",  "Regime": "Fear 🔴",     "Meaning": "Significant fear — prioritise stop-losses, be defensive"},
-        {"VIX Level": "> 28",   "Regime": "PANIC 🔴",    "Meaning": "Market panic — avoid new long positions; can be contrarian buy at extremes"},
+        {"VIX Level": "< 12",   "Regime": "Complacency", "Meaning": "Market very relaxed — historically many corrections began from low-VIX readings"},
+        {"VIX Level": "12–16",  "Regime": "Normal 🟢",   "Meaning": "Healthy range — trend signals have historically been most reliable here"},
+        {"VIX Level": "16–22",  "Regime": "Elevated 🟡", "Meaning": "Some fear — score rankings start to lose reliability"},
+        {"VIX Level": "22–28",  "Regime": "Fear 🔴",     "Meaning": "Significant fear — larger daily swings; rankings can invert"},
+        {"VIX Level": "> 28",   "Regime": "PANIC 🔴",    "Meaning": "Market panic — extreme volatility; historically extremes have sometimes preceded sharp rebounds"},
     ]), hide_index=True)
 
 # ── TAB 2: INDICATORS ─────────────────────────────────────────────────────
@@ -231,7 +256,7 @@ with tab_g3:
         {"Mistake": "Averaging down losers",     "Consequence": "More capital trapped in a losing position",  "Fix": "If stop is hit, exit. Never add to a loser."},
         {"Mistake": "Holding losers, selling winners","Consequence": "Loss portfolio of bad trades",         "Fix": "Let winners run. Cut losers quickly at stop."},
         {"Mistake": "Trading on tips/news alone","Consequence": "No edge, random outcomes",                  "Fix": "Use the composite score + chart for confirmation"},
-        {"Mistake": "Overtrading",               "Consequence": "Brokerage + taxes eat all profits",         "Fix": "Only trade high-conviction setups (score ≥ 65)"},
+        {"Mistake": "Overtrading",               "Consequence": "Brokerage + taxes eat all profits",         "Fix": "Fewer, better-researched decisions; the score alone is not a filter for returns"},
     ]), hide_index=True)
 
 # ── TAB 4: NEWS SIGNALS ───────────────────────────────────────────────────
@@ -254,16 +279,16 @@ with tab_g4:
     st.markdown("---")
     st.markdown(
         '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
-        'How to Use News Alongside Scores</div>',
+        'Reading News Alongside Scores</div>',
         unsafe_allow_html=True,
     )
     st.dataframe(pd.DataFrame([
-        {"Score Signal": "BUY 🟢", "News Sentiment": "Positive 🟢", "Combined Signal": "Strong BUY — fundamentals + technicals aligned",       "Action": "Enter with full position size"},
-        {"Score Signal": "BUY 🟢", "News Sentiment": "Negative 🔴", "Combined Signal": "Conflict — technical buy but fundamental headwind",    "Action": "Wait or use half position"},
-        {"Score Signal": "HOLD 🟡","News Sentiment": "Positive 🟢", "Combined Signal": "Potential upgrade — watch for score improvement",       "Action": "Set alert, review next day"},
-        {"Score Signal": "HOLD 🟡","News Sentiment": "Negative 🔴", "Combined Signal": "Risk of breakdown — tighten stop-loss",                "Action": "Move stop to breakeven or exit"},
-        {"Score Signal": "EXIT 🔴","News Sentiment": "Positive 🟢", "Combined Signal": "Technical bearish despite good news — mixed",          "Action": "If score < 30, exit anyway"},
-        {"Score Signal": "EXIT 🔴","News Sentiment": "Negative 🔴", "Combined Signal": "Full sell signal — both technicals and news bearish",   "Action": "Exit immediately at stop"},
+        {"Score Band": "Uptrend ▲", "News Sentiment": "Positive 🟢", "Combined Read": "Aligned — trend and news point the same way", "What It Historically Means": "The most internally consistent bullish case; still not a return forecast"},
+        {"Score Band": "Uptrend ▲", "News Sentiment": "Negative 🔴", "Combined Read": "Conflict — healthy trend, fundamental headwind", "What It Historically Means": "Uncertainty is elevated; trends can break quickly on bad news"},
+        {"Score Band": "Neutral 🟡", "News Sentiment": "Positive 🟢", "Combined Read": "Possible improvement — score rises only if price follows", "What It Historically Means": "News often leads price; the score reacts once the tape moves"},
+        {"Score Band": "Neutral 🟡", "News Sentiment": "Negative 🔴", "Combined Read": "Breakdown risk — no trend support under bad news", "What It Historically Means": "Structurally the weakest price support; downside moves tend to be larger"},
+        {"Score Band": "Broken Trend ▼▼", "News Sentiment": "Positive 🟢", "Combined Read": "Mixed — broken trend despite good news", "What It Historically Means": "Beaten-down names with good news can rebound sharply (seen in the efficacy study)"},
+        {"Score Band": "Broken Trend ▼▼", "News Sentiment": "Negative 🔴", "Combined Read": "Both bearish — trend and news aligned down", "What It Historically Means": "The most internally consistent bearish case; still not a forecast"},
     ]), hide_index=True)
 
     st.markdown("---")
@@ -295,7 +320,7 @@ with tab_g5:
     st.markdown("""
 **Step 1 — Find a trade setup**
 - Go to **🔍 Analyze Stock** and search for a stock
-- If the Composite Score is **≥ 65** and the action is **BUY**, that is a potential entry
+- Note the Composite Score (0–90) and its trend label — they describe trend quality, not future returns
 - Check the news — is the sentiment positive or neutral?
 
 **Step 2 — Open a paper trade**
@@ -341,7 +366,7 @@ with tab_g5:
             '<div class="card-green">'
             '<b>Win Rate</b><br>'
             'Target: > 45%<br>'
-            'How to improve: Only take trades with score ≥ 65 and positive news'
+            'Note: in the efficacy study, score band alone did not improve 20-day outcomes'
             '</div>', unsafe_allow_html=True
         )
     with _edge_col2:
@@ -412,11 +437,11 @@ with tab_g7:
         unsafe_allow_html=True,
     )
     st.warning(
-        "⚠️ **Don't confuse this with the Trend Quality Score (0–90) described "
-        "in the Scores & Signals tab.** They share a name but are two distinct "
+        "⚠️ **Don't confuse this with the Composite Score (0–90) described "
+        "in the Scores & Signals tab.** Both run 0–90 but they are two distinct "
         "scoring systems built for different purposes: the Analyze Stock score "
         "(0–90) blends Technical + Momentum + Volume + Sentiment for a single "
-        "buy/hold/exit call. The **TQS Scanner** page runs a separate 0–100 "
+        "trend label. The **TQS Scanner** page runs a separate 0–90 "
         "model, described below, purpose-built for ranking many stocks by pure "
         "trend health.",
         icon="⚠️",
@@ -424,7 +449,7 @@ with tab_g7:
     st.markdown(
         "The **TQS Scanner** page (📊 Trend Quality Score in the sidebar) scores "
         "every stock in a chosen universe across **four equally-weighted pillars "
-        "(22.5 points each, 90 max before rounding to a 0–100 scale)**:"
+        "(22.5 points each, 0–90 total)**:"
     )
     st.dataframe(pd.DataFrame([
         {"Pillar": "P1 — Trend Strength",       "What It Measures": "Moving-average alignment (Close > SMA20 > SMA50 > SMA200), ADX trend intensity, and SMA200 slope."},
@@ -449,7 +474,7 @@ with tab_g7:
     with _tqs_g1:
         st.markdown("**Grade scale**")
         st.dataframe(pd.DataFrame([
-            {"TQS Range": "80 – 100", "Grade": "A+"},
+            {"TQS Range": "80 – 90", "Grade": "A+"},
             {"TQS Range": "70 – 79",  "Grade": "A"},
             {"TQS Range": "55 – 69",  "Grade": "B"},
             {"TQS Range": "40 – 54",  "Grade": "C"},
@@ -459,7 +484,7 @@ with tab_g7:
     with _tqs_g2:
         st.markdown("**Signal scale**")
         st.dataframe(pd.DataFrame([
-            {"TQS Range": "75 – 100", "Signal": "STRONG TREND"},
+            {"TQS Range": "75 – 90", "Signal": "STRONG TREND"},
             {"TQS Range": "60 – 74",  "Signal": "TRENDING"},
             {"TQS Range": "45 – 59",  "Signal": "NEUTRAL"},
             {"TQS Range": "30 – 44",  "Signal": "WEAK"},
@@ -469,7 +494,7 @@ with tab_g7:
         "**How to use it:** use the TQS Scanner to *rank a whole universe* and "
         "find the healthiest trends quickly, then open **Analyze Stock** on the "
         "top candidates for the full picture (fundamentals, news, stop-loss "
-        "levels, and the 0–90 composite score) before acting."
+        "levels, and the 0–90 composite score)."
     )
 
 

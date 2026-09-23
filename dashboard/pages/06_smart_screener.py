@@ -24,7 +24,7 @@ st.markdown('<h1 class="page-title-serif">Smart <em>Stock Screener</em></h1>', u
 st.markdown(
     "Scan the NSE universe using 4 proven screens — oversold bounce, "
     "momentum leaders, breakouts, and pullback entries.  \n"
-    "Each match is enriched with a **trend-quality score** (0–100 — trend health, "
+    "Each match is enriched with a **trend-quality score** (0–90 composite — trend health, "
     "not a return forecast)."
 )
 
@@ -93,7 +93,7 @@ with sc2:
     screen_key = screen_map[screen_choice]
 with sc3:
     enrich_scores = st.checkbox("Enrich with trend-quality score", value=True,
-                                help="Adds the 0-100 trend-quality score to each result (slower)")
+                                help="Adds the 0–90 composite score to each result (slower)")
 
 # ── Revenue-growth filter (R1 — per docs/REVENUE_GROWTH_DISCOVERY_AUDIT.md) ────────
 # Thresholds capped at 15%: the audit showed >20% concentrates results into one
@@ -147,14 +147,19 @@ if scan_btn:
                     sig["stop_loss"]       = round(cs.stop_loss, 2)
                     sig["target"]          = round(cs.target, 2)
                 except Exception as _score_e:
-                    import logging; logging.getLogger("dashboard.smart_screener").debug("score_stock failed for %s: %s — using neutral fallback", sig.get("ticker"), _score_e)
-                    sig["composite_score"] = 50
-                    sig["grade"]           = "C"
+                    import logging; logging.getLogger("dashboard.smart_screener").debug("score_stock failed for %s: %s — marking unscored", sig.get("ticker"), _score_e)
+                    # Unscored — never fake a neutral 50/"C" and rank it
+                    # alongside real results.
+                    sig["composite_score"] = None
+                    sig["grade"]           = "—"
                     sig["action"]          = sig.get("action", "WATCHLIST")
                     sig["narrative"]       = "—"
                 scored_signals.append(sig)
                 prog.progress((i + 1) / len(signals))
-            signals = sorted(scored_signals, key=lambda x: x.get("composite_score", 0), reverse=True)
+            signals = sorted(
+                scored_signals,
+                key=lambda x: (x.get("composite_score") is not None, x.get("composite_score") or 0),
+                reverse=True)  # unscored rows sort last
 
         # ── Revenue-growth enrichment (R1) — bounded fetch, graceful "—" ──────
         # Per the discovery audit: never block indefinitely; anything not back
@@ -293,7 +298,7 @@ if scan_btn:
                     "#": st.column_config.TextColumn("#", width="small", pinned=True),
                     "Ticker": _ts_pin("Ticker"),
                     "Score": st.column_config.ProgressColumn(
-                        "Score", min_value=0, max_value=100, format="%d"),
+                        "Score", min_value=0, max_value=90, format="%d"),
                     "Price": st.column_config.NumberColumn(format="₹%.2f"),
                     "R:R": st.column_config.NumberColumn(format="%.1fx"),
                     "Rev Growth /yr": st.column_config.NumberColumn(format="%+.1f%%"),
@@ -317,8 +322,9 @@ if scan_btn:
             _s_rr = sig.get("_rr")
             _s_sector    = sig.get("sector", "")
             _s_stop_type = sig.get("stop_type", "atr")
-            _s_score_str = (f"Score {sig.get('composite_score','?')}/100 "
-                            f"[{sig.get('grade','?')}]" if enrich_scores else "")
+            _cs_v = sig.get("composite_score")
+            _s_score_str = ((f"Score {_cs_v}/90 " if _cs_v is not None else "Score —/90 ")
+                            + f"[{sig.get('grade', '—')}]") if enrich_scores else ""
             _s_rr_str    = f"R:R {_s_rr:.1f}x" if _s_rr else ""
             _header = (f"{emoji} {t}  |  ₹{_s_price:,.2f}  "
                        f"|  {sig.get('screen','')}  "

@@ -73,6 +73,7 @@ from dashboard.shared.trade_utils import (
     _action_emoji,
     _display_label,            # Phase 2 UI honesty
     _grade_color,
+    verdict_display_label,
     _paper_trade_popover,      # FIX A1: use popover instead of direct call
     load_manual_holdings,      # FIX A9: manual holdings replace CSV/Angel One path
 )
@@ -162,7 +163,7 @@ def _market_context_row():
                 _row["regime_severity"] = "red"
             elif _fii_5 > 0 and _dii_5 < 0:
                 _row["regime_msg"] = ("DII profit-taking rally — FII buying vs DII "
-                                       "selling. Rallies tend shallower; keep stops tight.")
+                                       "selling. Rallies have historically been shallower.")
                 _row["regime_severity"] = "amber"
             else:
                 _row["regime_msg"] = "Mixed — no clear institutional-flow signal."
@@ -524,7 +525,7 @@ if analyze_btn or _prefill_active or (
                         "Constructive", "with reservations", "accent")
                 elif _score >= 40:
                     _posture, _qual, _tone = (
-                        "Neutral", "wait for the tape to decide", "neutral")
+                        "Neutral", "no clear direction on the tape", "neutral")
                 elif _score >= 25:
                     _posture, _qual, _tone = (
                         "Watchful", "trend structure weakening", "warn")
@@ -541,18 +542,23 @@ if analyze_btn or _prefill_active or (
                         posture_qualifier=_qual,
                         composite=_score,
                         max_score=90,
-                        # UX2 · hover preview on the hero ticker — data from
-                        # the already-computed CompositeScore, no new fetch.
-                        kicker="Posture · " + _thw(
-                            ticker.replace('.NS', ''),
-                            price=(float(cs.price) if getattr(cs, "price", None) else None),
-                            chg_pct=getattr(cs, "return_1d", None),
-                            score=_score,
-                            sector=str(getattr(cs, "sector", "") or ""),
-                        ),
+                        kicker="Posture · " + ticker.replace('.NS', ''),
                         why=_hv_why,
                         tone=_tone,
                     ),
+                    unsafe_allow_html=True,
+                )
+                # UX2 · hover preview on the ticker — rendered OUTSIDE the
+                # hero card because hero_verdict clips overflow (the popover
+                # was cut off inside the kicker).
+                st.markdown(
+                    '<div style="font-size:12px;color:var(--dim);margin:-4px 0 8px">Hover: ' + _thw(
+                        ticker.replace('.NS', ''),
+                        price=(float(cs.price) if getattr(cs, "price", None) else None),
+                        chg_pct=getattr(cs, "return_1d", None),
+                        score=_score,
+                        sector=str(getattr(cs, "sector", "") or ""),
+                    ) + '</div>',
                     unsafe_allow_html=True,
                 )
             except Exception as _hv_err:
@@ -852,16 +858,21 @@ if analyze_btn or _prefill_active or (
                     # branch above rather than fetching a second time.
                     from analysis.portfolio_fundamentals import compute_quality_score as _cqs
                     if _fv_cf is not None:
-                        # The engine reads ROE / ROCE / Revenue CAGR / EPS CAGR
-                        # from an already-parsed dict shape; the fundamentals
-                        # service already exposes that shape as .to_metrics_dict()
-                        # when it's available. Guarded because implementations
-                        # vary and this path must never break the page.
-                        _fv_metrics = None
-                        if hasattr(_fv_cf, "to_metrics_dict"):
-                            _fv_metrics = _fv_cf.to_metrics_dict()
-                        elif isinstance(_fv_cf, dict):
-                            _fv_metrics = _fv_cf
+                        # compute_quality_score reads roe / roce / revenue_cagr_5y /
+                        # eps_cagr_5y (percent). Build that dict from the
+                        # fundamentals analytics layer (AnalyticResult values are
+                        # already in %). The old .to_metrics_dict() call pointed at
+                        # a method that never existed, so quality_score was always None.
+                        from analysis.fundamentals import analytics as _fa_q
+                        _fv_an = _fa_q.compute_all(_fv_cf)
+                        _fv_key_map = {"roe": "roe", "roce": "roce",
+                                       "revenue_cagr": "revenue_cagr_5y",
+                                       "eps_cagr": "eps_cagr_5y"}
+                        _fv_metrics = {}
+                        for _k_src, _k_dst in _fv_key_map.items():
+                            _r = _fv_an.get(_k_src)
+                            if _r is not None and getattr(_r, "available", False)                                     and getattr(_r, "value", None) is not None:
+                                _fv_metrics[_k_dst] = float(_r.value)
                         if _fv_metrics:
                             _fv_qs = _cqs(_fv_metrics)
                             if _fv_qs and _fv_qs > 0:
@@ -900,9 +911,9 @@ if analyze_btn or _prefill_active or (
                     f'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap">'
                     f'<div>'
                     f'<div style="font-size:12px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase">'
-                    f'Final verdict · {_fv.horizon.title()}-term · {_fv.confidence.title()} confidence</div>'
+                    f'Combined read · {_fv.horizon.title()}-term · {_fv.confidence.title()} confidence</div>'
                     f'<div style="font-size:32px;font-weight:700;color:{_fv_bg};margin:4px 0">'
-                    f'{_fv.verdict}</div>'
+                    f'{verdict_display_label(_fv.verdict)}</div>'
                     f'<div style="font-size:14px;color:var(--ink-mid)">{_fv.primary_reason}</div>'
                     f'</div>'
                     f'<div style="text-align:right">'
@@ -973,7 +984,7 @@ if analyze_btn or _prefill_active or (
                     st.markdown(
                         '<div style="font-size:12px;color:var(--dim);letter-spacing:1.5px;'
                         'text-transform:uppercase;margin:6px 0 4px 0">'
-                        'Horizon fit — is this stock good right now, and for how long?'
+                        'Horizon fit — how the same inputs read across three holding periods'
                         '</div>',
                         unsafe_allow_html=True,
                     )
@@ -992,7 +1003,7 @@ if analyze_btn or _prefill_active or (
                             f'<div style="font-size:20px;font-weight:700;color:{_color};'
                             f'margin:2px 0">{_posture}</div>'
                             f'<div style="font-size:11px;color:var(--dim)">'
-                            f'Verdict: <b style="color:var(--ink-mid)">{_hzv.verdict}</b> · '
+                            f'Read: <b style="color:var(--ink-mid)">{verdict_display_label(_hzv.verdict)}</b> · '
                             f'conviction {_hzv.conviction}/100</div>'
                             f'<div style="font-size:12px;color:var(--ink-mid);margin-top:6px;'
                             f'line-height:1.35">{_hzv.primary_reason}</div>'
@@ -1305,11 +1316,11 @@ if analyze_btn or _prefill_active or (
                                             "Price ₹": round(_cs2.price, 2),
                                             "Score /90": round(_cs2.score, 1),
                                             "Grade": _cs2.grade,
-                                            "Action": _cs2.action}
+                                            "Trend": _display_label(_cs2.action)}
                                 except Exception:
                                     return {"Ticker": _t.replace(".NS", ""),
                                             "Price ₹": None, "Score /90": None,
-                                            "Grade": "—", "Action": "n/a"}
+                                            "Grade": "—", "Trend": "n/a"}
                             _tpool = _TPE(max_workers=5)
                             try:
                                 _futs = {_tpool.submit(_peer_row, t): t for t in _peers}
@@ -1326,7 +1337,7 @@ if analyze_btn or _prefill_active or (
                             _rows.insert(0, {"Ticker": ticker.replace(".NS", "") + " ← this",
                                              "Price ₹": round(cs.price, 2),
                                              "Score /90": round(cs.score, 1),
-                                             "Grade": cs.grade, "Action": cs.action})
+                                             "Grade": cs.grade, "Trend": _display_label(cs.action)})
                             import pandas as _pd_pr
                             _pd_df = _pd_pr.DataFrame(_rows).sort_values(
                                 "Score /90", ascending=False, na_position="last")
@@ -1359,10 +1370,10 @@ if analyze_btn or _prefill_active or (
                     f'<div class="ticker-label">{ticker.replace(".NS","")}</div>'
                     f'<div style="font-size:14px;color:var(--dim)">₹{cs.price:,.2f}</div>'
                     f'<div class="score-big" style="color:{grade_c}">{cs.score:.0f}</div>'
-                    f'<div style="font-size:13px;color:var(--dim)">out of 100</div>'
+                    f'<div style="font-size:13px;color:var(--dim)">out of 90</div>'
                     f'<div style="font-size:28px;font-weight:700;color:{grade_c};margin:8px 0">'
                     f'Grade: {cs.grade}</div>'
-                    f'<div class="signal-big">{emoji} {cs.action}</div>'
+                    f'<div class="signal-big">{emoji} {_display_label(cs.action)}</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -1776,7 +1787,7 @@ if analyze_btn or _prefill_active or (
                     entry   = cs.entry,
                     sl      = cs.stop_loss,
                     tp      = cs.target,
-                    reason  = f"{cs.action} score={cs.score:.0f}: {cs.headline}",
+                    reason  = f"{_display_label(cs.action)} score={cs.score:.0f}/90: {cs.headline}",
                     key     = f"as_ptpop_{ticker}",
                     label   = "📌 Paper Trade This Signal",
                 )
