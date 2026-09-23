@@ -78,12 +78,12 @@ All six IR items shipped in the Sept 2026 sprint. Left here for provenance.
 Every entry links to the page it fixes. Numbers reference the current top-of-file "FIX" comments where relevant.
 
 ### [`01_market_live.py`](../dashboard/pages/01_market_live.py) — Market Live
-- 🟨 Ticker tape uses generic Streamlit container border; wrap in the terminal-grade "tape" component from `references/components.md` (fixed-height, monospaced, subtle gradient mask on edges).
-- 🟨 Sector heatmap: reads as flat blocks — apply diverging palette from `dataviz` skill; add small % labels on hover only.
+- ✅ ~~Ticker tape uses generic Streamlit container border~~ — shipped: `.ml-tape` terminal tape (32 px fixed height, IBM Plex Mono, gradient edge mask, pauses on hover, reduced-motion safe) + `ticker_hover_wrap` on movers + news chips on `PLOT_COLORS` (no raw hex). Original: wrap in the terminal-grade "tape" component from `references/components.md` (fixed-height, monospaced, subtle gradient mask on edges).
+- ✅ ~~Sector heatmap: reads as flat blocks~~ — shipped: sector treemap via `diverging_colors` (hue = sign, alpha = magnitude), % on hover only. Original — apply diverging palette from `dataviz` skill; add small % labels on hover only.
 
 ### [`02_command_centre.py`](../dashboard/pages/02_command_centre.py) — Command Centre
-- 🟧 The v2 scoring active chip added in #47 works but sits alone above the cards; move it into a "regime strip" alongside VIX zone and market breadth so status lives in one place.
-- 🟨 Top-picks cards: 6 metrics per card is > "5 above the fold" rule. Demote 2 to expander per `references/layout-patterns.md`.
+- ✅ ~~The v2 scoring active chip added in #47~~ — shipped: single `.regime-strip` (India VIX zone · breadth % > SMA50 · scoring v1/v2). Original: the chip works but sits alone above the cards; move it into a "regime strip" alongside VIX zone and market breadth so status lives in one place.
+- ✅ ~~Top-picks cards: 6 metrics per card~~ — shipped: R:R + freshness stamps demoted to a `<details>` "R:R & freshness" row; action chip now via `_display_label`. Original: 6 metrics per card is > "5 above the fold" rule. Demote 2 to expander per `references/layout-patterns.md`.
 
 ### [`03_my_portfolio.py`](../dashboard/pages/03_my_portfolio.py) — My Portfolio
 - ✅ IR2 + IR3 + IR4 + IR5 + IR6 all landed here (see §3).

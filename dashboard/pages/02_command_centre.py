@@ -52,30 +52,61 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── FIX REGIME-CHIP1 - v2 scoring badge (Rec 5 / Task 3.6 flag on) ─────────
-# When NSE_USE_REGIME_WEIGHTS is truthy, the Momentum pillar swaps in the
-# 5-day mean-reversion percentile (Var M) on bear-regime days. Surface a
-# small chip so the user knows they are seeing v2 scoring, not legacy.
-# Deferred item from docs/REGIME_WEIGHTS_2026-09.md:93; now landed alongside
-# the default flip authorised by docs/REGIME_WEIGHTS_VALIDATION.md.
+# ── FIX REGIME-CHIP1 → P2 REGIME STRIP ──────────────────────────────────────
+# The v2-scoring chip (NSE_USE_REGIME_WEIGHTS) used to sit alone above the
+# cards. Status now lives in one strip: VIX zone + market breadth + scoring
+# mode. Every cell degrades to "Unknown" when its feed is unavailable.
 _v2_flag = os.environ.get("NSE_USE_REGIME_WEIGHTS", "").strip().lower() in {"1", "true", "yes", "on"}
-if _v2_flag:
-    st.markdown(
-        '<div style="margin:-6px 0 10px 0">'
-        '<span style="display:inline-flex;align-items:center;gap:6px;'
-        'padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;'
-        'letter-spacing:0.4px;text-transform:uppercase;'
-        'background:color-mix(in srgb, var(--bull) 14%, transparent);color:var(--bull);'
-        'border:1px solid var(--bull)">'
-        '<span style="width:6px;height:6px;border-radius:50%;background:var(--bull)"></span>'
-        'v2 scoring active'
-        '</span>'
-        '<span style="margin-left:8px;font-size:11px;color:var(--dim)">'
-        'Momentum pillar dispatches to mean-reversion in bear regimes '
-        '(Rec 5 · <code style="font-size:10px">NSE_USE_REGIME_WEIGHTS=1</code>)'
-        '</span></div>',
-        unsafe_allow_html=True,
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cc_regime_snapshot() -> "dict | None":
+    from analysis.regime import snapshot_live
+    try:
+        return snapshot_live().as_dict()
+    except Exception as _reg_e:
+        import logging as _reg_log
+        _reg_log.getLogger("dashboard.command_centre").debug(
+            "regime snapshot failed: %s", _reg_e)
+        return None
+
+
+def _render_regime_strip() -> None:
+    _rs_cells = []
+    try:
+        _rs_vix = get_vix_info()
+        _rs_zone = str(_rs_vix.get("regime", "unknown")).lower()
+        _rs_v = _rs_vix.get("vix")
+    except Exception:
+        _rs_zone, _rs_v = "unknown", None
+    _rs_tone = {"complacency": "amber", "normal": "bull", "elevated": "amber",
+                "fear": "bear", "panic": "bear"}.get(_rs_zone, "dim")
+    _rs_cells.append(("India VIX", _rs_zone.title()
+                      + (f" · {_rs_v:.1f}" if isinstance(_rs_v, (int, float)) else ""), _rs_tone))
+    try:
+        _rs_reg = _cc_regime_snapshot() or {}
+    except Exception:
+        _rs_reg = {}
+    _rs_b = str((_rs_reg.get("components") or {}).get("breadth", "unknown"))
+    _rs_bp = (_rs_reg.get("metrics") or {}).get("pct_above_sma50")
+    _rs_cells.append(("Breadth", _rs_b.title()
+                      + (f" · {_rs_bp:.0f}% > SMA50" if isinstance(_rs_bp, (int, float)) else ""),
+                      {"broad": "bull", "mixed": "amber", "narrow": "bear"}.get(_rs_b, "dim")))
+    _rs_cells.append(("Scoring", "v2 · regime-weighted" if _v2_flag else "v1 · legacy",
+                      "bull" if _v2_flag else "dim"))
+    _rs_html = "".join(
+        f'<div class="regime-strip-cell"><span class="regime-strip-dot" style="background:var(--{_t})"></span>'
+        f'<span class="regime-strip-k">{_k}</span>'
+        f'<span class="regime-strip-v" style="color:var(--{_t})">{_v}</span></div>'
+        for _k, _v, _t in _rs_cells
     )
+    _rs_title = ("Momentum pillar dispatches to mean-reversion in bear regimes "
+                 "(NSE_USE_REGIME_WEIGHTS=1)" if _v2_flag else "Legacy fixed-weight scoring")
+    st.markdown(f'<div class="regime-strip" title="{_rs_title}">{_rs_html}</div>',
+                unsafe_allow_html=True)
+
+
+_render_regime_strip()
 
 st.caption("Market conditions · open positions needing action · watchlist decisions — no digging required.")
 
@@ -359,18 +390,7 @@ def _render_market_pulse_section() -> None:
     # no per-page-load network cost.
     # ─────────────────────────────────────────────────────────────────────────────
     try:
-        @st.cache_data(ttl=1800, show_spinner=False)
-        def _cc_regime_snapshot() -> "dict | None":
-            from analysis.regime import snapshot_live
-            try:
-                snap = snapshot_live()
-                return snap.as_dict()
-            except Exception as _reg_e:
-                import logging as _reg_log
-                _reg_log.getLogger("dashboard.command_centre").debug(
-                    "regime snapshot failed: %s", _reg_e)
-                return None
-
+        # _cc_regime_snapshot is hoisted to module scope (shared with the regime strip).
         # FIX UI-REGIME — inline regime banner replaced with the shared
         # dashboard.shared.ui_components.regime_badge so this page's regime
         # visual matches Analyze Stock and My Portfolio exactly. Removes ~20
@@ -999,7 +1019,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<span><span style="font-size:16px;font-weight:700;color:var(--ink)">{_bl_hover}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · '
+                f'{_display_label(_b["action"])}</span>'
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_b["headline"]}</div>'
@@ -1007,13 +1028,15 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                    f'Entry ₹{_b_lvl["entry"]:,.2f} · SL ₹{_b_lvl["sl"]:,.2f} · TP ₹{_b_lvl["tp"]:,.2f} '
                    f'{_b_live_span}</div>'
                    if _b_lvl["entry"] else "")
-                + _b_rr_html
                 + (f'<div style="font-size:11px;color:var(--azure);margin-top:2px">'
                    f'⏱ {_b.get("horizon")}'
                    + (f' · {_horizon_countdown(_b.get("valid_until"))}' if _b.get("valid_until") else '')
                    + '</div>'
                    if _b.get("horizon") else "")
-                + _stamp_html
+                # P2 · "5 above the fold" — R:R and freshness stamps are
+                # secondary; demoted into a native <details> disclosure.
+                + (f'<details class="pick-more"><summary>R:R &amp; freshness</summary>'
+                   f'{_b_rr_html}{_stamp_html}</details>')
                 + '</div>',
                 unsafe_allow_html=True,
             )
@@ -1070,7 +1093,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'border-left:4px solid var(--bear);border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_svl_hover}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
+                f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/100 · '
+                f'{_display_label(_sv["action"])}</span>'
                 f'</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{_sv["headline"]}</div>'
                 f'{_sv_live_html}'
