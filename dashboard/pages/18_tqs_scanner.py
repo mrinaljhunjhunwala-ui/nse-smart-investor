@@ -273,7 +273,8 @@ if True:  # top-level guard kept minimal so the following block stays indented a
             fig = go.Figure()
             pillars = ["p1_strength", "p2_persistence", "p3_momentum", "p4_confirmation"]
             labels  = ["P1 Strength", "P2 Persistence", "P3 Momentum", "P4 Volume"]
-            colours = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
+            from dashboard.shared.chart_helpers import PLOT_COLORS as _PC
+            colours = [_PC["accent"], _PC["azure"], _PC["amber"], _PC["dim"]]
 
             for pillar, label, colour in zip(pillars, labels, colours):
                 if pillar in top10.columns:
@@ -296,6 +297,42 @@ if True:  # top-level guard kept minimal so the following block stays indented a
                 plot_bgcolor="rgba(0,0,0,0)"
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            # ── P2 · 4-pillar radar — one ticker vs the top-10 median ─────────
+            # The table gives four numbers side by side; the radar shows the
+            # SHAPE (balanced vs one-pillar-carried) at a glance. Axes are each
+            # pillar's share of its 22.5-pt max so all four spokes are 0-100%.
+            _have = [p for p in pillars if p in df_scan.columns]
+            if len(_have) == 4 and not df_scan.empty:
+                _PMAX = 22.5
+                _r_pick = st.selectbox(
+                    "Pillar shape for", df_scan["ticker"].tolist(), index=0,
+                    key="tqs_radar_pick",
+                )
+                _r_row = df_scan[df_scan["ticker"] == _r_pick].iloc[0]
+                _theta = labels + labels[:1]
+                _vals = [max(0.0, min(float(_r_row[p]) / _PMAX * 100, 100)) for p in _have]
+                _med = [float(top10[p].median()) / _PMAX * 100 for p in _have]
+                _rfig = go.Figure()
+                _rfig.add_trace(go.Scatterpolar(
+                    r=_med + _med[:1], theta=_theta, name="Top-10 median",
+                    line=dict(color=_PC["dim"], dash="dot", width=1.5),
+                ))
+                _rfig.add_trace(go.Scatterpolar(
+                    r=_vals + _vals[:1], theta=_theta, name=_r_pick,
+                    fill="toself", fillcolor="rgba(255,149,0,0.18)",
+                    line=dict(color=_PC["accent"], width=2),
+                    hovertemplate="%{theta}: %{r:.0f}% of max<extra></extra>",
+                ))
+                _rfig.update_layout(
+                    polar=dict(bgcolor="rgba(0,0,0,0)",
+                               radialaxis=dict(range=[0, 100], ticksuffix="%",
+                                               showline=False, tickfont=dict(size=9))),
+                    legend=dict(orientation="h", y=-0.1),
+                    height=360, margin=dict(t=30, b=30, l=40, r=40),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                st.plotly_chart(_rfig, use_container_width=True)
 
             # ── Download ──────────────────────────────────────────────────────
             st.download_button(

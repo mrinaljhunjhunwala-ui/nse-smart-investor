@@ -94,9 +94,9 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ IR1 Bull/Bear/Risk card (#116).
 - ✅ Deep Dive absorbed as a tab (Slice 2, #115).
 - ✅ F6 loading skeletons on the four slow spinners (#120).
-- 🟧 Live drift caption (FIX A2) is a plain `st.caption`; promote to a small dismissible amber banner so it doesn't get lost in the top-bar noise.
+- ✅ Live drift → dismissible amber `degraded_banner` (dismissal per ticker + drift bucket, re-surfaces on a bigger move).
 - ✅ Conviction section (FIX A3) — "confirmation unavailable" branch now carries a `⏸` prefix so it's distinguishable from actual `⚠` warnings.
-- 🟨 Earnings-date pill (FIX A4) needs the shared "signal-badge" component so "Results 3d ago" reads consistently with every other status chip.
+- ✅ Earnings status → shared `chip_pill` with ⚠/◆/●/✓ glyphs; "avoid fresh buys" copy replaced with "event risk" (no-instruction rule).
 
 ### [`05_market_overview.py`](../dashboard/pages/05_market_overview.py) — Market Overview
 - 🟨 Two-column layout collapses badly on mobile (F2).
@@ -143,7 +143,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 ### [`18_tqs_scanner.py`](../dashboard/pages/18_tqs_scanner.py) — TQS Scanner
 - ✅ SH1 chips.
 - ✅ §9.4 typography sweep (#128).
-- 🟨 4-pillar breakdown: currently 4 numbers side-by-side. Convert to a compact radar or 4-segment bar for one-glance read.
+- ✅ 4-pillar radar (per ticker, % of 22.5 max) vs top-10 median; stacked-bar colours moved to `PLOT_COLORS` tokens.
 
 ### [`19_quality_watch.py`](../dashboard/pages/19_quality_watch.py) — Quality Watch
 - ✅ §9.4 typography sweep (#128).
@@ -158,7 +158,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 ### [`22_fii_dii_flows.py`](../dashboard/pages/22_fii_dii_flows.py) — FII/DII Flows
 - ✅ Regime card (#101), F1 Plotly hex → tokens (#100), DT1/DT2 wired (#126), §9.4 typography (#128).
-- 🟨 Bars + tables layout; time-series chart needs the diverging colour rule from `dataviz` skill.
+- ✅ Daily flows split into FII / DII panels, hue = sign only (bull/bear), opacity = magnitude via `diverging_colors()`; cumulative lines no longer use bull green for identity.
 
 ---
 
