@@ -1,0 +1,167 @@
+name: Alerts
+
+# 2026-09-16: fresh consolidation of market-alerts.yml + market-digest.yml.
+#
+# WHY: the API showed both predecessor files had been silently throttled by
+# GitHub Actions' cron scheduler — dropping ~90% of scheduled fires for 6+
+# days after we modified them repeatedly in a 24-hour window (Sep 8-10).
+# Throttle appears to be tracked per workflow-file path, so a brand-new
+# file at a path GitHub has never scheduled before starts fresh.
+#
+# This file therefore lives at .github/workflows/alerts.yml (not
+# market-alerts / market-digest), with a fresh workflow name "Alerts" that
+# GitHub allocates a new workflow ID for. The two old files are deleted in
+# the same commit so nothing is scheduled from the throttled paths.
+#
+# WHAT: one workflow drives every alert channel via one Python entry point
+# (alerts/check_alerts.py --mode=X). Six cron schedules cover every cadence
+# the two predecessor files had, plus workflow_dispatch for on-demand tests.
+#
+#   Schedule              IST              Mode                Notes
+#   ---------             -----            -----------------   -----
+#   */15 3-10 * * 1-5     08:30-16:30      default             VIX/Nifty/price CSV, every 15 min
+#   30 3 * * 1-5          09:00            morning-digest      top-5 delivery picks
+#   50 3 * * 1-5          09:20            intraday-watchlist  same picks with ORB levels
+#   0,30 4-9 * * 1-5      10:00-15:00      momentum            ~745-ticker breakout scan
+#   30 8 * * 1-5          14:00            portfolio-posture   Angel One holdings check
+#   30 3 * * 0            Sun 09:00        weekly-digest       week-ahead roll-up
+#
+# GitHub creates independent runs per cron pattern at overlapping times
+# (e.g. at 03:30 UTC on a weekday both */15 and 30-3 fire, creating two
+# separate runs, one dispatched as default and one as morning-digest).
+# github.event.schedule tells each run which cron triggered it.
+
+on:
+  schedule:
+    - cron: "*/15 3-10 * * 1-5"    # default — VIX/Nifty/price checks
+    - cron: "30 3 * * 1-5"         # 09:00 IST morning delivery digest
+    - cron: "50 3 * * 1-5"         # 09:20 IST intraday watchlist
+    - cron: "0,30 4-9 * * 1-5"     # 10:00-15:00 IST momentum every 30 min
+    - cron: "30 8 * * 1-5"         # 14:00 IST portfolio posture
+    - cron: "30 3 * * 0"           # Sunday 09:00 IST weekly digest
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which alert to fire"
+        required: true
+        default: "test"
+        type: choice
+        options:
+          - test               # diagnostic — proves both channels deliver
+          - default            # VIX + Nifty + custom price CSV
+          - morning-digest
+          - intraday-watchlist
+          - momentum
+          - portfolio-posture
+          - weekly-digest
+      clear_today:
+        description: "Wipe today's dedup state before running (fixes 'scheduled runs skipped because a manual test polluted state')"
+        required: false
+        default: false
+        type: boolean
+
+# Concurrency group scoped per mode so a slow momentum scan doesn't cancel
+# an overlapping morning-digest at 09:00 IST. cancel-in-progress:false lets
+# same-mode runs queue instead of one cancelling the other.
+concurrency:
+  group: alerts-${{ github.event.schedule || github.event.inputs.mode }}
+  cancel-in-progress: false
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    # 30 min covers the momentum scan's slow path (Angel One 403 -> Stooq
+    # bot-block -> yfinance cascade over ~745 tickers, ~15-20 min). Fast
+    # path (Angel One healthy) still returns in ~3-5 min.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # requirements.txt covers pandas/numpy/yfinance/psycopg2 for the
+      # trade_store KV read and the fetcher. Install lean but complete.
+      - name: Install project deps
+        run: pip install --quiet -r requirements.txt
+
+      - name: Restore alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
+          restore-keys: |
+            alert-state-
+
+      - name: Pick mode
+        id: pick
+        run: |
+          # Map github.event.schedule (the raw cron string) to the mode
+          # each cron owns. workflow_dispatch overrides via input.mode.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 3 * * 1-5" ]; then
+            echo "mode=morning-digest" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "50 3 * * 1-5" ]; then
+            echo "mode=intraday-watchlist" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0,30 4-9 * * 1-5" ]; then
+            echo "mode=momentum" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 8 * * 1-5" ]; then
+            echo "mode=portfolio-posture" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 3 * * 0" ]; then
+            echo "mode=weekly-digest" >> "$GITHUB_OUTPUT"
+          else
+            # */15 3-10 * * 1-5 or any unrecognised schedule falls through
+            # to default — VIX / Nifty trend / custom price CSV rules.
+            echo "mode=default" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fire alert
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Gmail SMTP as the second channel (Task 4.1, 2026-09-08).
+          # Requires ALERT_GMAIL_ADDRESS + ALERT_GMAIL_APP_PASSWORD +
+          # ALERT_GMAIL_TO. Missing any → GmailAlerter falls back to
+          # console print and the run still succeeds — Telegram carries.
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          # trade_store KV read for the morning-digest, intraday-watchlist
+          # and weekly-digest — persisted top-picks snapshot from the
+          # warm-top-picks workflow.
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+          # Angel One creds for portfolio-posture (holdings + intraday
+          # positions) and optionally for the momentum scan (real-time
+          # prices instead of 15-min-delayed Yahoo). No creds → those
+          # modes silently degrade; other modes are unaffected.
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: |
+          # workflow_dispatch → --force bypasses the market-hours guard
+          # AND the dedup check (see check_alerts.py's _FORCE_SEND) so a
+          # manual test always sends AND never stamps today's state.
+          # --clear-today wipes lingering today entries when the input
+          # is set. Scheduled cron runs never get either flag — they
+          # respect the guards as intended so the 30-min cadence
+          # doesn't spam the same list.
+          FLAGS="--mode=${{ steps.pick.outputs.mode }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FLAGS="$FLAGS --force"
+            if [ "${{ github.event.inputs.clear_today }}" = "true" ]; then
+              FLAGS="$FLAGS --clear-today"
+            fi
+          fi
+          python alerts/check_alerts.py $FLAGS
+
+      - name: Save alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
