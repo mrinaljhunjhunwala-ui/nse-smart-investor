@@ -31,6 +31,7 @@ from dashboard.shared.cache import (
 from dashboard.shared.trade_utils import (
     _auto_close_breached,
     _display_label,            # Phase 2 UI honesty
+    verdict_display_label,
     _is_squareoff_time,
     _paper_trade_popover,
     _portfolio_live_prices,
@@ -428,12 +429,12 @@ st.markdown("---")
 # Replaced first with a NIFTY 50 gainers tape, then with FIX TP3: this strip
 # now shows the app's own Top Picks BUY candidates (see _top_picks_ticker in
 # cache.py) instead of a generic NIFTY 50 gainers feed — the same
-# score-ranked list as the Buy Candidates cards below, priced live via ONE
+# score-ranked list as the Strongest-trends cards below, priced live via ONE
 # parallel batch call. Buys only, not filtered to today's gainers — a Top
 # Pick can legitimately be flat or red today, so each chip is colour-coded
 # red/green on its own live % change rather than assumed green. It's a real
 # horizontal auto-scrolling marquee in a distinct black/teal theme (teal to
-# match the Buy Candidates card accent, distinguishing it from the old
+# match the Strongest-trends card accent, distinguishing it from the old
 # black/amber NIFTY 50 theme) so it reads as a ticker tape, not another card
 # section. Still its own @st.fragment(run_every=60) so it refreshes
 # independently of the rest of the page. Purely informational (no
@@ -449,8 +450,8 @@ def _render_top_picks_ticker() -> None:
         st.markdown(
             "<div style='background:var(--rail);border-top:2px solid var(--bull);"
             "border-bottom:2px solid var(--bull);border-radius:6px;padding:9px 16px;"
-            "font-size:12px;color:var(--bull)'>🎯 TOP PICKS — no buy candidates "
-            "right now.</div>",
+            "font-size:12px;color:var(--bull)'>🎯 TOP PICKS — no names in the "
+            "strong-trend band right now.</div>",
             unsafe_allow_html=True,
         )
         return
@@ -479,7 +480,7 @@ def _render_top_picks_ticker() -> None:
         f'<span style="flex-shrink:0;padding:9px 14px;color:var(--bull);'
         f'font-size:10px;font-weight:700;letter-spacing:1px;'
         f'border-right:1px solid var(--sunken);white-space:nowrap">'
-        f'🎯 TOP PICKS<br>BUY CANDIDATES</span>'
+        f'🎯 TOP PICKS<br>STRONGEST TRENDS</span>'
         f'<div style="flex:1;overflow:hidden;position:relative;padding:9px 0">'
         f'<div style="white-space:nowrap;width:max-content;'
         f'animation:cc_ticker_scroll 32s linear infinite">'
@@ -831,7 +832,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     # ── FIX TP-HEALTH1: scan-health chip when data-fetch degraded ──
     # _home_top_picks now records n_scanned / n_scored_ok / n_unavailable in
     # meta. When the unavailable fraction crosses UNAVAIL_WARN_FRACTION, show
-    # a small chip so users understand a short Buy Candidates column reflects
+    # a small chip so users understand a short Strongest-trends column reflects
     # a data-source problem (Stooq breaker open, Yahoo throttle, Angel token
     # expired), not a genuinely quiet market. Threshold is deliberate: below
     # ~10 % is normal noise (illiquid tail names, new listings without SMA200
@@ -891,6 +892,24 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                                {s["ticker"] for s in _picks["sells"]}))
     _pk_live = _picks_live_prices(_pk_tickers)
 
+    # Sparklines for the hover previews: prefetch ALL pick tickers once,
+    # bounded pool + hard timeout, instead of one serial fetch per card
+    # inside this 20 s fragment. Anything not back in time gets no sparkline.
+    _pk_spark: dict = {}
+    if _pk_tickers:
+        import concurrent.futures as _cc_fut
+        _sp_pool = _cc_fut.ThreadPoolExecutor(max_workers=min(8, len(_pk_tickers)))
+        try:
+            _sp_futs = {_sp_pool.submit(_sparkline_closes, _t): _t for _t in _pk_tickers}
+            _sp_done, _ = _cc_fut.wait(list(_sp_futs), timeout=6)
+            for _f in _sp_done:
+                try:
+                    _pk_spark[_sp_futs[_f]] = _f.result(timeout=0)
+                except Exception:
+                    pass
+        finally:
+            _sp_pool.shutdown(wait=False, cancel_futures=True)
+
     # UX3 · live-tick pulse — one shared tracker for both Buy and Sell card
     # loops so a symbol that moves between the two lists compares against its
     # own last-seen price rather than starting over. commit() at the end of
@@ -901,11 +920,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     with _pk_buy:
         st.markdown(
             '<div class="t-h2" style="margin:8px 0 6px 0">'
-            '🟢 Buy Candidates</div>',
+            '🟢 Strongest trends</div>',
             unsafe_allow_html=True,
         )
         if not _picks["buys"]:
-            st.caption("No strong buy setups today — market not offering clean entries.")
+            st.caption("No names in the strong-trend band in today's scan.")
         for _b in _picks["buys"]:
             _bl = _b["ticker"].replace(".NS", "")
             _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
@@ -936,12 +955,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 }
                 _fv_tone = _fv_pill_tones.get(_fv.verdict, "neutral")
                 _fv_title = (
-                    f"FinalVerdict on the {_fv.horizon} horizon -- "
+                    f"Combined read on the {_fv.horizon} horizon -- "
                     f"{_fv.confidence} confidence, conviction {_fv.conviction}/100. "
                     f"{_fv.primary_reason}"
                 )
                 _fv_pill = chip_pill(
-                    f"Verdict: {_fv.verdict}", tone=_fv_tone, title=_fv_title,
+                    f"Read: {verdict_display_label(_fv.verdict)}", tone=_fv_tone, title=_fv_title,
                 )
             except Exception as _fv_pill_e:
                 import logging
@@ -958,7 +977,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             # price + score chip pre-baked into the anchor span. Cached
             # 5 min per ticker via _sparkline_closes, so the cost is one
             # 3-month fetch per pick per fragment refresh cycle at most.
-            _b_hover_svg = _sparkline_svg(_sparkline_closes(_b["ticker"]))
+            _b_hover_svg = _sparkline_svg(_pk_spark.get(_b["ticker"]) or [])
             _bl_hover = ticker_hover_wrap(
                 _bl,
                 sparkline_svg=_b_hover_svg,
@@ -1019,7 +1038,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<span><span style="font-size:16px;font-weight:700;color:var(--ink)">{_bl_hover}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · '
+                f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/90 · '
                 f'{_display_label(_b["action"])}</span>'
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
@@ -1054,11 +1073,11 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     with _pk_sell:
         st.markdown(
             '<div class="t-h2" style="margin:8px 0 6px 0">'
-            '🔴 Sell / Avoid</div>',
+            '🔴 Weakest trends</div>',
             unsafe_allow_html=True,
         )
         if not _picks["sells"]:
-            st.caption("No clear sell signals — nothing flashing red in the scan.")
+            st.caption("No names in the weak/broken-trend band in today's scan.")
         for _sv in _picks["sells"]:
             _svl = _sv["ticker"].replace(".NS", "")
             # FIX CC-LIVE1: same bounded pattern as the Buy loop above —
@@ -1079,7 +1098,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _sv_live_price = float(_sv_lp["price"]) if _sv_lp else None
             _sv_tick_cls = _pk_pulse(_sv["ticker"], _sv_live_price) if _sv_live_price else ""
             # UX2 · hover preview — same pattern as the Buy loop above.
-            _sv_hover_svg = _sparkline_svg(_sparkline_closes(_sv["ticker"]))
+            _sv_hover_svg = _sparkline_svg(_pk_spark.get(_sv["ticker"]) or [])
             _svl_hover = ticker_hover_wrap(
                 _svl,
                 sparkline_svg=_sv_hover_svg,
@@ -1093,7 +1112,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'border-left:4px solid var(--bear);border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
                 f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_svl_hover}</span>'
-                f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/100 · '
+                f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/90 · '
                 f'{_display_label(_sv["action"])}</span>'
                 f'</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{_sv["headline"]}</div>'

@@ -28,6 +28,11 @@ STT_RATE       = 0.001   # 0.1% on sell side (equity delivery)
 BROKERAGE_RATE = 0.0003  # 0.03% per leg (Zerodha flat ₹20 per order, approx)
 EXCHANGE_FEES  = 0.00035 # NSE transaction charges + SEBI fees + GST (approx)
 TOTAL_COST     = STT_RATE + 2 * BROKERAGE_RATE + 2 * EXCHANGE_FEES  # round-trip
+# FIX BT-COMMISSION (2026-09-24) — backtesting.py charges `commission` on
+# EVERY fill (entry AND exit), so passing the round-trip rate double-charged
+# (~0.46% per trade instead of ~0.23%). Pass the per-side rate; the charged
+# round trip then equals TOTAL_COST (STT is averaged across both legs).
+PER_SIDE_COST  = TOTAL_COST / 2
 
 
 def run_backtest(
@@ -35,7 +40,7 @@ def run_backtest(
     strategy_cls: Type,
     period: str = "2y",
     cash: float = 1_000_000,
-    commission: float = TOTAL_COST,
+    commission: float = PER_SIDE_COST,
     plot: bool = True,
     optimize: bool = False,
     strategy_params: dict = None,
@@ -51,7 +56,8 @@ def run_backtest(
         strategy_cls:    Strategy class (from strategies/)
         period:          yfinance period string
         cash:            Starting capital in INR
-        commission:      Round-trip commission rate (default: realistic Indian market costs)
+        commission:      PER-SIDE commission rate, charged on entry and exit
+                         (default PER_SIDE_COST = half the Indian round trip)
         plot:            Show backtesting.py chart for the last ticker (default True)
         optimize:        Run parameter optimisation (slow — only for single ticker)
         strategy_params: Dict of parameter overrides from Phase 2a optimiser

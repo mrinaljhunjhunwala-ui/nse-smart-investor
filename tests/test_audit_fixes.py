@@ -248,18 +248,18 @@ def test_num_helper_falls_back_on_nan_as_well_as_missing():
 
 
 def test_sma_stack_not_penalised_when_sma200_is_still_warming_up():
-    """A short-history stock in a clean uptrend must not be scored the same as
-    one genuinely trading below its 200-day average."""
+    """Updated for FIX SMA-NEUTRAL (audit 2026-09-24): the old price*0.80
+    fallback awarded points for UNKNOWN data. A warming-up SMA_200 now earns
+    no SMA-stack points (neutral), and the breakdown marks it unavailable so
+    it is distinguishable from a stock genuinely trading below its 200-DMA."""
     from analysis.score import _score_technical
 
     df = add_all_indicators(_ohlcv(n=120, drift=0.9))   # < 200 bars → SMA_200 NaN
     assert df["SMA_200"].isna().all(), "precondition: SMA_200 has no valid value yet"
 
     _, detail = _score_technical(df)
-    assert detail["sma"] > 0.0, (
-        "SMA stack scored 0/10 purely because SMA_200 was NaN — the documented "
-        "price*0.80 fallback never applied"
-    )
+    assert detail["sma"] == 0.0
+    assert detail["sma_available"] is False
 
 
 def test_missing_60d_history_is_neutral_not_penalised():

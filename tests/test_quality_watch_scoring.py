@@ -1,49 +1,17 @@
-"""tests/test_quality_watch_scoring.py — regression coverage for
-dashboard/pages/19_quality_watch.py's _compute_quality_score().
+"""tests/test_quality_watch_scoring.py — regression coverage for the Quality
+Watch score (FIX QW1 rescaling of missing ratios).
 
-This was previously untested (no test_quality_watch* file existed at all),
-which is very likely why FIX QW1 went unnoticed: missing ROE/ROCE/D-E data
-was silently scoring 0 for the `quality_ratios` component (up to 20 of 100
-points) instead of being rescaled by whatever metrics were actually
-available — directly distorting the Ranked Results sort order for any
-stock with incomplete Yahoo coverage, with no indication of why in the UI.
-
-19_quality_watch.py is a Streamlit page (runs st.title() etc. at import
-time), so it can't be `import`-ed directly in a test process without side
-effects. _extract_score_fn() pulls just the pure function + the two
-constant dicts it depends on out of the page's AST and execs them in an
-isolated namespace — no Streamlit code runs.
+The formula moved from dashboard/pages/19_quality_watch.py into the pure
+analysis/quality_watch.py (audit 2026-09-24), so it is imported directly —
+no AST extraction from the Streamlit page needed any more.
 """
-import ast
-import os
-
 import pytest
-
-_PAGE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "dashboard", "pages", "19_quality_watch.py",
-)
-
-
-def _extract_score_fn():
-    src = open(_PAGE_PATH, encoding="utf-8").read()
-    tree = ast.parse(src, filename=_PAGE_PATH)
-    ns = {}
-    wanted_assigns = {"_POSTURE_POINTS", "_CONFIDENCE_POINTS"}
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id in wanted_assigns for t in node.targets
-        ):
-            exec(compile(ast.Module(body=[node], type_ignores=[]), "<extract>", "exec"), ns)
-        if isinstance(node, ast.FunctionDef) and node.name == "_compute_quality_score":
-            exec(compile(ast.Module(body=[node], type_ignores=[]), "<extract>", "exec"), ns)
-    assert "_compute_quality_score" in ns, "extraction failed — page structure may have changed"
-    return ns["_compute_quality_score"]
 
 
 @pytest.fixture(scope="module")
 def compute_quality_score():
-    return _extract_score_fn()
+    from analysis.quality_watch import compute_quality_score as fn
+    return fn
 
 
 def test_full_data_unaffected(compute_quality_score):

@@ -104,7 +104,7 @@ def render_pick_analysis(pick: dict, key_prefix: str):
             f'border-radius:10px;padding:10px 12px;margin-bottom:8px">'
             f'<span style="font-size:18px">🧭</span>'
             f'<div style="font-size:12.5px;color:#dce6ff;line-height:1.5">'
-            f'<b>Why {tkr} scored {pick.get("score", 0):.0f}/100:</b><br>{html.escape(narr)}</div></div>',
+            f'<b>Why {tkr} scored {pick.get("score", 0):.0f}/90:</b><br>{html.escape(narr)}</div></div>',
             unsafe_allow_html=True)
 
         st.caption("How the score was built")

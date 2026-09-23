@@ -21,6 +21,8 @@ _STT        = 0.001
 _BROKERAGE  = 0.0003
 _EXCHANGE   = 0.00035
 TOTAL_COST  = _STT + 2 * _BROKERAGE + 2 * _EXCHANGE
+# FIX BT-COMMISSION — backtesting.py charges commission per fill; see runner.py.
+PER_SIDE_COST = TOTAL_COST / 2
 
 
 def run_portfolio_backtest(
@@ -29,7 +31,7 @@ def run_portfolio_backtest(
     period: str = "2y",
     total_cash: float = 1_000_000,
     strategy_params: Optional[Dict] = None,
-    commission: float = TOTAL_COST,
+    commission: float = PER_SIDE_COST,
     save_chart: bool = True,
 ) -> pd.DataFrame:
     """
@@ -41,7 +43,7 @@ def run_portfolio_backtest(
         period:          Data period (yfinance string)
         total_cash:      Total capital in INR — split equally across tickers
         strategy_params: Optimised param dict from Phase 2a (None = defaults)
-        commission:      Round-trip commission rate
+        commission:      Per-side commission rate (charged on entry and exit)
         save_chart:      Save HTML chart for the best-Sharpe ticker
 
     Returns:

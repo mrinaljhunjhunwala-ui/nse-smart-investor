@@ -64,6 +64,7 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.cache import load_ticker_df
 from dashboard.shared.chart_helpers import _ROOT, render_top_bar
 from dashboard.shared.table_styles import arrow_fmt, pnl_styler
+from backtest.display import integer_columns, signed_columns  # noqa: E402
 
 apply_design()
 render_sidebar(current="Backtest")
@@ -72,7 +73,13 @@ render_top_bar()
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown('<h1 class="page-title-serif">Backtest <em>Results</em></h1>', unsafe_allow_html=True)
 
-st.caption("Historical strategy performance — how would these signals have done in the past?")
+st.caption(
+    "Historical performance of the rule-based **RSI-MACD** and **Momentum** "
+    "strategies in `strategies/` — how would those rules have done in the past? "
+    "This is **not** a test of the 0–90 composite score or of the verdicts shown "
+    "elsewhere in the app; for how the app's own logged verdicts played out, see "
+    "**Verdict Calibration**. Costs: ~0.115% charged per side (~0.23% round trip)."
+)
 
 render_survivorship_notice()
 render_backtest_assumptions()
@@ -92,13 +99,20 @@ def _bt_table_styler(frame: pd.DataFrame, ret_col):
     """P2 · P&L table pattern for backtest results — rows tinted by return,
     ▲/▼ + sign colour on return columns (bold beyond ±10%), 2dp elsewhere.
     Replaces the RdYlGn gradient, which relied on red/green hue alone."""
-    _signed = [c for c in frame.columns
-               if c == ret_col or "Buy & Hold" in str(c) or "Return" in str(c)]
+    # Audit 2026-09-24: signed columns now include portfolio.py's "B&H (%)"
+    # and "Alpha (%)"; count columns (# Trades) render as integers.
+    _signed = signed_columns(frame, ret_col)
+    _ints = set(integer_columns(frame))
     _fmts = {}
     for c in frame.columns:
         if not pd.api.types.is_numeric_dtype(frame[c]):
             continue
-        _fmts[c] = arrow_fmt(2, "%") if c in _signed else "{:.2f}"
+        if c in _signed:
+            _fmts[c] = arrow_fmt(2, "%")
+        elif c in _ints:
+            _fmts[c] = "{:,.0f}"
+        else:
+            _fmts[c] = "{:.2f}"
     return pnl_styler(frame, tint_col=ret_col or "", signed_cols=_signed,
                       formats=_fmts, bold_at={c: 10.0 for c in _signed},
                       full_at=30.0)
@@ -324,10 +338,11 @@ if _bt_run and not st.session_state.get("bt_running", False):
         from strategies.rsi_macd import RSIMACDStrategy
         from strategies.momentum import MomentumStrategy
         try:
-            from backtest.runner import TOTAL_COST as _BT_COST
+            # Per-side: backtesting.py charges commission on entry AND exit.
+            from backtest.runner import PER_SIDE_COST as _BT_COST
         except Exception as e:
-            _log.debug("TOTAL_COST import failed, using fallback constant: %s", e)
-            _BT_COST = 0.0023
+            _log.debug("PER_SIDE_COST import failed, using fallback constant: %s", e)
+            _BT_COST = 0.00115
 
         _strat_cls   = RSIMACDStrategy if _bt_strat.startswith("RSI") else MomentumStrategy
         _bt_tickers  = get_universe(_uni_map[_bt_uni])

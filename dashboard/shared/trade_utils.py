@@ -584,8 +584,8 @@ _ACTION_DISPLAY_LABELS = {
     "WATCHLIST":  "Watch",
     "HOLD":       "Neutral",
     "CAUTION":    "Weakening ▼",
-    "EXIT":       "Exit Signal ▼▼",
-    "SELL":       "Exit Signal ▼▼",   # legacy alias from signals.py
+    "EXIT":       "Broken Trend ▼▼",
+    "SELL":       "Broken Trend ▼▼",   # legacy alias from signals.py
 }
 
 
@@ -600,6 +600,22 @@ def _display_label(action: str) -> str:
     sort keys, signal logic). Only the display layer uses this function.
     """
     return _ACTION_DISPLAY_LABELS.get(action, action)
+
+
+# FinalVerdict (analysis/final_verdict.VERDICTS) → descriptive display label.
+# Internal verdict strings are unchanged; this is display-only (CLAUDE.md rule 1).
+_VERDICT_DISPLAY_LABELS = {
+    "STRONG BUY": "Strong trend ▲▲",
+    "BUY":        "Uptrend ▲",
+    "WATCH":      "Mixed signals",
+    "HOLD":       "Neutral",
+    "AVOID":      "Weak / broken trend ▼",
+}
+
+
+def verdict_display_label(verdict: str) -> str:
+    """Descriptive UI label for a FinalVerdict value (never an instruction)."""
+    return _VERDICT_DISPLAY_LABELS.get(verdict, verdict)
 
 
 def _grade_color(grade: str) -> str:
