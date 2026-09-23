@@ -127,7 +127,8 @@ def test_page_loads_without_exception(page):
     )
     # Belt-and-braces for any other silent bail-out (compile error on a
     # Streamlit version whose handling differs, script never started, ...):
-    # every page renders at least its sidebar nav / title, so an empty
-    # element tree means the script did not actually run.
-    rendered = len(at.main.children) + len(at.sidebar.children)
-    assert rendered > 0, f"{name} rendered no elements — script did not run"
+    # render_sidebar() always populates the sidebar, so counting it would make
+    # this vacuous. Every page renders at least its top bar / title in the MAIN
+    # area, so an empty main tree means the page body never ran.
+    rendered = len(at.main.children)
+    assert rendered > 0, f"{name} rendered no main-area elements — page body did not run"

@@ -13,6 +13,7 @@ st.markdown(..., unsafe_allow_html=True). Nothing here touches Streamlit —
 these are pure string builders, testable in isolation.
 """
 from __future__ import annotations
+import math
 
 from typing import Optional
 
@@ -772,6 +773,14 @@ def ticker_hover_wrap(display_label: str,
     (a ``sparkline_svg`` needs a ``_sparkline_svg(_sparkline_closes(t))``
     call — spec that at the caller site, not here).
     """
+    def _finite(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if math.isfinite(f) else None
+
+    price, chg_pct, score = _finite(price), _finite(chg_pct), _finite(score)
     rows_html = ""
     if price is not None or chg_pct is not None:
         _p_txt = f"₹{price:,.2f}" if price is not None else "—"
@@ -798,7 +807,7 @@ def ticker_hover_wrap(display_label: str,
             f'<div class="thc-row">'
             f'<span class="thc-sym">Score</span>'
             f'<span class="thc-score" style="background:{_s_bg};color:{_s_col}">'
-            f'{score:.0f}/100</span>'
+            f'{score:.0f}/90</span>'
             f'</div>'
         )
     if sparkline_svg:

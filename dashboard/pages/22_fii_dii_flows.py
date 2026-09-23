@@ -31,6 +31,7 @@ from dashboard.shared.design import apply_design  # noqa: E402
 from dashboard.shared.nav import render_sidebar  # noqa: E402
 from dashboard.shared.chart_helpers import (  # noqa: E402
     render_top_bar, PLOT_COLORS as _PC, diverging_colors as _div,
+    finite_abs_peak as _finite_peak,
 )
 
 # FIX: this page previously called st.set_page_config, which violates the
@@ -100,6 +101,11 @@ if _df.empty:
     st.stop()
 
 _df["date"] = pd.to_datetime(_df["date"])
+# Postgres returns NULL nets as object-dtype None; coerce every flow column so
+# sums / abs / comparisons below never hit None or numeric strings.
+for _nc in ("fii_buy", "fii_sell", "fii_net", "dii_buy", "dii_sell", "dii_net"):
+    if _nc in _df.columns:
+        _df[_nc] = pd.to_numeric(_df[_nc], errors="coerce")
 _df = _df.sort_values("date").reset_index(drop=True)
 
 # ── Overview strip ────────────────────────────────────────────────────────────
@@ -141,14 +147,14 @@ elif _fii_5 < 0 and _dii_5 > 0:
 elif _fii_5 < 0 and _dii_5 < 0:
     _rg_icon, _rg_title, _rg_body, _rg_rail = (
         "🔴", "Distribution",
-        "Both selling. Historically precedes weakness. Trim marginal positions; "
-        "avoid new BUYs on high-beta names.",
+        "Both selling. Historically this regime has preceded weakness, "
+        "with high-beta names typically most affected.",
         "var(--bear)",
     )
 elif _fii_5 > 0 and _dii_5 < 0:
     _rg_icon, _rg_title, _rg_body, _rg_rail = (
         "🟡", "DII profit-taking rally",
-        "FIIs buying, DIIs selling. Rallies tend to be shallower; keep stops tight.",
+        "FIIs buying, DIIs selling. Rallies in this regime have historically been shallower.",
         "var(--amber)",
     )
 else:
@@ -191,24 +197,30 @@ st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
 # sign only (bull/bear) with opacity scaling by magnitude. Shared y-scale so
 # bar heights compare across panels.
 from plotly.subplots import make_subplots as _mk_sub
-_fig = _mk_sub(rows=2, cols=1, shared_xaxes=True, shared_yaxes=True,
-               vertical_spacing=0.08,
-               subplot_titles=("FII / FPI net", "DII net"))
-_fd_peak = float(pd.concat([_df["fii_net"], _df["dii_net"]]).abs().max() or 1.0)
-for _row, _col, _nm in ((1, "fii_net", "FII net"), (2, "dii_net", "DII net")):
-    _fig.add_bar(
-        x=_df["date"], y=_df[_col], name=_nm, showlegend=False,
-        marker_color=_div(_df[_col].fillna(0), full_at=_fd_peak),
-        hovertemplate="%{x|%d %b}<br>" + _nm + ": ₹%{y:,.0f} Cr<extra></extra>",
-        row=_row, col=1,
+_fd_peak = _finite_peak(_df["fii_net"], _df["dii_net"])
+if _fd_peak is None:
+    st.caption("No net-flow values in this window yet — daily bars will "
+               "appear once the ledger has non-empty FII/DII nets.")
+else:
+    _fig = _mk_sub(rows=2, cols=1, shared_xaxes=True,
+                   vertical_spacing=0.08,
+                   subplot_titles=("FII / FPI net", "DII net"))
+    for _row, _col, _nm in ((1, "fii_net", "FII net"), (2, "dii_net", "DII net")):
+        _fig.add_bar(
+            x=_df["date"], y=_df[_col], name=_nm, showlegend=False,
+            marker_color=_div(_df[_col].fillna(0), full_at=_fd_peak),
+            hovertemplate="%{x|%d %b}<br>" + _nm + ": ₹%{y:,.0f} Cr<extra></extra>",
+            row=_row, col=1,
+        )
+        _fig.add_hline(y=0, line_dash="dash", line_color=_PC["faint"], row=_row, col=1)
+    _fig.update_layout(
+        height=460, margin=dict(l=40, r=20, t=30, b=40),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     )
-    _fig.add_hline(y=0, line_dash="dash", line_color=_PC["faint"], row=_row, col=1)
-_fig.update_layout(
-    height=460, margin=dict(l=40, r=20, t=30, b=40),
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-)
-_fig.update_yaxes(title_text="₹ Crore")
-st.plotly_chart(_fig, width="stretch")
+    # shared_yaxes=True only links axes within a ROW; stacked rows need an
+    # explicit match so FII and DII bar heights share one scale.
+    _fig.update_yaxes(title_text="₹ Crore", matches="y")
+    st.plotly_chart(_fig, width="stretch")
 
 # DT1 + DT2 · flows are scraped from NSE — surface WHERE + WHEN.
 try:

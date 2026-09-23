@@ -361,14 +361,38 @@ def diverging_colors(values, full_at: float | None = None) -> list:
     """Per-bar diverging colours: hue by sign (bull/bear), opacity by
     magnitude (0.35 → 1.0 at |v| >= full_at; full_at defaults to the max |v|).
     One encoding per channel: sign = hue, size = strength."""
-    vals = [0.0 if (v is None or v != v) else float(v) for v in values]
-    peak = full_at or max((abs(v) for v in vals), default=0) or 1.0
+    vals = []
+    for v in values:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            f = 0.0
+        vals.append(f if math.isfinite(f) else 0.0)
+    try:
+        peak = float(full_at) if full_at is not None else 0.0
+    except (TypeError, ValueError):
+        peak = 0.0
+    if not math.isfinite(peak) or peak <= 0:
+        # None / NaN / inf / <=0 → compute from data (NaN would otherwise
+        # leak into "rgba(...,nan)" and make Plotly raise ValueError).
+        peak = max((abs(v) for v in vals), default=0.0) or 1.0
     out = []
     for v in vals:
         r, g, b = _hex_to_rgb(_TOKENS["bull"] if v >= 0 else _TOKENS["bear"])
         a = 0.35 + 0.65 * min(abs(v) / peak, 1.0)
         out.append(f"rgba({r},{g},{b},{a:.2f})")
     return out
+
+
+def finite_abs_peak(*series) -> float | None:
+    """Largest finite |value| across the given series, coercing object dtype
+    (e.g. Postgres NULL → None) to numeric. Returns None when nothing is
+    finite so callers can render an empty state instead of a NaN chart."""
+    parts = [pd.to_numeric(pd.Series(s), errors="coerce") for s in series]
+    if not parts:
+        return None
+    peak = pd.concat(parts).abs().max()
+    return float(peak) if pd.notna(peak) and math.isfinite(peak) else None
 
 
 def rdylgn_bg(val: float, vmin: float, vmax: float) -> str:
