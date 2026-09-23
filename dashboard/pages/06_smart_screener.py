@@ -240,6 +240,26 @@ if scan_btn:
             from dashboard.shared.table_styles import (
                 posture_label as _ts_posture, pinned_text_col as _ts_pin,
             )
+            # Sparkline column — 22 daily closes per row via the shared,
+            # 5-min-cached _sparkline_closes. Same bounded-pool pattern as the
+            # revenue-growth fetch above: anything not back in 15 s renders as
+            # an empty cell, never blocks the table.
+            from concurrent.futures import ThreadPoolExecutor as _SpPool, wait as _sp_wait
+            from dashboard.shared.cache import _sparkline_closes
+            _spark = {}
+            _sp_pool = _SpPool(max_workers=8)
+            try:
+                _sp_futs = {_sp_pool.submit(_sparkline_closes, _sg["ticker"]): _sg["ticker"]
+                            for _sg in signals[:30]}
+                _sp_done, _ = _sp_wait(list(_sp_futs), timeout=15)
+                for _f in _sp_done:
+                    try:
+                        _spark[_sp_futs[_f]] = _f.result(timeout=0) or []
+                    except Exception:
+                        _spark[_sp_futs[_f]] = []
+            finally:
+                _sp_pool.shutdown(wait=False, cancel_futures=True)
+
             _sig_rows = []
             for _rank, _sg in enumerate(signals[:30], start=1):
                 _sg_px = _sg.get("price", 0) or 0
@@ -251,10 +271,16 @@ if scan_btn:
                     "Sector": _sg.get("sector", "") or "—",
                     "Score": _sg.get("composite_score") if enrich_scores else None,
                     "Price": _sg_px,
+                    "22d": _spark.get(_sg["ticker"], []),
                     "R:R": _sg["_rr"],
                     "Rev Growth /yr": _sg.get("rev_growth"),
                 })
             _sig_df = pd.DataFrame(_sig_rows)
+            # Coerce numeric columns so a missing value renders as an empty
+            # cell — an all-None leading run left R:R as object dtype and the
+            # grid printed the literal string "None".
+            for _nc in ("Score", "Price", "R:R", "Rev Growth /yr"):
+                _sig_df[_nc] = pd.to_numeric(_sig_df[_nc], errors="coerce")
             if not enrich_scores:
                 _sig_df = _sig_df.drop(columns=["Score"])
             st.dataframe(
@@ -271,6 +297,9 @@ if scan_btn:
                     "Price": st.column_config.NumberColumn(format="₹%.2f"),
                     "R:R": st.column_config.NumberColumn(format="%.1fx"),
                     "Rev Growth /yr": st.column_config.NumberColumn(format="%+.1f%%"),
+                    "22d": st.column_config.LineChartColumn(
+                        "22d", width="small",
+                        help="Last 22 daily closes (shape only — each row is self-scaled)."),
                 },
             )
             st.caption("Ranked summary — expand a setup below for entry, "

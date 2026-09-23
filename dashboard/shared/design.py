@@ -866,8 +866,9 @@ def apply_design():
     /* ── P2 · Investor Guide long-form typography (15_investor_guide.py) ───
        Self-contained block. Scoped via the .guide-doc marker on the page H1
        so no other page's markdown picks up the 15/1.6 body scale.
-       H1 32/700 · H2 22/700 · body 15/1.6. */
-    .page-title-serif.guide-doc { font-size: 32px; font-weight: 700; }
+       H2 22/700 · body 15/1.6. The H1 deliberately keeps the shared
+       .page-title-serif scale (serif, !important) so the guide title matches
+       every other page — a 32/700 override here could never win anyway. */
     .t-h2.guide-h2 { font-size: 22px; font-weight: 700; line-height: 1.25;
                      margin-top: 22px !important; }
     [data-testid="stMain"]:has(.guide-doc) [data-testid="stMarkdownContainer"] p,
@@ -875,7 +876,6 @@ def apply_design():
         font-size: 15px; line-height: 1.6;
     }
     @media (max-width: 480px) {
-        .page-title-serif.guide-doc { font-size: 24px !important; }
         .t-h2.guide-h2 { font-size: 18px; }
     }
 

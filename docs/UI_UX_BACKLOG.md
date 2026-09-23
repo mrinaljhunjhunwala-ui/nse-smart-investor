@@ -102,7 +102,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ Two-column layout — verified: page uses only `st.columns` (no inline flex grids), which the F2 `stHorizontalBlock` media query (#146) stacks on mobile. No change needed.
 
 ### [`06_smart_screener.py`](../dashboard/pages/06_smart_screener.py) — Smart Screener
-- ✅ Signal-table summary above setup cards: rank, shape-coded posture, sector, score bar, R:R, rev growth. (Sparkline column deferred — screener doesn't carry a price series per signal.)
+- ✅ Signal-table summary above setup cards: rank, shape-coded posture, sector, score bar, R:R, rev growth. Sparkline column (22 daily closes via cached `_sparkline_closes`, bounded 15 s pool) added in the follow-up.
 
 ### [`07_paper_trades.py`](../dashboard/pages/07_paper_trades.py) — Paper Trades
 - ✅ F3 widget chrome (#139).

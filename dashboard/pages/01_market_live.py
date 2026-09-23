@@ -304,6 +304,7 @@ else:
                         .reset_index())
         if not _sec_agg.empty:
             import plotly.graph_objects as _go
+            from dashboard.shared.tokens import COLORS as _TOK
             _peak = max(float(_sec_agg["chg"].abs().max()), 1.0)
             _fig = _go.Figure(_go.Treemap(
                 labels=_sec_agg["sector"],
@@ -311,14 +312,21 @@ else:
                 values=_sec_agg["n"],
                 customdata=_sec_agg[["chg", "n"]].values,
                 marker=dict(colors=diverging_colors(_sec_agg["chg"], full_at=_peak),
-                            line=dict(width=1, color=PLOT_COLORS["faint"])),
+                            line=dict(width=2, color=_TOK["ground"])),
+                # Light ink on every tile: the alpha-scaled fills sit on the
+                # dark ground, so even the strongest tile is dark enough for
+                # --ink text (Plotly's auto-contrast picked near-black labels
+                # that vanished on the darker, low-magnitude tiles).
                 texttemplate="%{label}",
+                textfont=dict(color=_TOK["ink"], size=12),
+                textposition="middle center",
                 hovertemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}% avg"
                               " · %{customdata[1]} stocks<extra></extra>",
             ))
             _fig.update_layout(height=320, margin=dict(l=0, r=0, t=0, b=0),
                                paper_bgcolor="rgba(0,0,0,0)")
-            st.markdown("#### 🗺️ Sector Heatmap")
+            st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
+                        '🗺️ Sector Heatmap</div>', unsafe_allow_html=True)
             st.plotly_chart(_fig, use_container_width=True)
             st.caption("Tile size = stocks tracked · colour hue = direction, "
                        "intensity = size of the average move. Hover for %.")
