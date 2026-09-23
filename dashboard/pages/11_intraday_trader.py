@@ -838,9 +838,9 @@ with tab_pcr:
     elif pcr_input < 1.2:
         pcr_sig, pcr_fg, pcr_bg = "🟢 Healthy range — no extreme reading, normal conditions.", "var(--bull)", "var(--tint-bull)"
     elif pcr_input < 1.5:
-        pcr_sig, pcr_fg, pcr_bg = "🟡 Mildly Bearish — fear building. Caution on fresh longs.", "var(--amber)", "var(--tint-amber)"
+        pcr_sig, pcr_fg, pcr_bg = "🟡 Mildly Bearish — fear building (put activity rising relative to calls).", "var(--amber)", "var(--tint-amber)"
     else:
-        pcr_sig, pcr_fg, pcr_bg = "🟢 Extreme Fear — too many put buyers. Contrarian BULLISH. Bounce setup.", "var(--bull)", "var(--tint-bull)"
+        pcr_sig, pcr_fg, pcr_bg = "🟢 Extreme Fear — too many put buyers. historically a contrarian-bullish reading (crowded hedging).", "var(--bull)", "var(--tint-bull)"
 
     st.markdown(
         f'<div style="background:{pcr_bg};padding:14px;border-radius:8px;'

@@ -32,7 +32,10 @@ import pytest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _EXCLUDE_DIRS = {".venv", ".git", "__pycache__", ".pytest_cache",
-                 ".mypy_cache", ".ruff_cache", "build", "dist"}
+                 ".mypy_cache", ".ruff_cache", "build", "dist",
+                 # agent git worktrees (.claude/worktrees/*) are full repo
+                 # copies — scanning them doubled the suite. Hooks stay in.
+                 "worktrees"}
 
 
 def _iter_py_files():

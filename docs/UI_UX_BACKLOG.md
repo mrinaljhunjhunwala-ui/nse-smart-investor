@@ -110,7 +110,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ P&L block now uses Indian lakh/crore comma grouping via the shared `fmt_inr()` helper — `12,34,567` not `1,234,567`. Sign remains carried by the leading ▲/▼ arrow.
 
 ### [`08_backtest.py`](../dashboard/pages/08_backtest.py) — Backtest
-- 🟨 Equity curve: default Plotly axes; migrate to `nse_pro` template (should already inherit, verify).
+- ✅ Equity curve + comparison chart both set `template="nse_pro"` (and it's the global `pio.templates.default`) — verified.
 - ✅ Results tables: RdYlGn gradient replaced with the P&L pattern (row tint + ▲/▼ + bold beyond ±10%).
 
 ### [`11_intraday_trader.py`](../dashboard/pages/11_intraday_trader.py) — Intraday Trader

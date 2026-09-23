@@ -1,92 +1,94 @@
-# Handoff — 2026-09-23 · UI/UX polish + UX2 hover previews
+# Handoff — 2026-09-23 (session 2) · P2 backlog closed + tech-debt sweep
 
 ## Repo state
-- **`main` at `f3e62ad`** — CI green, working tree clean, origin/main synced.
-- **Canonical checkout:** `D:\Kashti Claude\nse-smart-investor` (per memory).
-- **Open PRs:** none from this session.
+- **`main` includes #150 → #161** — CI green on every PR, origin/main synced.
+- **Canonical checkout:** `D:\Kashti Claude\nse-smart-investor`.
+- **Open PRs:** none.
+- **Leftover agent worktrees** under `.claude/worktrees/agent-*` (were lock-held by the agents while running). Safe to remove: `git worktree list`, then `git worktree remove --force <path>` for each `agent-*`. `.claude/worktrees/` and `archive/` are untracked; don't commit them.
 
-## What shipped this session — 6 merged PRs
+## What shipped this session — 12 merged PRs
 
-| Ref | Title | User-visible effect |
-|---|---|---|
-| [#144](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/144) `bfdb569` | design · UX3 extension | `.tick-pulse-{up,down}` one-shot halo now fires on Market Live movers, Command Centre top-picks buy + sell cards, My Portfolio holdings cards. New shared helper `tick_pulse_tracker(key)` in `chart_helpers.py` — `(pulse_cls, commit)` pair, auto-prunes stale prev-values. |
-| [#145](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/145) `982f335` | feat · UX1 Ctrl+K command palette | Modal upgrade of the sidebar command bar. `@st.dialog` modal, JS keydown listener via `components.v1.html`, visible sidebar `⌘ K` trigger button (also click-tappable). Sidebar bar retained as AppTest-safe fallback. Shared `_cmdbar_navigate()` factored out so both surfaces route identically. |
-| [#146](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/146) `265a3aa` | design · F2 mobile responsive pass | Below 768 px: `st.columns()` rows collapse via `[data-testid="stHorizontalBlock"]` override, new `.mobile-stack` utility for raw flex-row card grids (Command Centre Market Pulse, Portfolio stat tiles), `.topbar-chip` min-width shrunk, `.t-display`/`.t-h1`/`.page-title-serif`/`.score-big` scaled down, block-container padding tightened. Second `@media (max-width: 480px)` tightens phone-only. |
-| [#147](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/147) `769e7b0` | design · F7b colour-blind Styler migration | Intraday Trader (Gap %, Day Chg %) and Angel One (P&L Rs, P&L %, Positions P&L) pandas Styler dataframes now get **▲/▼ arrow prefix via `Styler.format`** + **`font-weight: 700`** on high-magnitude cells. Direction survives red-green colour-vision deficiency. Categorical status columns untouched. |
-| [#148](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/148) `50d9e3b` | polish · P2 sweep + backlog refresh | New shared `fmt_inr()` helper in `ui_components.py` — Indian lakh/crore comma grouping (`12,34,567` not `1,234,567`). Wired into Paper Trades P&L block. Analyze Stock "confirmation unavailable" branch got a `⏸` prefix so it's iconographically distinct from `⚠` warnings. `docs/UI_UX_BACKLOG.md` refreshed to mark F7b/F2/UX1/UX3/copy-polish/P&L-format/conviction-icon all ✅. |
-| [#150](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/150) `f3e62ad` | feat · UX2 hover preview cards on tickers | Pure-CSS `:hover` tooltip on Command Centre top-picks (buy + sell) ticker labels. Shows mini sparkline (~22-day polyline SVG) + live price + delta + score chip toned by the pick's composite. New public helper `ticker_hover_wrap()` in `ui_components.py` — other surfaces (Market Live, Portfolio, Analyze Stock) can adopt. Hidden below 768 px so F2 mobile layout wins. Rebased replacement of #149 which conflicted with #148 on shared-helper insertion. |
+| PR | What changed |
+|---|---|
+| [#150](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/150) | UX2 hover preview cards on Command Centre top picks (carried over from session 1). |
+| [#151](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/151) | P&L table pattern (03 holdings, 08 backtest), signal-table summary (06 screener), Clean/Amber/Red grouping (19). New `dashboard/shared/table_styles.py`. |
+| [#152](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/152) | 04 dismissible drift banner + earnings `chip_pill`; 18 four-pillar radar vs top-10 median; 22 FII/DII split panels with hue = sign only. `PLOT_COLORS` + `diverging_colors()` in `chart_helpers.py`. |
+| [#153](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/153) | UX2 hover rolled out: 03 holdings cards, 14 watchlist chip strip (new UI: the watchlist itself is a dataframe), 04 hero ticker. |
+| [#154](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/154) | 01 Market Live: new scrolling ticker tape, new sector heatmap, hover on movers. 02 Command Centre: single regime strip (VIX · breadth · scoring version); pick cards show 5 lines, rest behind a toggle. |
+| [#155](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/155) | 11 market-closed notice · 12 input cards · 13 journal `.t-h2` + data-as-of · 15 guide typography · 16 Angel One onboarding panels · 21 `nse_pro` chart. 05 needed no change. |
+| [#156](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/156) | Tech debt: `components.v1.html` → `st.html(unsafe_allow_javascript=True)` (Ctrl+K palette + alerts in `nav.py`); **`dashboard/shared/tokens.py`** is now the single colour source; R:R computed once on 06. |
+| [#157](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/157) | Streamlit floor **1.52.0** (checked in the wheels: `unsafe_allow_javascript` is absent in 1.51.0 and present in 1.52.0); descriptive Market Live idea cards; screener rank column pinned. |
+| [#158](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/158) | All `pd.read_sql_query` → `utils/sql.py::read_sql_df` (pure, re-exported from `trade_store`), removing the SQLAlchemy UserWarning. **Page smoke test now catches syntax errors** (see gotchas). |
+| [#159](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/159) | Heatmap label contrast; screener **22-day sparkline column**; missing R:R no longer prints "None"; removed a guide H1 rule that could never apply. |
+| [#160](https://github.com/mrinaljhunjhunwala-ui/nse-smart-investor/pull/160) | TQS signal/grade colours distinct again (`tokens.ordinal_ramp`, ≥4.5:1 contrast); **zero raw hex in any page**, enforced by a test. |
+| #161 | Advice-copy sweep (05, 11, 15, 17, 02 paper alerts, 04 FII/DII regime text, `cache._plain_english` rewritten descriptively) + **`tests/test_no_advice_copy.py`** guard. This handoff. |
 
-## Shared helpers available (new this session)
+## Shared helpers / modules (new this session)
 
-All in `dashboard/shared/`:
+- **`dashboard/shared/tokens.py`**: `COLORS` dict (single source; `design.py` builds `:root` from it), `rgba(name, a)`, `mix(a, b, t)`, `ordinal_ramp(n)`, `css_vars()`. Plotly/Styler code must read colours from here or `PLOT_COLORS`, never hex.
+- **`dashboard/shared/table_styles.py`**:
+  - `pnl_styler(df, tint_col, signed_cols, formats, bold_at)`
+  - `arrow_fmt(decimals, unit, prefix, indian)`
+  - `row_tint_css`
+  - `pinned_text_col`
+  - `posture_label` (the honest label, plus a shape glyph)
+- **`chart_helpers.py`**: `PLOT_COLORS`, `diverging_colors(values, full_at)` (hue = sign, opacity = magnitude).
+- **`utils/sql.py::read_sql_df(sql, conn, params)`**: cursor-based, works on SQLite and Postgres (`coerce_float=True` so NUMERIC columns don't come back as `Decimal`).
 
-- **`chart_helpers.py::tick_pulse_tracker(key)`** → `(pulse_cls, commit)` pair for one-shot `.tick-pulse-{up,down}` halos. Usage: `_cls, _commit = tick_pulse_tracker("_my_key")`, call `_cls(symbol, value)` per row, `_commit()` after the loop. Auto-prunes stale prev-values.
-- **`ui_components.py::fmt_inr(value, decimals=0)`** — Indian lakh/crore digit grouping. Unsigned magnitude (`abs()` yourself if you carry the sign via arrow/color).
-- **`ui_components.py::ticker_hover_wrap(display_label, sparkline_svg, price, chg_pct, score, sector)`** — pure-CSS `:hover` tooltip wrapper. All fields optional.
-- **`nav.py::_cmdbar_navigate(kind, target, q_state_key)`** — shared post-click routing for both the sidebar command bar and the Ctrl+K modal palette.
+## New guard tests (they fail CI, so don't work around them)
 
-## CSS classes added this session (in `design.py`)
+- `tests/test_tokens.py`: no raw hex in `dashboard/pages/*.py` (same exemptions as the hook); tokens are consumed by design, charts and tables; TQS ramps are distinct.
+- `tests/test_no_advice_copy.py`: bans instruction phrases ("buy dips", "avoid fresh", "consider selling", "lock in profit", …) in UI string literals under `dashboard/pages` + `dashboard/shared`. `dashboard/shared/ai/` and docstrings are exempt. Add phrasings when you find new ones.
+- `tests/test_pages_smoke.py`: now `compile()`s each page and fails on an empty render.
 
-- `.mobile-stack` — opt-in utility that flips inline `display:flex` to `flex-direction:column` below 768 px, for hand-rolled card-row grids that can't reach `data-testid`.
-- `.ticker-hover` / `.ticker-hover-card` — pure-CSS hover-preview tooltip system with arrow indicator, transitions, tab-focus support. Hidden below 768 px.
+## Still open (can't be closed from here)
 
-## Backlog remaining
+- **F2 real-device pass**: mobile layout checked only in Chromium emulation. It needs a real iOS Safari and Android Chrome check (pinch-zoom, keyboard reflow, momentum scroll).
+- **04 drift banner live check**: it only renders during market hours (09:15–15:30 IST) with live drift ≥ 0.5%. Code and smoke test are fine, but it hasn't been seen live. Open Analyze Stock during market hours and check that dismiss (✕) works.
+- **16 Angel One**: now a clean numbered 4-step panel, but not an interactive wizard (step state, validation). Only worth building if onboarding becomes a priority.
+- **C/D/F grade shades on page 18**: distinct but close (orange→red). Glance at them on a real screen.
 
-**From `docs/UI_UX_BACKLOG.md`:**
+## Verified live in the browser this session
+18 radar · 06 summary table + sparklines + pinned rank · 04 earnings chip · 01 tape (animating, 32 px) + heatmap + 10 hover movers · 15 guide H2/body sizes · Ctrl+K palette after the `st.html` migration · 02 regime strip.
 
-Real work:
-- **UX2 wider adoption** — the helper is public; only Command Centre top-picks is wired (from #150). Natural next surfaces: Market Live movers, My Portfolio holdings, watchlist rows, Analyze Stock ticker.
-- **F2 real-device pass** — verified in Chromium 375×812 but not on iOS Safari / real Android Chrome. Pinch-zoom, virtual-keyboard reflow, iOS momentum scroll are open.
-- **Page 04 Analyze Stock — Live drift caption → amber banner** — needs banner component design.
-- **Page 04 Analyze Stock — Earnings-date pill → signal-badge component** — component refactor.
-- **Page 16 Angel One "Not connected" → empty_state()** — deferred; it's a full 4-step onboarding wizard, not a bare "nothing here yet" state.
-- **Page 03 Holdings table → P&L table pattern** (row tinting, sticky first col).
-- **Page 06 Smart Screener → signal-table pattern** (rank chip, posture chip, sector chip, sparkline col).
-- **Page 08 Backtest trade-log** → same table upgrade.
-- **Page 18 TQS Scanner** → 4-pillar radar or bar.
-- **Page 19 Quality Watch** → RAG chip pattern grouping.
-- **Page 22 FII/DII Flows** → diverging-colour rule from `dataviz` skill.
-- **Page 05 Market Overview** — 🟨 F2 mobile note flagged (probably already covered by column-collapse, but hasn't been re-verified after #146).
+## Gotchas learned this session
 
-Housekeeping:
-- **Empty `E:\code\nse-smart-investor` directory shell** — `rmdir` when nothing's holding it. Prior session flagged this; I retried and got "Device or resource busy" again.
-
-## Session-specific gotchas learned this session
-
-- **PR conflicts on shared helper files** — #148 (added `fmt_inr`) and #149 (added `ticker_hover_wrap`) both patched `ui_components.py` at the same insertion point (right before `chip_delta`). Since both branched off the same base, they conflicted at merge time. Fix: rebased #149 on the merged main and opened as #150. Lesson: when stacking multiple PRs that touch shared helpers, either sequence them (base each new one off the prior) or use different insertion points.
-- **`gh pr merge` on a stacked branch fails with "cannot be cleanly created"** — that's a conflict, not a CI failure. Local rebase + fresh branch + new PR is the recovery path since force-push to the old branch is auto-blocked.
-- **Old Streamlit dev server can bind port 8501 from a previous session's cwd** — even after moving the repo. If you see "No such file or directory" pointing at an old path in the Streamlit error card, `netstat -ano | grep :8501` to find stale PIDs and `taskkill //PID <n> //F` them. Then start fresh with an absolute path to `app.py` (Streamlit tries to resolve `dashboard/app.py` against process cwd, not command-line cwd).
-- **`NSE_SKIP_LIVE_TOP_PICKS=1` on the dev server means Command Centre shows no picks** — useful for fast-loading pages but breaks any test that needs actual pick cards on screen.
+- **The page smoke test used to pass syntax-broken pages.** Streamlit 1.57 handles compile errors itself: it logs "Script compilation error" and sends a stop event, so `AppTest.exception` stays empty. Fixed in #158 with an explicit `compile()`. If you write a new AppTest-style test, don't rely on `at.exception` alone.
+- **`.page-title-serif` uses `!important` on size and weight.** A page-specific H1 override without `!important` silently loses. All page titles are deliberately the same serif scale.
+- **Plotly treemap auto-contrast picks near-black labels** on dark, low-alpha tiles. Set `textfont.color` explicitly.
+- **Mixed `None` + float in a DataFrame column can end up object dtype**, and `st.dataframe` prints a literal "None". Run `pd.to_numeric(..., errors="coerce")` first.
+- **Parallel agent PRs that all append to the end of the `design.py` CSS string conflict every time.** Resolution is always "keep both blocks". Merge them one at a time and resolve in the agent's worktree (the branch is checked out there, so `git checkout` in the main checkout fails).
+- **`gh pr checks` exits non-zero while checks are pending**, so `gh pr checks N && gh pr merge N` silently skips the merge. Use `gh pr checks N --watch` first.
+- **Stale Streamlit server on 8501** (from session 1) still applies. Use `preview_start` with `.claude/launch.json` (`NSE_SKIP_LIVE_TOP_PICKS=1` means Command Centre shows no picks).
+- **Agent worktrees used to double the local test suite.** `test_syntax_parses.py` walks the whole repo and was parsing the ~1,100 `.py` files in `.claude/worktrees/*`, taking the count from ~1,185 to 2,302. Fixed in #161 by excluding `worktrees`. If the count jumps again, check for another repo copy inside the tree.
+- **Timing:** the screener scan on NIFTY 50 takes about 2 minutes in the dev server, and a TQS scan about 30 s.
 
 ## Conventions (unchanged — don't relearn)
 
-- **Never** call `st.subheader` in a page — use `.t-h2` class per §9.4.
-- **Never** write raw hex in a page file — F1 hook at `.claude/hooks/block_page_hex.py` blocks it.
-- **Never** call `st.set_page_config` in a page — happens once in `dashboard/app.py`.
+- **Never** `st.subheader` in a page — `.t-h2` per §9.4.
+- **Never** raw hex in a page — now enforced by both the hook and `test_tokens.py`.
+- **Never** `st.set_page_config` in a page.
 - **Never** re-add candlestick to composite scoring.
-- **No buy/sell/hold** recommendation copy anywhere — verdict is posture, not instruction.
-- **Windows-first shell** — `py` not `python`, `PYTHONUTF8=1` for ₹.
+- **No buy/sell/hold instruction copy anywhere**, now enforced by `test_no_advice_copy.py`. Posture labels come from `trade_utils._display_label` (or `table_styles.posture_label`).
+- **Windows-first shell**: `py`, `PYTHONUTF8=1`.
 - **Hook-blocked files:** `portfolio.csv`, `*.db`, `*.sqlite`, `.streamlit/secrets.toml`, `.env*`.
-- **New research/alerts/tools/*.py with `__main__`** — MUST register in `tests/test_standalone_scripts_smoke.py::_STANDALONE_SCRIPTS` or CI breaks.
-- **Force-push** requires explicit user permission (auto mode blocks it). Prefer close-and-reopen when rebasing.
-- **User has standing push permission** — auto-push to remote right after committing (memory note from 2026-05-31). Still confirm before force-push / history rewrite.
+- **New research/alerts/tools/*.py with `__main__`** must be registered in `tests/test_standalone_scripts_smoke.py::_STANDALONE_SCRIPTS`.
+- **Force-push** needs explicit user permission; prefer close-and-reopen.
+- **Standing push permission**: auto-push after commit, and tell the user.
 
 ## Where things are
 
-- **Repo map:** `CLAUDE.md` at repo root
+- **Repo map:** `CLAUDE.md`
 - **Design doc:** `docs/UI_UX_DESIGN_2026-09.md`
-- **Backlog:** `docs/UI_UX_BACKLOG.md` (freshly swept in #148)
+- **Backlog:** `docs/UI_UX_BACKLOG.md` (everything ✅ except F2 real-device)
 - **This handoff:** `HANDOFF.md`
-- **Archive bundles:** `D:\Kashti Claude\nse-smart-investor\archive\*.bundle`
+- **Archive bundles:** `archive/*.bundle`
 
 ## What NOT to do
 
-- Don't touch `.pulse-green`/`.pulse-red` (looping, wired to Paper Trades card-state glow).
-- Don't reintroduce candlestick to scoring.
-- Don't `st.set_page_config` in a page.
-- Don't force-push without asking (or use close-and-reopen).
-- Don't stack PRs that both add to the same insertion point in a shared helper file.
-- Don't bulk-regex-replace across many pages without an `ast.parse` sanity check.
-- Don't `--delete-branch` a squash-merge on a branch that has PRs stacked on it.
-
-Working tree clean, CI green, all session PRs merged. Good starting point for the next chat.
+- Don't touch `.pulse-green` / `.pulse-red` (looping, wired to the Paper Trades glow).
+- Don't add colour literals outside `dashboard/shared/tokens.py`.
+- Don't reintroduce `st.components.v1.html` (deprecated); use `st.html(..., unsafe_allow_javascript=True)`.
+- Don't call `pd.read_sql_query` directly; use `utils.sql.read_sql_df`.
+- Don't stack PRs on the same insertion point in a shared file; sequence them.
+- Don't bulk-regex-replace across pages without an `ast.parse` check.
