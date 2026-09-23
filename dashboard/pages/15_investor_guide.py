@@ -26,11 +26,11 @@ render_sidebar(current="Investor Guide")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.markdown('<h1 class="page-title-serif">Investor <em>Guide</em></h1><p class="page-subtitle">How to read this dashboard.</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="page-title-serif guide-doc">Investor <em>Guide</em></h1><p class="page-subtitle">How to read this dashboard.</p>', unsafe_allow_html=True)
 
 st.markdown(
     "This guide explains every signal, score, and term used in the NSE Smart Investor platform.  \n"
-    "Read this once and you will understand exactly what every number means and when to act."
+    "Read this once and you will understand exactly what every number means and how to read it."
 )
 
 tab_g1, tab_g2, tab_g3, tab_g4, tab_g5, tab_g6, tab_g7 = st.tabs([
@@ -42,7 +42,7 @@ tab_g1, tab_g2, tab_g3, tab_g4, tab_g5, tab_g6, tab_g7 = st.tabs([
 # ── TAB 1: SCORES & SIGNALS ───────────────────────────────────────────────
 with tab_g1:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Trend Quality Score (0 – 90)</div>',
         unsafe_allow_html=True,
     )
@@ -77,7 +77,7 @@ with tab_g1:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Score Sub-Components</div>',
         unsafe_allow_html=True,
     )
@@ -91,7 +91,7 @@ with tab_g1:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Fundamentals — and the Revenue Growth signal</div>',
         unsafe_allow_html=True,
     )
@@ -116,7 +116,7 @@ with tab_g1:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'VIX Regime — Market Fear Gauge</div>',
         unsafe_allow_html=True,
     )
@@ -135,7 +135,7 @@ with tab_g1:
 # ── TAB 2: INDICATORS ─────────────────────────────────────────────────────
 with tab_g2:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Technical Indicators — Plain English</div>',
         unsafe_allow_html=True,
     )
@@ -153,7 +153,7 @@ with tab_g2:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Candlestick Patterns</div>',
         unsafe_allow_html=True,
     )
@@ -171,7 +171,7 @@ with tab_g2:
 # ── TAB 3: STOP-LOSS & RISK ───────────────────────────────────────────────
 with tab_g3:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Stop-Loss — Protecting Your Capital</div>',
         unsafe_allow_html=True,
     )
@@ -189,7 +189,7 @@ with tab_g3:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Risk : Reward (R:R) — The Most Important Concept</div>',
         unsafe_allow_html=True,
     )
@@ -207,7 +207,7 @@ with tab_g3:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Position Sizing — How Much to Buy</div>',
         unsafe_allow_html=True,
     )
@@ -221,7 +221,7 @@ with tab_g3:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Common Mistakes — What to Avoid</div>',
         unsafe_allow_html=True,
     )
@@ -237,7 +237,7 @@ with tab_g3:
 # ── TAB 4: NEWS SIGNALS ───────────────────────────────────────────────────
 with tab_g4:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'How News Affects Stock Prices</div>',
         unsafe_allow_html=True,
     )
@@ -253,7 +253,7 @@ with tab_g4:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'How to Use News Alongside Scores</div>',
         unsafe_allow_html=True,
     )
@@ -268,7 +268,7 @@ with tab_g4:
 
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Key News Events Calendar (Indian Markets)</div>',
         unsafe_allow_html=True,
     )
@@ -283,7 +283,7 @@ with tab_g4:
 # ── TAB 5: PAPER TRADING SOP ──────────────────────────────────────────────
 with tab_g5:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         '📌 How to Use Paper Trading — Step by Step</div>',
         unsafe_allow_html=True,
     )
@@ -328,7 +328,7 @@ with tab_g5:
 
     st.markdown(
 
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
 
         '📊 The 3 Numbers That Define Your Edge</div>',
 
@@ -371,7 +371,7 @@ with tab_g5:
 # ── TAB 6: UNIVERSE & COVERAGE ────────────────────────────────────────────
 with tab_g6:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'How Many Stocks Does the Platform Actually Scan?</div>',
         unsafe_allow_html=True,
     )
@@ -407,7 +407,7 @@ with tab_g6:
 # ── TAB 7: TQS SCANNER ────────────────────────────────────────────────────
 with tab_g7:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Trend Quality Score (TQS) Scanner — A Separate Model</div>',
         unsafe_allow_html=True,
     )
@@ -434,7 +434,7 @@ with tab_g7:
     ]), hide_index=True)
     st.markdown("---")
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
+        '<div class="t-h2 guide-h2" style="margin:14px 0 6px 0">'
         'Grades & Signals</div>',
         unsafe_allow_html=True,
     )

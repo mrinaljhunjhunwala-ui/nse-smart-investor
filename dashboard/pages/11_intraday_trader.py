@@ -43,6 +43,28 @@ st.markdown(
     "⚠️ *Data is 15-min delayed via Yahoo Finance free API.*"
 )
 
+# P2 · "market is closed" state — outside regular trading hours the live
+# tools (gap scan, ORB, live signals) return empty frames. Say so up-front
+# with the F5 empty-state kit instead of leaving blank widgets. Reference
+# tools (Max Pain / PCR / strategy selector) still work, so we don't stop.
+try:
+    from dashboard.shared.market_hours import market_status as _mkt_status
+    from dashboard.shared.ui_components import empty_state as _it_empty
+    _ms = _mkt_status()
+    if _ms.get("session") in ("closed", "holiday", "weekend"):
+        st.markdown(
+            _it_empty(
+                f"{_ms.get('label', 'Market Closed')} — {_ms.get('sublabel', '')}",
+                hint=(f"{_ms.get('next_event', '')}. Live gap / ORB / signal tabs "
+                      "show last-session data or stay empty until the open; "
+                      "Options reference tabs work any time."),
+                icon="🕒",
+            ),
+            unsafe_allow_html=True,
+        )
+except Exception:  # noqa: BLE001 — status banner is cosmetic; never block the page
+    pass
+
 # FIX DEDUP1 — the "Live Positions" tab used to live here too, calling the
 # same data.angel_fetcher.get_positions() already shown on the dedicated
 # 🔗 Angel One page's "Today's Positions" tab. Same data, two places to

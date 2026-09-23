@@ -202,17 +202,19 @@ else:
         ).reset_index()
         _agg["mean_ret"] = _agg["mean_ret"].round(2)
         import plotly.graph_objects as go
+        from dashboard.shared.chart_helpers import PLOT_COLORS as _PC
+        # P2 · adopt the shared `nse_pro` template explicitly + token colours
         _fig = go.Figure()
         _fig.add_bar(x=_agg["bucket"], y=_agg["mean_ret"],
                      text=[f"n={n}" for n in _agg["n"]], textposition="outside",
-                     marker_color=["#ef5350" if v < 0 else "#26a69a"
+                     marker_color=[_PC["bear"] if v < 0 else _PC["bull"]
                                    for v in _agg["mean_ret"]])
-        _fig.add_hline(y=0, line_dash="dash", line_color="#888")
+        _fig.add_hline(y=0, line_dash="dash", line_color=_PC["faint"])
         _fig.update_layout(
-            xaxis_title=f"Conviction bucket (0-100)",
+            template="nse_pro",
+            xaxis_title="Conviction bucket (0-100)",
             yaxis_title=f"Mean {_horizon_choice}-day return %",
             height=360, margin=dict(l=40, r=20, t=20, b=40),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(_fig, width="stretch")
 

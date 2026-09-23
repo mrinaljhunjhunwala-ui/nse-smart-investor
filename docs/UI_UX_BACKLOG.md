@@ -99,7 +99,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ Earnings status → shared `chip_pill` with ⚠/◆/●/✓ glyphs; "avoid fresh buys" copy replaced with "event risk" (no-instruction rule).
 
 ### [`05_market_overview.py`](../dashboard/pages/05_market_overview.py) — Market Overview
-- 🟨 Two-column layout collapses badly on mobile (F2).
+- ✅ Two-column layout — verified: page uses only `st.columns` (no inline flex grids), which the F2 `stHorizontalBlock` media query (#146) stacks on mobile. No change needed.
 
 ### [`06_smart_screener.py`](../dashboard/pages/06_smart_screener.py) — Smart Screener
 - ✅ Signal-table summary above setup cards: rank, shape-coded posture, sector, score bar, R:R, rev growth. (Sparkline column deferred — screener doesn't carry a price series per signal.)
@@ -115,10 +115,10 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 ### [`11_intraday_trader.py`](../dashboard/pages/11_intraday_trader.py) — Intraday Trader
 - ✅ F3 widget chrome (#139).
-- 🟧 No "market is closed" state — page just returns empty widgets outside RTH. Use F5 empty-state kit + `dashboard/shared/market_hours.py`.
+- ✅ "Market is closed" state — F5 `empty_state()` driven by `market_hours.market_status()` (closed / holiday / weekend) with next-open time; Options reference tabs stay usable.
 
 ### [`12_position_sizer.py`](../dashboard/pages/12_position_sizer.py) — Position Sizer
-- 🟨 Form-heavy; sliders + numeric inputs need the same restyle F1 applies elsewhere.
+- ✅ Form inputs grouped into bordered cards with §9.4 `.t-label` eyebrows (inherits F3 widget chrome); advice-toned copy ("Shares to Buy", "Do not trade") neutralised.
 
 ### [`14_my_watchlist.py`](../dashboard/pages/14_my_watchlist.py) — Watchlist
 - ✅ SH1 posture chips (chip vocabulary sweep).
@@ -126,14 +126,14 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ DT1/DT2 source pill + data-as-of (#127).
 
 ### [`15_investor_guide.py`](../dashboard/pages/15_investor_guide.py) — Investor Guide
-- 🟨 Long-form document; typography scale is default (14px everywhere). Apply hierarchy from skill (H1 32/700, H2 22/700, body 15/1.6).
+- ✅ Typography hierarchy H1 32/700 · H2 22/700 · body 15/1.6 via page-scoped `.guide-doc` / `.guide-h2` block in design.py.
 
 ### [`16_angel_one.py`](../dashboard/pages/16_angel_one.py) — Angel One
 - ✅ F3 widget chrome (#139).
-- 🟨 "Not connected" state currently uses `st.warning` + `st.expander` markdown. Consider migrating to the F5 `empty_state()` helper so the wire-up steps read consistently with other stub states.
+- ✅ "Not connected" state → `empty_state()` + numbered `panel()` steps (4-step wizard kept); placeholder-only credential sample.
 
 ### [`13_stock_journal.py`](../dashboard/pages/13_stock_journal.py) — Stock Journal
-- New page shipped since last backlog write. No specific UI action items filed yet — audit against §9.4 typography + DT1/DT2 next pass.
+- ✅ §9.4 audit (`### Reviews due` → `.t-h2`), status colours → `PLOT_COLORS` tokens, DT1/DT2 `data_as_of` + `source_pill` under the entries table.
 
 ### [`17_tomorrow_watchlist.py`](../dashboard/pages/17_tomorrow_watchlist.py) — Tomorrow's Watchlist
 - ✅ SH1 chips (#89).
@@ -154,7 +154,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 ### [`21_verdict_calibration.py`](../dashboard/pages/21_verdict_calibration.py) — Verdict Calibration
 - ✅ §9.4 typography sweep (#131).
-- 🟨 Internal-facing tool; low visual priority but the summary chart should adopt `nse_pro` template.
+- ✅ Summary chart adopts `nse_pro` template explicitly; bar colours → `PLOT_COLORS` tokens.
 
 ### [`22_fii_dii_flows.py`](../dashboard/pages/22_fii_dii_flows.py) — FII/DII Flows
 - ✅ Regime card (#101), F1 Plotly hex → tokens (#100), DT1/DT2 wired (#126), §9.4 typography (#128).
