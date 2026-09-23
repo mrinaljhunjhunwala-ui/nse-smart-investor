@@ -31,7 +31,6 @@ ALLOWLIST_COPY: set[str] = {
     "pages/22_fii_dii_flows.py",   # TODO(advice-copy): "keep stops tight" (~line 151)
 }
 ALLOWLIST_MAPPER: set[str] = {
-    "shared/checklist_ui.py",      # TODO(advice-copy): raw {result.verdict} incl. "Consider entry."
 }
 
 def _files():

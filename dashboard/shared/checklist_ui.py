@@ -8,7 +8,7 @@ also renders this — one location instead of two.
 
 `compute_checklist(sym, df_daily, df_weekly)` — pure computation. Takes
 symbol + already-fetched (indicator-enriched) daily & weekly dataframes,
-returns a list of check dicts + score / verdict / trade-plan levels.
+returns a list of check dicts + score / alignment summary / trade-plan levels.
 
 `render_checklist_block(sym, df_daily, df_weekly)` — Streamlit UI. Wraps
 the computation in an expander so pages can drop it in with one call.
@@ -33,7 +33,7 @@ _log = logging.getLogger("dashboard.shared.checklist_ui")
 class ChecklistResult:
     score: int                           # 0-8
     checks: List[Dict[str, Any]]         # full items with pass/fail/detail/tip
-    verdict: str                         # STRONG / MODERATE / WEAK setup message
+    summary: str                         # descriptive factor-alignment line (no advice)
     price: float
     rsi: float
     adx: float
@@ -119,11 +119,13 @@ def compute_checklist(sym: str,
         ]
 
         score = sum(1 for c in checks if c["pass"])
-        verdict = ("✅ STRONG SETUP — all key factors aligned. Consider entry."
+        # Descriptive only (CLAUDE.md rule 1): how many factors align, never
+        # what to do about it.
+        summary = (f"✅ STRONG ALIGNMENT — {score} of {len(checks)} factors aligned."
                    if score >= 7 else
-                   "🟡 MODERATE SETUP — most factors align. Entry with smaller size."
+                   f"🟡 PARTIAL ALIGNMENT — {score} of {len(checks)} factors aligned."
                    if score >= 5 else
-                   "🔴 WEAK SETUP — too many factors against. Wait for improvement.")
+                   f"🔴 WEAK ALIGNMENT — only {score} of {len(checks)} factors aligned.")
 
         trade_plan = None
         if score >= 5 and atr > 0:
@@ -132,12 +134,12 @@ def compute_checklist(sym: str,
             trade_plan = {"entry": price, "sl": sl, "tp": tp,
                           "rr": (tp - price) / max(price - sl, 1e-6), "atr": atr}
 
-        return ChecklistResult(score=score, checks=checks, verdict=verdict,
+        return ChecklistResult(score=score, checks=checks, summary=summary,
                                 price=price, rsi=rsi, adx=adx, atr=atr,
                                 trade_plan=trade_plan)
     except Exception as e:
         _log.warning("compute_checklist(%s) failed: %s: %s", sym, type(e).__name__, e)
-        return ChecklistResult(score=0, checks=[], verdict="", price=0, rsi=0, adx=0, atr=0,
+        return ChecklistResult(score=0, checks=[], summary="", price=0, rsi=0, adx=0, atr=0,
                                 error=f"{type(e).__name__}: {e}")
 
 
@@ -172,7 +174,7 @@ def render_checklist_expander(sym: str, df_daily: pd.DataFrame,
         st.markdown(
             f'<div class="{_card}">'
             f'<span class="score-big">{result.score}/8</span> &nbsp;&nbsp;'
-            f'<span class="signal-big">{result.verdict}</span><br>'
+            f'<span class="signal-big">{result.summary}</span><br>'
             f'<b>{sym.replace(".NS","")}</b> at ₹{result.price:.2f} | '
             f'RSI {result.rsi:.1f} | ADX {result.adx:.1f}'
             f'</div>',
