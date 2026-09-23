@@ -703,6 +703,46 @@ def chip_pill(label: str, tone: str = "neutral", title: str = "") -> str:
     )
 
 
+def fmt_inr(value: float, decimals: int = 0) -> str:
+    """Format a numeric value with Indian lakh/crore digit grouping.
+
+    Python's own ``{:,.0f}`` uses international thousand-separators
+    (``1,234,567``). Indian numeric convention groups the last three digits
+    then pairs after that (``12,34,567`` — twelve lakh thirty-four thousand
+    five hundred sixty-seven). Applied here for P&L displays and any other
+    surface where an Indian audience will read the number aloud.
+
+    Returns the unsigned magnitude formatted with a `,` group separator —
+    callers own the sign and prefix (₹, +/-, ▲/▼) via surrounding markup.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    neg = v < 0
+    v = abs(v)
+    if decimals > 0:
+        int_part, _, frac_part = f"{v:.{decimals}f}".partition(".")
+    else:
+        int_part = f"{v:.0f}"
+        frac_part = ""
+    if len(int_part) <= 3:
+        grouped = int_part
+    else:
+        last3 = int_part[-3:]
+        rest = int_part[:-3]
+        # Insert commas every 2 digits from the right into `rest`.
+        chunks = []
+        while len(rest) > 2:
+            chunks.append(rest[-2:])
+            rest = rest[:-2]
+        if rest:
+            chunks.append(rest)
+        grouped = ",".join(reversed(chunks)) + "," + last3
+    out = grouped + (f".{frac_part}" if frac_part else "")
+    return f"-{out}" if neg else out
+
+
 def chip_delta(value: float, unit: str = "%") -> str:
     """Mono numeric-change chip. Auto-signed. Bull >0, bear <0, dim ==0."""
     if value > 0:

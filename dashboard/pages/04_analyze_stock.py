@@ -1691,7 +1691,7 @@ if analyze_btn or _prefill_active or (
                 + (
                     f'<div style="font-size:10px;color:{_delta_c}">base {cs.score:.0f} · {_delta_s} confirmation</div>'
                     if _confirmation_available
-                    else '<div style="font-size:10px;color:var(--dim)">confirmation unavailable</div>'
+                    else '<div style="font-size:10px;color:var(--dim)">⏸ confirmation unavailable</div>'
                 ) +
                 f'</div>'
                 f'<div><div style="font-size:10px;color:var(--faint)">WEEKLY TREND</div>'
@@ -1719,7 +1719,7 @@ if analyze_btn or _prefill_active or (
                         if _confirmation_available
                         else
                         '<div style="font-size:11px;color:var(--dim);margin-top:8px">'
-                        'Deep confirmation unavailable — conviction equals base score.</div>'
+                        '⏸ Deep confirmation unavailable — conviction equals base score.</div>'
                     )
                 )
                 + "</div>",

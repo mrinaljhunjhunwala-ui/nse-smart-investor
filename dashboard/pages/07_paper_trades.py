@@ -73,7 +73,7 @@ from dashboard.shared.trade_utils import (
     set_paper_account_type,
 )
 from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared.ui_components import empty_state  # F5
+from dashboard.shared.ui_components import empty_state, fmt_inr  # F5 + Indian-comma P&L
 
 apply_design()
 render_sidebar(current="Paper Trades")
@@ -777,25 +777,25 @@ else:
 
         f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s P&amp;L</div>'
-        f'<div style="font-size:22px;font-weight:700;color:{_td_col}">{_td_arr} ₹{abs(_pt_today_pnl):,.0f}'
+        f'<div style="font-size:22px;font-weight:700;color:{_td_col}">{_td_arr} ₹{fmt_inr(abs(_pt_today_pnl))}'
         + (" <span style='font-size:10px;color:var(--dim)'>·stale</span>" if _prices_stale else "") +
         f'</div></div>'
 
         f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Unrealised P&amp;L</div>'
-        f'<div style="font-size:22px;font-weight:700;color:{_ur_col}">{_ur_arr} ₹{abs(_pt_unrealised):,.0f} '
+        f'<div style="font-size:22px;font-weight:700;color:{_ur_col}">{_ur_arr} ₹{fmt_inr(abs(_pt_unrealised))} '
         f'<span style="font-size:13px">({_pt_unr_pct:+.1f}%)</span></div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">'
         f'Realised P&amp;L &nbsp;<span style="color:var(--dim)">({_wins_cnt}/{_n_closed} won)</span></div>'
-        f'<div style="font-size:22px;font-weight:700;color:{_re_col}">{_re_arr} ₹{abs(_pt_realised):,.0f}</div>'
+        f'<div style="font-size:22px;font-weight:700;color:{_re_col}">{_re_arr} ₹{fmt_inr(abs(_pt_realised))}</div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
         f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Deployed Capital</div>'
-        f'<div style="font-size:22px;font-weight:700;color:var(--ink)">₹{_pt_deployed:,.0f}</div>'
+        f'<div style="font-size:22px;font-weight:700;color:var(--ink)">₹{fmt_inr(_pt_deployed)}</div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'

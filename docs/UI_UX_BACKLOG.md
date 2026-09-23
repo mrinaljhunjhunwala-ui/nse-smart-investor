@@ -43,7 +43,7 @@ Effort: S ≤ ½ day · M ≤ 2 days · L > 2 days
 | F5 | ✅ **Empty-state kit** — `empty_state(icon, title, hint)` helper in `ui_components.py` (#95) + rollout across 6 pages including Watchlist and Paper Trades (#96). | ✅ Done | — | — |
 | F6 | ✅ **Loading skeletons** on Analyze Stock's four slow spinners. Shipped in #120. Extending to Command Centre / TQS Scanner / Tomorrow's Watchlist stays opportunistic. | ✅ Done (Analyze Stock) | — | — |
 | F7 | ✅ **Focus rings** on buttons + tabs via `:focus-visible` saffron halo. Shipped in #136. `aria-label` on ticker-tape spans + colour-blind check for red/green metrics — **still open** (see F7b below). | ✅ Focus rings done | — | `frontend-ui-engineering` |
-| F7b | **A11y follow-up** — `aria-label` on ticker-tape spans, colour-blind pattern (icon or hatch) for red/green metrics so `--bull`/`--bear` aren't the only signal. | 🟨 P2 | S | `frontend-ui-engineering` |
+| F7b | ✅ `aria-label` on top-bar chips + `aria-hidden` on ticker tape + `.delta-pos`/`.delta-neg` shape classes (#141). ✅ Styler dataframes on Intraday Trader + Angel One now carry ▲/▼ prefix + bold-weight cue (#147). | ✅ Shipped | — | — |
 
 ---
 
@@ -95,7 +95,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ Deep Dive absorbed as a tab (Slice 2, #115).
 - ✅ F6 loading skeletons on the four slow spinners (#120).
 - 🟧 Live drift caption (FIX A2) is a plain `st.caption`; promote to a small dismissible amber banner so it doesn't get lost in the top-bar noise.
-- 🟨 Conviction section (FIX A3) — "confirmation unavailable" branch renders as neutral grey text; distinguish with an iconography convention (⏸ = insufficient data ≠ ⚠ = adverse).
+- ✅ Conviction section (FIX A3) — "confirmation unavailable" branch now carries a `⏸` prefix so it's distinguishable from actual `⚠` warnings.
 - 🟨 Earnings-date pill (FIX A4) needs the shared "signal-badge" component so "Results 3d ago" reads consistently with every other status chip.
 
 ### [`05_market_overview.py`](../dashboard/pages/05_market_overview.py) — Market Overview
@@ -107,7 +107,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 ### [`07_paper_trades.py`](../dashboard/pages/07_paper_trades.py) — Paper Trades
 - ✅ F3 widget chrome (#139).
 - ✅ F5 empty state (#96).
-- 🟨 P&L column: needs Indian-comma + explicit sign per skill's number rules.
+- ✅ P&L block now uses Indian lakh/crore comma grouping via the shared `fmt_inr()` helper — `12,34,567` not `1,234,567`. Sign remains carried by the leading ▲/▼ arrow.
 
 ### [`08_backtest.py`](../dashboard/pages/08_backtest.py) — Backtest
 - 🟨 Equity curve: default Plotly axes; migrate to `nse_pro` template (should already inherit, verify).
@@ -176,10 +176,10 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 
 Everything above under a ✅ has shipped. Remaining active work:
 
-1. **F2 mobile pass** (`<900 px`) — the biggest untouched foundation item. Needs real device viewport testing, not just DevTools. ~1 day.
-2. **§10 UX ideas** (see below) — Ctrl+K palette upgrade, hover previews, live-tick pulse animation.
-3. **F7b a11y follow-up** — ticker-tape `aria-label`, colour-blind pattern layer on red/green metrics.
-4. **Copy polish sweep** — audit ambient caption text for staleness after the design foundation landed.
+1. ✅ **F2 mobile pass** (`<768 px`) — shipped in #146. `st.columns` collapse below 768, `.mobile-stack` utility for raw flex grids, top-bar chip shrink, hero-text scale-down, tight block-container padding. Real device pass still open.
+2. **§10 UX ideas** (see below) — Ctrl+K palette + UX3 live-tick shipped; hover previews (UX2) still open.
+3. ✅ **F7b a11y follow-up** — shipped in #141 + #147.
+4. ✅ **Copy polish sweep** — shipped in #143 (Deep-Dive fallback removed, cyan-in-comment fixed).
 5. Per-page P2 residuals — most flagged with 🟨 above; opportunistic.
 
 ---
@@ -190,9 +190,9 @@ Follow-ups seeded during the Sept 2026 sprint but not yet shipped:
 
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
-| UX1 | **Ctrl+K command palette modal** — upgrade the sidebar command bar (#135, #137) to a proper overlay. | 🟨 P2 | M | Needs `st.components.v1.html` + event plumbing back to Streamlit. Not native — plan the custom-component boundary before starting. |
+| UX1 | ✅ **Ctrl+K command palette modal** — shipped in #145. `st.dialog`-based modal, JS keybind via `components.v1.html`, sidebar `⌘ K` trigger button, sidebar bar retained as AppTest fallback. | ✅ Shipped | — | — |
 | UX2 | **Hover preview cards on tickers** — show a mini-chart + score chip on hover. | 🟨 P2 | M | Custom HTML component. |
-| UX3 | **Live-tick pulse animation** — `.pulse-green` / `.pulse-red` classes already in `design.py` but not wired. | 🟨 P2 | S | Needs prev-vs-current price tracking in `st.session_state`. |
+| UX3 | ✅ **Live-tick pulse** — `.tick-pulse-{up,down}` one-shot classes shipped in #142 (top-bar chips) and extended in #144 to Market Live movers + Command Centre top picks + My Portfolio holdings. Shared helper `tick_pulse_tracker(key)` in `chart_helpers.py`. | ✅ Shipped | — | — |
 | UX4 | ~~Ticker drag-and-drop~~ | ❌ Deferred | — | Streamlit doesn't support natively; needs full custom component. |
 
 ---
