@@ -10,6 +10,7 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 # P3: explicit imports (was a dynamic shared-namespace injection)
 import os
 import pandas as pd
@@ -145,7 +146,7 @@ with tab_ao1:
                 _cash = _funds["available_cash"]
                 _used = _funds["used_margin"]
                 _m2m  = _funds["m2m"]
-                _m2m_clr = "#26a69a" if _m2m >= 0 else "#ef5350"
+                _m2m_clr = "var(--bull)" if _m2m >= 0 else "var(--bear)"
                 st.markdown(
                     f'<div class="card-green">'
                     f'<div class="metric-lbl">Available Cash</div>'
@@ -211,7 +212,7 @@ with tab_ao2:
             # ▲/▼ prefix added by the formatters below — so P&L direction is
             # legible without relying on the red/green channel alone.
             if isinstance(val, (int, float)):
-                color = "#26a69a" if val >= 0 else "#ef5350"
+                color = _TK["bull"] if val >= 0 else _TK["bear"]
                 return f"color: {color}; font-weight:700"
             return ""
 
@@ -299,8 +300,8 @@ with tab_ao3:
                     "LTP":       "Rs {:.2f}",
                     "P&L":       _fmt_pos_pnl,
                 })
-                .map(lambda v: "color:#26a69a;font-weight:700" if isinstance(v, (int,float)) and v >= 0
-                     else ("color:#ef5350;font-weight:700" if isinstance(v, (int,float)) else ""),
+                .map(lambda v: f"color:{_TK['bull']};font-weight:700" if isinstance(v, (int,float)) and v >= 0
+                     else (f"color:{_TK['bear']};font-weight:700" if isinstance(v, (int,float)) else ""),
                      subset=["P&L"]),
                 hide_index=True,
                 width="stretch",
@@ -332,11 +333,11 @@ with tab_ao4:
 
             def _status_color(val):
                 colors = {
-                    "complete": "#26a69a", "rejected": "#ef5350",
-                    "cancelled": "#888",   "open": "#f9a825",
-                    "pending": "#f9a825",
+                    "complete": _TK["bull"], "rejected": _TK["bear"],
+                    "cancelled": _TK["dim"], "open": _TK["amber"],
+                    "pending": _TK["amber"],
                 }
-                c = colors.get(str(val).lower(), "#aaa")
+                c = colors.get(str(val).lower(), _TK["ink-mid"])
                 return f"color:{c}; font-weight:600"
 
             st.dataframe(
@@ -527,29 +528,29 @@ with tab_ao6:
         _hpost.sort(key=lambda h: _order.get(h.posture, 9))
 
         _colour = {
-            "EXIT_WATCH":  "#ef5350",   # red
-            "TRIM_WATCH":  "#ffa726",   # amber
-            "HOLD":        "#42a5f5",   # blue
-            "ADD_WATCH":   "#26a69a",   # green
-            "STOPPED_OUT": "#8d6e63",   # brown
-            "STOP_HIT":    "#ef5350",
-            "TARGET_HIT":  "#26a69a",
-            "TRAIL_TIGHTER":"#ffa726",
-            "RUNNING":     "#42a5f5",
-            "UNCLEAR":     "#8d6e63",
+            "EXIT_WATCH":  "var(--bear)",
+            "TRIM_WATCH":  "var(--amber)",
+            "HOLD":        "var(--azure)",
+            "ADD_WATCH":   "var(--bull)",
+            "STOPPED_OUT": "var(--dim)",
+            "STOP_HIT":    "var(--bear)",
+            "TARGET_HIT":  "var(--bull)",
+            "TRAIL_TIGHTER": "var(--amber)",
+            "RUNNING":     "var(--azure)",
+            "UNCLEAR":     "var(--dim)",
         }
 
         if _hpost:
             st.markdown("#### 💼 Delivery holdings")
             for h in _hpost:
-                _c = _colour.get(h.posture, "#42a5f5")
+                _c = _colour.get(h.posture, "var(--azure)")
                 st.markdown(
                     f'<div style="border-left:4px solid {_c}; padding:8px 12px;'
                     f' margin:6px 0; background:rgba(66,165,245,0.05)">'
                     f'<b>{h.symbol}</b> · '
                     f'<span style="color:{_c};font-weight:600">{h.posture.replace("_"," ")}</span> · '
                     f'{h.filters_passing}/6 filters · P&L {h.pnl_pct:+.2f}%<br>'
-                    f'<span style="color:#888;font-size:0.9em">{h.reason}</span><br>'
+                    f'<span style="color:var(--dim);font-size:0.9em">{h.reason}</span><br>'
                     f'<span style="font-size:0.85em">RSI {h.rsi} · SMA50 ₹{h.sma50:,.2f} · '
                     f'ATR ₹{h.atr:,.2f} · Suggested stop ₹{h.suggested_stop:,.2f} · '
                     f'RS-63d {h.rs_63d:+.1f}%</span>'
@@ -562,14 +563,14 @@ with tab_ao6:
         if _ipost:
             st.markdown("#### ⚡ Intraday positions")
             for p in _ipost:
-                _c = _colour.get(p.posture, "#42a5f5")
+                _c = _colour.get(p.posture, "var(--azure)")
                 st.markdown(
                     f'<div style="border-left:4px solid {_c}; padding:8px 12px;'
                     f' margin:6px 0; background:rgba(66,165,245,0.05)">'
                     f'<b>{p.symbol}</b> · '
                     f'<span style="color:{_c};font-weight:600">{p.posture.replace("_"," ")}</span> · '
                     f'P&L {p.pnl_pct:+.2f}%<br>'
-                    f'<span style="color:#888;font-size:0.9em">{p.reason}</span>'
+                    f'<span style="color:var(--dim);font-size:0.9em">{p.reason}</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )

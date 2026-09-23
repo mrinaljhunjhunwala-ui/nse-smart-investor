@@ -46,3 +46,32 @@ def rgba(name: str, alpha: float) -> str:
 def css_vars(indent: str = "      ") -> str:
     """`--name: #hex;` lines for a :root block."""
     return "\n".join(f"{indent}--{k}: {v};" for k, v in COLORS.items())
+
+
+def mix(a: str, b: str, t: float) -> str:
+    """Opaque `#rrggbb` blend of tokens `a` -> `b` at fraction t (0 = a, 1 = b).
+
+    Opaque (not alpha) so text drawn with it stays legible on any surface,
+    including Styler cells in the glide-data-grid canvas.
+    """
+    ra, ga, ba = hex_to_rgb(COLORS[a])
+    rb, gb, bb = hex_to_rgb(COLORS[b])
+    t = max(0.0, min(1.0, t))
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in ((ra, rb), (ga, gb), (ba, bb)))
+
+
+def ordinal_ramp(n: int, stops: tuple[str, ...] = ("bull", "amber", "bear")) -> list[str]:
+    """`n` evenly spaced opaque shades along the token stops (best -> worst).
+
+    Default bull -> amber -> bear. n=5 gives bull / bull-soft / amber /
+    bear-soft / bear; n=6 gives six distinct ordinal steps (TQS grades).
+    """
+    if n < 2:
+        return [COLORS[stops[0]]] * max(n, 0)
+    segs = len(stops) - 1
+    out = []
+    for i in range(n):
+        pos = i / (n - 1) * segs
+        k = min(int(pos), segs - 1)
+        out.append(mix(stops[k], stops[k + 1], pos - k))
+    return out

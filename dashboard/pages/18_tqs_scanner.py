@@ -78,20 +78,15 @@ DEFAULT_TICKERS = [
     "SUNPHARMA.NS","HCLTECH.NS",     "LT.NS",         "ULTRACEMCO.NS",
 ]
 
-from dashboard.shared.tokens import COLORS as TOKENS  # noqa: E402
+from dashboard.shared.tokens import COLORS as TOKENS, ordinal_ramp  # noqa: E402
 
-SIGNAL_COLOUR = {
-    "STRONG TREND": TOKENS["bull"],
-    "TRENDING":     TOKENS["bull"],
-    "NEUTRAL":      TOKENS["amber"],
-    "WEAK":         TOKENS["accent"],
-    "AVOID":        TOKENS["bear"],
-}
-
-GRADE_COLOUR = {
-    "A+": TOKENS["bull"], "A": TOKENS["bull"], "B": TOKENS["amber"],
-    "C":  TOKENS["accent"], "D": TOKENS["bear"], "F": TOKENS["bear"],
-}
+# Ordinal ramps (best -> worst) blended from bull -> amber -> bear tokens so
+# every level is visibly distinct. Colour is redundant with the label text
+# (grade / signal are printed in the cell), so it never carries meaning alone.
+_SIGNAL_ORDER = ("STRONG TREND", "TRENDING", "NEUTRAL", "WEAK", "AVOID")
+_GRADE_ORDER = ("A+", "A", "B", "C", "D", "F")
+SIGNAL_COLOUR = dict(zip(_SIGNAL_ORDER, ordinal_ramp(len(_SIGNAL_ORDER))))
+GRADE_COLOUR = dict(zip(_GRADE_ORDER, ordinal_ramp(len(_GRADE_ORDER))))
 
 
 # ═════════════════════════════════════════════════════════════════════════════

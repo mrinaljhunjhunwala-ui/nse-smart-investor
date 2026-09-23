@@ -316,12 +316,16 @@ from dashboard.shared.disclosures import (
 )
 _tw_regime_note()
 
-_ACCENT = {"breakout": "#26a69a", "breakdown": "#ef5350", "reversal": "#ab8bff"}
-_BG = {
-    "breakout":  "linear-gradient(135deg,#0a2a1a,#0f3320)",
-    "breakdown": "linear-gradient(135deg,#2a0a0a,#330f0f)",
-    "reversal":  "linear-gradient(135deg,#1a1430,#221a3a)",
-}
+_ACCENT = {"breakout": "var(--bull)", "breakdown": "var(--bear)", "reversal": "var(--violet)"}
+
+
+def _card_bg(tok: str) -> str:
+    """Dark tinted card gradient: token hue blended into the ground surface."""
+    return (f"linear-gradient(135deg,color-mix(in srgb, var(--{tok}) 12%, var(--ground)),"
+            f"color-mix(in srgb, var(--{tok}) 17%, var(--ground)))")
+
+
+_BG = {"breakout": _card_bg("bull"), "breakdown": _card_bg("bear"), "reversal": _card_bg("violet")}
 
 
 def _render_cards(items, kind, key_prefix):
@@ -382,11 +386,11 @@ def _render_cards(items, kind, key_prefix):
         # composite-score grade thresholds elsewhere in the app.
         _sc = float(_it.get("score", 0) or 0)
         if _sc >= 70:
-            _conv_label, _conv_col = "high conviction", "#26a69a"
+            _conv_label, _conv_col = "high conviction", "var(--bull)"
         elif _sc >= 55:
-            _conv_label, _conv_col = "developing", "#c6a15b"
+            _conv_label, _conv_col = "developing", "var(--amber)"
         else:
-            _conv_label, _conv_col = "watch only", "#8892a0"
+            _conv_label, _conv_col = "watch only", "var(--dim)"
         _conv_chip = (
             f'<span style="display:inline-block;padding:1px 7px;border-radius:999px;'
             f'font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;'
@@ -399,22 +403,22 @@ def _render_cards(items, kind, key_prefix):
             f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
             f'border-radius:10px;padding:11px 14px;margin-bottom:6px">'
             f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span style="font-size:16px;font-weight:700;color:#fff">{_rank_chip}{_lbl}{_conv_chip}</span>'
+            f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_rank_chip}{_lbl}{_conv_chip}</span>'
             f'<span style="font-size:13px;font-weight:700;color:{accent}">'
             f'{_it["score"]:.0f}/100 · {_it["action"]}</span>'
             f'</div>'
             f'{_flag_badge}'
             f'<div style="font-size:11px;color:{accent};font-weight:600;margin-top:3px">'
             f'{_it["signal_type"]} · key level {_it["key_level"]}</div>'
-            f'<div style="font-size:12px;color:#bbb;margin-top:2px">{_headline_card}</div>'
+            f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_headline_card}</div>'
             + (
-                f'<div style="font-size:11px;color:#9aa;margin-top:2px">'
+                f'<div style="font-size:11px;color:var(--dim);margin-top:2px">'
                 f'⏳ {_horizon}' + (f' · fresh until {_valid_until}' if _valid_until else '')
                 + '</div>'
                 if _horizon else ""
             )
             + (
-                f'<div style="font-size:11px;color:#888;margin-top:4px">'
+                f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
                 f'Entry ₹{_entry:,.2f} · SL ₹{_sl:,.2f} · TP ₹{_tp:,.2f}</div>'
                 if _show_levels else ""
             )

@@ -29,6 +29,7 @@ from dashboard.shared.chart_helpers import (
     compute_market_breadth,
     rdylgn_bg,
 )
+from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 from dashboard.shared.cache import load_vix_data
 
 apply_design()
@@ -67,12 +68,12 @@ with _tab_snapshot:
             curr_nifty = float(nifty_df["Close"].iloc[-1])
             nifty_chg  = float(nifty_df["Close"].pct_change().iloc[-1]) * 100
 
-            if curr_vix < 12:    regime, reg_color = "Extreme Complacency", "#FF6B35"
-            elif curr_vix < 16:  regime, reg_color = "Low Volatility",       "#4ECDC4"
-            elif curr_vix < 22:  regime, reg_color = "Normal",                "#45B7D1"
-            elif curr_vix < 28:  regime, reg_color = "Elevated Fear",         "#F7DC6F"
-            elif curr_vix < 35:  regime, reg_color = "High Fear",             "#E74C3C"
-            else:                regime, reg_color = "PANIC / Crisis",         "#8E44AD"
+            if curr_vix < 12:    regime, reg_color = "Extreme Complacency", "var(--accent)"
+            elif curr_vix < 16:  regime, reg_color = "Low Volatility",       "var(--bull)"
+            elif curr_vix < 22:  regime, reg_color = "Normal",                "var(--azure)"
+            elif curr_vix < 28:  regime, reg_color = "Elevated Fear",         "var(--amber)"
+            elif curr_vix < 35:  regime, reg_color = "High Fear",             "var(--bear)"
+            else:                regime, reg_color = "PANIC / Crisis",         "var(--violet)"
 
             if curr_vix < 15:   opt_str = "BUY options (cheap premium)"
             elif curr_vix < 22: opt_str = "SPREADS (balanced IV)"
@@ -99,7 +100,7 @@ with _tab_snapshot:
             )
             st.markdown(
                 f'<div style="background:{reg_color};padding:12px 18px;border-radius:10px;'
-                f'color:#000;font-weight:700;font-size:18px;text-align:center;">'
+                f'color:var(--ground);font-weight:700;font-size:18px;text-align:center;">'
                 f'VIX {curr_vix:.2f}  ({vix_chg:+.1f}% today)  —  {regime}  |  '
                 f'Options regime: {opt_str}'
                 f'</div>',
@@ -116,7 +117,7 @@ with _tab_snapshot:
             fig_vix = go.Figure()
             fig_vix.add_trace(go.Scatter(
                 x=vix_df.index, y=vix_df["Close"],
-                name="India VIX", line=dict(color="#FF6B6B", width=2),
+                name="India VIX", line=dict(color=_TK["bear"], width=2),
                 fill="tozeroy", fillcolor="rgba(255,107,107,0.1)",
             ))
             for lo, hi, clr, lbl in [
@@ -243,7 +244,7 @@ with _tab_snapshot:
                 price = row["Price"]
                 tick  = row["Ticker"]
                 short = tick.replace(".NS", "")
-                color = "#26a69a" if is_gain else "#ef5350"
+                color = "var(--bull)" if is_gain else "var(--bear)"
                 sign  = "+" if is_gain else ""
                 card_cls = "card-green" if is_gain else "card-red"
                 st.markdown(
@@ -369,7 +370,7 @@ with _tab_macro:
                         lambda s: s.dropna().iloc[0] if not s.dropna().empty else 1
                     )
                     norm_df = _macro_use.div(first_valid) * 100
-                    _colors = ["#4CAF50","#2196F3","#FF6B6B","#FFD700","#FF8C00","#9C27B0","#00BCD4"]
+                    _colors = [_TK[k] for k in ("bull", "azure", "bear", "amber", "accent", "violet", "ink-mid")]
                     fig_norm = go.Figure()
                     for i, col in enumerate(norm_df.columns):
                         fig_norm.add_trace(go.Scatter(
@@ -487,15 +488,15 @@ with _tab_breadth:
         }
         bar_fig = go.Figure()
         for label, val in bvals.items():
-            bclr = "#4CAF50" if val > 60 else ("#FF9800" if val > 40 else "#F44336")
+            bclr = _TK["bull"] if val > 60 else (_TK["amber"] if val > 40 else _TK["bear"])
             bar_fig.add_trace(go.Bar(
                 x=[label], y=[val], name=label,
                 marker_color=bclr,
                 text=[f"{val:.0f}%"], textposition="auto",
             ))
-        bar_fig.add_hline(y=70, line_dash="dot", line_color="#4CAF50",
+        bar_fig.add_hline(y=70, line_dash="dot", line_color=_TK["bull"],
                           annotation_text="Strong (70%)", annotation_position="right")
-        bar_fig.add_hline(y=40, line_dash="dot", line_color="#F44336",
+        bar_fig.add_hline(y=40, line_dash="dot", line_color=_TK["bear"],
                           annotation_text="Weak (40%)", annotation_position="right")
         bar_fig.update_layout(
             template="nse_pro", height=340,
@@ -507,16 +508,16 @@ with _tab_breadth:
 
         pct200 = breadth["pct_above_200"]
         if pct200 >= 70:
-            sig_txt, sig_clr = "🟢 **Strong Bull Market breadth** — Majority above SMA200. Buy dips with confidence.", "#4CAF50"
+            sig_txt, sig_clr = "🟢 **Strong Bull Market breadth** — Majority above SMA200. Buy dips with confidence.", "bull"
         elif pct200 >= 50:
-            sig_txt, sig_clr = "🟡 **Moderate breadth** — More than half in uptrend. Stock-selective long approach.", "#FF9800"
+            sig_txt, sig_clr = "🟡 **Moderate breadth** — More than half in uptrend. Stock-selective long approach.", "amber"
         elif pct200 >= 30:
-            sig_txt, sig_clr = "🟠 **Weakening breadth** — Over half below SMA200. Reduce position sizes.", "#FF5722"
+            sig_txt, sig_clr = "🟠 **Weakening breadth** — Over half below SMA200. Reduce position sizes.", "accent"
         else:
-            sig_txt, sig_clr = "🔴 **Bear market breadth** — Most below SMA200. Defensive posture; consider hedges.", "#F44336"
+            sig_txt, sig_clr = "🔴 **Bear market breadth** — Most below SMA200. Defensive posture; consider hedges.", "bear"
         st.markdown(
-            f'<div style="background:{sig_clr}22;padding:12px;border-radius:8px;'
-            f'border-left:4px solid {sig_clr};font-size:15px;margin:10px 0">'
+            f'<div style="background:var(--tint-{sig_clr});padding:12px;border-radius:8px;'
+            f'border-left:4px solid var(--{sig_clr});font-size:15px;margin:10px 0">'
             f'{sig_txt}</div>', unsafe_allow_html=True
         )
 
@@ -531,7 +532,7 @@ with _tab_breadth:
             pie_fig = go.Figure(data=go.Pie(
                 labels=["Advancing", "Declining"],
                 values=[breadth["advance"], breadth["decline"]],
-                marker_colors=["#4CAF50", "#F44336"], hole=0.4,
+                marker_colors=[_TK["bull"], _TK["bear"]], hole=0.4,
             ))
             pie_fig.update_layout(
                 template="nse_pro", height=260,
@@ -560,7 +561,7 @@ with _tab_breadth:
         hl_fig = go.Figure(go.Bar(
             x=["Near 52W High (within 5%)", "Near 52W Low (within 5%)"],
             y=[breadth["near_52w_high"], breadth["near_52w_low"]],
-            marker_color=["#4CAF50", "#F44336"],
+            marker_color=[_TK["bull"], _TK["bear"]],
             text=[breadth["near_52w_high"], breadth["near_52w_low"]],
             textposition="auto",
         ))
