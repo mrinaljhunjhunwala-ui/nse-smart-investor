@@ -153,11 +153,12 @@ def _market_context_row():
                 _row["regime_severity"] = "green"
             elif _fii_5 < 0 and _dii_5 > 0:
                 _row["regime_msg"] = ("Domestic-supported dip — FII selling absorbed "
-                                       "by DII. Buy quality on pullbacks; avoid high-beta.")
+                                       "by DII. Historically dips here have been shallower; "
+                                       "high-beta names remain more exposed.")
                 _row["regime_severity"] = "amber"
             elif _fii_5 < 0 and _dii_5 < 0:
                 _row["regime_msg"] = ("Distribution — both selling. Historically "
-                                       "precedes weakness; hold, don't add.")
+                                       "precedes weakness.")
                 _row["regime_severity"] = "red"
             elif _fii_5 > 0 and _dii_5 < 0:
                 _row["regime_msg"] = ("DII profit-taking rally — FII buying vs DII "
@@ -529,7 +530,7 @@ if analyze_btn or _prefill_active or (
                         "Watchful", "trend structure weakening", "warn")
                 else:
                     _posture, _qual, _tone = (
-                        "Weak", "avoid fresh long exposure", "bad")
+                        "Weak", "trend structure broken", "bad")
                 _hv_why = ""
                 _narr = getattr(cs, "narrative", "") or ""
                 if _narr:

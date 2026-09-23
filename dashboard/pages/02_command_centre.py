@@ -1210,9 +1210,9 @@ def _render_open_positions_section():
                      "normal": "var(--surface)"}.get(_pos["status"], "var(--surface)")
             _purc = "var(--bull)" if _pos["unr"] >= 0 else "var(--bear)"
             _palert = {
-                "target_hit": f"🎯 Target hit — close to lock in profit",
-                "sl_hit":     f"🚨 Stop-loss breached — consider exiting to limit loss",
-                "big_move":   f"{'📈' if _pos['unr_pct']>0 else '📉'} Large move — review your stop and target",
+                "target_hit": f"🎯 Target reached — price is at or above your target",
+                "sl_hit":     f"🚨 Stop-loss breached — price is below your stop",
+                "big_move":   f"{'📈' if _pos['unr_pct']>0 else '📉'} Large move since entry",
             }.get(_pos["status"], "")
     
             _pc1, _pc2 = st.columns([5, 1])

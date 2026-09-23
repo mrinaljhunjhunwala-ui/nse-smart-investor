@@ -329,28 +329,33 @@ def _validate_ticker(raw: str):
 
 
 def _plain_english(action: str, entry: float, sl: float, tp: float, rr: float) -> str:
-    """One-line 'what this means + what to do' for non-traders."""
+    """One-line plain-English description of the setup for non-traders.
+
+    Descriptive only (CLAUDE.md rule 1): it states what the trend and the
+    model's reference levels ARE — never what the reader should do. Levels
+    are framed as the model's reference points, not an order ticket.
+    """
     risk_amt = entry - sl
     rew_amt  = tp - entry
+    levels = (f"Model reference levels: entry <b>₹{entry:,.2f}</b>, invalidation "
+              f"<b>₹{sl:,.2f}</b> (≈ ₹{risk_amt:,.2f}/share away), target "
+              f"<b>₹{tp:,.2f}</b> (≈ ₹{rew_amt:,.2f}/share away) — a 1 : {rr:.1f} "
+              f"risk-to-reward structure.")
     if action in ("STRONG BUY", "BUY"):
-        return (f"✅ <b>Looks like a good buy.</b> If you want in, buy near "
-                f"<b>₹{entry:,.2f}</b>. Set a stop-loss at <b>₹{sl:,.2f}</b> — that's your "
-                f"exit if it goes wrong (max loss ≈ ₹{risk_amt:,.2f}/share). Aim to take "
-                f"profit near <b>₹{tp:,.2f}</b> (≈ ₹{rew_amt:,.2f}/share gain). "
-                f"You're risking 1 to make {rr:.1f}.")
+        return f"📈 <b>Trend quality is strong.</b> Price structure and momentum are aligned. {levels}"
     if action == "WATCHLIST":
-        return ("👀 <b>Not a buy yet.</b> It's close but not strong enough — add it to your "
-                "watchlist and wait for it to firm up before committing money.")
+        return ("👀 <b>Trend is forming but not confirmed.</b> Several components are "
+                "positive, but the score sits below the strong-trend band.")
     if action == "HOLD":
-        return ("🟡 <b>Hold, don't add.</b> If you already own it, keep holding. But this isn't "
-                "a good level to put fresh money in.")
+        return ("🟡 <b>Neutral trend.</b> No clear edge in either direction on the "
+                "current readings.")
     if action == "CAUTION":
-        return ("⚠️ <b>Be careful.</b> Momentum is fading. If you own it, consider trimming or "
-                "tightening your stop. Not a place to buy more.")
+        return ("⚠️ <b>Momentum is fading.</b> The trend is weakening and the score is "
+                "in the deteriorating band.")
     if action == "EXIT":
-        return ("🔴 <b>Weak — avoid buying.</b> If you own it, consider selling and moving the "
-                "money to a stronger stock. The trend is against it right now.")
-    return ("This stock is in a neutral zone — no strong edge either way. Wait for a clearer setup.")
+        return ("🔴 <b>Trend is broken.</b> Price is below key averages and momentum is "
+                "negative — the weakest band of the score.")
+    return "This stock is in a neutral zone — no strong edge either way on current readings."
 
 
 def _trade_type(headline: str) -> tuple:

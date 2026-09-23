@@ -508,9 +508,9 @@ with _tab_breadth:
 
         pct200 = breadth["pct_above_200"]
         if pct200 >= 70:
-            sig_txt, sig_clr = "🟢 **Strong Bull Market breadth** — Majority above SMA200. Buy dips with confidence.", "bull"
+            sig_txt, sig_clr = "🟢 **Strong Bull Market breadth** — Majority above SMA200 — a broad, well-supported uptrend.", "bull"
         elif pct200 >= 50:
-            sig_txt, sig_clr = "🟡 **Moderate breadth** — More than half in uptrend. Stock-selective long approach.", "amber"
+            sig_txt, sig_clr = "🟡 **Moderate breadth** — More than half in uptrend. Leadership is narrower; moves are more stock-specific.", "amber"
         elif pct200 >= 30:
             sig_txt, sig_clr = "🟠 **Weakening breadth** — Over half below SMA200. Reduce position sizes.", "accent"
         else:
@@ -546,10 +546,10 @@ with _tab_breadth:
                 unsafe_allow_html=True,
             )
             st.dataframe(pd.DataFrame([
-                {"% Above SMA200": "> 70%",  "Signal": "Strong Bull",    "Action": "Full long — buy dips"},
-                {"% Above SMA200": "50–70%", "Signal": "Healthy uptrend","Action": "Long bias, trail stops"},
-                {"% Above SMA200": "30–50%", "Signal": "Sector chop",    "Action": "Stock-selective only"},
-                {"% Above SMA200": "< 30%",  "Signal": "Bear market",    "Action": "Reduce exposure, hedge"},
+                {"% Above SMA200": "> 70%",  "Signal": "Strong Bull",    "Historically": "Broad uptrends; pullbacks have tended to be bought"},
+                {"% Above SMA200": "50–70%", "Signal": "Healthy uptrend","Historically": "Healthy uptrend with rotation"},
+                {"% Above SMA200": "30–50%", "Signal": "Sector chop",    "Historically": "Choppy; dispersion across sectors is high"},
+                {"% Above SMA200": "< 30%",  "Signal": "Bear market",    "Historically": "Downtrend; rallies have tended to fade"},
             ]), hide_index=True)
 
         st.markdown("---")

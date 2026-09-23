@@ -473,7 +473,7 @@ with _t1:
 with _t2:
     st.caption(
         "Weak names below key moving averages with distribution volume — watch for a "
-        "breakdown / avoid fresh longs."
+        "potential breakdown."
     )
     _render_cards(_wl.get("breakdown_watch", []), "breakdown", "tw_bdn")
 with _t3:
