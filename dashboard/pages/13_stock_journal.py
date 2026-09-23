@@ -198,18 +198,30 @@ _df = pd.DataFrame([{
 } for e in filtered])
 
 # Style: colour the status chip
-_status_bg = {
-    "open":          "#42a5f5",   # blue
-    "closed":        "#8d6e63",   # brown
-    "passed":        "#78909c",   # grey
-    "invalidated":   "#ef5350",   # red
+# P2 · token colours (PLOT_COLORS) instead of raw hex; tinted text rather
+# than a solid fill so the chip reads on the dark ground.
+from dashboard.shared.chart_helpers import PLOT_COLORS as _PC  # noqa: E402
+_status_fg = {
+    "open":          _PC["azure"],
+    "closed":        _PC["dim"],
+    "passed":        _PC["faint"],
+    "invalidated":   _PC["bear"],
 }
 def _colour_status(v):
-    bg = _status_bg.get(v, "#42a5f5")
-    return f"background-color:{bg};color:white;font-weight:600;text-align:center"
+    fg = _status_fg.get(v, _PC["azure"])
+    return f"color:{fg};font-weight:600;text-align:center"
 
 _styled = _df.style.map(_colour_status, subset=["Status"])
 st.dataframe(_styled, hide_index=True, width="stretch")
+
+# DT1/DT2 — provenance + freshness for the table above.
+from dashboard.shared.ui_components import data_as_of as _data_as_of  # noqa: E402
+_latest_added = max((e.added_date for e in entries if e.added_date), default="")
+st.markdown(
+    _data_as_of(f"last entry {_latest_added}" if _latest_added else "",
+                source="local journal", ttl_hint="read on every page load"),
+    unsafe_allow_html=True,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utility: review-due nudge
@@ -228,7 +240,8 @@ for e in entries:
         _due.append((e, rd))
 
 if _due:
-    st.markdown("### ⏰ Reviews due")
+    st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">⏰ Reviews due</div>',
+                unsafe_allow_html=True)
     for e, rd in sorted(_due, key=lambda x: x[1]):
         _overdue_by = (_today - rd).days
         _overdue_txt = "today" if _overdue_by == 0 else f"{_overdue_by} day(s) ago"

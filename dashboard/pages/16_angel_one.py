@@ -52,36 +52,54 @@ _ao_ok = _ao_is_configured()
 
 # ── Credentials setup ────────────────────────────────────────────────────
 if not _ao_ok:
-    st.warning(
-        "**Angel One credentials not configured.**  \n"
-        "Add them to `.streamlit/secrets.toml` or as environment variables to connect your account."
+    # P2 · F5 onboarding panel — same empty_state()/panel() vocabulary as the
+    # other stub states, with the numbered wire-up steps kept as a wizard.
+    from dashboard.shared.ui_components import (
+        empty_state as _ao_empty, panel as _ao_panel,
     )
-    with st.expander("📋 Setup Instructions", expanded=True):
-        st.markdown("""
-**Step 1 — Get your SmartAPI key:**
-1. Login to Angel One → My Profile → API Key (or visit [smartapi.angelone.in](https://smartapi.angelone.in))
-2. Click **Generate API Key** → copy the key
+    st.markdown(
+        _ao_empty(
+            "Angel One not connected",
+            hint="Credentials aren't configured yet. Follow the four steps "
+                 "below — the page lights up after a restart.",
+            icon="🔌",
+        ),
+        unsafe_allow_html=True,
+    )
 
-**Step 2 — Get your TOTP secret:**
-1. Angel One → Profile → Security Settings → Two-Factor Authentication → **Re-Setup**
-2. Click **"Can't scan QR?"** → copy the **text key** (looks like `JBSWY3DPEHPK3PXP`)
+    def _ao_step(n: int, title: str, body: str) -> None:
+        st.markdown(
+            _ao_panel(
+                f'<div class="t-body">{body}</div>',
+                kind="sunken", tone="info",
+                title=f"Step {n} of 4 · {title}",
+            ),
+            unsafe_allow_html=True,
+        )
 
-**Step 3 — Add to `.streamlit/secrets.toml`:**
-```toml
-[angel_one]
-api_key      = "C58Sb2tl..."        # SmartAPI key
-client_id    = "AABM038127"         # Your Angel One client ID
-password     = "yourpassword"       # Login password
-totp_secret  = "JBSWY3DPEHPK3PXP"  # Base32 TOTP seed
-```
-
-**Or set environment variables:**
-```bash
-ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  ANGEL_TOTP_SECRET=...
-```
-
-**Step 4 — Restart Streamlit** after adding credentials.
-""")
+    _ao_step(1, "Get your SmartAPI key",
+             "Log in to Angel One → My Profile → API Key (or visit "
+             '<a href="https://smartapi.angelone.in" target="_blank">smartapi.angelone.in</a>) '
+             "→ <b>Generate API Key</b> → copy the key.")
+    _ao_step(2, "Get your TOTP secret",
+             "Angel One → Profile → Security Settings → Two-Factor Authentication "
+             "→ <b>Re-Setup</b> → click <b>“Can't scan QR?”</b> and copy the base32 text key.")
+    _ao_step(3, "Add credentials",
+             "Put them in <code>.streamlit/secrets.toml</code> (gitignored) "
+             "or your platform's secret store — never in code.")
+    st.code(
+        "[angel_one]\n"
+        'api_key     = "<your SmartAPI key>"\n'
+        'client_id   = "<your client ID>"\n'
+        'password    = "<your login password>"\n'
+        'totp_secret = "<base32 TOTP seed>"\n',
+        language="toml",
+    )
+    st.caption("Or set environment variables:")
+    st.code("ANGEL_API_KEY=...  ANGEL_CLIENT_ID=...  ANGEL_PASSWORD=...  "
+            "ANGEL_TOTP_SECRET=...", language="bash")
+    _ao_step(4, "Restart Streamlit",
+             "Restart the app after adding credentials so the session picks them up.")
     st.stop()
 
 # ── Connected — show tabs ────────────────────────────────────────────────

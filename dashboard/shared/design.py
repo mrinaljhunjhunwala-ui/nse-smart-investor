@@ -875,6 +875,22 @@ def apply_design():
         .ticker-content   { font-size: 11px !important; }
     }
 
+    /* ── P2 · Investor Guide long-form typography (15_investor_guide.py) ───
+       Self-contained block. Scoped via the .guide-doc marker on the page H1
+       so no other page's markdown picks up the 15/1.6 body scale.
+       H1 32/700 · H2 22/700 · body 15/1.6. */
+    .page-title-serif.guide-doc { font-size: 32px; font-weight: 700; }
+    .t-h2.guide-h2 { font-size: 22px; font-weight: 700; line-height: 1.25;
+                     margin-top: 22px !important; }
+    [data-testid="stMain"]:has(.guide-doc) [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMain"]:has(.guide-doc) [data-testid="stMarkdownContainer"] li {
+        font-size: 15px; line-height: 1.6;
+    }
+    @media (max-width: 480px) {
+        .page-title-serif.guide-doc { font-size: 24px !important; }
+        .t-h2.guide-h2 { font-size: 18px; }
+    }
+
     /* ── P2 · Market Live tape + Command Centre regime strip / pick-more ──
        Self-contained block (01_market_live.py, 02_command_centre.py). */
     .ml-tape {

@@ -34,7 +34,7 @@ st.markdown('<h1 class="page-title-serif">Position <em>Sizer</em></h1><p class="
 
 st.markdown(
     "Calculate exact position size using Kelly Criterion and fixed-risk rules.  \n"
-    "Never guess your lot size again — know exactly how many shares to buy *before* you enter."
+    "Illustrative sizing maths — see how many shares a given risk budget implies *before* committing capital."
 )
 
 _ps_tab1, _ps_tab2 = st.tabs(["💰 Fixed Risk Calculator", "📊 Kelly Criterion"])
@@ -80,7 +80,13 @@ with _ps_tab1:
             else:
                 st.info("Pick a stock from the list first.")
 
+    # P2 · F1/F3 widget chrome — group the form into bordered cards with
+    # §9.4 eyebrow labels so inputs read as one grouped control surface.
     _psc1, _psc2 = st.columns(2)
+    _psc1 = _psc1.container(border=True)
+    _psc2 = _psc2.container(border=True)
+    _psc1.markdown('<div class="t-label">Account &amp; risk</div>', unsafe_allow_html=True)
+    _psc2.markdown('<div class="t-label">Trade levels</div>', unsafe_allow_html=True)
     with _psc1:
         _ps_capital   = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="ps_cap")
         _ps_risk_pct  = st.slider("Risk per trade (%)", 0.5, 3.0, 1.0, 0.25, key="ps_risk_pct")
@@ -106,7 +112,7 @@ with _ps_tab1:
 
         st.markdown("---")
         r1, r2, r3, r4, r5 = st.columns(5)
-        r1.metric("Shares to Buy",   f"{_shares:,}")
+        r1.metric("Position (shares)",   f"{_shares:,}")
         r2.metric("Notional",        f"₹{_notional:,.0f}")
         r3.metric("Risk ₹",          f"₹{_actual_risk:,.0f}",
                   delta=f"{_actual_risk/_ps_capital*100:.2f}% of capital")
@@ -118,7 +124,7 @@ with _ps_tab1:
         st.markdown(f"""
         <div class="{_card_color}">
         <b>📋 Trade Plan: {_ps_entry:.2f} entry</b><br>
-        Buy <b>{_shares:,} shares</b> at ₹{_ps_entry:.2f} &nbsp;|&nbsp;
+        Size <b>{_shares:,} shares</b> at ₹{_ps_entry:.2f} &nbsp;|&nbsp;
         Stop ₹{_ps_sl:.2f} &nbsp;|&nbsp;
         Target ₹{_ps_tp:.2f}<br>
         Risk: ₹{_actual_risk:,.0f} ({_actual_risk/_ps_capital*100:.2f}% of ₹{_ps_capital:,}) &nbsp;|&nbsp;
@@ -142,6 +148,10 @@ with _ps_tab2:
     """)
 
     _kc1, _kc2 = st.columns(2)
+    _kc1 = _kc1.container(border=True)
+    _kc2 = _kc2.container(border=True)
+    _kc1.markdown('<div class="t-label">Edge inputs</div>', unsafe_allow_html=True)
+    _kc2.markdown('<div class="t-label">Risk limits &amp; levels</div>', unsafe_allow_html=True)
     with _kc1:
         _k_capital  = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="k_cap")
         _k_winrate  = st.slider("Historical Win Rate (%)", 30, 75, 55, 1, key="k_wr") / 100
@@ -180,7 +190,7 @@ with _ps_tab2:
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.error("Negative Kelly — this setup has negative expected value. Do not trade.")
+            st.error("Negative Kelly — this setup has negative expected value on these inputs.")
     except Exception as _ke:
         st.error(f"Kelly calculation error: {_ke}")
 
