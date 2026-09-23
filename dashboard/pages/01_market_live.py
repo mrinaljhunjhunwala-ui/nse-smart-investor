@@ -21,9 +21,21 @@ from dashboard.shared.cache import (
 )
 from dashboard.shared.chart_helpers import (
     _ROOT,
+    PLOT_COLORS,
+    diverging_colors,
     render_top_bar,
     tick_pulse_tracker,
 )
+from dashboard.shared.ui_components import ticker_hover_wrap
+import logging
+
+
+def _sector_of(ticker: str) -> str:
+    try:
+        from data.universe import get_sector
+        return get_sector(ticker)
+    except Exception:
+        return "Other"
 
 apply_design()
 render_sidebar(current="Live Ticker")
@@ -164,6 +176,21 @@ else:
     m4.metric("Breadth", f"{_breadth_pct:.0f}% up",
               delta_color="normal" if _breadth_pct >= 50 else "inverse")
 
+    # ── P2 · terminal-grade tape — fixed height, monospaced, edge-masked ──
+    _tape_rows = pd.concat([snap.head(10), snap.tail(10).iloc[::-1]]).drop_duplicates(subset=["ticker"])
+    _tape_items = "".join(
+        f'<span class="ml-tape-item"><b>{_tr["ticker"].replace(".NS", "")}</b> '
+        f'{_tr["price"]:,.2f} '
+        f'<span class="{"ml-tape-up" if _tr["chg_pct"] >= 0 else "ml-tape-dn"}">'
+        f'{"▲" if _tr["chg_pct"] >= 0 else "▼"}{abs(_tr["chg_pct"]):.2f}%</span></span>'
+        for _, _tr in _tape_rows.iterrows()
+    )
+    st.markdown(
+        f'<div class="ml-tape" aria-label="Top movers tape"><div class="ml-tape-track">'
+        f'{_tape_items}{_tape_items}</div></div>',
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
 
     # ── Today's Trade Ideas (from live % change + market breadth) ──────────
@@ -238,13 +265,19 @@ else:
             _ar = "▲" if _ch >= 0 else "▼"
             _nm = str(_row.get("name", ""))[:26]
             _tick_cls = _mv_pulse(_row["ticker"], _row["price"])
+            _mv_label = ticker_hover_wrap(
+                _row["ticker"].replace(".NS", ""),
+                price=float(_row["price"]),
+                chg_pct=float(_ch),
+                sector=_sector_of(_row["ticker"]),
+            )
             _html += (
                 f'<div class="mover-card{_tick_cls}" '
                 f'style="background:var(--sunken);border-left:4px solid {_acc};'
                 f'border-radius:9px;padding:9px 13px;margin-bottom:6px;'
                 f'display:flex;justify-content:space-between;align-items:center">'
                 f'<div><span style="color:var(--faint);font-size:11px;margin-right:6px">#{_i}</span>'
-                f'<span style="font-size:15px;font-weight:700;color:var(--ink)">{_row["ticker"].replace(".NS","")}</span>'
+                f'<span style="font-size:15px;font-weight:700;color:var(--ink)">{_mv_label}</span>'
                 f'<div style="font-size:11px;color:var(--dim)">{_nm}</div></div>'
                 f'<div style="text-align:right">'
                 f'<div style="font-size:15px;font-weight:700;color:var(--ink)">₹{_row["price"]:,.2f}</div>'
@@ -261,6 +294,36 @@ else:
         st.markdown("#### 🔴 Top Losers")
         st.markdown(_movers_block(bot5, False), unsafe_allow_html=True)
     _mv_pulse_commit()
+
+    # ── P2 · Sector heatmap — diverging palette (hue = sign, alpha = size) ──
+    try:
+        _sec = snap.assign(sector=snap["ticker"].map(_sector_of))
+        _sec = _sec[_sec["sector"] != "Other"]
+        _sec_agg = (_sec.groupby("sector")
+                        .agg(chg=("chg_pct", "mean"), n=("ticker", "count"))
+                        .reset_index())
+        if not _sec_agg.empty:
+            import plotly.graph_objects as _go
+            _peak = max(float(_sec_agg["chg"].abs().max()), 1.0)
+            _fig = _go.Figure(_go.Treemap(
+                labels=_sec_agg["sector"],
+                parents=[""] * len(_sec_agg),
+                values=_sec_agg["n"],
+                customdata=_sec_agg[["chg", "n"]].values,
+                marker=dict(colors=diverging_colors(_sec_agg["chg"], full_at=_peak),
+                            line=dict(width=1, color=PLOT_COLORS["faint"])),
+                texttemplate="%{label}",
+                hovertemplate="<b>%{label}</b><br>%{customdata[0]:+.2f}% avg"
+                              " · %{customdata[1]} stocks<extra></extra>",
+            ))
+            _fig.update_layout(height=320, margin=dict(l=0, r=0, t=0, b=0),
+                               paper_bgcolor="rgba(0,0,0,0)")
+            st.markdown("#### 🗺️ Sector Heatmap")
+            st.plotly_chart(_fig, use_container_width=True)
+            st.caption("Tile size = stocks tracked · colour hue = direction, "
+                       "intensity = size of the average move. Hover for %.")
+    except Exception as _hm_e:
+        logging.getLogger("dashboard.market_live").debug("sector heatmap failed: %s", _hm_e)
 
     @st.cache_data(ttl=300, show_spinner=False)
     def _explain_mover(ticker: str, chg_pct: float, vol_ratio: float) -> list:
@@ -409,12 +472,9 @@ with st.spinner("Aggregating news from multiple sources…"):
 if mkt_news:
     _srcs = sorted({a.get("publisher", "") for a in mkt_news if a.get("publisher")})
     st.caption(f"🗞️ Aggregated from **{len(_srcs)} sources**: {', '.join(_srcs)}")
-    # F1 audit: the source palette below is a deliberate exception -- it's
-    # a hand-picked distinguishable-colour set assigning each news publisher
-    # a stable identity chip. No semantic meaning per colour; routing through
-    # tokens would collapse the visual distinction that IS the point.
-    _src_palette = ["#5b8def", "#00d4aa", "#ff9500", "#a78bfa", "#FFC107",
-                    "#26a69a", "#64b5f6", "#ff6b9d", "#ffd700"]
+    # P2 · publisher identity chips cycle through PLOT_COLORS tokens
+    # (no raw hex in pages).
+    _src_palette = [PLOT_COLORS[k] for k in ("azure", "accent", "bull", "amber", "bear", "dim")]
     _src_color = {s: _src_palette[i % len(_src_palette)] for i, s in enumerate(_srcs)}
     for article in mkt_news:
         _s   = article["sentiment"]
@@ -422,7 +482,7 @@ if mkt_news:
                 else "var(--bear)" if _s == "negative" else "var(--dim)")
         _si  = "▲" if _s == "positive" else "▼" if _s == "negative" else "•"
         _pub = article.get("publisher", "—")
-        _pc  = _src_color.get(_pub, "#8899bb")
+        _pc  = _src_color.get(_pub, PLOT_COLORS["dim"])
         st.markdown(
             f'<div style="background:var(--surface);border:1px solid var(--hairline-soft);'
             f'border-left:3px solid {_sc};border-radius:8px;padding:10px 14px;margin-bottom:6px">'

@@ -78,12 +78,12 @@ All six IR items shipped in the Sept 2026 sprint. Left here for provenance.
 Every entry links to the page it fixes. Numbers reference the current top-of-file "FIX" comments where relevant.
 
 ### [`01_market_live.py`](../dashboard/pages/01_market_live.py) — Market Live
-- 🟨 Ticker tape uses generic Streamlit container border; wrap in the terminal-grade "tape" component from `references/components.md` (fixed-height, monospaced, subtle gradient mask on edges).
-- 🟨 Sector heatmap: reads as flat blocks — apply diverging palette from `dataviz` skill; add small % labels on hover only.
+- ✅ ~~Ticker tape uses generic Streamlit container border~~ — shipped: `.ml-tape` terminal tape (32 px fixed height, IBM Plex Mono, gradient edge mask, pauses on hover, reduced-motion safe) + `ticker_hover_wrap` on movers + news chips on `PLOT_COLORS` (no raw hex). Original: wrap in the terminal-grade "tape" component from `references/components.md` (fixed-height, monospaced, subtle gradient mask on edges).
+- ✅ ~~Sector heatmap: reads as flat blocks~~ — shipped: sector treemap via `diverging_colors` (hue = sign, alpha = magnitude), % on hover only. Original — apply diverging palette from `dataviz` skill; add small % labels on hover only.
 
 ### [`02_command_centre.py`](../dashboard/pages/02_command_centre.py) — Command Centre
-- 🟧 The v2 scoring active chip added in #47 works but sits alone above the cards; move it into a "regime strip" alongside VIX zone and market breadth so status lives in one place.
-- 🟨 Top-picks cards: 6 metrics per card is > "5 above the fold" rule. Demote 2 to expander per `references/layout-patterns.md`.
+- ✅ ~~The v2 scoring active chip added in #47~~ — shipped: single `.regime-strip` (India VIX zone · breadth % > SMA50 · scoring v1/v2). Original: the chip works but sits alone above the cards; move it into a "regime strip" alongside VIX zone and market breadth so status lives in one place.
+- ✅ ~~Top-picks cards: 6 metrics per card~~ — shipped: R:R + freshness stamps demoted to a `<details>` "R:R & freshness" row; action chip now via `_display_label`. Original: 6 metrics per card is > "5 above the fold" rule. Demote 2 to expander per `references/layout-patterns.md`.
 
 ### [`03_my_portfolio.py`](../dashboard/pages/03_my_portfolio.py) — My Portfolio
 - ✅ IR2 + IR3 + IR4 + IR5 + IR6 all landed here (see §3).
@@ -177,7 +177,7 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 Everything above under a ✅ has shipped. Remaining active work:
 
 1. ✅ **F2 mobile pass** (`<768 px`) — shipped in #146. `st.columns` collapse below 768, `.mobile-stack` utility for raw flex grids, top-bar chip shrink, hero-text scale-down, tight block-container padding. Real device pass still open.
-2. **§10 UX ideas** (see below) — Ctrl+K palette + UX3 live-tick shipped; hover previews (UX2) still open.
+2. **§10 UX ideas** (see below) — Ctrl+K palette + UX3 live-tick shipped; hover previews (UX2) shipped on Command Centre, My Portfolio holdings cards, My Watchlist (chip strip above table) and Analyze Stock hero.
 3. ✅ **F7b a11y follow-up** — shipped in #141 + #147.
 4. ✅ **Copy polish sweep** — shipped in #143 (Deep-Dive fallback removed, cyan-in-comment fixed).
 5. Per-page P2 residuals — most flagged with 🟨 above; opportunistic.
@@ -191,7 +191,7 @@ Follow-ups seeded during the Sept 2026 sprint but not yet shipped:
 | # | Item | Pri | Effort | Notes |
 |---|---|---|---|---|
 | UX1 | ✅ **Ctrl+K command palette modal** — shipped in #145. `st.dialog`-based modal, JS keybind via `components.v1.html`, sidebar `⌘ K` trigger button, sidebar bar retained as AppTest fallback. | ✅ Shipped | — | — |
-| UX2 | **Hover preview cards on tickers** — show a mini-chart + score chip on hover. | 🟨 P2 | M | Custom HTML component. |
+| UX2 | **Hover preview cards on tickers** — show a mini-chart + score chip on hover. | 🟨 P2 | M | ✅ Shipped — `ticker_hover_wrap` (pure-CSS). Live on 02 top picks, 03 holdings cards, 14 watchlist chip strip, 04 hero kicker. Not possible inside st.dataframe cells. |
 | UX3 | ✅ **Live-tick pulse** — `.tick-pulse-{up,down}` one-shot classes shipped in #142 (top-bar chips) and extended in #144 to Market Live movers + Command Centre top picks + My Portfolio holdings. Shared helper `tick_pulse_tracker(key)` in `chart_helpers.py`. | ✅ Shipped | — | — |
 | UX4 | ~~Ticker drag-and-drop~~ | ❌ Deferred | — | Streamlit doesn't support natively; needs full custom component. |
 
