@@ -708,6 +708,99 @@ def apply_design():
         .cc-skel { animation: none; }
     }
 
+    /* ── UX2 · Ticker hover preview card ─────────────────────────────────────
+       Pure CSS `:hover` tooltip anchored to a ticker span. No JS, no custom
+       component — the entire preview (sparkline SVG, price, delta, score
+       chip) is pre-rendered inline into the span at page render time and
+       hidden/shown by a single CSS rule. Fine for the desktop hover UX;
+       mobile users tap-through the ticker without the preview (no `:hover`
+       state on touch).
+
+       Layout: the outer .ticker-hover span is inline + position:relative
+       so the .ticker-hover-card absolute-positions off of it. The card
+       floats above the anchor with a small top offset and a subtle drop
+       shadow; the tail arrow is a rotated square at the top edge.
+
+       Wired first on Command Centre top-picks cards (see picks_ui /
+       shared/ui_components ticker_hover_wrap). Other surfaces can adopt
+       the same helper. */
+    .ticker-hover {
+        position: relative;
+        display: inline-block;
+        cursor: default;
+    }
+    .ticker-hover .ticker-hover-card {
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        margin-bottom: 8px;
+        min-width: 200px;
+        max-width: 260px;
+        background: var(--card-lift, #101828);
+        border: 1px solid var(--hairline, rgba(255,255,255,.08));
+        border-radius: 10px;
+        padding: 10px 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.55);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(4px);
+        transition: opacity .15s ease-out, transform .15s ease-out, visibility 0s .15s;
+        z-index: 100;
+        pointer-events: none;
+        text-align: left;
+        font-family: var(--font-sans);
+    }
+    .ticker-hover:hover .ticker-hover-card,
+    .ticker-hover:focus-visible .ticker-hover-card,
+    .ticker-hover:focus-within .ticker-hover-card {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+        transition: opacity .15s ease-out, transform .15s ease-out, visibility 0s;
+    }
+    /* Tail arrow — small rotated square anchored to the card's bottom edge. */
+    .ticker-hover .ticker-hover-card::after {
+        content: "";
+        position: absolute;
+        bottom: -5px;
+        left: 16px;
+        width: 10px;
+        height: 10px;
+        background: var(--card-lift, #101828);
+        border-right: 1px solid var(--hairline, rgba(255,255,255,.08));
+        border-bottom: 1px solid var(--hairline, rgba(255,255,255,.08));
+        transform: rotate(45deg);
+    }
+    .ticker-hover-card .thc-row {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 4px; gap: 8px;
+    }
+    .ticker-hover-card .thc-sym {
+        font-size: 13px; font-weight: 700; color: var(--ink, #f0f4ff);
+        letter-spacing: .2px;
+    }
+    .ticker-hover-card .thc-score {
+        font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+        padding: 1px 6px; border-radius: 4px;
+    }
+    .ticker-hover-card .thc-price {
+        font-family: var(--font-mono); font-size: 14px; font-weight: 700;
+        color: var(--ink, #f0f4ff);
+    }
+    .ticker-hover-card .thc-delta {
+        font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    }
+    .ticker-hover-card .thc-sector {
+        font-size: 10px; color: var(--dim, #8b8d93);
+        text-transform: uppercase; letter-spacing: .6px; margin-top: 4px;
+    }
+    .ticker-hover-card svg { margin-top: 4px; }
+    /* Below 768 px the card would overflow a phone viewport, so hide it and
+       let the ticker just be a ticker — F2 mobile pass covers the layout. */
+    @media (max-width: 768px) {
+        .ticker-hover .ticker-hover-card { display: none !important; }
+    }
+
     /* ── F2 · Mobile responsive pass ────────────────────────────────────────
        The app is desktop-first (portfolio work, chart reading). Below 768 px
        the two-column card grids stack, the top-bar chips shrink, hero text
