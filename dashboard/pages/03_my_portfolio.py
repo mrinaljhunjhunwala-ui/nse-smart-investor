@@ -89,7 +89,7 @@ if _ROOT not in sys.path:
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
-from dashboard.shared.ui_components import chip_pill
+from dashboard.shared.ui_components import chip_pill, ticker_hover_wrap
 from dashboard.shared.trade_utils import (
     _action_emoji,
     _display_label,                # Phase 2 UI honesty
@@ -756,13 +756,22 @@ if _csv_source is not None:
                     f"{_h_emoji} {_display_label(h.action)}", tone=_h_chip_tone,
                 )
                 _h_tick_cls = _pf_pulse(h.ticker, h.current_price)
+                # UX2 · hover preview on the holding label — reuses fields the
+                # HoldingResult already carries (no extra fetch per card).
+                _h_lbl_hover = ticker_hover_wrap(
+                    _h_lbl,
+                    price=h.current_price,
+                    chg_pct=_h_today,
+                    score=h.score,
+                    sector=str(getattr(h, "sector", "") or ""),
+                )
                 _h_html = (
                     f'<div class="holding-card{_h_tick_cls}" '
                     f'style="background:{_h_bg};border-left:5px solid {_h_ac};'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:8px">'
                     f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
                     f'<div>'
-                    f'<span style="font-size:20px;font-weight:700;color:var(--ink)">{_h_lbl}</span>'
+                    f'<span style="font-size:20px;font-weight:700;color:var(--ink)">{_h_lbl_hover}</span>'
                     f'&nbsp;&nbsp;{_h_action_chip}'
                     f'</div>'
                     f'<div style="text-align:right">'
