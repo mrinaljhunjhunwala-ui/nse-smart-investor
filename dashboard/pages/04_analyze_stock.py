@@ -1425,12 +1425,29 @@ if analyze_btn or _prefill_active or (
                         _dlabel = ""
                     if _ms_an.get("is_open") and _an_live and _an_drift >= 0.5:
                         # FIX A2: only warn about drift during live market hours
-                        st.caption(
-                            f"ℹ️ Live price **₹{_an_live:,.2f}** · indicators & levels "
-                            f"computed on the last daily close **₹{cs.price:,.2f}**"
-                            f"{f' ({_dlabel})' if _dlabel else ''} "
-                            f"— {_an_drift:.1f}% apart, treat entry/target as a guide."
-                        )
+                        # P2 · promoted from st.caption to a dismissible amber
+                        # banner so it isn't lost in the top-bar noise. The
+                        # dismissal is per ticker + drift bucket, so a bigger
+                        # move later in the session re-surfaces it.
+                        _drift_key = f"_an_drift_dismiss_{ticker}_{int(_an_drift)}"
+                        if not st.session_state.get(_drift_key):
+                            from dashboard.shared.ui_components import degraded_banner as _an_banner
+                            _db_c1, _db_c2 = st.columns([20, 1])
+                            with _db_c1:
+                                st.markdown(_an_banner(
+                                    f"Live price {_an_drift:.1f}% from last close",
+                                    detail=(
+                                        f"Live <b>₹{_an_live:,.2f}</b> · indicators & levels "
+                                        f"computed on the last daily close <b>₹{cs.price:,.2f}</b>"
+                                        f"{f' ({_dlabel})' if _dlabel else ''}."
+                                    ),
+                                    fallback="Treat entry / stop / target below as a guide until the close settles.",
+                                ), unsafe_allow_html=True)
+                            with _db_c2:
+                                if st.button("✕", key=f"btn{_drift_key}",
+                                             help="Dismiss for this ticker"):
+                                    st.session_state[_drift_key] = True
+                                    st.rerun()
                     elif _ms_an.get("is_open"):
                         st.caption(
                             "🔴 LIVE · market open — official close settles after 3:30 PM."
@@ -1587,21 +1604,21 @@ if analyze_btn or _prefill_active or (
 
             # FIX A4: handle negative _ed_days (results already announced)
             _ed_days = _dc["earnings_days"]
+            # P2 · earnings status now renders through the shared chip_pill
+            # (signal-badge) so it reads like every other status chip. Shape
+            # glyph per state so urgency doesn't depend on colour alone.
+            from dashboard.shared.ui_components import chip_pill as _an_chip
             if _ed_days is not None and _ed_days < 0:
-                _ed_txt = f"Results {abs(_ed_days)}d ago"
-                _ed_c   = "var(--dim)"                            # neutral — event passed
+                _ed_txt, _ed_tone = f"✓ Results {abs(_ed_days)}d ago", "neutral"   # event passed
             elif _ed_days is not None and 0 <= _ed_days <= 7:
-                _ed_txt = f"⚠️ Results in {_ed_days}d — avoid fresh buys"
-                _ed_c   = "var(--bear)"
+                _ed_txt, _ed_tone = f"⚠ Results in {_ed_days}d · event risk", "bad"
             elif _ed_days is not None and 0 <= _ed_days <= 21:
-                _ed_txt = f"Results in {_ed_days}d"
-                _ed_c   = "var(--amber)"
+                _ed_txt, _ed_tone = f"◆ Results in {_ed_days}d", "warn"
             elif _ed_days is not None:
-                _ed_txt = f"Results in {_ed_days}d (clear)"
-                _ed_c   = "var(--bull)"
+                _ed_txt, _ed_tone = f"● Results in {_ed_days}d (clear)", "good"
             else:
-                _ed_txt = "Unknown"
-                _ed_c   = "var(--dim)"
+                _ed_txt, _ed_tone = "Unknown", "neutral"
+            _ed_badge = _an_chip(_ed_txt, _ed_tone)
 
             # FIX A3: guard against _dc["total"] being None or 0
             _bull = _dc.get("bull", 0)
@@ -1699,7 +1716,7 @@ if analyze_btn or _prefill_active or (
                 f'<div><div style="font-size:10px;color:var(--faint)">RELATIVE STRENGTH</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_rs_c}">{_rs_txt}</div></div>'
                 f'<div><div style="font-size:10px;color:var(--faint)">EARNINGS</div>'
-                f'<div style="font-size:14px;font-weight:700;color:{_ed_c}">{_ed_txt}</div></div>'
+                f'<div style="margin-top:2px">{_ed_badge}</div></div>'
                 f'<div><div style="font-size:10px;color:var(--faint)">SIGNAL AGREEMENT</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_agr_c}">'
                 + (f'{_bull} of {_tot} bullish' if _confirmation_available else '—') +

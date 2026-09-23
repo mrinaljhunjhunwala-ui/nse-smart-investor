@@ -29,7 +29,9 @@ if _ROOT not in sys.path:
 from analysis import fii_dii as _fd     # noqa: E402
 from dashboard.shared.design import apply_design  # noqa: E402
 from dashboard.shared.nav import render_sidebar  # noqa: E402
-from dashboard.shared.chart_helpers import render_top_bar  # noqa: E402
+from dashboard.shared.chart_helpers import (  # noqa: E402
+    render_top_bar, PLOT_COLORS as _PC, diverging_colors as _div,
+)
 
 # FIX: this page previously called st.set_page_config, which violates the
 # CLAUDE.md rule "only dashboard/app.py may call set_page_config; a second
@@ -182,25 +184,30 @@ st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
             'font-size:12px">₹ Cr</span></div>',
             unsafe_allow_html=True)
 
-# F1 audit note: Plotly colour params don't parse CSS custom properties,
-# so these hex are raw. They ARE the current token values from design.py --
-# --bull #16c784, --bear #ff4d4d, --azure #5a8fd6, --amber #f2a93b, --faint
-# #55575e -- so a palette swap needs a matching update here.
-_fig = go.Figure()
-_fig.add_bar(x=_df["date"], y=_df["fii_net"], name="FII net",
-             marker_color=["#16c784" if v >= 0 else "#ff4d4d"
-                           for v in _df["fii_net"].fillna(0)])
-_fig.add_bar(x=_df["date"], y=_df["dii_net"], name="DII net",
-             marker_color=["#5a8fd6" if v >= 0 else "#f2a93b"
-                           for v in _df["dii_net"].fillna(0)])
-_fig.add_hline(y=0, line_dash="dash", line_color="#55575e")
+# P2 · diverging colour rule (dataviz skill): one encoding per channel.
+# Previously one grouped chart used FOUR hues — FII green/red, DII blue/amber
+# — so colour meant both "which investor" and "which sign". Now FII and DII
+# get their own panel (identity = position), and within each panel hue is
+# sign only (bull/bear) with opacity scaling by magnitude. Shared y-scale so
+# bar heights compare across panels.
+from plotly.subplots import make_subplots as _mk_sub
+_fig = _mk_sub(rows=2, cols=1, shared_xaxes=True, shared_yaxes=True,
+               vertical_spacing=0.08,
+               subplot_titles=("FII / FPI net", "DII net"))
+_fd_peak = float(pd.concat([_df["fii_net"], _df["dii_net"]]).abs().max() or 1.0)
+for _row, _col, _nm in ((1, "fii_net", "FII net"), (2, "dii_net", "DII net")):
+    _fig.add_bar(
+        x=_df["date"], y=_df[_col], name=_nm, showlegend=False,
+        marker_color=_div(_df[_col].fillna(0), full_at=_fd_peak),
+        hovertemplate="%{x|%d %b}<br>" + _nm + ": ₹%{y:,.0f} Cr<extra></extra>",
+        row=_row, col=1,
+    )
+    _fig.add_hline(y=0, line_dash="dash", line_color=_PC["faint"], row=_row, col=1)
 _fig.update_layout(
-    barmode="group",
-    xaxis_title="", yaxis_title="₹ Crore",
-    height=380, margin=dict(l=40, r=20, t=20, b=40),
+    height=460, margin=dict(l=40, r=20, t=30, b=40),
     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
 )
+_fig.update_yaxes(title_text="₹ Crore")
 st.plotly_chart(_fig, width="stretch")
 
 # DT1 + DT2 · flows are scraped from NSE — surface WHERE + WHEN.
@@ -230,14 +237,15 @@ st.markdown('<div class="t-h2" style="margin:14px 0 6px 0">'
 _cum = _df.copy()
 _cum["fii_cum"] = _cum["fii_net"].fillna(0).cumsum()
 _cum["dii_cum"] = _cum["dii_net"].fillna(0).cumsum()
-# F1 audit note: Plotly hex mirrors the daily-bars chart above (design.py
-# tokens --bull #16c784, --azure #5a8fd6, --faint #55575e).
+# Series identity here is investor type, not sign, so neither line uses
+# bull/bear hues (green would read as "positive"). Sign is read against the
+# dashed zero line.
 _fig2 = go.Figure()
 _fig2.add_trace(go.Scatter(x=_cum["date"], y=_cum["fii_cum"], mode="lines",
-                            line=dict(color="#16c784", width=2), name="FII cumulative"))
+                            line=dict(color=_PC["accent"], width=2), name="FII cumulative"))
 _fig2.add_trace(go.Scatter(x=_cum["date"], y=_cum["dii_cum"], mode="lines",
-                            line=dict(color="#5a8fd6", width=2), name="DII cumulative"))
-_fig2.add_hline(y=0, line_dash="dash", line_color="#55575e")
+                            line=dict(color=_PC["azure"], width=2), name="DII cumulative"))
+_fig2.add_hline(y=0, line_dash="dash", line_color=_PC["faint"])
 _fig2.update_layout(
     xaxis_title="", yaxis_title="₹ Crore (cumulative)",
     height=340, margin=dict(l=40, r=20, t=20, b=40),
