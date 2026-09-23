@@ -626,24 +626,40 @@ if _csv_source is not None:
                     "Value (₹)": _th.current_price * _th.quantity,
                     "P&L (₹)": _th.pnl,
                     "P&L %": _th.pnl_pct,
-                    "Action": _display_label(_th.action),
+                    "Posture": _display_label(_th.action),
                     "Score": _th.score,
                 })
+            # P2 · P&L table pattern — rows tinted by P&L %, ▲/▼ + sign
+            # colour on the signed columns (bold on big moves), Indian digit
+            # grouping on ₹ columns, Ticker pinned while scrolling sideways.
+            from dashboard.shared.table_styles import (
+                arrow_fmt as _ts_arrow, pnl_styler as _ts_pnl,
+                pinned_text_col as _ts_pin,
+            )
+            from dashboard.shared.ui_components import fmt_inr as _ts_inr
+            _inr0 = lambda v: "—" if pd.isna(v) else f"₹{_ts_inr(v, 0)}"
+            _tbl_df = pd.DataFrame(_tbl_rows)
             st.dataframe(
-                pd.DataFrame(_tbl_rows),
+                _ts_pnl(
+                    _tbl_df,
+                    tint_col="P&L %",
+                    signed_cols=["Today %", "Today ₹", "P&L (₹)", "P&L %"],
+                    bold_at={"Today %": 2.0, "P&L %": 10.0},
+                    formats={
+                        "Price (₹)":    lambda v: "—" if pd.isna(v) else f"₹{_ts_inr(v, 2)}",
+                        "Today %":      _ts_arrow(2, "%"),
+                        "Today ₹":      _ts_arrow(0, "", prefix="₹", indian=True),
+                        "Qty":          "{:.0f}",
+                        "Invested (₹)": _inr0,
+                        "Value (₹)":    _inr0,
+                        "P&L (₹)":      _ts_arrow(0, "", prefix="₹", indian=True),
+                        "P&L %":        _ts_arrow(2, "%"),
+                        "Score":        "{:.0f}/100",
+                    },
+                ),
                 width="stretch",
                 hide_index=True,
-                column_config={
-                    "Price (₹)":    st.column_config.NumberColumn(format="₹%.2f"),
-                    "Today %":      st.column_config.NumberColumn(format="%.2f%%"),
-                    "Today ₹":      st.column_config.NumberColumn(format="₹%.0f"),
-                    "Qty":          st.column_config.NumberColumn(format="%.0f"),
-                    "Invested (₹)": st.column_config.NumberColumn(format="₹%.0f"),
-                    "Value (₹)":    st.column_config.NumberColumn(format="₹%.0f"),
-                    "P&L (₹)":      st.column_config.NumberColumn(format="₹%.0f"),
-                    "P&L %":        st.column_config.NumberColumn(format="%.2f%%"),
-                    "Score":        st.column_config.NumberColumn(format="%.0f/100"),
-                },
+                column_config={"Ticker": _ts_pin("Ticker")},
             )
             st.caption(
                 "Same numbers as the cards below, sourced from the same "

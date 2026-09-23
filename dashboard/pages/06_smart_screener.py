@@ -220,6 +220,52 @@ if scan_btn:
         )
         _scr_rg_evidence()
 
+        # P2 · signal-table pattern — one-glance ranked summary above the
+        # per-setup cards: rank chip, posture (shape + honest label), sector,
+        # score bar, R:R and revenue growth. Same `signals` list, same order.
+        if signals:
+            from dashboard.shared.table_styles import (
+                posture_label as _ts_posture, pinned_text_col as _ts_pin,
+            )
+            _sig_rows = []
+            for _rank, _sg in enumerate(signals[:30], start=1):
+                _sg_px = _sg.get("price", 0) or 0
+                _sg_sl = _sg.get("sl", _sg.get("stop_loss", 0)) or 0
+                _sg_tp = _sg.get("tp", _sg.get("target", None))
+                _sg_rr = _sg.get("rr_ratio")
+                if _sg_rr is None and _sg_tp and (_sg_px - _sg_sl) > 0.01:
+                    _sg_rr = (_sg_tp - _sg_px) / (_sg_px - _sg_sl)
+                _sig_rows.append({
+                    "#": f"#{_rank}",
+                    "Ticker": _sg["ticker"].replace(".NS", ""),
+                    "Posture": _ts_posture(_sg.get("action", "WATCHLIST")),
+                    "Screen": _sg.get("screen", "") or "—",
+                    "Sector": _sg.get("sector", "") or "—",
+                    "Score": _sg.get("composite_score") if enrich_scores else None,
+                    "Price": _sg_px,
+                    "R:R": _sg_rr,
+                    "Rev Growth /yr": _sg.get("rev_growth"),
+                })
+            _sig_df = pd.DataFrame(_sig_rows)
+            if not enrich_scores:
+                _sig_df = _sig_df.drop(columns=["Score"])
+            st.dataframe(
+                _sig_df,
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "#": st.column_config.TextColumn("#", width="small"),
+                    "Ticker": _ts_pin("Ticker"),
+                    "Score": st.column_config.ProgressColumn(
+                        "Score", min_value=0, max_value=100, format="%d"),
+                    "Price": st.column_config.NumberColumn(format="₹%.2f"),
+                    "R:R": st.column_config.NumberColumn(format="%.1fx"),
+                    "Rev Growth /yr": st.column_config.NumberColumn(format="%+.1f%%"),
+                },
+            )
+            st.caption("Ranked summary — expand a setup below for entry, "
+                       "stop and target detail.")
+
         # Display results as Trade Setup Cards
         for sig in signals[:30]:  # cap at 30 for performance
             t      = sig["ticker"].replace(".NS", "")
