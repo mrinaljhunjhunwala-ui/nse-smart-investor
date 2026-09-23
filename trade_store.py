@@ -131,6 +131,26 @@ def _q(sql: str) -> str:
     return sql.replace("?", "%s") if _is_pg() else sql
 
 
+def read_sql_df(sql: str, conn, params=()) -> pd.DataFrame:
+    """Run a SELECT via a DB-API cursor and return a DataFrame.
+
+    Equivalent to ``pd.read_sql_query`` but works identically for sqlite3
+    and psycopg2 connections without pandas' "only supports SQLAlchemy
+    connectable" UserWarning. ``sql`` must already be passed through ``_q()``.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, tuple(params or ()))
+        cols = [d[0] for d in (cur.description or [])]
+        rows = cur.fetchall() if cur.description else []
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+    return pd.DataFrame.from_records(rows, columns=cols)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Startup validation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -368,7 +388,7 @@ def load_by_account(account: str) -> pd.DataFrame:
     ensure_schema()
     try:
         with _get_conn() as conn:
-            return pd.read_sql_query(
+            return read_sql_df(
                 _q("SELECT * FROM trades WHERE account=? ORDER BY id DESC"),
                 conn, params=(account,),
             )
@@ -382,12 +402,12 @@ def fetch_open(account: str = None) -> pd.DataFrame:
     try:
         with _get_conn() as conn:
             if account:
-                return pd.read_sql_query(
+                return read_sql_df(
                     _q("SELECT * FROM trades WHERE status='OPEN' AND account=? ORDER BY timestamp DESC"),
                     conn, params=(account,),
                 )
             # No-account path: now uses _q() consistently
-            return pd.read_sql_query(
+            return read_sql_df(
                 _q("SELECT * FROM trades WHERE status='OPEN' ORDER BY timestamp DESC"),
                 conn,
             )

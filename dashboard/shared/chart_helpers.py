@@ -352,15 +352,9 @@ _INDEX_STRIP = [
 # Plotly colour params don't parse CSS custom properties, so charts need the
 # token values as literals. Keep them HERE (mirrors design.py :root) so pages
 # stay hex-free and a palette swap is a one-file change.
-PLOT_COLORS = {
-    "bull":   "#16c784",
-    "bear":   "#ff4d4d",
-    "amber":  "#f2a93b",
-    "accent": "#ff9500",
-    "azure":  "#5a8fd6",
-    "dim":    "#8b8d93",
-    "faint":  "#55575e",
-}
+from dashboard.shared.tokens import COLORS as _TOKENS, hex_to_rgb as _hex_to_rgb  # noqa: E402
+
+PLOT_COLORS = {k: _TOKENS[k] for k in ("bull", "bear", "amber", "accent", "azure", "dim", "faint")}
 
 
 def diverging_colors(values, full_at: float | None = None) -> list:
@@ -371,7 +365,7 @@ def diverging_colors(values, full_at: float | None = None) -> list:
     peak = full_at or max((abs(v) for v in vals), default=0) or 1.0
     out = []
     for v in vals:
-        r, g, b = (22, 199, 132) if v >= 0 else (255, 77, 77)
+        r, g, b = _hex_to_rgb(_TOKENS["bull"] if v >= 0 else _TOKENS["bear"])
         a = 0.35 + 0.65 * min(abs(v) / peak, 1.0)
         out.append(f"rgba({r},{g},{b},{a:.2f})")
     return out

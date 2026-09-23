@@ -123,7 +123,7 @@ def load_history(days: int = 90) -> pd.DataFrame:
     ensure_schema()
     try:
         with _store._get_conn() as conn:
-            return pd.read_sql_query(_store._q("""
+            return _store.read_sql_df(_store._q("""
                 SELECT * FROM fii_dii_daily
                 ORDER BY date DESC LIMIT ?
             """), conn, params=(int(days),))
