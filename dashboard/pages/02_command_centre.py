@@ -14,7 +14,7 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.picks_ui import render_pick_analysis
 from dashboard.shared.chart_helpers import render_top_bar, tick_pulse_tracker
-from dashboard.shared.ui_components import chip_pill
+from dashboard.shared.ui_components import chip_pill, ticker_hover_wrap
 from dashboard.shared.cache import (
     get_top_picks,
     _persisted_top_picks_snapshot,   # FIX TP-FAST1 / FIX TP-NOOP1
@@ -934,6 +934,20 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             _b_lp = _pk_live.get(_b["ticker"])
             _b_live_price = float(_b_lp["price"]) if _b_lp else None
 
+            # UX2 · hover preview on the ticker label — sparkline + live
+            # price + score chip pre-baked into the anchor span. Cached
+            # 5 min per ticker via _sparkline_closes, so the cost is one
+            # 3-month fetch per pick per fragment refresh cycle at most.
+            _b_hover_svg = _sparkline_svg(_sparkline_closes(_b["ticker"]))
+            _bl_hover = ticker_hover_wrap(
+                _bl,
+                sparkline_svg=_b_hover_svg,
+                price=_b_live_price,
+                chg_pct=(_b_lp.get("chg_pct") if _b_lp else None),
+                score=_b.get("score"),
+                sector=_b.get("sector", ""),
+            )
+
             # FIX CC-FRESH — re-anchor entry/SL/TP to live price if it's
             # drifted > 0.5 % from the scored entry, and compute honest
             # cost-adjusted R:R. See _reanchor_levels() docstring above.
@@ -984,7 +998,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div class="pick-card{_b_tick_cls}" style="background:{_card_grad};'
                 f'border-left:4px solid {_card_border};border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span><span style="font-size:16px;font-weight:700;color:var(--ink)">{_bl}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
+                f'<span><span style="font-size:16px;font-weight:700;color:var(--ink)">{_bl_hover}</span>{_grade_html}{_tier_badge}{_fv_pill}</span>'
                 f'<span style="font-size:13px;font-weight:700;color:{_score_color}">{_b["score"]:.0f}/100 · {_b["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
@@ -1041,11 +1055,21 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 _sv_live_html = ""
             _sv_live_price = float(_sv_lp["price"]) if _sv_lp else None
             _sv_tick_cls = _pk_pulse(_sv["ticker"], _sv_live_price) if _sv_live_price else ""
+            # UX2 · hover preview — same pattern as the Buy loop above.
+            _sv_hover_svg = _sparkline_svg(_sparkline_closes(_sv["ticker"]))
+            _svl_hover = ticker_hover_wrap(
+                _svl,
+                sparkline_svg=_sv_hover_svg,
+                price=_sv_live_price,
+                chg_pct=(_sv_lp.get("chg_pct") if _sv_lp else None),
+                score=_sv.get("score"),
+                sector=_sv.get("sector", ""),
+            )
             st.markdown(
                 f'<div class="pick-card{_sv_tick_cls}" style="background:linear-gradient(135deg,var(--sunken),var(--sunken));'
                 f'border-left:4px solid var(--bear);border-radius:10px;padding:11px 14px;margin-bottom:6px">'
                 f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_svl}</span>'
+                f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_svl_hover}</span>'
                 f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/100 · {_sv["action"]}</span>'
                 f'</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{_sv["headline"]}</div>'
