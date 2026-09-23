@@ -28,7 +28,6 @@ BANNED = re.compile(
 # sweep. Remove each entry once its owner fixes the flagged copy.
 # Each entry: path relative to dashboard/ -> the phrase(s) it currently trips.
 ALLOWLIST_COPY: set[str] = {
-    "pages/22_fii_dii_flows.py",   # TODO(advice-copy): "keep stops tight" (~line 151)
 }
 ALLOWLIST_MAPPER: set[str] = {
 }
