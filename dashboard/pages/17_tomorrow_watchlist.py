@@ -39,7 +39,7 @@ from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
     _tomorrow_watchlist, get_tomorrow_watchlist, get_display_name, _trade_type,
 )
-from dashboard.shared.trade_utils import _paper_trade_popover
+from dashboard.shared.trade_utils import _display_label, _paper_trade_popover
 from dashboard.shared.flags_ui import render_flag_badge_html  # QF2: shortlist-only flag badge
 from dashboard.shared.ui_components import chip_pill, chip_delta
 
@@ -405,7 +405,7 @@ def _render_cards(items, kind, key_prefix):
             f'<div style="display:flex;justify-content:space-between;align-items:center">'
             f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_rank_chip}{_lbl}{_conv_chip}</span>'
             f'<span style="font-size:13px;font-weight:700;color:{accent}">'
-            f'{_it["score"]:.0f}/100 · {_it["action"]}</span>'
+            f'{_it["score"]:.0f}/90 · {_display_label(_it["action"])}</span>'
             f'</div>'
             f'{_flag_badge}'
             f'<div style="font-size:11px;color:{accent};font-weight:600;margin-top:3px">'
