@@ -129,15 +129,30 @@ with tab_gap:
             def _color_gap(val):
                 try:
                     v = float(val)
-                    if v >= 1.5:  return "background-color:#1a3a2a; color:#4caf50"
+                    # F7b · colour-blind cue — bold weight is a magnitude
+                    # signal orthogonal to hue; combined with the ▲/▼ prefix
+                    # added by _fmt_gap below, direction is readable without
+                    # relying on the red/green channel at all.
+                    if v >= 1.5:  return "background-color:#1a3a2a; color:#4caf50; font-weight:700"
                     if v > 0:     return "background-color:#1a2a1a; color:#a5d6a7"
-                    if v <= -1.5: return "background-color:#3a1a1a; color:#ef5350"
+                    if v <= -1.5: return "background-color:#3a1a1a; color:#ef5350; font-weight:700"
                     if v < 0:     return "background-color:#2a1a1a; color:#ef9a9a"
                 except (ValueError, TypeError):
                     pass  # non-numeric cell — return empty style
                 return ""
 
-            styled = _disp.style.map(_color_gap, subset=["Gap %","Day Chg %"])
+            def _fmt_gap(val):
+                # F7b · shape cue — a ▲/▼ prefix in the displayed value gives
+                # direction to readers with red-green colour vision deficiency.
+                try:
+                    v = float(val)
+                except (ValueError, TypeError):
+                    return val
+                return f"{'▲' if v >= 0 else '▼'} {abs(v):.2f}%"
+
+            styled = (_disp.style
+                      .format(_fmt_gap, subset=["Gap %", "Day Chg %"])
+                      .map(_color_gap, subset=["Gap %", "Day Chg %"]))
             st.dataframe(styled, hide_index=True, width="stretch", height=400)
 
             # Gap distribution bar chart
