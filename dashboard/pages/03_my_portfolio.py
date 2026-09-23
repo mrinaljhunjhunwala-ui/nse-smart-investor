@@ -89,6 +89,7 @@ if _ROOT not in sys.path:
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 from dashboard.shared.ui_components import chip_pill, ticker_hover_wrap
 from dashboard.shared.trade_utils import (
     _action_emoji,
@@ -894,12 +895,10 @@ if _csv_source is not None:
                     import plotly.express as _px2
                     # F1 audit exception: Plotly's color_continuous_scale
                     # requires real colour values (it doesn't parse CSS
-                    # custom properties). These hex ARE the current token
-                    # values from design.py -- --bear #ff4d4d, --faint
-                    # #55575e (approximated as #555555), --bull #16c784.
+                    # custom properties), so read them from tokens.
                     _fig_hm = _px2.treemap(
                         _hm_df, path=["label"], values="value", color="pct",
-                        color_continuous_scale=["#ff4d4d", "#555555", "#16c784"],
+                        color_continuous_scale=[_TK["bear"], _TK["faint"], _TK["bull"]],
                         color_continuous_midpoint=0, custom_data=["pct", "text"],
                     )
                     _fig_hm.update_traces(
@@ -1061,7 +1060,7 @@ if _csv_source is not None:
                         _fig_nav.add_trace(_go.Scatter(
                             x=_nav_df["Date"], y=_nav_df["NAV"],
                             mode="lines", name="NAV",
-                            line=dict(color="#ff9500", width=2),
+                            line=dict(color=_TK["accent"], width=2),
                             fill="tozeroy",
                             fillcolor="rgba(255,149,0,0.06)",
                             hovertemplate="%{x|%d %b %Y}<br>NAV Rs.%{y:,.0f}<extra></extra>",
@@ -1080,7 +1079,7 @@ if _csv_source is not None:
                                 ),
                                 annotation_position="top left",
                                 annotation_font=dict(
-                                    color="#ff4d4d", size=11,
+                                    color=_TK["bear"], size=11,
                                     family="IBM Plex Mono",
                                 ),
                             )
@@ -1100,8 +1099,8 @@ if _csv_source is not None:
                                    else _nav_df["NAV"].min()],
                                 mode="markers",
                                 marker=dict(size=[8, 10],
-                                            color=["#16c784", "#ff4d4d"],
-                                            line=dict(color="#0a0a0a", width=1.5)),
+                                            color=[_TK["bull"], _TK["bear"]],
+                                            line=dict(color=_TK["ground"], width=1.5)),
                                 hovertemplate="%{x|%d %b %Y}<br>Rs.%{y:,.0f}<extra></extra>",
                                 showlegend=False,
                             ))
@@ -1204,20 +1203,20 @@ if _csv_source is not None:
                                     _bh_df, x="β", y="Stock", color="_tone",
                                     orientation="h",
                                     color_discrete_map={
-                                        "defensive": "#3fb27f",
-                                        "market":    "#8899bb",
-                                        "aggressive": "#e26d5c",
+                                        "defensive": _TK["bull"],
+                                        "market":    _TK["azure"],
+                                        "aggressive": _TK["bear"],
                                     },
                                     hover_data={"β contrib": True, "_tone": False},
                                     title=None,
                                 )
                                 _fig_beta.add_vline(
                                     x=1.0, line_dash="dot",
-                                    line_color="#ffffff",
+                                    line_color=_TK["ink"],
                                     annotation_text="Nifty β = 1.0",
                                     annotation_position="top",
                                     annotation_font_size=10,
-                                    annotation_font_color="#ffffff",
+                                    annotation_font_color=_TK["ink"],
                                 )
                                 _fig_beta.update_layout(
                                     template="nse_pro",
@@ -1591,14 +1590,14 @@ if _csv_source is not None:
                             _cr_sorted, x="P&L (₹)", y="Stock",
                             color="_tone", orientation="h",
                             color_discrete_map={
-                                "gain": "#16c784", "loss": "#ff4d4d",
-                                "flat": "#8b8d93",
+                                "gain": _TK["bull"], "loss": _TK["bear"],
+                                "flat": _TK["dim"],
                             },
                             hover_data={"Contrib %": ":.1f", "_tone": False},
                             title=None,
                         )
                         _fig_cr.add_vline(
-                            x=0, line_dash="dot", line_color="#ffffff",
+                            x=0, line_dash="dot", line_color=_TK["ink"],
                             opacity=0.5,
                         )
                         _fig_cr.update_layout(

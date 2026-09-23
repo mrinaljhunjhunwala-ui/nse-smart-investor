@@ -7,6 +7,7 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.tokens import COLORS as _TK, mix as _mix, rgba as _rgba  # noqa: E402
 # P3: explicit imports (was a dynamic shared-namespace injection)
 import os
 import pandas as pd
@@ -155,10 +156,10 @@ with tab_gap:
                     # signal orthogonal to hue; combined with the ▲/▼ prefix
                     # added by _fmt_gap below, direction is readable without
                     # relying on the red/green channel at all.
-                    if v >= 1.5:  return "background-color:#1a3a2a; color:#4caf50; font-weight:700"
-                    if v > 0:     return "background-color:#1a2a1a; color:#a5d6a7"
-                    if v <= -1.5: return "background-color:#3a1a1a; color:#ef5350; font-weight:700"
-                    if v < 0:     return "background-color:#2a1a1a; color:#ef9a9a"
+                    if v >= 1.5:  return f"background-color:{_rgba('bull', 0.18)}; color:{_TK['bull']}; font-weight:700"
+                    if v > 0:     return f"background-color:{_rgba('bull', 0.08)}; color:{_mix('bull', 'ink', 0.5)}"
+                    if v <= -1.5: return f"background-color:{_rgba('bear', 0.18)}; color:{_TK['bear']}; font-weight:700"
+                    if v < 0:     return f"background-color:{_rgba('bear', 0.08)}; color:{_mix('bear', 'ink', 0.5)}"
                 except (ValueError, TypeError):
                     pass  # non-numeric cell — return empty style
                 return ""
@@ -183,7 +184,7 @@ with tab_gap:
                 x=_gap_chart_df["ticker"].str.replace(".NS","",regex=False),
                 y=_gap_chart_df["gap_pct"],
                 marker_color=[
-                    "#4caf50" if g > 0 else "#ef5350"
+                    _TK["bull"] if g > 0 else _TK["bear"]
                     for g in _gap_chart_df["gap_pct"]
                 ],
                 text=_gap_chart_df["gap_pct"].apply(lambda x: f"{x:+.1f}%"),
@@ -194,7 +195,7 @@ with tab_gap:
                 title="Gap % Distribution — Nifty 50",
                 xaxis_title="Stock", yaxis_title="Gap %",
                 showlegend=False,
-                yaxis=dict(zeroline=True, zerolinecolor="#666", zerolinewidth=2),
+                yaxis=dict(zeroline=True, zerolinecolor=_TK["faint"], zerolinewidth=2),
             )
             st.plotly_chart(fig_gap, width="stretch")
     else:
@@ -323,15 +324,15 @@ with tab_chart:
                     x=_ic_df.index,
                     open=_ic_df["Open"], high=_ic_df["High"],
                     low=_ic_df["Low"],   close=_ic_df["Close"],
-                    name=_ic_ticker, increasing_line_color="#26a69a",
-                    decreasing_line_color="#ef5350",
+                    name=_ic_ticker, increasing_line_color=_TK["bull"],
+                    decreasing_line_color=_TK["bear"],
                 ), row=1, col=1)
 
                 # Anchored VWAP
                 if "AVWAP" in _ic_df.columns:
                     fig_ic.add_trace(go.Scatter(
                         x=_ic_df.index, y=_ic_df["AVWAP"],
-                        line=dict(color="#FFD700", width=1.5, dash="solid"),
+                        line=dict(color=_TK["accent-hi"], width=1.5, dash="solid"),
                         name="AVWAP", opacity=0.9,
                     ), row=1, col=1)
                     if "AVWAP_SD1_Upper" in _ic_df.columns:
@@ -354,25 +355,25 @@ with tab_chart:
                     if not _bull_st.empty:
                         fig_ic.add_trace(go.Scatter(
                             x=_bull_st.index, y=_bull_st["Supertrend"],
-                            mode="markers", marker=dict(size=3, color="#26a69a"),
+                            mode="markers", marker=dict(size=3, color=_TK["bull"]),
                             name="ST Bull", showlegend=False,
                         ), row=1, col=1)
                     if not _bear_st.empty:
                         fig_ic.add_trace(go.Scatter(
                             x=_bear_st.index, y=_bear_st["Supertrend"],
-                            mode="markers", marker=dict(size=3, color="#ef5350"),
+                            mode="markers", marker=dict(size=3, color=_TK["bear"]),
                             name="ST Bear", showlegend=False,
                         ), row=1, col=1)
 
                 # CPR levels as horizontal lines
                 _level_defs = [
-                    (_r2,    "#ff6b6b", "R2", "dash"),
-                    (_r1,    "#ff9999", "R1", "dot"),
-                    (_cpr_tc,"#64b5f6", "CPR TC", "solid"),
-                    (_pivot, "#9e9e9e", "Pivot", "dot"),
-                    (_cpr_bc,"#64b5f6", "CPR BC", "solid"),
-                    (_s1,    "#81c784", "S1", "dot"),
-                    (_s2,    "#4caf50", "S2", "dash"),
+                    (_r2,    _TK["bear"], "R2", "dash"),
+                    (_r1,    _mix("bear", "ink", 0.4), "R1", "dot"),
+                    (_cpr_tc, _TK["azure"], "CPR TC", "solid"),
+                    (_pivot, _TK["dim"], "Pivot", "dot"),
+                    (_cpr_bc, _TK["azure"], "CPR BC", "solid"),
+                    (_s1,    _mix("bull", "ink", 0.4), "S1", "dot"),
+                    (_s2,    _TK["bull"], "S2", "dash"),
                 ]
                 for _lv, _lc, _ln, _ld in _level_defs:
                     if _lv and not pd.isna(_lv):
@@ -405,11 +406,11 @@ with tab_chart:
                         annotation_position="top left",
                     )
                     fig_ic.add_hline(y=_orb["orb_high"], line_dash="dash",
-                                     line_color="#ffeb3b", line_width=1.5,
+                                     line_color=_TK["amber"], line_width=1.5,
                                      annotation_text=f"ORB H {_orb['orb_high']:.2f}",
                                      annotation_position="right")
                     fig_ic.add_hline(y=_orb["orb_low"], line_dash="dash",
-                                     line_color="#ff9800", line_width=1.5,
+                                     line_color=_TK["accent"], line_width=1.5,
                                      annotation_text=f"ORB L {_orb['orb_low']:.2f}",
                                      annotation_position="right")
 
@@ -418,7 +419,7 @@ with tab_chart:
                     x=_ic_df.index, y=_ic_df["Volume"],
                     name="Volume",
                     marker_color=[
-                        "#26a69a" if c >= o else "#ef5350"
+                        _TK["bull"] if c >= o else _TK["bear"]
                         for c, o in zip(_ic_df["Close"], _ic_df["Open"])
                     ],
                     opacity=0.7,
@@ -794,13 +795,13 @@ with tab_maxpain:
 
                 mp_fig = go.Figure()
                 mp_fig.add_trace(go.Bar(x=oi_df["strike"].astype(str), y=oi_df["call_oi"],
-                                        name="Call OI", marker_color="#ef5350"))
+                                        name="Call OI", marker_color=_TK["bear"]))
                 mp_fig.add_trace(go.Bar(x=oi_df["strike"].astype(str), y=oi_df["put_oi"],
-                                        name="Put OI", marker_color="#26a69a"))
+                                        name="Put OI", marker_color=_TK["bull"]))
                 mp_fig.add_vline(x=str(int(mp)), line_dash="dash",
-                                 line_color="#FFD700", line_width=2,
+                                 line_color=_TK["accent-hi"], line_width=2,
                                  annotation_text=f"Max Pain: {mp:,.0f}",
-                                 annotation_font_color="#FFD700")
+                                 annotation_font_color=_TK["accent-hi"])
                 mp_fig.update_layout(
                     template="nse_pro", barmode="group", height=340,
                     title="Call vs Put OI by Strike",

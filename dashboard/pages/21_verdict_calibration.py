@@ -53,6 +53,7 @@ import trade_store as _store                       # noqa: E402
 from dashboard.shared.design import apply_design   # noqa: E402
 from dashboard.shared.nav import render_sidebar    # noqa: E402
 from dashboard.shared.chart_helpers import render_top_bar  # noqa: E402
+from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 
 
 # FIX: this page previously called st.set_page_config, violating the
@@ -337,9 +338,9 @@ else:
         except (TypeError, ValueError):
             return ""
         if v > 0:
-            return "color: #26a69a; font-weight: 600;"
+            return f"color: {_TK['bull']}; font-weight: 600;"
         if v < 0:
-            return "color: #ef5350; font-weight: 600;"
+            return f"color: {_TK['bear']}; font-weight: 600;"
         return ""
     _sty = _sh.style.applymap(
         _colour_ret,

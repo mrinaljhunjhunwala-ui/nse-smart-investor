@@ -73,6 +73,7 @@ from dashboard.shared.trade_utils import (
     set_paper_account_type,
 )
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 from dashboard.shared.ui_components import empty_state, fmt_inr  # F5 + Indian-comma P&L
 
 apply_design()
@@ -1034,19 +1035,17 @@ else:
                 _eq_df["trade_no"]   = range(1, len(_eq_df) + 1)
                 _eq_df["cumulative"] = _eq_df["pnl"].cumsum()
                 # F1 audit exception: Plotly colour params don't parse CSS
-                # custom properties -- these hex ARE the current token values
-                # from design.py (--bull #16c784 / --bear #ff4d4d /
-                # --azure #5a8fd6 / --ink #edeef0).
+                # custom properties, so read the token values directly.
                 _eq_colors = [
-                    "#16c784" if v >= 0 else "#ff4d4d"
+                    _TK["bull"] if v >= 0 else _TK["bear"]
                     for v in _eq_df["cumulative"]
                 ]
                 _fig_eq = go.Figure()
                 _fig_eq.add_trace(go.Scatter(
                     x=_eq_df["trade_no"], y=_eq_df["cumulative"],
                     mode="lines+markers",
-                    line=dict(color="#5a8fd6", width=2.5),
-                    marker=dict(color=_eq_colors, size=8, line=dict(width=1, color="#edeef0")),
+                    line=dict(color=_TK["azure"], width=2.5),
+                    marker=dict(color=_eq_colors, size=8, line=dict(width=1, color=_TK["ink"])),
                     fill="tozeroy",
                     fillcolor="rgba(33,150,243,0.08)",
                     name="Cumulative P&L",

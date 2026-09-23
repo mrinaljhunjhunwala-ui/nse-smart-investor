@@ -44,6 +44,7 @@ import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 from dashboard.shared.disclosures import (
     render_survivorship_notice,
     render_backtest_assumptions,
@@ -621,7 +622,7 @@ if st.button("📊 Show Normalised Performance", key="compare_btn"):
                     text=f"Common start: {_common_start.strftime('%d %b %Y')}",
                     xref="paper", yref="paper",
                     x=0, y=1.08, showarrow=False,
-                    font=dict(size=10, color="#888"),
+                    font=dict(size=10, color=_TK["dim"]),
                 )
                 fig_comp.update_layout(
                     title="Normalised Price Performance (Base = 100 at common start date)",

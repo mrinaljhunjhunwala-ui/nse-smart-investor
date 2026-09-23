@@ -52,6 +52,79 @@ def test_tqs_page_has_no_raw_hex():
     assert re.search(r"#[0-9a-fA-F]{6}\b", src) is None
 
 
+def _page_hex_hook():
+    """Load .claude/hooks/block_page_hex.py so the test shares its exemptions."""
+    import importlib.util
+    path = os.path.join(_ROOT, ".claude", "hooks", "block_page_hex.py")
+    spec = importlib.util.spec_from_file_location("_block_page_hex", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_no_raw_hex_in_any_page():
+    from pathlib import Path
+    hook = _page_hex_hook()
+    pages = sorted(Path(_ROOT, "dashboard", "pages").glob("*.py"))
+    assert pages
+    hits = {p.name: hook._find_hex_violations(p) for p in pages}
+    hits = {k: v for k, v in hits.items() if v}
+    assert not hits, hits
+
+
+def test_page_hex_hook_exemptions():
+    import tempfile
+    from pathlib import Path
+    hook = _page_hex_hook()
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d, "x.py")
+        p.write_text('# comment #16c784\nA = "#fff"  # noqa: hex\nB = "#ff4d4d"\n', encoding="utf-8")
+        assert [h[0] for h in hook._find_hex_violations(p)] == [3]
+
+
+def test_ordinal_ramp_distinct_and_anchored():
+    r5, r6 = tokens.ordinal_ramp(5), tokens.ordinal_ramp(6)
+    assert len(set(r5)) == 5 and len(set(r6)) == 6
+    for r in (r5, r6):
+        assert r[0] == COLORS["bull"] and r[-1] == COLORS["bear"]
+        assert all(re.fullmatch(r"#[0-9a-f]{6}", c) for c in r)
+    assert r5[2] == COLORS["amber"]
+
+
+def _load_tqs_ramps():
+    """Pull SIGNAL_COLOUR / GRADE_COLOUR out of the page without running Streamlit."""
+    import ast
+    path = os.path.join(_ROOT, "dashboard", "pages", "18_tqs_scanner.py")
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    wanted = {"_SIGNAL_ORDER", "_GRADE_ORDER", "SIGNAL_COLOUR", "GRADE_COLOUR"}
+    body = [n for n in tree.body
+            if isinstance(n, ast.Assign) and any(getattr(t, "id", None) in wanted for t in n.targets)]
+    ns = {"ordinal_ramp": tokens.ordinal_ramp, "TOKENS": COLORS}
+    exec(compile(ast.Module(body=body, type_ignores=[]), path, "exec"), ns)
+    return ns["SIGNAL_COLOUR"], ns["GRADE_COLOUR"]
+
+
+def test_tqs_ramps_all_distinct():
+    signal, grade = _load_tqs_ramps()
+    assert list(signal) == ["STRONG TREND", "TRENDING", "NEUTRAL", "WEAK", "AVOID"]
+    assert list(grade) == ["A+", "A", "B", "C", "D", "F"]
+    assert len(set(signal.values())) == len(signal)
+    assert len(set(grade.values())) == len(grade)
+    # Best/worst stay anchored on the signal tokens.
+    assert signal["STRONG TREND"] == grade["A+"] == COLORS["bull"]
+    assert signal["AVOID"] == grade["F"] == COLORS["bear"]
+    # Readable on the dark ground: every shade clears 4.5:1 contrast.
+    def _lum(h):
+        def ch(c):
+            c /= 255
+            return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        r, g, b = hex_to_rgb(h)
+        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+    bg = _lum(COLORS["surface"])
+    for c in list(signal.values()) + list(grade.values()):
+        assert (_lum(c) + 0.05) / (bg + 0.05) >= 4.5, c
+
+
 def test_no_deprecated_components_html_in_shared():
     d = os.path.join(_ROOT, "dashboard", "shared")
     for f in os.listdir(d):
