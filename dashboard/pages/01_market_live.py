@@ -208,25 +208,25 @@ else:
         _sg_items.append(("🟢 STRONGEST TODAY", "var(--bull)", "var(--tint-bull)",
                           _top_gain["ticker"].replace(".NS",""),
                           f"₹{_top_gain['price']:,.2f}  ·  {_top_gain['chg_pct']:+.2f}%",
-                          "Leading the market higher — momentum / long-bias candidate"))
+                          "Leading the market higher — strongest momentum in the universe today"))
     if _top_lose is not None and _top_lose["chg_pct"] <= -1.0:
         _sg_items.append(("🔴 WEAKEST TODAY", "var(--bear)", "var(--tint-bear)",
                           _top_lose["ticker"].replace(".NS",""),
                           f"₹{_top_lose['price']:,.2f}  ·  {_top_lose['chg_pct']:+.2f}%",
-                          "Under the heaviest selling — avoid / short-bias candidate"))
+                          "Under the heaviest selling pressure in the universe today"))
     # Market-regime idea from breadth
     if _breadth_pct >= 65:
         _sg_items.append(("📈 BROAD STRENGTH", "var(--bull)", "var(--tint-bull)", "Market-wide",
                           f"{_breadth_pct:.0f}% of stocks up · avg {avg_chg:+.2f}%",
-                          "Risk-on day — trend-following longs favoured"))
+                          "Risk-on breadth — most stocks advancing"))
     elif _breadth_pct <= 35:
         _sg_items.append(("📉 BROAD WEAKNESS", "var(--bear)", "var(--tint-bear)", "Market-wide",
                           f"{100-_breadth_pct:.0f}% of stocks down · avg {avg_chg:+.2f}%",
-                          "Risk-off day — protect capital, avoid fresh longs"))
+                          "Risk-off breadth — most stocks declining"))
     else:
         _sg_items.append(("↔️ MIXED MARKET", "var(--amber)", "var(--tint-amber)", "Market-wide",
                           f"{_breadth_pct:.0f}% up · avg {avg_chg:+.2f}%",
-                          "No clear breadth edge — be selective, stock-specific only"))
+                          "No clear breadth tilt — moves are stock-specific"))
 
     _sg_html = '<div style="display:flex;gap:10px;margin-bottom:4px;flex-wrap:wrap">'
     for _lbl, _c, _bg, _tk, _sub, _why in _sg_items:

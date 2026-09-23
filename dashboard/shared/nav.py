@@ -490,7 +490,7 @@ def _render_ctrlk_palette() -> None:
     # window so it isn't rebound across Streamlit's iframe reloads (which fire
     # on every rerun); rebinding would cascade to N clicks on one keystroke.
     #
-    # st.html(unsafe_allow_javascript=True) (Streamlit >=1.51) runs the script
+    # st.html(unsafe_allow_javascript=True) (Streamlit >=1.52) runs the script
     # directly in the app document (no iframe), replacing the deprecated
     # st.components.v1.html. window.parent === window there, so `doc` resolves
     # to the app document either way. The button above still works in
