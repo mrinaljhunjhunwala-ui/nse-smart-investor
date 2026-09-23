@@ -262,7 +262,9 @@ if scan_btn:
                 hide_index=True,
                 width="stretch",
                 column_config={
-                    "#": st.column_config.TextColumn("#", width="small"),
+                    # Pin rank too — pinned columns render first, so pinning only Ticker
+                    # pushed "#" to the right of it.
+                    "#": st.column_config.TextColumn("#", width="small", pinned=True),
                     "Ticker": _ts_pin("Ticker"),
                     "Score": st.column_config.ProgressColumn(
                         "Score", min_value=0, max_value=100, format="%d"),
