@@ -51,6 +51,7 @@ import pandas as pd
 import requests
 
 import trade_store as _store
+from utils.sql import read_sql_df
 
 _log = logging.getLogger("data.nse_fno_bhavcopy")
 
@@ -290,7 +291,7 @@ def load_symbol_history(symbol: str, days: int = 5) -> pd.DataFrame:
     sym = (symbol or "").upper().replace(".NS", "")
     try:
         with _store._get_conn() as conn:
-            return pd.read_sql_query(_store._q("""
+            return read_sql_df(_store._q("""
                 SELECT date, total_oi, n_contracts
                 FROM nse_fno_oi_daily
                 WHERE symbol = ?

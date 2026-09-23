@@ -131,24 +131,9 @@ def _q(sql: str) -> str:
     return sql.replace("?", "%s") if _is_pg() else sql
 
 
-def read_sql_df(sql: str, conn, params=()) -> pd.DataFrame:
-    """Run a SELECT via a DB-API cursor and return a DataFrame.
-
-    Equivalent to ``pd.read_sql_query`` but works identically for sqlite3
-    and psycopg2 connections without pandas' "only supports SQLAlchemy
-    connectable" UserWarning. ``sql`` must already be passed through ``_q()``.
-    """
-    cur = conn.cursor()
-    try:
-        cur.execute(sql, tuple(params or ()))
-        cols = [d[0] for d in (cur.description or [])]
-        rows = cur.fetchall() if cur.description else []
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-    return pd.DataFrame.from_records(rows, columns=cols)
+# read_sql_df lives in the pure utils.sql module; re-exported here for callers
+# that already use ``_store.read_sql_df``.
+from utils.sql import read_sql_df  # noqa: E402,F401
 
 
 # ─────────────────────────────────────────────────────────────────────────────

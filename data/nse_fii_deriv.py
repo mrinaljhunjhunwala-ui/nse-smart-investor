@@ -53,6 +53,7 @@ import pandas as pd
 import requests
 
 import trade_store as _store
+from utils.sql import read_sql_df
 
 _log = logging.getLogger("data.nse_fii_deriv")
 
@@ -277,7 +278,7 @@ def load_history(days: int = 30) -> pd.DataFrame:
     ensure_schema()
     try:
         with _store._get_conn() as conn:
-            return pd.read_sql_query(_store._q("""
+            return read_sql_df(_store._q("""
                 SELECT * FROM nse_fii_deriv_daily
                 ORDER BY date DESC LIMIT ?
             """), conn, params=(int(days),))
