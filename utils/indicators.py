@@ -546,13 +546,22 @@ def add_relative_strength(
                 df[col] = np.nan
             return df
 
-        stock_close = df["Close"].reindex(common_idx)
-        bench_close = bench_df["Close"].reindex(common_idx)
+        # FIX RS-ZERO (2026-09-24) — the benchmark often lacks the stock's
+        # latest bar (Nifty feed lags a session / provider tiers disagree).
+        # Computing the ratio only on the intersection left the stock's last
+        # bar NaN, and the percentile lambda below compared NaN against
+        # history (all False) -> 0.0, silently costing up to 10/25 momentum
+        # points. The benchmark is now forward-filled onto the stock's index
+        # for AT MOST 2 bars (documented tolerance for a lagging feed); if it
+        # is staler than that, RS stays NaN and RS_Score is NaN
+        # ("unavailable" -> score.py falls back to abs-only momentum), never 0.
+        bench_close = (bench_df["Close"]
+                       .reindex(df.index.union(bench_df.index))
+                       .ffill(limit=2)
+                       .reindex(df.index))
+        bench_close = bench_close.where(df.index >= bench_df.index.min())
 
-        rs_line = stock_close / bench_close.replace(0, np.nan)
-
-        # Reindex back to original df index
-        rs_aligned = rs_line.reindex(df.index)
+        rs_aligned = df["Close"] / bench_close.replace(0, np.nan)
         df["RS_Line"] = rs_aligned
 
         # RS momentum: N-period change in RS ratio
@@ -561,8 +570,18 @@ def add_relative_strength(
 
         # RS Score: 0-100 percentile rank in 252-bar rolling window
         def _pct_rank(series: pd.Series, window: int = 252) -> pd.Series:
+            def _rank_last(x):
+                # NaN current value -> NaN (unavailable), never 0.0.
+                cur = x[-1]
+                if np.isnan(cur):
+                    return np.nan
+                hist = x[:-1]
+                hist = hist[~np.isnan(hist)]
+                if hist.size == 0:
+                    return np.nan
+                return (cur > hist).mean() * 100
             return series.rolling(window, min_periods=window // 4).apply(
-                lambda x: (x[-1] > x[:-1]).mean() * 100, raw=True
+                _rank_last, raw=True
             )
         df["RS_Score"] = _pct_rank(rs_aligned, 252).round(1)
 

@@ -17,8 +17,8 @@ holding decisions. This page ranks by a QUALITY SCORE (0-100) built from:
      fundamentals fetch already used for valuation
 
 The full points breakdown is shown per stock — this is not a black box.
-See _compute_quality_score() for the exact formula and _SCORE_WEIGHTS_DOC
-for the rationale, mirroring how analysis/score.py documents its own
+See analysis/quality_watch.py compute_quality_score() for the exact formula
+and rationale (sector-aware: banks/NBFCs use ROE + P/B), mirroring how analysis/score.py documents its own
 weights for the technical CompositeScore.
 
 CompositeScore / technical momentum is intentionally NOT a factor.
@@ -92,6 +92,9 @@ with st.expander("↔️ Also see: Analyze Stock · Deep Dive", expanded=False):
 _POSTURE_COLOR = {
     "REASONABLE": "var(--bull)",
     "SUPPORTED_BY_ROE": "var(--bull)",
+    "SUPPORTED_BY_GROWTH_AND_QUALITY": "var(--bull)",
+    "SUPPORTED_BY_GROWTH": "var(--bull)",
+    "SUPPORTED_BY_QUALITY": "var(--bull)",
     "DEMANDING_VS_ROE": "var(--amber)",
     "DEMANDING_VS_RETURNS": "var(--amber)",
     "DEMANDING_VS_GROWTH": "var(--amber)",
@@ -99,72 +102,19 @@ _POSTURE_COLOR = {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# QUALITY SCORE — 0-100, transparent breakdown (documented in module docstring)
+# QUALITY SCORE — 0-100, transparent breakdown. The formula now lives in the
+# pure, unit-tested analysis/quality_watch.py (audit 2026-09-24): complete
+# posture mapping + sector-aware ratios via analysis/sector_classification.py.
 # ═══════════════════════════════════════════════════════════════════════════
 
-_POSTURE_POINTS = {
-    "REASONABLE": 40,
-    "SUPPORTED_BY_ROE": 35,
-    "DEMANDING_VS_ROE": 15,
-    "DEMANDING_VS_RETURNS": 15,
-    "DEMANDING_VS_GROWTH": 15,
-    "INSUFFICIENT_EVIDENCE": 10,  # unknown isn't "bad" — scored neutral-low, not zero
-}
-_CONFIDENCE_POINTS = {"high": 15, "medium": 10, "low": 5, "none": 0}
+from analysis.quality_watch import compute_quality_score as _qw_score  # noqa: E402
+
+_RATIO_NAMES = {"roe": "ROE", "roce": "ROCE", "debt_to_equity": "D/E", "pb": "P/B"}
 
 
-def _compute_quality_score(posture, confidence, red_flags, amber_flags,
-                           roe, roce, debt_to_equity) -> tuple:
-    """Returns (score_0_to_100, breakdown_dict). Never raises — missing
-    inputs are rescaled by the weight of what IS available (or given a
-    neutral-low default if nothing is), never penalized as if they were
-    the worst possible reading. See FIX QW1 below.
-    """
-    breakdown = {}
-
-    breakdown["valuation_posture"] = _POSTURE_POINTS.get(posture, 10)
-    breakdown["confidence"] = _CONFIDENCE_POINTS.get(confidence, 0)
-
-    # Governance safety: start at 25, subtract per flag. Floors at 0 —
-    # this is a penalty, not a score that can go negative.
-    gov = 25 - (red_flags * 8) - (amber_flags * 3)
-    breakdown["governance_safety"] = max(0, gov)
-
-    # Quality ratios: ROE + ROCE + Debt/Equity, weighted up to 20 total.
-    #
-    # FIX QW1 — this used to add 0 for any metric that was None (Yahoo
-    # coverage is patchy for small/mid-caps — see
-    # analysis/fundamentals/providers/yahoo_fundamentals.py), so a stock
-    # missing e.g. ROCE and D/E silently lost up to 13 of these 20 points
-    # for a data-availability reason, not a quality reason — and this
-    # score drives the Ranked Results sort order directly, with no
-    # indication in that list of why. Missing data should reduce
-    # confidence, not distort the ranking (same principle already applied
-    # to `posture` below via INSUFFICIENT_EVIDENCE=10, and already
-    # correctly done for the equivalent Portfolio quality score — see
-    # analysis/portfolio_fundamentals.py compute_quality_score).
-    #
-    # Now rescaled by the weight of whichever metrics are actually present,
-    # same technique as compute_quality_score. If none are available, use
-    # a neutral-low default (10/20) rather than 0 — "unknown" isn't "bad".
-    q = 0.0
-    weight_used = 0.0
-    if roe is not None:
-        q += 7 if roe > 0.15 else (4 if roe > 0.10 else 1)
-        weight_used += 7
-    if roce is not None:
-        q += 7 if roce > 0.15 else (4 if roce > 0.10 else 1)
-        weight_used += 7
-    if debt_to_equity is not None:
-        q += 6 if debt_to_equity < 0.5 else (3 if debt_to_equity < 1.0 else 0)
-        weight_used += 6
-    if weight_used > 0:
-        breakdown["quality_ratios"] = round(min(20.0, q * 20.0 / weight_used))
-    else:
-        breakdown["quality_ratios"] = 10
-
-    total = sum(breakdown.values())
-    return round(total), breakdown
+def _ratio_label(bd: dict) -> str:
+    used = bd.get("ratios_used") or []
+    return "/".join(_RATIO_NAMES.get(k, k) for k in used) or "none available"
 
 
 @st.cache_data(ttl=4 * 60 * 60, show_spinner=False)
@@ -223,9 +173,15 @@ def _assess_one(ticker: str) -> dict:
     except Exception as e:
         _log.debug("quality_watch: flags failed for %s: %s", ticker, e)
 
-    score, breakdown = _compute_quality_score(
+    try:
+        from analysis.sector_classification import classify_sector as _cls
+        _profile = _cls(out.get("sector"), name=out.get("company_name"))
+    except Exception:
+        _profile = None
+    score, breakdown = _qw_score(
         out["posture"], out["confidence"], out["red_flags"], out["amber_flags"],
-        out["roe"], out["roce"], out["debt_to_equity"],
+        roe=out["roe"], roce=out["roce"], debt_to_equity=out["debt_to_equity"],
+        pb=out["pb"], sector_profile=_profile,
     )
     out["quality_score"] = score
     out["score_breakdown"] = breakdown
@@ -452,7 +408,7 @@ def _render_sizing_tab(ticker: str, quality_score: int, score_breakdown: dict):
             f"- Valuation posture: **{bd.get('valuation_posture', 0)}/40**\n"
             f"- Confidence in that call: **{bd.get('confidence', 0)}/15**\n"
             f"- Governance safety (flags): **{bd.get('governance_safety', 0)}/25**\n"
-            f"- Quality ratios (ROE/ROCE/D-E): **{bd.get('quality_ratios', 0)}/20**"
+            f"- Quality ratios ({_ratio_label(bd)}): **{bd.get('quality_ratios', 0)}/20**"
         )
 
 
@@ -843,7 +799,8 @@ else:
             st.caption(
                 "**Quality Score breakdown:** valuation posture (40pts) + "
                 "confidence (15pts) + governance safety from flags (25pts, "
-                "penalized per red/amber flag) + quality ratios: ROE/ROCE/"
-                "Debt-Equity (20pts). Open a Deep Dive for the exact "
+                "penalized per red/amber flag) + quality ratios (20pts): "
+                "ROE/ROCE/Debt-Equity for operating companies, ROE + P/B for "
+                "banks/NBFCs/insurers. Open a Deep Dive for the exact "
                 "breakdown on any stock."
             )

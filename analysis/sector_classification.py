@@ -182,6 +182,23 @@ def _build(token: str, raw) -> SectorProfile:
     return _operating(OTHER, raw, capital_intensive=False, capex_caveat=False)
 
 
+def quality_ratio_keys(profile: Optional[SectorProfile]) -> tuple:
+    """Which balance-sheet/return ratios are meaningful for a quality score.
+
+    Financials (banks / NBFCs / insurers / fin-services): ROE + P/B only —
+    ROCE and debt/equity are not economically meaningful for lenders.
+    Operating businesses: ROE, plus ROCE / D-E when the profile says they apply.
+    """
+    if profile is not None and profile.is_financial:
+        return ("roe", "pb")
+    keys = ["roe"]
+    if profile is None or profile.roce_meaningful:
+        keys.append("roce")
+    if profile is None or profile.leverage_warning_applies:
+        keys.append("debt_to_equity")
+    return tuple(keys)
+
+
 def classify_sector(raw: Optional[str], name: Optional[str] = None) -> SectorProfile:
     """Map a raw sector label (and optional company name) to a SectorProfile.
 

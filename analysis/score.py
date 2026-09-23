@@ -134,17 +134,60 @@ def _num(row: "pd.Series", key: str, default: float) -> float:
 # _MISS distinguishes "not tried yet" from "tried and failed" so a failed
 # fetch on ticker 1 doesn't get retried for tickers 2..N (the actual bug
 # 02_command_centre's 120s smoke timeout on 3.11 was pointing at).
+#
+# FIX CACHE-TTL (2026-09-24) — the cache used to live for the whole process
+# (Streamlit Cloud processes run for days), so a Nifty series fetched on
+# Monday was still used on Thursday, and a single failed fetch disabled RS
+# for the life of the process. Entries are now (fetched_at, value):
+#   * success: refreshed after _BENCH_TTL_S (1h), or earlier when the cached
+#     series' last bar is older than the expected last NSE session (checked
+#     at most every _BENCH_NEG_TTL_S so a holiday doesn't cause a refetch
+#     storm);
+#   * failure: negative-cached for only _BENCH_NEG_TTL_S (5 min) — still
+#     enough to stop tickers 2..N of one scan re-walking every provider.
 _BENCH_MISS = object()
 _BENCH_CACHE: Dict[str, object] = {}
+_BENCH_TTL_S = 60 * 60
+_BENCH_NEG_TTL_S = 5 * 60
+
+
+def _now() -> float:
+    """Monotonic-ish wall clock; indirection so tests can freeze time."""
+    import time
+    return time.time()
+
+
+def _expected_last_session() -> pd.Timestamp:
+    """Most recent weekday strictly before today (a conservative 'the feed
+    should have at least this bar' date; ignores NSE holidays, which the
+    re-check throttle tolerates)."""
+    return (pd.Timestamp.today().normalize() - pd.offsets.BDay(1)).normalize()
+
+
+def _bench_is_stale(b) -> bool:
+    try:
+        last = pd.Timestamp(b.index.max())
+        if last.tzinfo is not None:
+            last = last.tz_localize(None)
+        return last.normalize() < _expected_last_session()
+    except Exception:
+        return False
 
 
 # FIX FLOWS-CACHE (2026-09-04) — universe-level flows cached per process.
-_FLOWS_CACHE: Dict[str, Optional[Dict]] = {}
+# FIX CACHE-TTL (2026-09-24) — entries are (fetched_at, value) with a TTL;
+# failures (None) use the short negative TTL.
+_FLOWS_CACHE: Dict[str, object] = {}
+_FLOWS_TTL_S = 60 * 60
 
 
 def _get_flows_cached() -> Optional[Dict]:
-    if "flows" in _FLOWS_CACHE:
-        return _FLOWS_CACHE["flows"]
+    ent = _FLOWS_CACHE.get("flows")
+    if ent is not None:
+        ts, val = ent  # type: ignore[misc]
+        ttl = _FLOWS_TTL_S if val is not None else _BENCH_NEG_TTL_S
+        if _now() - ts <= ttl:
+            return val
     try:
         from analysis.fii_dii import load_history as _fd_load
         _fd = _fd_load(days=5)
@@ -159,28 +202,34 @@ def _get_flows_cached() -> Optional[Dict]:
     except Exception as e:
         _log.debug("FII/DII flows cache miss: %s: %s", type(e).__name__, e)
         v = None
-    _FLOWS_CACHE["flows"] = v
+    _FLOWS_CACHE["flows"] = (_now(), v)
     return v
 
 
 def _get_bench_cached(period: str):
     """Return a cached Nifty DataFrame for `period`, or None on failure.
-    None is cached too — subsequent calls in the same process skip the fetch.
-    """
-    if period in _BENCH_CACHE:
-        v = _BENCH_CACHE[period]
-        return None if v is _BENCH_MISS else v
+    See FIX CACHE-TTL above for expiry rules (1h TTL, date staleness,
+    5-min negative cache)."""
+    ent = _BENCH_CACHE.get(period)
+    if ent is not None:
+        ts, v = ent  # type: ignore[misc]
+        age = _now() - ts
+        if v is _BENCH_MISS:
+            if age <= _BENCH_NEG_TTL_S:
+                return None
+        elif age <= _BENCH_TTL_S and not (age > _BENCH_NEG_TTL_S and _bench_is_stale(v)):
+            return v
     try:
         b = _fetch_single("^NSEI", period=period)  # type: ignore[misc]
         if b is None or (hasattr(b, "empty") and b.empty):
-            _BENCH_CACHE[period] = _BENCH_MISS
+            _BENCH_CACHE[period] = (_now(), _BENCH_MISS)
             return None
-        _BENCH_CACHE[period] = b
+        _BENCH_CACHE[period] = (_now(), b)
         return b
     except Exception as e:
-        _log.debug("bench cache: ^NSEI %s fetch failed, caching MISS: %s: %s",
+        _log.debug("bench cache: ^NSEI %s fetch failed, negative-caching: %s: %s",
                    period, type(e).__name__, e)
-        _BENCH_CACHE[period] = _BENCH_MISS
+        _BENCH_CACHE[period] = (_now(), _BENCH_MISS)
         return None
 
 
@@ -373,9 +422,16 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
     hist_p = _num(prev, "MACD_Hist",    0)
     adx    = _num(cur,  "ADX",         15)
     price  = float(cur["Close"])
-    sma20  = _num(cur, "SMA_20",  price * 0.95)
-    sma50  = _num(cur, "SMA_50",  price * 0.90)
-    sma200 = _num(cur, "SMA_200", price * 0.80)
+    # FIX SMA-NEUTRAL (2026-09-24) — missing/warm-up SMAs used to default to
+    # 0.95/0.90/0.80 x price, i.e. a perfect bullish stack, so a stock with
+    # unknown moving averages earned up to 10/10 SMA points. Missing SMAs are
+    # now NaN and every comparison involving them is False: a tier can only
+    # be claimed from SMAs that actually exist (e.g. price > SMA_200 with
+    # SMA_20/50 unknown still earns the 4-pt tier). Unknown data earns no
+    # points from this sub-check — neutral, not rewarded.
+    sma20  = _num(cur, "SMA_20",  float("nan"))
+    sma50  = _num(cur, "SMA_50",  float("nan"))
+    sma200 = _num(cur, "SMA_200", float("nan"))
 
     pts: Dict[str, float] = {}
 
@@ -407,6 +463,8 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
     elif price > sma50 > sma200:          pts["sma"] = 7.0
     elif price > sma200:                  pts["sma"] = 4.0
     else:                                 pts["sma"] = 0.0
+    # Distinguish "unknown" from "bearish" in the breakdown (FIX SMA-NEUTRAL).
+    pts["sma_available"] = not math.isnan(sma200)
 
     # ADX — 8 pts
     if adx > 40:    pts["adx"] = 8.0

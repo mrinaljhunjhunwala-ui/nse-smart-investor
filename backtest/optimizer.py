@@ -38,7 +38,9 @@ PARAMS_FILE = "best_params.json"
 _STT        = 0.001
 _BROKERAGE  = 0.0003
 _EXCHANGE   = 0.00035
-COMMISSION  = _STT + 2 * _BROKERAGE + 2 * _EXCHANGE   # ~0.17%
+# FIX BT-COMMISSION — backtesting.py charges `commission` on every fill, so
+# pass the PER-SIDE rate (half the ~0.23% round trip), not the round trip.
+COMMISSION  = (_STT + 2 * _BROKERAGE + 2 * _EXCHANGE) / 2   # ~0.115% per side
 
 # ── Parameter grids ────────────────────────────────────────────────────────────
 PARAM_GRIDS = {
