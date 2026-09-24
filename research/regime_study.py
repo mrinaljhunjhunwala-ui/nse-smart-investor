@@ -270,7 +270,13 @@ def main() -> int:
     frames: Dict[str, pd.DataFrame] = {}
     prep_failures = 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = {ex.submit(_prepare_ticker, t, PERIOD): t for t in universe}
+        # RS replay (2026-09-24): same Nifty frame production uses for RS_Score.
+        try:
+            from data.fetcher import fetch_single as _fs
+            _bench = _fs("^NSEI", period=PERIOD)
+        except Exception:
+            _bench = None
+        futs = {ex.submit(_prepare_ticker, t, PERIOD, _bench): t for t in universe}
         done = 0
         for f in as_completed(futs):
             t = futs[f]
