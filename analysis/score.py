@@ -493,8 +493,37 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
 import os as _regime_os
 
 def _regime_weights_enabled() -> bool:
+    """Default ON since 2026-09-24 (docs/SCORE_EFFICACY_2026-09-24.md: the
+    bear-regime variant improved bear ranking in both halves of the 5-year
+    replay, bull/range untouched). Set NSE_USE_REGIME_WEIGHTS=0 to disable."""
     _v = _regime_os.environ.get("NSE_USE_REGIME_WEIGHTS", "").strip().lower()
-    return _v in {"1", "true", "yes", "on"}
+    return _v not in {"0", "false", "no", "off"}
+
+
+# Live regime label cache — snapshot_live() makes two fetches (^INDIAVIX,
+# ^NSEI); calling it per scored ticker would multiply that by the universe.
+# Pure module-level TTL cache (analysis/ stays Streamlit-free).
+import time as _regime_time
+_REGIME_LABEL_CACHE: Dict[str, object] = {"t": 0.0, "label": None, "ok": False}
+_REGIME_TTL_OK   = 1800.0   # 30 min — regime inputs are daily
+_REGIME_TTL_FAIL = 300.0    # retry a failed snapshot after 5 min
+
+
+def _live_regime_label() -> Optional[str]:
+    now = _regime_time.time()
+    c = _REGIME_LABEL_CACHE
+    ttl = _REGIME_TTL_OK if c["ok"] else _REGIME_TTL_FAIL
+    if c["t"] and now - float(c["t"]) < ttl:
+        return c["label"]  # type: ignore[return-value]
+    label, ok = None, False
+    try:
+        from analysis.regime import snapshot_live as _reg_snap
+        label = getattr(_reg_snap(), "label", None)
+        ok = label is not None
+    except Exception as _rg_e:
+        _log.debug("regime snapshot unavailable: %s: %s", type(_rg_e).__name__, _rg_e)
+    c.update(t=now, label=label, ok=ok)
+    return label
 
 # Regime labels analysis.regime.snapshot_live() emits, mapped to the
 # three-way {bull, bear, sideways} the variant study used.
@@ -859,11 +888,14 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15,
     if _flows_available:
         # Split 5/3/2 — see docstring. VIX map preserves the old 6-pt map's
         # relative shape then rescales so the max is 5 (normal) instead of 6.
-        vix_pts_map = {
-            "complacency": 4.0, "normal": 5.0, "elevated": 3.0,
-            "fear":        1.5, "panic":  0.0, "unknown":  2.5,
-        }
-        pts["vix"] = vix_pts_map.get(regime, 2.5)
+        # FIX VIX-NEUTRAL (2026-09-24): VIX is identical for every stock on a
+        # date, so it can't rank anything; replayed over 5y its points ran
+        # opposite to forward returns (fear had the best 20d returns but the
+        # fewest points). Held at the "normal" value so the pillar max and
+        # calm-market scores are unchanged. VIX still drives stop width and
+        # horizon, and is shown as context. See SCORE_EFFICACY_2026-09-24.md.
+        pts["vix"] = 5.0
+        pts["vix_regime"] = regime
 
         top_third = n_sectors // 3
         mid_third = 2 * n_sectors // 3
@@ -891,11 +923,9 @@ def _score_sentiment(vix_info: Dict, sector_rank: int, n_sectors: int = 15,
         total = pts["vix"] + pts["sector"] + pts["flows"]
     else:
         # Legacy mode — unchanged from pre-2026-09-03 behavior
-        vix_pts_map = {
-            "complacency": 5.0, "normal": 6.0, "elevated": 4.0,
-            "fear":        2.0, "panic":  0.0, "unknown":  3.0,
-        }
-        pts["vix"] = vix_pts_map.get(regime, 3.0)
+        # FIX VIX-NEUTRAL (2026-09-24) — see the flows branch above.
+        pts["vix"] = 6.0
+        pts["vix_regime"] = regime
 
         top_third = n_sectors // 3
         mid_third = 2 * n_sectors // 3
@@ -1805,13 +1835,7 @@ def score_stock(
     # run (see docs/REGIME_WEIGHTS_2026-09.md).
     regime_label: Optional[str] = None
     if _regime_weights_enabled():
-        try:
-            from analysis.regime import snapshot_live as _reg_snap
-            _rsnap = _reg_snap()
-            regime_label = getattr(_rsnap, "label", None)
-        except Exception as _rg_e:
-            _log.debug("regime snapshot unavailable for %s: %s: %s",
-                       canonical, type(_rg_e).__name__, _rg_e)
+        regime_label = _live_regime_label()
 
     # FIX DELIV1 (2026-09-03) — load NSE bhavcopy delivery snapshot so the
     # Volume pillar can consume delivery % as a 4-pt sub-score inside its

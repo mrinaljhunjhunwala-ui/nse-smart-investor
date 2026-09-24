@@ -52,16 +52,19 @@ REGIME_EMOJI = {
 }
 
 REGIME_NOTES = {
+    # Numbers from docs/SCORE_EFFICACY_2026-09-24.md (5y replay, 87.6k obs).
     "trend_up":
-        "Trending up. Momentum-heavy signals have historically hit ~60%",
+        "Trending up. This is where the score has ranked stocks best "
+        "(20-day rank correlation ≈ +0.09)",
     "trend_down":
-        "Trending down. Score dispatches to mean-reversion when v2 is on "
-        "(NSE_USE_REGIME_WEIGHTS=1); momentum-first signals underperform either way",
+        "Trending down. Momentum scoring switches to a 5-day reversal read here; "
+        "rankings have still been weak in this regime",
     "range":
-        "Range-bound. Historical BUY hit rate here is ~46% vs ~60% in trend-up regimes. "
-        "Halve size or wait",
+        "Range-bound. The score has had little ranking power in this regime "
+        "(20-day rank correlation ≈ 0)",
     "risk_off":
-        "Risk-off (VIX ≥ 22). Historically all BUYs paid 5-12% but you have to buy the fear",
+        "Risk-off (VIX ≥ 22). Forward returns have historically been strong across "
+        "the board, but the score's rankings have run backwards",
     "unknown":
         "Regime undetermined. Data unavailable",
 }

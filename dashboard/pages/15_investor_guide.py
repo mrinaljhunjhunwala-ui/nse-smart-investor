@@ -67,11 +67,12 @@ with tab_g1:
         icon="🔬",
     )
     st.warning(
-        "📉 **Honest caveat.** This repo's own efficacy study "
-        "(docs/SCORE_EFFICACY_REPORT.md) found the score's labels did **not** "
-        "predict 20-day forward returns — in that window the lowest band even "
-        "outperformed the highest. Scores describe *trend quality today*, not "
-        "future returns.",
+        "📉 **Honest caveat.** This repo's 5-year efficacy study "
+        "(docs/SCORE_EFFICACY_2026-09-24.md) found only a **weak** tendency for "
+        "higher-scored stocks to outperform lower-scored ones on the same date "
+        "(rank correlation ≈ +0.02). The edge showed up in trending-up markets, "
+        "vanished in range-bound ones and ran backwards in fear regimes, and it was "
+        "negative in 2025. Scores describe *trend quality today*, not future returns.",
         icon="⚖️",
     )
     st.markdown(
@@ -366,7 +367,7 @@ with tab_g5:
             '<div class="card-green">'
             '<b>Win Rate</b><br>'
             'Target: > 45%<br>'
-            'Note: in the efficacy study, score band alone did not improve 20-day outcomes'
+            'Note: in the efficacy study, score band alone only weakly separated 20-day outcomes'
             '</div>', unsafe_allow_html=True
         )
     with _edge_col2:
