@@ -1212,7 +1212,12 @@ def _build_narrative(
     price      = float(cur["Close"])
     rsi        = _num(cur, "RSI",          50)          # FIX SCORE-NAN
     sma20      = _num(cur, "SMA_20",       price)
-    sma200     = _num(cur, "SMA_200",      price * 0.8)
+    # Missing SMA_200 (<200 bars) must read as "not yet available", never as
+    # a synthetic level the price happens to sit above (matches the neutral
+    # SMA scoring in _score_technical).
+    _sma200_raw = cur.get("SMA_200") if hasattr(cur, "get") else None
+    sma200_ok  = _sma200_raw is not None and not pd.isna(_sma200_raw)
+    sma200     = float(_sma200_raw) if sma200_ok else float("nan")
     vol        = _num(cur, "Volume_Ratio", 1.0)
     r20d       = mom_pts.get("_r20d", 0.0)
     # FIX SCORE-R60: _r60d is None when there is under 60 bars of history — the
@@ -1227,18 +1232,18 @@ def _build_narrative(
     if score >= 80:
         headline = "Strong uptrend — all indicators aligned"
     elif score >= 65:
-        headline = "Healthy setup — good risk-reward opportunity"
+        headline = "Healthy trend — most indicators aligned"
     elif score >= 52:
-        headline = "Mixed signals — worth watching for entry"
+        headline = "Mixed signals — trend not yet confirmed"
     elif score >= 40:
         headline = "Consolidating — no clear edge right now"
     elif score >= 25:
-        headline = "Caution — momentum fading, consider reducing"
+        headline = "Weakening — momentum fading"
     else:
         headline = "Weak — downtrend with no reversal signal"
 
     if rsi < 30 and score > 40:
-        headline = "Deeply oversold — potential reversal setup"
+        headline = "Deeply oversold — stretched to the downside"
     if bull_pats:
         headline += f" ({bull_pats[0]} pattern)"
 
@@ -1246,7 +1251,15 @@ def _build_narrative(
     parts = []
 
     # Sentence 1: Trend / SMA context
-    if price > sma20 and price > sma200:
+    if not sma200_ok:
+        parts.append(
+            f"{short_name} is trading at Rs.{price:,.2f}, "
+            + ("above" if price > sma20 else "below")
+            + f" its 20-day average (Rs.{sma20:,.2f}). The 200-day average is not yet "
+            f"available (under 200 trading days of history), so the long-term trend "
+            f"check scores neutral rather than being measured."
+        )
+    elif price > sma20 and price > sma200:
         parts.append(
             f"{short_name} is trading at Rs.{price:,.2f}, above both its "
             f"20-day average (Rs.{sma20:,.2f}) and 200-day average — the uptrend is intact."
@@ -1267,12 +1280,12 @@ def _build_narrative(
     if rsi < 30:
         parts.append(
             f"The stock has become deeply oversold (momentum indicator at {rsi:.0f}/100), "
-            f"which often precedes a recovery bounce — but wait for a clear green candle to confirm."
+            f"a stretched reading that has often preceded rebounds, though it can persist in downtrends."
         )
     elif rsi < 45:
         parts.append(
             f"The stock is in oversold territory (momentum at {rsi:.0f}/100), "
-            f"suggesting selling pressure may be exhausted — a good zone for long-term buyers."
+            f"suggesting selling pressure may be easing."
         )
     elif rsi <= 65:
         parts.append(
@@ -1281,13 +1294,13 @@ def _build_narrative(
         )
     elif rsi <= 75:
         parts.append(
-            f"Momentum is elevated ({rsi:.0f}/100) — the stock is running hot. "
-            f"Wait for a small pullback before adding new positions."
+            f"Momentum is elevated ({rsi:.0f}/100) — the stock is running hot, "
+            f"and extended readings like this often see a pause or pullback."
         )
     else:
         parts.append(
             f"Momentum is very high ({rsi:.0f}/100 — overbought zone). "
-            f"Existing holders can stay, but new buyers should wait for a pullback."
+            f"Overbought readings can persist in strong trends but raise pullback risk."
         )
 
     # Sentence 3: Recent performance (or fallback note)
@@ -1398,18 +1411,18 @@ def _build_narrative(
     sl_pct = (sl / price - 1) * 100
     tp_pct = (tp / price - 1) * 100
     parts.append(
-        f"Suggested entry around Rs.{entry:,.2f} with a protective stop at "
-        f"Rs.{sl:,.2f} ({sl_pct:.1f}%) and target Rs.{tp:,.2f} ({tp_pct:+.1f}%) "
-        f"— risk-reward ratio {rr:.1f}:1."
+        f"Model reference levels: entry Rs.{entry:,.2f}, invalidation "
+        f"Rs.{sl:,.2f} ({sl_pct:.1f}%), target Rs.{tp:,.2f} ({tp_pct:+.1f}%) "
+        f"— a {rr:.1f}:1 risk-reward structure."
     )
 
     # Sentence 6: VIX + sector (thresholds derived from n_sectors)
     vix_sentence_map = {
-        "complacency": "Market is calm (low VIX) — good environment for equities but complacency risk.",
+        "complacency": "Market is calm (low VIX) — historically supportive, though complacency can precede volatility spikes.",
         "normal":      "Overall market conditions are normal (VIX in healthy range).",
-        "elevated":    "Market fear is elevated (VIX rising) — consider smaller position size.",
-        "fear":        "Market fear is high (VIX above 22) — use strict stop-losses.",
-        "panic":       "Market is in panic mode (VIX above 28) — exercise extreme caution.",
+        "elevated":    "Market fear is elevated (VIX rising) — price swings are wider than usual.",
+        "fear":        "Market fear is high (VIX above 22) — volatility is well above normal.",
+        "panic":       "Market is in panic mode (VIX above 28) — extreme volatility regime.",
     }
     vix_txt    = vix_sentence_map.get(vix_regime, "Market conditions are uncertain.")
     top_third  = n_sectors // 3
@@ -1438,10 +1451,10 @@ def _build_narrative(
                          "— institutional distribution, a headwind.")
         elif _f < 0 and _d > 0:
             _flow_txt = ("FII selling absorbed by DII buying (5-day) — a domestic-supported "
-                         "dip, historically a tradeable pullback rather than a trend break.")
+                         "dip, historically more often a pullback than a trend break.")
         elif _f > 0 and _d < 0:
             _flow_txt = ("FII buying with DII taking profits (5-day) — rallies in this regime "
-                         "tend to be shallower; keep stops tight.")
+                         "have tended to be shallower.")
         else:
             _flow_txt = None
         if _flow_txt:

@@ -210,7 +210,7 @@ def _classify_delivery(
     return (
         "HOLD",
         f"{n_pass}/6 filters passing — thesis intact but not extending. "
-        f"Trail stop 2-ATR below at ₹{ltp - 2*atr:,.2f}.",
+        f"2-ATR below price is ₹{ltp - 2*atr:,.2f}.",
     )
 
 
@@ -275,13 +275,13 @@ def analyse_intraday_position(
         posture, reason = (
             "TARGET_HIT",
             f"Position up {pnl_pct:.2f}% — beyond intraday target of {target_pct:.1f}%. "
-            "Consider trailing tighter or booking.",
+            "Past the intraday target.",
         )
     elif pnl_pct >= target_pct * 0.6:
         posture, reason = (
             "TRAIL_TIGHTER",
             f"Position up {pnl_pct:.2f}% — through 60% of target. "
-            f"Trail stop to entry ₹{avg:,.2f} (breakeven) to lock in.",
+            f"Breakeven (entry) is ₹{avg:,.2f}.",
         )
     else:
         posture, reason = (

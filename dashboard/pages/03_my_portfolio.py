@@ -1740,7 +1740,7 @@ else:
         "- 🟡 Neutral = mixed signals, no clear edge  \n"
         "- ⚠️ Weakening / Broken Trend = trend deteriorating  \n"
         "- Composite score (0–90) — higher = stronger trend (not a return forecast)  \n"
-        "- Plain English explanation and suggested stop-loss / target per holding"
+        "- Plain English explanation and the model's reference stop / target levels per holding"
     )
     col_ex1, col_ex2, col_ex3 = st.columns(3)
     with col_ex1:
@@ -1756,7 +1756,7 @@ else:
         <div class="card-yellow">
         <b>🟡 Neutral (Score 40–64)</b><br>
         Mixed signals — some positives, some caution.
-        Monitor your position; no clear directional edge right now.
+        No clear directional edge right now.
         </div>
         """, unsafe_allow_html=True)
     with col_ex3:
@@ -1764,6 +1764,6 @@ else:
         <div class="card-red">
         <b>⚠️ Weakening ▼ / Broken Trend ▼▼ (Score &lt; 40)</b><br>
         Trend quality is deteriorating.
-        Consider reviewing your position size or tightening your stop-loss.
+        Price has broken below key averages or momentum has turned negative.
         </div>
         """, unsafe_allow_html=True)

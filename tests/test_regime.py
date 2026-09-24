@@ -37,7 +37,8 @@ def test_dispersion_verdict_low_zone_carries_a_paste_ready_note():
     v = dispersion_verdict(DISPERSION_LOW_THRESHOLD - 1.0)
     assert v["zone"] == "low"
     assert isinstance(v["note"], str) and v["note"]
-    assert "consider halving" in v["note"].lower() or "waiting" in v["note"].lower()
+    # Descriptive (CLAUDE.md rule 1): states the reliability hit, no instruction.
+    assert "less reliable" in v["note"].lower() and "consider" not in v["note"].lower()
 
 
 def test_dispersion_verdict_normal_zone_has_empty_note():

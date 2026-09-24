@@ -293,11 +293,11 @@ def assess_fit(inp: PortfolioFitInputs) -> PortfolioFitResult:
     if illiquid:
         guidance = "Small"
         size_reason = ("Small — the stock is illiquid; a large position would be hard to exit. "
-                       "Cap the size regardless of other factors.")
+                       "Liquidity caps the fit regardless of other factors.")
     elif weak_thesis:
         guidance = "Small"
         size_reason = (f"Small — the candidate's own thesis is weak "
-                       f"({inp.candidate_verdict or inp.candidate_verdict_score}); size conservatively.")
+                       f"({inp.candidate_verdict or inp.candidate_verdict_score}).")
     elif len(pressures) >= 2:
         guidance = "Small"
         size_reason = "Small — multiple risk pressures: " + "; ".join(pressures) + "."

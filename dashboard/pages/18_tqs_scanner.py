@@ -206,7 +206,7 @@ if True:  # top-level guard kept minimal so the following block stays indented a
             m1.metric("Stocks Scored", total)
             m2.metric("Strong Trend", strong)
             m3.metric("Trending", trending)
-            m4.metric("Avoid", avoid)
+            m4.metric("No trend", avoid)
 
             st.divider()
 
@@ -252,6 +252,9 @@ if True:  # top-level guard kept minimal so the following block stays indented a
                 .map(_colour_grade,  subset=["Grade"] if "Grade" in df_display.columns else [])
                 .apply(lambda col: [_bar_tqs(v) for v in col], subset=["TQS"] if "TQS" in df_display.columns else [])
                 .format({
+                    # Display-only relabel (CLAUDE.md rule 1): engine value
+                    # "AVOID" stays internal; colour lookup keys off the raw value.
+                    "Signal": lambda v: "NO TREND" if str(v).upper() == "AVOID" else v,
                     "Close": "₹{:,.2f}", "TQS": "{:.1f}",
                     "P1 Strength": "{:.1f}", "P2 Persist": "{:.1f}",
                     "P3 Momentum": "{:.1f}", "P4 Volume": "{:.1f}",

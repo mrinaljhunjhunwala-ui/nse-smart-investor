@@ -180,19 +180,19 @@ def check_daily_weekly_alignment(df: pd.DataFrame, weekly_df: pd.DataFrame = Non
     elif d_dir == "bearish" and w_dir == "bearish":
         alignment    = "bearish"
         aligned      = True
-        confirmation = "Both daily and weekly bearish — avoid longs / consider shorts."
+        confirmation = "Both daily and weekly bearish — downtrend confirmed on both timeframes."
     elif d_dir == "bullish" and w_dir == "neutral":
         alignment    = "mixed"
         aligned      = False
-        confirmation = "Daily bullish but weekly neutral — wait for weekly confirmation."
+        confirmation = "Daily bullish but weekly neutral — the weekly trend has not confirmed."
     elif d_dir == "bullish" and w_dir == "bearish":
         alignment    = "mixed"
         aligned      = False
-        confirmation = "Daily bullish but weekly bearish — counter-trend risk, skip."
+        confirmation = "Daily bullish but weekly bearish — a counter-trend bounce within a weekly downtrend."
     elif d_dir == "bearish" and w_dir == "bullish":
         alignment    = "mixed"
         aligned      = False
-        confirmation = "Daily pullback in weekly uptrend — possible buy-the-dip opportunity."
+        confirmation = "Daily pullback within a weekly uptrend."
     else:
         alignment    = "mixed"
         aligned      = False
@@ -252,23 +252,23 @@ def check_all_timeframes(ticker: str, period: str = "2y") -> dict:
     if bullish_count == 3:
         alignment = "bullish"
         aligned   = True
-        summary   = f"{ticker}: All 3 timeframes bullish — maximum conviction long."
+        summary   = f"{ticker}: All 3 timeframes bullish — full alignment."
     elif bearish_count == 3:
         alignment = "bearish"
         aligned   = True
-        summary   = f"{ticker}: All 3 timeframes bearish — avoid / short."
+        summary   = f"{ticker}: All 3 timeframes bearish — full bearish alignment."
     elif bullish_count >= 2:
         alignment = "bullish"
         aligned   = False
-        summary   = f"{ticker}: {bullish_count}/3 TFs bullish — moderate conviction."
+        summary   = f"{ticker}: {bullish_count}/3 TFs bullish — partial alignment."
     elif bearish_count >= 2:
         alignment = "bearish"
         aligned   = False
-        summary   = f"{ticker}: {bearish_count}/3 TFs bearish — lean short."
+        summary   = f"{ticker}: {bearish_count}/3 TFs bearish — partial bearish alignment."
     else:
         alignment = "mixed"
         aligned   = False
-        summary   = f"{ticker}: Timeframes conflict — wait for alignment."
+        summary   = f"{ticker}: Timeframes conflict — no alignment."
 
     return {
         "ticker":        ticker,

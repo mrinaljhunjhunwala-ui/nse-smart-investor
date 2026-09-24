@@ -74,7 +74,7 @@ class HoldingResult:
     score:          float           # 0–100 composite score
     grade:          str             # A+…F
     action:         str             # STRONG BUY…EXIT
-    signal:         str             # 🟢 BUY MORE / 🟡 HOLD / 🔴 CONSIDER SELLING
+    signal:         str             # 🟢 / 🟡 / 🔴 + descriptive trend state (never an instruction)
     headline:       str             # one-liner for UI card
     narrative:      str             # full paragraph
     sector:         str
@@ -117,19 +117,23 @@ class PortfolioSummary:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _traffic_light(action: str, pnl_pct: float) -> str:
-    """Return 🟢 / 🟡 / 🔴 signal with a short label."""
+    """Return 🟢 / 🟡 / 🔴 plus a short DESCRIPTIVE trend-state label.
+
+    CLAUDE.md rule 1: describes the holding's trend, never tells the user to
+    add, trim or sell. Colour prefixes are kept for the CSV G/Y/R export.
+    """
     if action in ("STRONG BUY", "BUY"):
-        return "🟢 ADD / BUY MORE"
+        return "🟢 Strong trend"
     elif action in ("WATCHLIST",):
-        return "🟡 HOLD — watching"
+        return "🟡 Mixed signals"
     elif action in ("HOLD",):
-        return "🟡 HOLD"
+        return "🟡 Neutral trend"
     elif action in ("CAUTION",):
         if pnl_pct > 15:
-            return "🟡 CONSIDER TRIMMING"
-        return "🔴 REDUCE POSITION"
+            return "🟡 Weakening (position in profit)"
+        return "🔴 Weakening"
     else:  # EXIT
-        return "🔴 CONSIDER SELLING"
+        return "🔴 Broken trend"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -162,25 +166,25 @@ def _analyse_diversification(
         advice = (
             f"Over 60% of your portfolio is in {top_sector}. "
             "A single sector event can hurt significantly. "
-            "Consider spreading across 5–8 sectors."
+            "Portfolios spread across 5–8 sectors are conventionally considered diversified."
         )
     elif top_pct > 45:
         risk = "HIGH"
         advice = (
             f"{top_sector} makes up {top_pct:.0f}% of your portfolio. "
-            "Aim to bring any single sector below 40%."
+            "A common diversification benchmark keeps any single sector below 40%."
         )
     elif top_pct > 30 or n_sectors < 4:
         risk = "MEDIUM"
         advice = (
             f"Reasonable diversification but {top_sector} is dominant at {top_pct:.0f}%. "
-            "Adding 1–2 stocks from other sectors would reduce risk."
+            "Exposure to other sectors is limited."
         )
     else:
         risk = "LOW"
         advice = (
             f"Good diversification across {n_sectors} sectors. "
-            "Continue monitoring sector weights as markets move."
+            "Sector weights are within conventional diversification ranges."
         )
 
     return PortfolioDiversification(
@@ -215,24 +219,24 @@ def _portfolio_narrative(
     if buy_count:
         parts.append(
             f"{buy_count} of your holdings look strong right now "
-            "— our model suggests they could be added to."
+            "— their trend scores are in the strong bands."
         )
     if sell_count:
         parts.append(
             f"{sell_count} holdings are showing weakness "
-            "— consider reviewing those positions."
+            "— their trend scores are in the weakening or broken bands."
         )
 
     _vix_upper = summary.vix_regime.upper()
     if "FEAR" in _vix_upper or "PANIC" in _vix_upper:
         parts.append(
             "Markets are currently fearful (VIX elevated). "
-            "This is often a better time to hold or buy carefully, not to sell in panic."
+            "Historically, fear regimes have been followed by above-average forward returns, with wider swings along the way."
         )
     elif "COMPLACENCY" in _vix_upper:
         parts.append(
-            "Market volatility is very low right now — a good time to review "
-            "your stops, as sharp moves can catch investors off guard."
+            "Market volatility is very low right now — calm regimes can end "
+            "with sharp, sudden moves."
         )
     else:
         parts.append(
