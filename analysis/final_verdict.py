@@ -257,7 +257,7 @@ def _gate_valuation(posture: Optional[str],
         return GateEvaluation(
             name="valuation", passed=True, effect="damp",
             message=f"Valuation posture: {posture.replace('_', ' ').lower()}. "
-                    f"Consider halving size or waiting for a pullback.")
+                    f"Stretched valuations have historically meant more downside on pullbacks.")
 
     if posture.startswith("SUPPORTED"):
         return GateEvaluation(
@@ -321,7 +321,7 @@ def _gate_trend_quality(tqs: Optional[float]) -> GateEvaluation:
     if tqs < 25:
         return GateEvaluation(
             name="trend", passed=True, effect="damp",
-            message=f"TQS {tqs:.0f}/90 — trend weak. Counter-trend entry.")
+            message=f"TQS {tqs:.0f}/90 — trend weak; any long reading here runs against the trend.")
 
     if tqs > 60:
         return GateEvaluation(

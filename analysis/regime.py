@@ -368,8 +368,8 @@ def dispersion_verdict(value: Optional[float]) -> Dict[str, str]:
             "note": (
                 f"Cross-sectional dispersion is {value:.1f} — below the "
                 f"{DISPERSION_LOW_THRESHOLD} threshold. In this regime "
-                f"individual BUY signals have historically hit ~44 % vs "
-                f"~50 % baseline. Consider halving position or waiting."
+                f"individual uptrend signals have historically hit ~44 % vs "
+                f"~50 % baseline — signals are less reliable in low-dispersion markets."
             ),
         }
     if value > 15.0:

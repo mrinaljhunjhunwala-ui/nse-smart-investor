@@ -157,7 +157,7 @@ def calculate_portfolio_beta(
     elif pb < 1.2:
         interpretation = f"Market beta ({pb}) — portfolio tracks Nifty closely."
     elif pb < 1.5:
-        interpretation = f"High beta ({pb}) — portfolio amplifies market moves. Consider partial hedge."
+        interpretation = f"High beta ({pb}) — portfolio amplifies market moves."
     else:
         interpretation = f"Very high beta ({pb}) — portfolio is highly leveraged to market. Hedge recommended."
 

@@ -20,7 +20,15 @@ BANNED = re.compile(
     r"don't add|hold existing|full long|short-bias|long-bias|go (long|short)|"
     r"buy quality|lock in profit|reduce (position|exposure)|consider hedg\w*|"
     r"keep stops|buy candidates|sell\s*/\s*avoid|(strong )?buy setups|enter with|"
-    r"exit immediately|full position|only take trades)\b",
+    r"exit immediately|full position|only take trades|"
+    # Narrative phrasings found in analysis/score.py + portfolio modules:
+    r"new buyers|holders (can|should)|should (wait|buy|sell|exit|avoid)|"
+    r"wait for (a )?(pullback|clear|confirmation)|suggested entry|"
+    r"consider (reducing|smaller)|buy more|use strict stop\w*|"
+    r"rebalance toward|diversify beyond|add \d|"
+    r"consider (partial )?hedg\w*|consider shorts|avoid longs|lean short|buy-the-dip|"
+    r"trail stop|size conservatively|cap the size|consider halving|could be added|"
+    r"consider (spreading|reviewing|trailing)|aim to bring|counter-trend entry)\b",
     re.I,
 )
 
@@ -32,8 +40,23 @@ ALLOWLIST_COPY: set[str] = {
 ALLOWLIST_MAPPER: set[str] = {
 }
 
+ANALYSIS = ROOT.parent / "analysis"
+
+
 def _files():
     return list((ROOT / "pages").glob("*.py")) + list((ROOT / "shared").glob("*.py"))
+
+
+def test_no_instruction_copy_in_analysis_narratives():
+    """analysis/ builds headlines, narratives and portfolio labels that pages
+    render verbatim — the same rule applies there."""
+    hits = []
+    for p in ANALYSIS.rglob("*.py"):
+        for ln, s in _strings(p):
+            m = BANNED.search(s)
+            if m:
+                hits.append(f"analysis/{p.relative_to(ANALYSIS).as_posix()}:{ln}: {m.group(0)!r}")
+    assert not hits, "Advice-style narrative copy (CLAUDE.md rule 1):\n" + "\n".join(hits)
 
 
 def _docstring_ids(tree):

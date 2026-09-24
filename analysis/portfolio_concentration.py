@@ -120,16 +120,16 @@ def analyze_concentration(holdings: List[Dict]) -> ConcentrationResult:
     # Recommendation
     recs = []
     if top_1 > 30:
-        recs.append(f"⚠️  Largest holding is {top_1:.1f}% — consider trimming to <25%.")
+        recs.append(f"⚠️  Largest holding is {top_1:.1f}% of the portfolio — above the 25% single-name concentration benchmark.")
     if top_5 > 60:
-        recs.append(f"Top 5 holdings account for {top_5:.1f}% — diversify beyond top positions.")
+        recs.append(f"Top 5 holdings account for {top_5:.1f}% — returns are dominated by a few names.")
     if len(weights) < 5:
-        recs.append(f"Only {len(weights)} holdings — add 2–3 more for better diversification.")
+        recs.append(f"Only {len(weights)} holdings — below the ~5 names where diversification benefits usually start.")
     if hhi > 2500:
-        recs.append("HHI indicates high concentration risk. Rebalance toward more equal weights.")
+        recs.append("HHI indicates high concentration (above 2,500, the conventional 'highly concentrated' threshold).")
     
     if not recs:
-        recs.append("Concentration profile is healthy. Continue monitoring as weights shift.")
+        recs.append("Concentration profile is within conventional diversification ranges.")
 
     recommendation = " ".join(recs)
 
