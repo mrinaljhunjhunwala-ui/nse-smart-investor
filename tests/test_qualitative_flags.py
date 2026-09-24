@@ -44,6 +44,16 @@ def _reset_module_level_caches():
     _news_feed_mod._cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_live_nse_rss(monkeypatch):
+    """refresh_all_flags() fetches live NSE RSS when rss_items_by_category is
+    None. Unmocked, a real filing for the test ticker leaked an extra flag
+    into assertions (CI failure 2026-09-24). Default every test in this file
+    to "no RSS items"; tests that care monkeypatch it themselves."""
+    monkeypatch.setattr(_nse_rss_feeds_mod, "get_all_relevant_items",
+                        lambda *a, **k: {})
+
+
 # ── fake kv store (mirrors trade_store.kv_get/kv_set signatures exactly) ──
 class _FakeKv:
     def __init__(self):
