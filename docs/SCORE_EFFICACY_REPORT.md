@@ -1,5 +1,7 @@
 # Score Efficacy Report
 
+> **Superseded 2026-09-24** by [`SCORE_EFFICACY_2026-09-24.md`](SCORE_EFFICACY_2026-09-24.md). This run pooled across dates and never replayed relative strength; its "labels inverted" finding does not hold on per-date IC over 5 years.
+
 **Question:** Does the production composite score have predictive power?
 **Answer: No — not in the tested window, and marginally worse than three
 naive baselines tested alongside it.** The score ranks forward returns

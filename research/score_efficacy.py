@@ -146,7 +146,8 @@ _prepare_ticker_exceptions = 0
 _STUDY_PERIOD_ENV = os.environ.get("SCORE_EFFICACY_PERIOD", "").strip()
 
 
-def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
+def _prepare_ticker(ticker: str, period: str = "2y",
+                    bench: Optional[pd.DataFrame] = None) -> Optional[pd.DataFrame]:
     """Fetch daily bars (default 2y) and enrich with the production indicators.
 
     Indicators are rolling/causal, so computing them once on the full frame and
@@ -161,6 +162,15 @@ def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
         if df is None or df.empty or len(df) < 280:
             return None  # benign: just not enough history, not a real failure
         df = add_all_indicators(df)
+        # Relative strength vs Nifty, exactly as production score_stock()
+        # adds it (after the core indicators). RS_Score is a rolling 252-bar
+        # percentile of the stock/Nifty ratio, so computing it once on the
+        # full frame and slicing is causal — no look-ahead. Before 2026-09-24
+        # the study never passed a benchmark, so it validated the RS-less
+        # 25-pt absolute-momentum fallback instead of the live scorer.
+        if bench is not None and not bench.empty:
+            from utils.indicators import add_relative_strength
+            df = add_relative_strength(df, bench)
         df = df.dropna(subset=["RSI", "ATR"])
         return df if len(df) >= 280 else None
     except Exception as e:
@@ -176,9 +186,11 @@ def _prepare_ticker(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
 
 
 def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
-                  regimes: Optional[pd.Series]) -> "Tuple[List[Dict], int]":
+                  regimes: Optional[pd.Series],
+                  live_regimes: Optional[pd.Series] = None,
+                  pass_regime: bool = False) -> "Tuple[List[Dict], int]":
     """Score the production model at weekly sample points; measure forward."""
-    from analysis.score import score_dataframe
+    from analysis.score import score_dataframe, _score_sentiment
 
     closes = df["Close"].astype(float).values
     highs  = df["High"].astype(float).values
@@ -198,9 +210,14 @@ def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
     score_failures = 0
     for i in range(start, last, SAMPLE_STEP):
         sub = df.iloc[: i + 1]
+        # Production regime label (analysis.regime classifier, no breadth —
+        # same inputs snapshot_live() uses). Recorded on every row; only
+        # handed to the scorer when --regime-weights is on (FIX EFF-REGIME).
+        _live_reg = _regime_for(df.index[i], live_regimes)
         try:
             cs = score_dataframe(sub, ticker, vix_info=_NEUTRAL_VIX,
-                                 sector_rank=_NEUTRAL_SECTOR_RANK, sector=sector)
+                                 sector_rank=_NEUTRAL_SECTOR_RANK, sector=sector,
+                                 regime_label=_live_reg if pass_regime else None)
         except Exception:
             score_failures += 1
             continue
@@ -246,14 +263,32 @@ def _walk_forward(ticker: str, df: pd.DataFrame, sector: str,
 
         cur = df.iloc[i]
         sma200 = float(cur.get("SMA_200", np.nan))
+        # Sentiment replay — the VIX sub-component only. Sector rank and
+        # FII/DII flows have no reliable point-in-time history, so they stay
+        # neutral; VIX regime IS reconstructible from ^INDIAVIX, so score it
+        # with the production _score_sentiment() for that date's regime.
+        _hist_regime = _regime_for(df.index[i], regimes)
+        try:
+            _sent_hist = float(_score_sentiment(
+                {"regime": _hist_regime if _hist_regime != "unknown" else "normal"},
+                _NEUTRAL_SECTOR_RANK)[0])
+        except Exception:
+            _sent_hist = np.nan
+        _score90 = float(cs.score) - float(cs.sentiment_score)
         rows.append({
             "ticker":   ticker,
             "date":     str(df.index[i])[:10],
             "sector":   sector,
             "regime":   _regime_for(df.index[i], regimes),
+            "live_regime": _live_reg,
             # production outputs (verbatim)
             "score":     float(cs.score),
-            "score90":   float(cs.score) - float(cs.sentiment_score),
+            "score90":   _score90,
+            # FIX EFF-SENT (2026-09-24): sentiment with historical VIX, and the
+            # full-shape score a user would have seen (sector/flows neutral).
+            "sent_vix_hist":   _sent_hist,
+            "score_full_hist": _score90 + _sent_hist if np.isfinite(_sent_hist) else np.nan,
+            "rs_score":  float(cur.get("RS_Score", np.nan)),
             "technical": float(cs.technical_score),
             "momentum":  float(cs.momentum_score),
             "volume":    float(cs.volume_score),
@@ -385,7 +420,10 @@ def aggregate(obs: pd.DataFrame) -> Dict[str, pd.DataFrame]:
 
     # Factor attribution — rank correlation of each component vs forward returns
     rows = []
-    for comp in ["score90", "score", "technical", "momentum", "volume", "pattern"]:
+    for comp in ["score90", "score", "score_full_hist", "technical", "momentum",
+                 "volume", "sent_vix_hist", "rs_score", "pattern"]:
+        if comp not in obs.columns:
+            continue
         rows.append({
             "component": comp,
             "spearman_fwd5":  round(_spearman(obs[comp], obs["fwd_5d"]), 4),
@@ -454,6 +492,11 @@ def main() -> int:
                     help="Historical window: 2y (default), 3y, 5y, max. "
                          "Longer windows cover more regimes → disambiguate whether "
                          "any inversion in the score is regime-specific or universal.")
+    ap.add_argument("--regime-weights", action="store_true",
+                    help="Replay with NSE_USE_REGIME_WEIGHTS on: bear-regime (trend_down/"
+                         "risk_off) momentum uses the 5d mean-reversion variant.")
+    ap.add_argument("--no-rs", action="store_true",
+                    help="Skip the Nifty benchmark (reproduces the pre-2026-09-24 RS-less study).")
     args = ap.parse_args()
 
     from data.universe import get_universe, get_sector
@@ -468,13 +511,39 @@ def main() -> int:
           f"step={SAMPLE_STEP}d | horizons={HORIZONS} | max_horizon={MAX_HORIZON}d")
 
     regimes = _vix_regime_series(period=args.period)
+
+    bench = None
+    if not args.no_rs:
+        try:
+            from data.fetcher import fetch_single
+            bench = fetch_single("^NSEI", period=args.period)
+        except Exception as e:
+            print(f"  ^NSEI fetch failed ({type(e).__name__}: {e})")
+    print(f"Nifty benchmark (RS): {'OK' if bench is not None and not bench.empty else 'OFF/UNAVAILABLE'}")
+
+    # Production regime labels per date (FIX EFF-REGIME).
+    live_regimes = None
+    try:
+        from analysis.regime import classify_history
+        from data.fetcher import fetch_single as _fs
+        _nifty = bench if (bench is not None and not bench.empty) else _fs("^NSEI", period=args.period)
+        _vix = _fs("^INDIAVIX", period=args.period)
+        live_regimes = classify_history(_nifty["Close"].astype(float),
+                                        _vix["Close"].astype(float) if _vix is not None and not _vix.empty else None,
+                                        None)
+        print("Live regime labels:", live_regimes.value_counts().to_dict())
+    except Exception as e:
+        print(f"  live regime labels unavailable ({type(e).__name__}: {e})")
+    if args.regime_weights:
+        os.environ["NSE_USE_REGIME_WEIGHTS"] = "1"
+        print("Regime weights: ON (bear-regime mean-reversion momentum)")
     print(f"VIX regime series: {'OK' if regimes is not None else 'UNAVAILABLE (regime=unknown)'}")
 
     # Fetch + indicator-enrich in parallel (network bound)
     frames: Dict[str, pd.DataFrame] = {}
     prep_failures = 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = {ex.submit(_prepare_ticker, t, args.period): t for t in universe}
+        futs = {ex.submit(_prepare_ticker, t, args.period, bench): t for t in universe}
         done = 0
         for f in as_completed(futs):
             t = futs[f]
@@ -508,7 +577,8 @@ def main() -> int:
             sector = get_sector(t)
         except Exception:
             sector_failures += 1
-        rows, score_failures = _walk_forward(t, df, sector, regimes)
+        rows, score_failures = _walk_forward(t, df, sector, regimes,
+                                             live_regimes, args.regime_weights)
         all_rows.extend(rows)
         total_score_failures += score_failures
         if k % 25 == 0:
