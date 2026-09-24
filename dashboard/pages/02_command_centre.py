@@ -57,7 +57,8 @@ st.markdown(
 # The v2-scoring chip (NSE_USE_REGIME_WEIGHTS) used to sit alone above the
 # cards. Status now lives in one strip: VIX zone + market breadth + scoring
 # mode. Every cell degrades to "Unknown" when its feed is unavailable.
-_v2_flag = os.environ.get("NSE_USE_REGIME_WEIGHTS", "").strip().lower() in {"1", "true", "yes", "on"}
+from analysis.score import _regime_weights_enabled as _cc_rw_enabled, _BEAR_REGIMES as _cc_bear
+_v2_flag = _cc_rw_enabled()   # default ON since 2026-09-24; NSE_USE_REGIME_WEIGHTS=0 disables
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -93,16 +94,23 @@ def _render_regime_strip() -> None:
     _rs_cells.append(("Breadth", _rs_b.title()
                       + (f" · {_rs_bp:.0f}% > SMA50" if isinstance(_rs_bp, (int, float)) else ""),
                       {"broad": "bull", "mixed": "amber", "narrow": "bear"}.get(_rs_b, "dim")))
-    _rs_cells.append(("Scoring", "v2 · regime-weighted" if _v2_flag else "v1 · legacy",
-                      "bull" if _v2_flag else "dim"))
+    # Say what the momentum pillar is doing TODAY, not just that the option exists.
+    _rs_live = str(_rs_reg.get("label") or "unknown").lower()
+    _rs_bear_on = _v2_flag and _rs_live in _cc_bear
+    _rs_cells.append(("Scoring",
+                      "Bear mode · momentum uses 5-day reversal" if _rs_bear_on
+                      else ("Standard · trend momentum" if _v2_flag else "Legacy · bear mode off"),
+                      "amber" if _rs_bear_on else ("bull" if _v2_flag else "dim")))
     _rs_html = "".join(
         f'<div class="regime-strip-cell"><span class="regime-strip-dot" style="background:var(--{_t})"></span>'
         f'<span class="regime-strip-k">{_k}</span>'
         f'<span class="regime-strip-v" style="color:var(--{_t})">{_v}</span></div>'
         for _k, _v, _t in _rs_cells
     )
-    _rs_title = ("Momentum pillar dispatches to mean-reversion in bear regimes "
-                 "(NSE_USE_REGIME_WEIGHTS=1)" if _v2_flag else "Legacy fixed-weight scoring")
+    _rs_title = ("In bear regimes (trend_down / risk_off) the momentum pillar swaps absolute "
+                 "returns for a 5-day reversal percentile — trend momentum has ranked stocks "
+                 "backwards in bear markets (docs/SCORE_EFFICACY_2026-09-24.md). "
+                 f"Current regime: {_rs_live}." if _v2_flag else "Bear-regime scoring disabled")
     st.markdown(f'<div class="regime-strip" title="{_rs_title}">{_rs_html}</div>',
                 unsafe_allow_html=True)
 
