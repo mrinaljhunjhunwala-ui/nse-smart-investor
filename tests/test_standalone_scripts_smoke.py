@@ -62,6 +62,7 @@ _STANDALONE_SCRIPTS = [
     ("research.revenue_growth_trend_interaction", "research/revenue_growth_trend_interaction.py", ["main"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
     ("tools.refresh_flags_batch",           "tools/refresh_flags_batch.py", ["main"]),
+    ("tools.composite_golden",              "tools/composite_golden.py", ["main", "build_snapshot", "run_case"]),
 ]
 _IDS = [mod for mod, _, _ in _STANDALONE_SCRIPTS]
 
