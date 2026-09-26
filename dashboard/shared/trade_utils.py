@@ -51,7 +51,6 @@ import logging
 import os
 import pathlib
 import sys
-import sqlite3
 import warnings
 import io
 import json
@@ -80,7 +79,6 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import trade_store as _store
-from utils.sql import read_sql_df  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,17 +198,6 @@ def _ist_now() -> datetime.datetime:
 # ─────────────────────────────────────────────────────────────────────────────
 # DB / account helpers (unchanged public API)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def load_trades_db(path: str = "trades.db") -> pd.DataFrame:
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    with sqlite3.connect(path) as conn:
-        try:
-            return read_sql_df("SELECT * FROM trades ORDER BY id DESC", conn)
-        except Exception as _e:
-            _log.warning("trade_utils.load_trades_db degraded: %s", _e)
-            return pd.DataFrame()
-
 
 def load_trades_by_account(account: str, path: str = "trades.db") -> pd.DataFrame:
     return _store.load_by_account(account)
