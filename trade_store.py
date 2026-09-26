@@ -9,7 +9,7 @@ Two backends, chosen automatically:
     See dashboard/DB_SETUP.md for the 5-minute setup.
 
 Fixes applied vs previous version:
-  - _database_url() cached with lru_cache — was re-reading st.secrets on every call
+  - _database_url() deliberately NOT cached — tests swap DATABASE_URL between runs
   - _schema_ready / _kv_ready flags — ensure_schema() no longer opens a second
     connection on every read (was opening 2 connections per operation)
   - Postgres connection pool (ThreadedConnectionPool, max 5) — replaces one new
@@ -22,6 +22,8 @@ Fixes applied vs previous version:
   - open_trade now accepts strategy and action params (were hardcoded "Manual"/"BUY")
   - open_trade validates price > 0, qty > 0, sl < price
   - _get_conn() context manager centralises connection acquire/release
+  - _get_conn() waits for a free pool slot instead of raising PoolError when
+    scan threads outnumber pool connections (2026-09-27)
 """
 
 from __future__ import annotations
@@ -30,8 +32,8 @@ import datetime
 import json
 import logging
 import os
+import threading
 from contextlib import contextmanager
-from functools import lru_cache
 from typing import Any, List, Optional
 
 import pandas as pd
@@ -46,7 +48,18 @@ _schema_ready_for: Optional[str] = None
 _kv_ready_for:     Optional[str] = None
 
 # ── Postgres connection pool (created once, reused across calls) ──────────────
+# psycopg2's ThreadedConnectionPool raises PoolError the moment all maxconn
+# connections are out — it never waits. Universe scans run 10+ worker threads
+# (ThreadPoolExecutor in dashboard/shared/cache.py) that each read delivery /
+# F&O history, so a bare pool failed most tickers and silently dropped the
+# delivery sub-score on scan pages. _pg_slots (a semaphore sized to maxconn)
+# makes callers queue for a free connection instead.
+_PG_MAXCONN = 5
+_PG_ACQUIRE_TIMEOUT_S = 30.0
 _pg_pool = None
+_pg_slots: Optional[threading.BoundedSemaphore] = None
+_pg_pool_lock = threading.Lock()
+_pg_held = threading.local()   # per-thread count of connections checked out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,11 +71,6 @@ def _database_url() -> Optional[str]:
     Return Postgres URL from Streamlit secrets or env, else None.
     Not cached with lru_cache — tests monkeypatch DATABASE_URL between runs
     and need live re-reads. Fast enough: called only at connection time.
-    """
-    """
-    Return a Postgres URL from Streamlit secrets or env, else None.
-    Cached with lru_cache — previously re-read st.secrets on every single
-    DB call (4-5 times per operation). Now resolves once per process.
     """
     url = None
     try:
@@ -96,10 +104,13 @@ def _is_pg() -> bool:
 
 def _get_pg_pool():
     """Return (and lazily create) a threaded Postgres connection pool."""
-    global _pg_pool
+    global _pg_pool, _pg_slots
     if _pg_pool is None:
-        from psycopg2 import pool as pg_pool_mod
-        _pg_pool = pg_pool_mod.ThreadedConnectionPool(1, 5, _database_url())
+        with _pg_pool_lock:   # scan threads race here on first use
+            if _pg_pool is None:
+                from psycopg2 import pool as pg_pool_mod
+                _pg_slots = threading.BoundedSemaphore(_PG_MAXCONN)
+                _pg_pool = pg_pool_mod.ThreadedConnectionPool(1, _PG_MAXCONN, _database_url())
     return _pg_pool
 
 
@@ -107,16 +118,39 @@ def _get_pg_pool():
 def _get_conn():
     """
     Context manager that yields a DB connection and releases it on exit.
-    For Postgres: borrows from the pool and returns it.
+    For Postgres: waits (up to _PG_ACQUIRE_TIMEOUT_S) for a free pool slot,
+    borrows a connection and returns it. A nested _get_conn() on a thread that
+    already holds one skips the wait — blocking there could deadlock the
+    thread against itself — and hits the pool directly, as before.
     For SQLite: opens a file connection and closes it.
     """
     if _is_pg():
         pool = _get_pg_pool()
-        conn = pool.getconn()
+        slots = _pg_slots
+        depth = getattr(_pg_held, "n", 0)
+        gated = depth == 0 and slots is not None
+        if gated and not slots.acquire(timeout=_PG_ACQUIRE_TIMEOUT_S):
+            from psycopg2.pool import PoolError
+            raise PoolError(
+                f"no Postgres connection free after {_PG_ACQUIRE_TIMEOUT_S:.0f}s "
+                f"(pool max {_PG_MAXCONN})"
+            )
+        try:
+            conn = pool.getconn()
+        except BaseException:
+            if gated:
+                slots.release()
+            raise
+        _pg_held.n = depth + 1
         try:
             yield conn
         finally:
-            pool.putconn(conn)
+            _pg_held.n = depth
+            try:
+                pool.putconn(conn)
+            finally:
+                if gated:
+                    slots.release()
     else:
         import sqlite3
         conn = sqlite3.connect(_SQLITE_PATH)
@@ -355,11 +389,14 @@ def edit_trade(
 ) -> None:
     fields, vals = [], []
     if sl is not None:
-        fields.append("sl=?");     vals.append(sl)
+        fields.append("sl=?")
+        vals.append(sl)
     if tp is not None:
-        fields.append("tp=?");     vals.append(tp)
+        fields.append("tp=?")
+        vals.append(tp)
     if reason is not None:
-        fields.append("reason=?"); vals.append(reason)
+        fields.append("reason=?")
+        vals.append(reason)
     if not fields:
         return
     vals.append(trade_id)

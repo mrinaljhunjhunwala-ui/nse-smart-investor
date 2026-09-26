@@ -191,3 +191,10 @@ def test_parse_option_chain_returns_none_when_no_future_expiry():
 def test_parse_option_chain_named_error_on_empty_payload():
     with pytest.raises(ValueError, match="empty payload"):
         parse_option_chain({}, "INFY")   # {} has no records key
+
+
+def test_manual_cookie_env_fallback(monkeypatch):
+    """refresh-eod-data workflow passes the cookie via NSE_COOKIE."""
+    from data import nse_option_chain as oc
+    monkeypatch.setenv("NSE_COOKIE", "nseappid=abc")
+    assert oc._read_manual_cookie() == "nseappid=abc"

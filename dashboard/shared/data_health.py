@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from datetime import time as dtime
 from typing import Callable, Dict, List, Optional
 
 
@@ -330,6 +331,108 @@ def probe_warmer_tomorrow_watchlist() -> ProviderCheck:
     )
 
 
+# ─── stored end-of-day datasets (tables populated by out-of-app jobs) ─────────
+# FIX HEALTH-EOD (2026-09-26) — the probes above only see fetches made in THIS
+# process, so a refresh job that stopped running was invisible: the scoring
+# pillars kept silently reading week-old FII / OI / PCR / delivery rows. These
+# probes read MAX(date) per table and count NSE sessions behind the latest
+# completed session. (display, table, how to refresh it)
+_STORED_DATASETS = (
+    ("FII/DII cash flows",       "fii_dii_daily",          "page 22 refresh"),
+    ("FII index futures",        "nse_fii_deriv_daily",    "py -m scripts.fetch_nse_fii_deriv"),
+    ("F&O open interest",        "nse_fno_oi_daily",       "py -m scripts.fetch_nse_fno_bhavcopy"),
+    ("Option chain PCR / pain",  "nse_option_chain_daily", "py -m scripts.fetch_nse_option_chain --fno-all"),
+    ("Delivery % (bhavcopy)",    "nse_delivery_daily",     "py -m scripts.fetch_nse_delivery"),
+)
+_EOD_READY_IST = dtime(20, 0)       # the refresh jobs are scheduled 19:15-19:30 IST
+_STORED_MAX_LAG_SESSIONS = 1        # one session of grace for a late or retried job
+_STORED_TTL_S = 600                 # one DB round-trip per 10 min, not per render
+_STORED_CACHE: Dict[str, object] = {}
+_TABLE_MISSING = "__missing__"
+
+
+def _latest_stored_dates() -> Optional[Dict[str, Optional[str]]]:
+    """{table: latest date string | None (empty) | _TABLE_MISSING}, or None when
+    the database itself is unreachable. Cached for _STORED_TTL_S."""
+    now = time.time()
+    hit = _STORED_CACHE.get("v")
+    if hit is not None and now - float(_STORED_CACHE.get("t", 0.0)) < _STORED_TTL_S:
+        return hit[0]  # type: ignore[index]
+    try:
+        import trade_store as _store   # local import: keeps module Streamlit-free
+        out: Dict[str, Optional[str]] = {}
+        with _store._get_conn() as conn:
+            for _name, table, _how in _STORED_DATASETS:
+                cur = conn.cursor()
+                try:
+                    cur.execute(f"SELECT MAX(date) FROM {table}")
+                    row = cur.fetchone()
+                    out[table] = str(row[0])[:10] if row and row[0] else None
+                except Exception:
+                    # Table not created yet. Roll back so a pooled Postgres
+                    # connection is not handed back in an aborted transaction.
+                    out[table] = _TABLE_MISSING
+                    _try(conn.rollback)
+            _try(conn.rollback)        # read-only: leave the pooled conn clean
+        result: Optional[Dict[str, Optional[str]]] = out
+    except Exception:
+        result = None
+    _STORED_CACHE["v"] = (result,)
+    _STORED_CACHE["t"] = now
+    return result
+
+
+def _reference_session(now_ist: Optional[datetime] = None) -> date:
+    """Latest NSE session whose end-of-day data should already be stored."""
+    from dashboard.shared.market_hours import is_trading_day, prev_trading_day, _now_ist
+    now_ist = now_ist or _now_ist()
+    d = now_ist.date()
+    if is_trading_day(d) and now_ist.time() >= _EOD_READY_IST:
+        return d
+    return prev_trading_day(d)
+
+
+def _sessions_behind(latest: date, ref: date) -> int:
+    """Trading sessions in (latest, ref] - 0 when the latest row covers ref."""
+    from dashboard.shared.market_hours import is_trading_day
+    n, d = 0, latest + timedelta(days=1)
+    while d <= ref:
+        n += is_trading_day(d)
+        d += timedelta(days=1)
+    return n
+
+
+def probe_stored_datasets(now_ist: Optional[datetime] = None) -> List[ProviderCheck]:
+    """One check per stored EOD dataset: healthy / stale / idle / unavailable."""
+    group = "eod store"
+    dates = _latest_stored_dates()
+    if dates is None:
+        return [ProviderCheck(name, group, STATUS_UNAVAILABLE, note="database unreachable")
+                for name, _t, _h in _STORED_DATASETS]
+    ref = _reference_session(now_ist)
+    checks: List[ProviderCheck] = []
+    for name, table, how in _STORED_DATASETS:
+        latest = dates.get(table)
+        if latest == _TABLE_MISSING or not latest:
+            checks.append(ProviderCheck(name, group, STATUS_IDLE,
+                                        note=f"no rows yet - refresh: {how}"))
+            continue
+        try:
+            latest_d = date.fromisoformat(latest)
+        except ValueError:
+            checks.append(ProviderCheck(name, group, STATUS_IDLE, latest,
+                                        note=f"unparseable date {latest!r}"))
+            continue
+        lag = _sessions_behind(latest_d, ref)
+        if lag <= _STORED_MAX_LAG_SESSIONS:
+            checks.append(ProviderCheck(name, group, STATUS_HEALTHY, latest,
+                                        note=f"latest {latest}"))
+        else:
+            checks.append(ProviderCheck(name, group, STATUS_STALE, latest, lag,
+                                        note=f"latest {latest}, {lag} sessions behind - refresh: {how}"))
+    return checks
+
+
 def collect_all_health() -> List[ProviderCheck]:
     """Every probe. Pure: no network, no Streamlit."""
     return [
@@ -346,6 +449,8 @@ def collect_all_health() -> List[ProviderCheck]:
         # they become user-visible cold-scan latency spikes.
         probe_warmer_top_picks(),
         probe_warmer_tomorrow_watchlist(),
+        # FIX HEALTH-EOD: stored FII/DII, FII-deriv, OI, option-chain, delivery.
+        *probe_stored_datasets(),
     ]
 
 
