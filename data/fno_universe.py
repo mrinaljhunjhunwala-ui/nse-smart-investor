@@ -104,31 +104,29 @@ def check_universe_drift(date=None):
       - stale:     symbols in _FNO_TICKERS but NOT in the bhavcopy (candidates to remove)
       - missing:   symbols in the bhavcopy but NOT in _FNO_TICKERS (candidates to add)
 
-    Kept import-light: uses sqlite3 + the shared trade_store path resolver.
-    Returns an empty result silently if the bhavcopy table doesn't exist yet.
+    Reads through trade_store._get_conn(), so it sees the same DB the
+    bhavcopy fetcher writes to — Postgres when DATABASE_URL is set, else the
+    local SQLite file. (It used to open trades.db directly, which on a
+    Postgres deployment always looked empty and made the check a silent no-op.)
+    Imports are lazy so is_fno_eligible() callers stay import-light.
+    Returns an empty result if the bhavcopy table has no rows yet.
     """
-    import sqlite3
-    import os as _os
-    db = _os.environ.get("TRADE_STORE_DB") or "trades.db"
-    if not _os.path.exists(db):
-        return {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
-    con = sqlite3.connect(db)
-    try:
-        row = con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='nse_fno_oi_daily'"
-        ).fetchone()
-        if not row:
-            return {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
+    import trade_store as _store
+    from data.nse_fno_bhavcopy import ensure_schema
+
+    empty = {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
+    ensure_schema()
+    with _store._get_conn() as conn:
+        cur = conn.cursor()
         if date is None:
-            r = con.execute("SELECT MAX(date) FROM nse_fno_oi_daily").fetchone()
+            cur.execute("SELECT MAX(date) FROM nse_fno_oi_daily")
+            r = cur.fetchone()
             date = r[0] if r else None
         if not date:
-            return {"db_date": None, "db_count": 0, "stale": set(), "missing": set()}
-        rows = con.execute(
-            "SELECT DISTINCT symbol FROM nse_fno_oi_daily WHERE date=?", (date,)
-        ).fetchall()
-    finally:
-        con.close()
+            return empty
+        cur.execute(_store._q("SELECT DISTINCT symbol FROM nse_fno_oi_daily WHERE date=?"),
+                    (date,))
+        rows = cur.fetchall()
     db_set = {_normalize(r[0]) for r in rows if r[0]}
     static = set(_FNO_TICKERS)
     return {
