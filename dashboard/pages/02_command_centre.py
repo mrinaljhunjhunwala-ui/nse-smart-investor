@@ -18,7 +18,6 @@ from dashboard.shared.ui_components import chip_pill, ticker_hover_wrap
 from dashboard.shared.cache import (
     get_top_picks,
     _persisted_top_picks_snapshot,   # FIX TP-FAST1 / FIX TP-NOOP1
-    _top_picks_ticker,
     _score_watchlist,
     _sector_ranks_tuple,
     _sparkline_closes,
@@ -43,465 +42,278 @@ apply_design()
 render_sidebar(current="Command Centre")
 render_top_bar()
 
-# ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-# UI/UX 2026-09 typography slice: editorial serif on the H1, saffron-italic
-# accent on the descriptive noun. Subtitle stays in the pre-existing block
-# below to avoid duplicating the "no digging required" line.
-# See docs/UI_UX_DESIGN_2026-09.md §4.
-st.markdown(
-    '<h1 class="page-title-serif">Command <em>Centre</em></h1>',
-    unsafe_allow_html=True,
+# ───────────────────────── page body ─────────────────────────
+# LAYOUT (mockup artboard 01, 2026-09-12 "proposed layout" artifact)
+# Title + meta line → five-cell market pulse → descriptive posture hero →
+# sector heatmap → top gainers + recent posture changes → data-health strip.
+# Top Picks, paper trades and open positions below keep their behaviour.
+#
+# CC-COPY: the blocks this replaced (morning card, VIX/Nifty cards, "market
+# mood" gauge, regime badge) carried instruction copy — "avoid new buys,
+# protect capital", "trade your setups at plan size", "position sizing
+# halved", "tighten stops". Everything here describes the market from data;
+# nothing tells the user what to do (CLAUDE.md rule 1). The second, Top Picks
+# ticker tape is dropped too: the top bar already runs a tape, and the audit
+# (UI_AUDIT_2026-09 cluster A) flagged a marquee on a decision surface.
+import datetime as _mb_dt
+import html as _html
+
+from analysis.score import _regime_weights_enabled as _cc_rw_enabled, _BEAR_REGIMES as _cc_bear
+from dashboard.shared.cache import (
+    get_regime_snapshot, get_fii_dii_recent, get_recent_posture_changes,
+    _nifty50_gainers_ticker, get_display_name,
+)
+from dashboard.shared.chart_helpers import _index_strip_data
+from dashboard.shared.ui_components import (
+    gate_strip, section_header, signal_table, chip_delta, chip_tag, fmt_inr, rank_chip,
 )
 
-# ── FIX REGIME-CHIP1 → P2 REGIME STRIP ──────────────────────────────────────
-# The v2-scoring chip (NSE_USE_REGIME_WEIGHTS) used to sit alone above the
-# cards. Status now lives in one strip: VIX zone + market breadth + scoring
-# mode. Every cell degrades to "Unknown" when its feed is unavailable.
-from analysis.score import _regime_weights_enabled as _cc_rw_enabled, _BEAR_REGIMES as _cc_bear
 _v2_flag = _cc_rw_enabled()   # default ON since 2026-09-24; NSE_USE_REGIME_WEIGHTS=0 disables
 
+st.markdown('<h1 class="page-title-serif">Command <em>Centre</em></h1>', unsafe_allow_html=True)
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _cc_regime_snapshot() -> "dict | None":
-    from analysis.regime import snapshot_live
-    try:
-        return snapshot_live().as_dict()
-    except Exception as _reg_e:
-        import logging as _reg_log
-        _reg_log.getLogger("dashboard.command_centre").debug(
-            "regime snapshot failed: %s", _reg_e)
-        return None
-
-
-def _render_regime_strip() -> None:
-    _rs_cells = []
-    try:
-        _rs_vix = get_vix_info()
-        _rs_zone = str(_rs_vix.get("regime", "unknown")).lower()
-        _rs_v = _rs_vix.get("vix")
-    except Exception:
-        _rs_zone, _rs_v = "unknown", None
-    _rs_tone = {"complacency": "amber", "normal": "bull", "elevated": "amber",
-                "fear": "bear", "panic": "bear"}.get(_rs_zone, "dim")
-    _rs_cells.append(("India VIX", _rs_zone.title()
-                      + (f" · {_rs_v:.1f}" if isinstance(_rs_v, (int, float)) else ""), _rs_tone))
-    try:
-        _rs_reg = _cc_regime_snapshot() or {}
-    except Exception:
-        _rs_reg = {}
-    _rs_b = str((_rs_reg.get("components") or {}).get("breadth", "unknown"))
-    _rs_bp = (_rs_reg.get("metrics") or {}).get("pct_above_sma50")
-    _rs_cells.append(("Breadth", _rs_b.title()
-                      + (f" · {_rs_bp:.0f}% > SMA50" if isinstance(_rs_bp, (int, float)) else ""),
-                      {"broad": "bull", "mixed": "amber", "narrow": "bear"}.get(_rs_b, "dim")))
-    # Say what the momentum pillar is doing TODAY, not just that the option exists.
-    _rs_live = str(_rs_reg.get("label") or "unknown").lower()
-    _rs_bear_on = _v2_flag and _rs_live in _cc_bear
-    _rs_cells.append(("Scoring",
-                      "Bear mode · momentum uses 5-day reversal" if _rs_bear_on
-                      else ("Standard · trend momentum" if _v2_flag else "Legacy · bear mode off"),
-                      "amber" if _rs_bear_on else ("bull" if _v2_flag else "dim")))
-    _rs_html = "".join(
-        f'<div class="regime-strip-cell"><span class="regime-strip-dot" style="background:var(--{_t})"></span>'
-        f'<span class="regime-strip-k">{_k}</span>'
-        f'<span class="regime-strip-v" style="color:var(--{_t})">{_v}</span></div>'
-        for _k, _v, _t in _rs_cells
-    )
-    _rs_title = ("In bear regimes (trend_down / risk_off) the momentum pillar swaps absolute "
-                 "returns for a 5-day reversal percentile — trend momentum has ranked stocks "
-                 "backwards in bear markets (docs/SCORE_EFFICACY_2026-09-24.md). "
-                 f"Current regime: {_rs_live}." if _v2_flag else "Bear-regime scoring disabled")
-    st.markdown(f'<div class="regime-strip" title="{_rs_title}">{_rs_html}</div>',
-                unsafe_allow_html=True)
-
-
-_render_regime_strip()
-
-st.caption("Market conditions · open positions needing action · watchlist decisions — no digging required.")
-
-# ── 0. MORNING SUMMARY CARD — your daily brief ─────────────────────────────
-import datetime as _mb_dt
-_mb_now   = _mb_dt.datetime.now(_mb_dt.timezone(_mb_dt.timedelta(hours=5, minutes=30)))
-_mb_greet = ("Good morning" if _mb_now.hour < 12 else
-             "Good afternoon" if _mb_now.hour < 17 else "Good evening")
-_mb_date  = _mb_now.strftime("%A, %d %b %Y · %H:%M IST")
-_mb_open  = 0
+_mb_now = _mb_dt.datetime.now(_mb_dt.timezone(_mb_dt.timedelta(hours=5, minutes=30)))
 try:
-    import trade_store as _mb_ts
-    _mbo = _mb_ts.fetch_open()
+    _mbo = _store.fetch_open()
     _mb_open = 0 if (_mbo is None or _mbo.empty) else len(_mbo)
+    _mb_open_txt = f"{_mb_open} open paper position{'s' if _mb_open != 1 else ''}"
 except Exception as _e:
-    st.caption(f"⚠️ Couldn't read open paper positions ({_e}) — showing 0.")
-_mb_reg = get_vix_info().get("regime", "normal")
-_mb_focus = {
-    "panic":       ("🚨", "Panic — protect capital, avoid new buys"),
-    "fear":        ("🔴", "Fearful — be defensive, small sizes only"),
-    "elevated":    ("🟠", "Elevated volatility — only high-conviction setups"),
-    "normal":      ("🟢", "Calm conditions — trade your setups normally"),
-    "complacency": ("😴", "Very calm — tighten stops, stay selective"),
-}.get(_mb_reg, ("•", "Trade your plan"))
-_mb_pos_txt = (f"You have <b style='color:var(--amber)'>{_mb_open}</b> open paper position"
-               f"{'s' if _mb_open != 1 else ''}." if _mb_open else
-               "No open paper positions.")
+    _mb_open_txt = "paper positions unavailable"
 st.markdown(
-    f'<div class="glass-panel" style="margin-bottom:14px;display:flex;'
-    f'justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">'
-    f'<div><div style="font-size:20px;font-weight:800;color:var(--ink)">☀️ {_mb_greet}, Mrinal</div>'
-    f'<div style="font-size:12px;color:var(--dim);margin-top:2px">{_mb_date}</div></div>'
-    f'<div style="text-align:right">'
-    f'<div style="font-size:13px;color:var(--ink-mid)">{_mb_focus[0]} {_mb_focus[1]}</div>'
-    f'<div style="font-size:12px;color:var(--dim);margin-top:3px">{_mb_pos_txt} '
-    f'Scroll for today\'s picks &amp; watchlist.</div></div>'
-    f'</div>',
+    f'<p class="page-subtitle">{_mb_now.strftime("%a %d %b %Y · %H:%M IST")} · {_mb_open_txt} · '
+    'market conditions, open positions and watchlist in one place.</p>',
     unsafe_allow_html=True,
 )
 
-# ── UI/UX 2026-09 · editorial market-posture hero (mockup Variant A) ────────
-# Maps the VIX regime to a descriptive posture noun. Never buy/sell/hold
-# (guardrail §1). See docs/UI_UX_DESIGN_2026-09.md.
-_regime_to_posture = {
-    "panic":       ("Defensive",    "protect capital", "bad",
-                    "India VIX is in panic territory. Broad de-risking, "
-                    "widened stops, and new entries only on the highest "
-                    "conviction setups. Position sizing halved."),
-    "fear":        ("Watchful",     "be selective", "bad",
-                    "India VIX is elevated. Prefer defensive sectors and "
-                    "tight stops. Reduce fresh long exposure until VIX cools."),
-    "elevated":    ("Cautious",     "quality-first", "warn",
-                    "India VIX above the 90-day median. Momentum trades "
-                    "benefit from smaller size and tighter risk. "
-                    "Watch for breadth deterioration."),
-    "normal":      ("Constructive", "with reservations", "accent",
-                    "India VIX is at calm-market levels and breadth is "
-                    "broad. Trade your setups at plan size. Watchful of "
-                    "VIX spikes as the regime turns."),
-    "complacency": ("Complacent",   "asymmetric downside", "warn",
-                    "India VIX is unusually low. Options are cheap, "
-                    "downside is under-priced. Tighten trailing stops on "
-                    "extended positions."),
-}
-_posture_noun, _posture_qual, _posture_tone, _posture_why = \
-    _regime_to_posture.get(_mb_reg, _regime_to_posture["normal"])
+# ── Inputs shared by the pulse strip and the hero ───────────────────────────
+try:
+    _cc_vix_info = get_vix_info()
+except Exception:
+    _cc_vix_info = {}
+_cc_vix_r = str(_cc_vix_info.get("regime", "unknown")).lower()
+_cc_vix_v = _cc_vix_info.get("vix")
+try:
+    _cc_reg = get_regime_snapshot() or {}
+except Exception:
+    _cc_reg = {}
+_cc_label = str(_cc_reg.get("label") or "unknown").lower()
+_cc_conf = str(_cc_reg.get("confidence") or "").lower()
+_cc_breadth = str((_cc_reg.get("components") or {}).get("breadth", "unknown"))
+_cc_breadth_pct = (_cc_reg.get("metrics") or {}).get("pct_above_sma50")
+try:
+    _cc_idx = {lbl: (px, chg) for lbl, px, chg in _index_strip_data()}
+except Exception:
+    _cc_idx = {}
+try:
+    _cc_flows = get_fii_dii_recent()
+except Exception:
+    _cc_flows = None
+
+_TONE = {"complacency": "amber", "normal": "bull", "elevated": "amber", "fear": "bear", "panic": "bear",
+         "trend_up": "bull", "trend_down": "bear", "risk_off": "bear", "range": "amber",
+         "broad": "bull", "mixed": "amber", "narrow": "bear"}
+
+
+def _tinted(text: str, key: str) -> str:
+    return f'<span style="color:var(--{_TONE.get(key, "dim")})">{_html.escape(text)}</span>'
+
+
+def _index_cell(label: str, name: str) -> tuple:
+    px_chg = _cc_idx.get(label)
+    if not px_chg:
+        return (name, "–", "feed unavailable")
+    return (name, fmt_inr(px_chg[0], 0), chip_delta(px_chg[1]) + "today")
+
+
+def _pulse_cells() -> list:
+    cells = [_index_cell("NIFTY 50", "Nifty 50"), _index_cell("BANK NIFTY", "Bank Nifty")]
+    cells.append(("India VIX",
+                  f"{_cc_vix_v:.2f}" if isinstance(_cc_vix_v, (int, float)) else "–",
+                  _tinted(_cc_vix_r.title() + " zone", _cc_vix_r)))
+    cells.append(("Breadth",
+                  f"{_cc_breadth_pct:.0f}%" if isinstance(_cc_breadth_pct, (int, float)) else "–",
+                  _tinted(_cc_breadth.title(), _cc_breadth) + " · Nifty 500 above SMA50"))
+    if _cc_flows and _cc_flows.get("fii") is not None:
+        _dii = _cc_flows.get("dii")
+        cells.append(("FII net · ₹ Cr",
+                      f'{"+" if _cc_flows["fii"] >= 0 else "−"}{fmt_inr(abs(_cc_flows["fii"]), 0)}',
+                      (f"DII {_dii:+,.0f} · " if _dii is not None else "")
+                      + f"5D {_cc_flows['fii_5d']:+,.0f} · {_html.escape(_cc_flows['date'])}"))
+    else:
+        cells.append(("FII net · ₹ Cr", "–", "no stored flows yet"))
+    return cells
+
+
+st.markdown(gate_strip(_pulse_cells()), unsafe_allow_html=True)
+
+
+# ── Descriptive posture hero ─────────────────────────────────────────────────
+def _posture() -> tuple:
+    """(noun, qualifier, tone) describing the tape. Never an instruction."""
+    if _cc_label == "risk_off" or _cc_vix_r in ("fear", "panic"):
+        return "Defensive", "volatility elevated", "bad"
+    if _cc_label == "trend_down":
+        return "Weak", "trend pointing lower", "bad"
+    if _cc_vix_r == "complacency":
+        return "Complacent", "volatility unusually low", "warn"
+    if _cc_label == "trend_up" and _cc_vix_r == "normal":
+        return "Constructive", "trend and volatility aligned", "accent"
+    if _cc_vix_r == "elevated":
+        return "Cautious", "volatility above normal", "warn"
+    return "Mixed", "no clear trend", "warn"
+
+
+def _posture_why() -> str:
+    bits = []
+    nifty = _cc_idx.get("NIFTY 50")
+    if nifty:
+        bits.append(f"Nifty 50 at <b>{fmt_inr(nifty[0], 0)}</b> ({nifty[1]:+.2f}% today).")
+    if _cc_label != "unknown":
+        bits.append(f"The regime classifier reads <b>{_cc_label.replace('_', ' ')}</b>"
+                    + (f" with {_html.escape(_cc_conf)} confidence." if _cc_conf else "."))
+    if isinstance(_cc_vix_v, (int, float)):
+        bits.append(f"India VIX {_cc_vix_v:.1f} sits in the {_cc_vix_r} zone.")
+    if isinstance(_cc_breadth_pct, (int, float)):
+        bits.append(f"{_cc_breadth_pct:.0f}% of Nifty 500 names trade above their 50-day average.")
+    if _cc_flows and _cc_flows.get("n_5d"):
+        _f5 = _cc_flows["fii_5d"]
+        bits.append(f"FIIs were net {'buyers' if _f5 >= 0 else 'sellers'} of "
+                    f"₹{fmt_inr(abs(_f5), 0)} Cr over the last {_cc_flows['n_5d']} sessions.")
+    if _v2_flag and _cc_label in _cc_bear:
+        bits.append("In this regime the momentum pillar scores 5-day reversals instead of trend momentum.")
+    return " ".join(bits) or "Market feeds are unavailable right now."
+
+
 try:
     from dashboard.shared.ui_components import hero_verdict as _hero_verdict
+    _pn, _pq, _pt = _posture()
+    _mode = ("bear-mode scoring" if (_v2_flag and _cc_label in _cc_bear)
+             else ("standard scoring" if _v2_flag else "legacy scoring"))
     st.markdown(
-        _hero_verdict(
-            posture=_posture_noun,
-            posture_qualifier=_posture_qual,
-            kicker=f"Market posture · {_mb_reg} regime",
-            why=_posture_why,
-            tone=_posture_tone,
-        ),
+        _hero_verdict(posture=_pn, posture_qualifier=_pq,
+                      kicker=f"Market posture · {_cc_label.replace('_', ' ')} regime · {_mode}",
+                      why=_posture_why(), tone=_pt),
         unsafe_allow_html=True,
     )
 except Exception as _hv_err:
     import logging
-    logging.getLogger("dashboard.command_centre").debug(
-        "hero_verdict render failed: %s", _hv_err)
+    logging.getLogger("dashboard.command_centre").debug("hero_verdict render failed: %s", _hv_err)
 
-# ── 0a. DATA HEALTH (Task 2.3) ─────────────────────────────────────────────
-# Per-provider up/degraded/idle snapshot behind a collapsed expander so the
-# top-of-page density stays intact for the common case. Opens on demand
-# when the user wants to know why data looks off. Read-only aggregation of
-# the diagnostic surfaces each provider already exposes; no network on this
-# path (probes are is_configured() / get_last_diagnostic() reads).
+
+# ── Sector heatmap (Nifty sectoral indices, 1-day change) ────────────────────
+_SECTOR_IDX = [("BANK NIFTY", "Bank"), ("NIFTY IT", "IT"), ("NIFTY AUTO", "Auto"),
+               ("NIFTY FMCG", "FMCG"), ("NIFTY PHARMA", "Pharma"), ("NIFTY METAL", "Metal"),
+               ("NIFTY ENERGY", "Energy")]
+
+
+def _render_sector_heatmap() -> None:
+    rows = [(name, *_cc_idx[lbl]) for lbl, name in _SECTOR_IDX if lbl in _cc_idx]
+    st.markdown(section_header("Sector heatmap", "1-day change · nifty sectoral indices · sorted"),
+                unsafe_allow_html=True)
+    if not rows:
+        st.caption("Sector index quotes are unavailable right now.")
+        return
+    rows.sort(key=lambda r: -r[2])
+    peak = max(max(abs(r[2]) for r in rows), 1.0)
+    cells = []
+    for name, px, chg in rows:
+        hue = "bull" if chg >= 0 else "bear"
+        alpha = 4 + round(min(abs(chg) / peak, 1.0) * 22)      # hue = sign, strength = size
+        cells.append(
+            f'<div class="heat-cell" style="background:color-mix(in srgb, var(--{hue}) {alpha}%, var(--surface))">'
+            f'<span class="heat-name">{name}</span>'
+            f'<div><div class="heat-val" style="color:var(--{hue})">{chg:+.2f}%</div>'
+            f'<div class="heat-sub">{fmt_inr(px, 0)}</div></div></div>'
+        )
+    st.markdown(f'<div class="heat-grid">{"".join(cells)}</div>', unsafe_allow_html=True)
+
+
+_render_sector_heatmap()
+
+
+# ── Two columns: today's gainers + recent posture changes ────────────────────
+def _panel_html(title: str, sub: str, body: str) -> str:
+    return (f'<div class="kit-panel"><div class="kit-panel-hd"><span class="kit-panel-t">{title}</span>'
+            f'<span class="kit-panel-s">{sub}</span></div>{body}</div>')
+
+
+def _gainers_html() -> str:
+    try:
+        rows = _nifty50_gainers_ticker(n=5)
+    except Exception:
+        rows = []
+    if not rows:
+        return _panel_html("Top gainers · today", "Nifty 50 · live",
+                           '<div class="ledger-note" style="padding:14px">'
+                           "No Nifty 50 name is up today, or quotes are unavailable.</div>")
+    body = signal_table(
+        [("#", "l"), ("Ticker", "l"), ("LTP", "r"), ("Δ %", "r")],
+        [[rank_chip(i),
+          f'<span class="sym">{_html.escape(r["ticker"].replace(".NS", ""))}</span>'
+          f'<span class="co">{_html.escape(get_display_name(r["ticker"]))}</span>',
+          "₹" + fmt_inr(r["price"], 2 if r["price"] < 1000 else 0),
+          chip_delta(r["chg_pct"])]
+         for i, r in enumerate(rows, start=1)],
+    )
+    return _panel_html("Top gainers · today", "Nifty 50 · live, 60 s cache", body)
+
+
+def _changes_html() -> str:
+    try:
+        changes = get_recent_posture_changes(limit=5)
+    except Exception:
+        changes = []
+    if not changes:
+        return _panel_html("Posture changes · recent", "verdict ledger",
+                           '<div class="ledger-note" style="padding:14px">'
+                           "No verdict has changed between logged sessions yet.</div>")
+    items = []
+    for c in changes:
+        _sc = ""
+        if c.get("prev_score") is not None and c.get("new_score") is not None:
+            try:
+                _sc = f"composite {float(c['prev_score']):.0f} → {float(c['new_score']):.0f} · "
+            except (TypeError, ValueError):
+                _sc = ""
+        items.append(
+            f'<li><span class="ledger-when">{_html.escape(c["date"][5:])}</span><div>'
+            f'<span class="ledger-sym">{_html.escape(str(c["ticker"]).replace(".NS", ""))}</span>'
+            f'{chip_tag(_html.escape(verdict_display_label(c["prev"])))} → '
+            f'{chip_tag(_html.escape(verdict_display_label(c["new"])))}'
+            f'<div class="ledger-note">{_sc}logged by {_html.escape(str(c["source"]).replace("_", " "))}</div>'
+            f'</div></li>'
+        )
+    return _panel_html("Posture changes · recent", "verdict ledger · latest change per ticker",
+                       f'<ul class="ledger-list">{"".join(items)}</ul>')
+
+
+_cc_c1, _cc_c2 = st.columns(2, gap="medium")
+with _cc_c1:
+    st.markdown(_gainers_html(), unsafe_allow_html=True)
+with _cc_c2:
+    st.markdown(_changes_html(), unsafe_allow_html=True)
+
+
+# ── Data health: one-line strip, full table on demand (Task 2.3) ─────────────
+# Read-only aggregation of each provider's own diagnostics; no network here.
 try:
-    from dashboard.shared.data_health import render_data_health_html as _dh_render
-    with st.expander("Data health", expanded=False):
-        st.markdown(_dh_render(), unsafe_allow_html=True)
+    from dashboard.shared.data_health import (
+        collect_all_health as _dh_collect, render_data_health_html as _dh_render,
+    )
+    _dh_checks = _dh_collect()
+    _dh_dot = {"healthy": "bull", "stale": "amber", "degraded": "bear"}
+    st.markdown(
+        '<div class="health-strip"><b>Data health</b>' + "".join(
+            f'<span class="health-item"><span class="health-dot" '
+            f'style="background:var(--{_dh_dot.get(c.status, "faint")})"></span>{_html.escape(c.name)}</span>'
+            for c in _dh_checks) + "</div>",
+        unsafe_allow_html=True,
+    )
+    with st.expander("Data health details", expanded=False):
+        st.markdown(_dh_render(_dh_checks), unsafe_allow_html=True)
 except Exception as _dh_err:
     import logging
-    logging.getLogger("dashboard.command_centre").debug(
-        "data_health panel render failed: %s", _dh_err)
-
-# ── 0b. PAPER TRADES OVERVIEW (quick view) ─────────────────────────────────
-try:
-    import trade_store as _pto_ts
-    _pto_open  = _pto_ts.fetch_open()
-    _pto_accts = _pto_ts.list_accounts()
-    _pto_all   = (pd.concat([_pto_ts.load_by_account(_a) for _a in _pto_accts],
-                            ignore_index=True)
-                  if _pto_accts else pd.DataFrame())
-
-    _pto_n = 0 if (_pto_open is None or _pto_open.empty) else len(_pto_open)
-
-    _pto_unreal = 0.0
-    if _pto_n:
-        _pto_syms = tuple(_pto_open["ticker"].tolist())
-        _pto_lp   = _portfolio_live_prices(_pto_syms)
-        for _, _por in _pto_open.iterrows():
-            _pep = float(_por.get("price", 0) or 0)
-            _pqt = int(_por.get("quantity", 0) or 0)
-            _pcur = _pto_lp.get(str(_por["ticker"]), {}).get("price", _pep)
-            _pto_unreal += (_pcur - _pep) * _pqt
-
-    _pto_real, _pto_wins, _pto_tot = 0.0, 0, 0
-    if not _pto_all.empty and "status" in _pto_all.columns:
-        _pto_closed = _pto_all[_pto_all["status"].isin(["CLOSED", "STOPPED"])]
-        if not _pto_closed.empty and "pnl" in _pto_closed.columns:
-            _pnl_series = _pto_closed["pnl"].fillna(0)
-            _pto_real = float(_pnl_series.sum())
-            _pto_tot  = int(len(_pto_closed))
-            _pto_wins = int((_pnl_series > 0).sum())
-    _pto_wr = (_pto_wins / _pto_tot * 100) if _pto_tot else 0.0
-
-    # Task 1.3: this block used a bespoke _pto_cell helper + a raw
-    # .glass-panel wrapper with drifting hex ("var(--ink)", "var(--faint)",
-    # "var(--faint)", "var(--dim)"). Migrated to the shared panel() + stat()
-    # components so it renders in the same visual language as every
-    # other card in the app and pulls color from CSS custom properties.
-    from dashboard.shared.ui_components import panel as _panel, stat as _stat
-    _u_tone = "bull" if _pto_unreal >= 0 else "bear"
-    _r_tone = "bull" if _pto_real   >= 0 else "bear"
-    _wr_tone = ("bull" if _pto_wr >= 50 else
-                "amber" if _pto_wr >= 35 else "bear")
-    _pto_body = (
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
-        'gap:14px 22px">'
-        + _stat("Open Positions", f"{_pto_n}", tone="neutral", align="center")
-        + _stat("Unrealised P&amp;L", f"Rs.{_pto_unreal:+,.0f}",
-                sub="live prices", tone=_u_tone, align="center")
-        + _stat("Realised P&amp;L", f"Rs.{_pto_real:+,.0f}",
-                sub=f"{_pto_tot} closed", tone=_r_tone, align="center")
-        + _stat("Win Rate", f"{_pto_wr:.0f}%",
-                sub=(f"{_pto_wins}/{_pto_tot} wins" if _pto_tot else "no closed trades"),
-                tone=_wr_tone, align="center")
-        + '</div>'
-    )
-    st.markdown(
-        _panel(_pto_body, kind="glass", tone="neutral",
-               title="Paper Trades Overview", margin="0 0 14px 0"),
-        unsafe_allow_html=True,
-    )
-except Exception as _pto_e:
-    st.caption(f"⚠️ Paper trades overview unavailable ({_pto_e}).")
-
-
-# ── 1. MARKET PULSE (wrapped in @st.fragment per Task 2.4 F4) ──────────────
-# The full pulse card lives inside _render_market_pulse_section() below so a
-# '🔄 Refresh' click reruns only this section, not the whole 1128-LOC page.
-# We hoist _cc_vix_r to module scope because _render_top_picks_section
-# (called much later) reads it as an argument.
-_cc_vix_r = get_vix_info().get('regime', 'unknown').lower()
-
-@st.fragment
-def _render_market_pulse_section() -> None:
-    """Section 1 rendered as a fragment: the '🔄 Refresh' button below only
-    reruns this fragment, not the outer script."""
-    _cc_vix_info = get_vix_info()
-    _cc_vix_r = _cc_vix_info.get("regime", "unknown").lower()
-    _cc_vix_v = _cc_vix_info.get("vix")
-
-    _cc_nifty_trend = "unknown"
-    _cc_nifty_val   = None
-    _cc_nifty_5d    = 0.0
-    try:
-        from data.fetcher import fetch_single as _cc_fs
-        _cc_ndf = _cc_fs("^NSEI", period="3mo")
-        if not _cc_ndf.empty:
-            _cc_nifty_val = float(_cc_ndf["Close"].iloc[-1])
-            _cc_nifty_5d  = float((_cc_ndf["Close"].iloc[-1] / _cc_ndf["Close"].iloc[-6] - 1) * 100) if len(_cc_ndf) >= 6 else 0
-            _cc_sma20 = float(_cc_ndf["Close"].rolling(20).mean().iloc[-1]) if len(_cc_ndf) >= 20 else _cc_nifty_val
-            _cc_sma50 = float(_cc_ndf["Close"].rolling(50).mean().iloc[-1]) if len(_cc_ndf) >= 50 else _cc_nifty_val
-            if _cc_nifty_val > _cc_sma20 and _cc_sma20 > _cc_sma50:
-                _cc_nifty_trend = "uptrend"
-            elif _cc_nifty_val < _cc_sma20 and _cc_sma20 < _cc_sma50:
-                _cc_nifty_trend = "downtrend"
-            else:
-                _cc_nifty_trend = "sideways"
-    except Exception as _e:
-        st.caption(f"⚠️ Couldn't load Nifty trend ({_e}) — market pulse may be incomplete.")
-
-    _VIX_LBL = {
-        "complacency": ("var(--amber)", "😴", "COMPLACENT"), "normal":  ("var(--bull)", "🟢", "CALM"),
-        "elevated":    ("var(--amber)", "🟡", "ELEVATED"),   "fear":    ("var(--bear)", "🔴", "HIGH FEAR"),
-        "panic":       ("var(--bear)", "🚨", "PANIC"),      "unknown": ("var(--dim)", "❓", "UNKNOWN"),
-    }
-    _NT_LBL = {
-        "uptrend":  ("var(--bull)", "📈", "UPTREND"),  "downtrend": ("var(--bear)", "📉", "DOWNTREND"),
-        "sideways": ("var(--amber)", "↔️", "SIDEWAYS"), "unknown":   ("var(--dim)", "❓", "NO DATA"),
-    }
-    _vc, _vi, _vl = _VIX_LBL.get(_cc_vix_r, _VIX_LBL["unknown"])
-    _nc, _ni, _nl = _NT_LBL.get(_cc_nifty_trend, _NT_LBL["unknown"])
-
-    if _cc_vix_r == "normal" and _cc_nifty_trend == "uptrend":
-        _verd, _vbg, _vbdr = "✅ Good conditions — new positions okay", "var(--sunken)", "var(--bull)"
-    elif _cc_vix_r in ("fear", "panic") or _cc_nifty_trend == "downtrend":
-        _verd, _vbg, _vbdr = "🔴 Weak / fearful market — avoid new buys, protect capital", "var(--sunken)", "var(--bear)"
-    elif _cc_vix_r == "complacency":
-        _verd, _vbg, _vbdr = "😴 Market too calm — be selective, tighten stops", "var(--sunken)", "var(--amber)"
-    else:
-        _verd, _vbg, _vbdr = "🟡 Mixed signals — only high-conviction setups today", "var(--sunken)", "var(--amber)"
-
-    st.markdown(
-        f'<div class="mobile-stack" style="display:flex;gap:12px;margin-bottom:4px">'
-        f'<div style="flex:1;background:var(--card-lift);border:1px solid var(--hairline);border-left:5px solid {_vc};border-radius:var(--r-base);padding:14px 16px">'
-        f'<div class="t-label" style="margin-bottom:3px">India VIX</div>'
-        f'<div style="font-size:20px;font-weight:700;color:{_vc}">{_vi} {_vl}</div>'
-        f'<div class="t-caption" style="color:var(--ink-mid);margin-top:3px">{f"{_cc_vix_v:.1f}" if _cc_vix_v else "—"}</div>'
-        f'</div>'
-        f'<div style="flex:1;background:var(--card-lift);border:1px solid var(--hairline);border-left:5px solid {_nc};border-radius:var(--r-base);padding:14px 16px">'
-        f'<div class="t-label" style="margin-bottom:3px">Nifty 50</div>'
-        f'<div style="font-size:20px;font-weight:700;color:{_nc}">{_ni} {_nl}</div>'
-        f'<div class="t-caption" style="color:var(--ink-mid);margin-top:3px">'
-        f'{f"{_cc_nifty_val:,.0f}" if _cc_nifty_val else "—"}'
-        f'{f"&nbsp;({_cc_nifty_5d:+.1f}% 5d)" if _cc_nifty_val else ""}</div>'
-        f'</div>'
-        f'<div style="flex:2;background:{_vbg};border:1px solid var(--hairline);border-left:5px solid {_vbdr};border-radius:var(--r-base);'
-        f'padding:14px 16px;display:flex;align-items:center">'
-        f'<div style="font-size:16px;font-weight:600;color:var(--ink)">{_verd}</div>'
-        f'</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    _mood_vix = {"complacency": 85, "normal": 65, "elevated": 45,
-                 "fear": 22, "panic": 6, "unknown": 50}.get(_cc_vix_r, 50)
-    _mood_nty = {"uptrend": 80, "sideways": 50, "downtrend": 20,
-                 "unknown": 50}.get(_cc_nifty_trend, 50)
-    _mood = int(round((_mood_vix + _mood_nty) / 2))
-    if   _mood < 20: _mood_lbl, _mood_c = "Extreme Fear", "var(--bear)"
-    elif _mood < 40: _mood_lbl, _mood_c = "Fear", "var(--bear)"
-    elif _mood < 60: _mood_lbl, _mood_c = "Neutral", "var(--amber)"
-    elif _mood < 80: _mood_lbl, _mood_c = "Greed", "var(--bull)"
-    else:            _mood_lbl, _mood_c = "Extreme Greed", "var(--bull)"
-    st.markdown(
-        f'<div style="background:var(--card-lift);border:1px solid var(--hairline-soft);border-radius:var(--r-base);'
-        f'padding:12px 18px;margin-top:8px;display:flex;align-items:center;gap:16px">'
-        f'<div class="t-label" style="min-width:96px">Market Mood</div>'
-        f'<div style="flex:1;position:relative;height:10px;border-radius:6px;'
-        f'background:linear-gradient(90deg,var(--bear),var(--bear),var(--amber),var(--bull),var(--bull))">'
-        f'<div style="position:absolute;left:{_mood}%;top:-5px;transform:translateX(-50%);'
-        f'width:20px;height:20px;border-radius:50%;background:{_mood_c};border:3px solid var(--surface);'
-        f'box-shadow:0 0 8px {_mood_c}"></div></div>'
-        f'<div style="min-width:130px;text-align:right">'
-        f'<span style="font-size:20px;font-weight:800;color:{_mood_c}">{_mood}</span>'
-        f'<span style="font-size:13px;color:{_mood_c};font-weight:600"> · {_mood_lbl}</span></div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    _cc_ref_c = st.columns([6, 1])[1]
-    if _cc_ref_c.button("🔄 Refresh", key="cc_refresh_pulse", width="stretch"):
-        # BUGFIX: this only needs to bust the VIX cache — the previous blanket
-        # st.cache_data.clear() also wiped Top Picks (2-min cold scan), watchlist
-        # scores, and sparklines, forcing expensive re-fetches the user never
-        # asked for just to refresh the VIX/Nifty pulse panel.
-        get_vix_info.clear()
-        st.rerun()
-
-    # ─────────────────────────────────────────────────────────────────────────────
-    # FIX CC-REGIME — composite regime badge (Phase 2 wiring)
-    # The 5-year efficacy study established that the composite score's edge is
-    # regime-dependent: 62-66 % BUY hit rate on train (2020-22, trending), 46 %
-    # on holdout (2023-25, mean-reverting). Users need to see WHAT REGIME the
-    # app thinks the market is in RIGHT NOW so they can calibrate expectations
-    # on every BUY signal below. Fetches are cached at the classifier layer —
-    # no per-page-load network cost.
-    # ─────────────────────────────────────────────────────────────────────────────
-    try:
-        # _cc_regime_snapshot is hoisted to module scope (shared with the regime strip).
-        # FIX UI-REGIME — inline regime banner replaced with the shared
-        # dashboard.shared.ui_components.regime_badge so this page's regime
-        # visual matches Analyze Stock and My Portfolio exactly. Removes ~20
-        # lines of duplicated color/emoji/note tables — one source of truth.
-        _cc_reg = _cc_regime_snapshot()
-        if _cc_reg:
-            from dashboard.shared.ui_components import regime_badge as _ui_regime_badge
-            st.markdown(
-                _ui_regime_badge(_cc_reg.get("label", "unknown"),
-                                 _cc_reg.get("confidence", "low"),
-                                 compact=False),
-                unsafe_allow_html=True,
-            )
-    except Exception as _cc_reg_e:
-        import logging as _cc_reg_log
-        _cc_reg_log.getLogger("dashboard.command_centre").debug(
-            "regime banner render failed: %s", _cc_reg_e)
-
-_render_market_pulse_section()
-
-st.markdown("---")
-
-# ═══════════════════════════════════════════════════════════════════════════
-# ── 1b. TOP PICKS TICKER — scrolling ticker tape, separate from the cards ──
-# ═══════════════════════════════════════════════════════════════════════════
-# FIX (was "Suggestions Strip") — the old version had two real bugs:
-#   1. It mixed the user's raw watchlist (which can be down on any given day)
-#      with a few Top Picks candidates, so a strip meant to be "what's worth
-#      a look" could show loss-making stocks — it was never actually
-#      gainers-only, it was "whatever's on your watchlist".
-#   2. It priced everything via trade_utils._portfolio_live_prices, which
-#      fetches tickers one at a time in a for-loop (see FIX TU4 there), not
-#      in parallel — real, measurable load-time cost.
-#
-# Replaced first with a NIFTY 50 gainers tape, then with FIX TP3: this strip
-# now shows the app's own Top Picks BUY candidates (see _top_picks_ticker in
-# cache.py) instead of a generic NIFTY 50 gainers feed — the same
-# score-ranked list as the Strongest-trends cards below, priced live via ONE
-# parallel batch call. Buys only, not filtered to today's gainers — a Top
-# Pick can legitimately be flat or red today, so each chip is colour-coded
-# red/green on its own live % change rather than assumed green. It's a real
-# horizontal auto-scrolling marquee in a distinct black/teal theme (teal to
-# match the Strongest-trends card accent, distinguishing it from the old
-# black/amber NIFTY 50 theme) so it reads as a ticker tape, not another card
-# section. Still its own @st.fragment(run_every=60) so it refreshes
-# independently of the rest of the page. Purely informational (no
-# click-through) — a scrolling tape isn't a natural fit for per-item
-# buttons; the full Top Picks section below still offers the "click through
-# to Analyze Stock" workflow.
-
-@st.fragment(run_every=60)
-def _render_top_picks_ticker() -> None:
-    _tk_rows = _top_picks_ticker(n=12)
-
-    if not _tk_rows:
-        st.markdown(
-            "<div style='background:var(--rail);border-top:2px solid var(--bull);"
-            "border-bottom:2px solid var(--bull);border-radius:6px;padding:9px 16px;"
-            "font-size:12px;color:var(--bull)'>🎯 TOP PICKS — no names in the "
-            "strong-trend band right now.</div>",
-            unsafe_allow_html=True,
-        )
-        return
-
-    def _chip(_r: dict) -> str:
-        _lbl = _r["ticker"].replace(".NS", "")
-        _up  = (_r["chg_pct"] or 0) >= 0
-        _cc  = "var(--bull)" if _up else "var(--bear)"
-        _arr = "▲" if _up else "▼"
-        return (
-            f'<span style="display:inline-block;margin-right:34px;white-space:nowrap">'
-            f'<span style="color:var(--ink-mid);font-weight:700;font-size:13px">{_lbl}</span>'
-            f'<span style="color:var(--dim);font-size:12px"> ₹{_r["price"]:,.1f} </span>'
-            f'<span style="color:{_cc};font-weight:700;font-size:13px">'
-            f'{_arr}{abs(_r["chg_pct"]):.2f}%</span></span>'
-        )
-
-    # Content duplicated back-to-back so the marquee loops seamlessly at the
-    # 50%-translateX halfway point (standard CSS ticker-tape technique).
-    _tape_html = "".join(_chip(r) for r in _tk_rows) * 2
-
-    st.markdown(
-        f'<div style="background:var(--rail);border-top:2px solid var(--bull);'
-        f'border-bottom:2px solid var(--bull);border-radius:6px;'
-        f'display:flex;align-items:center;overflow:hidden">'
-        f'<span style="flex-shrink:0;padding:9px 14px;color:var(--bull);'
-        f'font-size:10px;font-weight:700;letter-spacing:1px;'
-        f'border-right:1px solid var(--sunken);white-space:nowrap">'
-        f'🎯 TOP PICKS<br>STRONGEST TRENDS</span>'
-        f'<div style="flex:1;overflow:hidden;position:relative;padding:9px 0">'
-        f'<div style="white-space:nowrap;width:max-content;'
-        f'animation:cc_ticker_scroll 32s linear infinite">'
-        f'{_tape_html}'
-        f'</div></div></div>'
-        f'<style>@keyframes cc_ticker_scroll {{'
-        f'0% {{ transform:translateX(0%); }} '
-        f'100% {{ transform:translateX(-50%); }} }}</style>',
-        unsafe_allow_html=True,
-    )
-
-
-_render_top_picks_ticker()
+    logging.getLogger("dashboard.command_centre").debug("data_health strip render failed: %s", _dh_err)
 
 st.markdown("---")
 
@@ -1140,6 +952,69 @@ st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
 _render_top_picks_section(_cc_vix_r, _sec_tuple)
 
 st.markdown("---")
+
+# ── PAPER TRADES OVERVIEW (quick view; moved below Top Picks per the mockup) ─────────────────────────────────
+try:
+    import trade_store as _pto_ts
+    _pto_open  = _pto_ts.fetch_open()
+    _pto_accts = _pto_ts.list_accounts()
+    _pto_all   = (pd.concat([_pto_ts.load_by_account(_a) for _a in _pto_accts],
+                            ignore_index=True)
+                  if _pto_accts else pd.DataFrame())
+
+    _pto_n = 0 if (_pto_open is None or _pto_open.empty) else len(_pto_open)
+
+    _pto_unreal = 0.0
+    if _pto_n:
+        _pto_syms = tuple(_pto_open["ticker"].tolist())
+        _pto_lp   = _portfolio_live_prices(_pto_syms)
+        for _, _por in _pto_open.iterrows():
+            _pep = float(_por.get("price", 0) or 0)
+            _pqt = int(_por.get("quantity", 0) or 0)
+            _pcur = _pto_lp.get(str(_por["ticker"]), {}).get("price", _pep)
+            _pto_unreal += (_pcur - _pep) * _pqt
+
+    _pto_real, _pto_wins, _pto_tot = 0.0, 0, 0
+    if not _pto_all.empty and "status" in _pto_all.columns:
+        _pto_closed = _pto_all[_pto_all["status"].isin(["CLOSED", "STOPPED"])]
+        if not _pto_closed.empty and "pnl" in _pto_closed.columns:
+            _pnl_series = _pto_closed["pnl"].fillna(0)
+            _pto_real = float(_pnl_series.sum())
+            _pto_tot  = int(len(_pto_closed))
+            _pto_wins = int((_pnl_series > 0).sum())
+    _pto_wr = (_pto_wins / _pto_tot * 100) if _pto_tot else 0.0
+
+    # Task 1.3: this block used a bespoke _pto_cell helper + a raw
+    # .glass-panel wrapper with drifting hex ("var(--ink)", "var(--faint)",
+    # "var(--faint)", "var(--dim)"). Migrated to the shared panel() + stat()
+    # components so it renders in the same visual language as every
+    # other card in the app and pulls color from CSS custom properties.
+    from dashboard.shared.ui_components import panel as _panel, stat as _stat
+    _u_tone = "bull" if _pto_unreal >= 0 else "bear"
+    _r_tone = "bull" if _pto_real   >= 0 else "bear"
+    _wr_tone = ("bull" if _pto_wr >= 50 else
+                "amber" if _pto_wr >= 35 else "bear")
+    _pto_body = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
+        'gap:14px 22px">'
+        + _stat("Open Positions", f"{_pto_n}", tone="neutral", align="center")
+        + _stat("Unrealised P&amp;L", f"Rs.{_pto_unreal:+,.0f}",
+                sub="live prices", tone=_u_tone, align="center")
+        + _stat("Realised P&amp;L", f"Rs.{_pto_real:+,.0f}",
+                sub=f"{_pto_tot} closed", tone=_r_tone, align="center")
+        + _stat("Win Rate", f"{_pto_wr:.0f}%",
+                sub=(f"{_pto_wins}/{_pto_tot} wins" if _pto_tot else "no closed trades"),
+                tone=_wr_tone, align="center")
+        + '</div>'
+    )
+    st.markdown(
+        _panel(_pto_body, kind="glass", tone="neutral",
+               title="Paper Trades Overview", margin="0 0 14px 0"),
+        unsafe_allow_html=True,
+    )
+except Exception as _pto_e:
+    st.caption(f"⚠️ Paper trades overview unavailable ({_pto_e}).")
+
 
 @st.fragment
 def _render_open_positions_section():

@@ -28,7 +28,11 @@ BANNED = re.compile(
     r"rebalance toward|diversify beyond|add \d|"
     r"consider (partial )?hedg\w*|consider shorts|avoid longs|lean short|buy-the-dip|"
     r"trail stop|size conservatively|cap the size|consider halving|could be added|"
-    r"consider (spreading|reviewing|trailing)|aim to bring|counter-trend entry)\b",
+    r"consider (spreading|reviewing|trailing)|aim to bring|counter-trend entry|"
+    # Command Centre market-pulse copy removed 2026-09-27 (CC-COPY):
+    r"avoid new (buys|positions)|new positions (are )?ok(ay)?|protect capital|"
+    r"trade your (setups|plan)|at plan size|position sizing halved|small sizes only|"
+    r"tighten (trailing )?stops|be defensive|reduce fresh)\b",
     re.I,
 )
 

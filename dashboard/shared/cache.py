@@ -1419,6 +1419,74 @@ def get_regime_snapshot() -> "dict | None":
         return None
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_fii_dii_recent(days: int = 10) -> "dict | None":
+    """Latest FII/DII cash-market day plus 5-session FII sum, from the
+    fii_dii_daily table the cron fills. None when the table is empty."""
+    try:
+        from analysis.fii_dii import load_history
+        df = load_history(days=days)
+        if df is None or df.empty or "fii_net" not in df.columns:
+            return None
+        df = df.sort_values("date")
+        last = df.iloc[-1]
+        return {
+            "date":   str(last.get("date", "")),
+            "fii":    float(last["fii_net"]) if pd.notna(last["fii_net"]) else None,
+            "dii":    float(last["dii_net"]) if pd.notna(last.get("dii_net")) else None,
+            "fii_5d": float(df["fii_net"].tail(5).fillna(0).sum()),
+            "n_5d":   int(df["fii_net"].tail(5).notna().sum()),
+        }
+    except Exception as _e:
+        _log.debug("cache.get_fii_dii_recent failed: %s", _e)
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_recent_posture_changes(limit: int = 6, lookback_rows: int = 3000) -> list:
+    """Most recent verdict changes in verdict_ledger, one per ticker.
+
+    A change is two consecutive logged days for the same (ticker, source,
+    horizon) whose `verdict` differs, so like is compared with like. Returns
+    dicts: ticker, source, date, prev, new, prev_score, new_score. [] on error.
+    """
+    try:
+        from analysis.verdict_ledger import load_ledger
+        df = load_ledger(limit=lookback_rows)
+        need = {"ticker", "verdict", "logged_at", "logged_date", "source"}
+        if df is None or df.empty or not need.issubset(df.columns):
+            return []
+        if "horizon" not in df.columns:
+            df = df.assign(horizon="")
+        df = df.sort_values("logged_at")
+        changes = []
+        for (tk, src, _hz), g in df.groupby(["ticker", "source", "horizon"], dropna=False):
+            g = g.drop_duplicates("logged_date", keep="last")
+            rows = g.to_dict("records")
+            for prev, cur in zip(rows, rows[1:]):
+                if prev.get("verdict") and cur.get("verdict") and prev["verdict"] != cur["verdict"]:
+                    changes.append({
+                        "ticker": tk, "source": src, "date": str(cur["logged_date"]),
+                        "at": str(cur["logged_at"]),
+                        "prev": prev["verdict"], "new": cur["verdict"],
+                        "prev_score": prev.get("composite_score"),
+                        "new_score": cur.get("composite_score"),
+                    })
+        changes.sort(key=lambda c: c["at"], reverse=True)
+        seen, out = set(), []
+        for c in changes:
+            if c["ticker"] in seen:
+                continue
+            seen.add(c["ticker"])
+            out.append(c)
+            if len(out) >= limit:
+                break
+        return out
+    except Exception as _e:
+        _log.debug("cache.get_recent_posture_changes failed: %s", _e)
+        return []
+
+
 @st.cache_data(ttl=3600, show_spinner=False)   # 1-hour cache — heavy multi-fetch
 def _sector_ranking():
     """
