@@ -9,7 +9,7 @@ Two backends, chosen automatically:
     See dashboard/DB_SETUP.md for the 5-minute setup.
 
 Fixes applied vs previous version:
-  - _database_url() cached with lru_cache — was re-reading st.secrets on every call
+  - _database_url() deliberately NOT cached — tests swap DATABASE_URL between runs
   - _schema_ready / _kv_ready flags — ensure_schema() no longer opens a second
     connection on every read (was opening 2 connections per operation)
   - Postgres connection pool (ThreadedConnectionPool, max 5) — replaces one new
@@ -34,7 +34,6 @@ import logging
 import os
 import threading
 from contextlib import contextmanager
-from functools import lru_cache
 from typing import Any, List, Optional
 
 import pandas as pd
@@ -72,11 +71,6 @@ def _database_url() -> Optional[str]:
     Return Postgres URL from Streamlit secrets or env, else None.
     Not cached with lru_cache — tests monkeypatch DATABASE_URL between runs
     and need live re-reads. Fast enough: called only at connection time.
-    """
-    """
-    Return a Postgres URL from Streamlit secrets or env, else None.
-    Cached with lru_cache — previously re-read st.secrets on every single
-    DB call (4-5 times per operation). Now resolves once per process.
     """
     url = None
     try:
@@ -395,11 +389,14 @@ def edit_trade(
 ) -> None:
     fields, vals = [], []
     if sl is not None:
-        fields.append("sl=?");     vals.append(sl)
+        fields.append("sl=?")
+        vals.append(sl)
     if tp is not None:
-        fields.append("tp=?");     vals.append(tp)
+        fields.append("tp=?")
+        vals.append(tp)
     if reason is not None:
-        fields.append("reason=?"); vals.append(reason)
+        fields.append("reason=?")
+        vals.append(reason)
     if not fields:
         return
     vals.append(trade_id)
