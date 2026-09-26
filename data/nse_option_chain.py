@@ -388,8 +388,12 @@ except ImportError:
 
 def _read_manual_cookie() -> Optional[str]:
     """Return a Cookie: header string set by the operator in
-    .streamlit/secrets.toml under `[nse] cookie = "..."`. None when absent.
+    .streamlit/secrets.toml under `[nse] cookie = "..."`, or the NSE_COOKIE env
+    var (used by the refresh-eod-data workflow). None when absent.
     """
+    import os
+    if os.environ.get("NSE_COOKIE"):
+        return os.environ["NSE_COOKIE"]
     try:
         import streamlit as st  # local import — module stays streamlit-free
         nse = st.secrets.get("nse")
