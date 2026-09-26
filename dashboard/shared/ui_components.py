@@ -1246,14 +1246,15 @@ def follow_card(rank: int, symbol: str, sub: str, rows: list,
     )
 
 
-def share_bars(rows: list, fill: str = "var(--accent)") -> str:
+def share_bars(rows: list, fill: str = "var(--accent)", absolute: bool = False) -> str:
     """Horizontal share bars: rows of (label, pct 0-100, value_text[, fill]).
 
     Bar length is the share of the largest row, so the biggest item always
-    spans the track; the printed value stays the true percentage.
+    spans the track; the printed value stays the true percentage. With
+    ``absolute=True`` the track is 0-100 instead (breadth percentages).
     """
     rows = list(rows)
-    peak = max((float(r[1]) for r in rows), default=0.0) or 1.0
+    peak = 100.0 if absolute else (max((float(r[1]) for r in rows), default=0.0) or 1.0)
     out = []
     for r in rows:
         label, pct, text = r[0], float(r[1]), r[2]
@@ -1281,3 +1282,49 @@ def quiet_output(label: str, lead: str, unit: str = "", sub: str = "",
     note_html = f'<div class="quiet-note">{note}</div>' if note else ""
     return (f'<div class="quiet-output"><div class="quiet-out-lbl">{label}</div>'
             f'<div class="quiet-lead">{lead}{unit_html}</div>{sub_html}{kv_html}{note_html}</div>')
+
+
+def breadth_gauge(share: float, left: str = "weak", right: str = "strong") -> str:
+    """Half-circle gauge (bear / amber / bull thirds) with a needle at
+    ``share`` (0-1). Returns inline SVG sized by the .breadth-gauge class."""
+    try:
+        share = min(max(float(share), 0.0), 1.0)
+    except (TypeError, ValueError):
+        share = 0.5
+    arc = "M 20 96 A 80 80 0 0 1 180 96"
+    seg = 83.78  # one third of the 251.3 arc length
+    parts = [f'<path d="{arc}" fill="none" stroke="var(--sunken)" stroke-width="10"/>']
+    for i, tone in enumerate(("bear", "amber", "bull")):
+        parts.append(f'<path d="{arc}" fill="none" stroke="var(--{tone})" stroke-width="10" '
+                     f'stroke-dasharray="{seg:.2f} 251.3" stroke-dashoffset="{-seg * i:.2f}"/>')
+    angle = -90 + 180 * share
+    parts.append(f'<g transform="translate(100,96) rotate({angle:.1f})">'
+                 '<line x1="0" y1="0" x2="0" y2="-70" stroke="var(--ink)" stroke-width="2" '
+                 'stroke-linecap="round"/><circle r="5" fill="var(--ink)"/></g>')
+    parts.append(f'<text x="12" y="112" class="breadth-gauge-t">{left}</text>'
+                 f'<text x="188" y="112" text-anchor="end" class="breadth-gauge-t">{right}</text>')
+    return ('<svg class="breadth-gauge" viewBox="0 0 200 116" role="img" '
+            f'aria-label="{share * 100:.0f}% advancing">{"".join(parts)}</svg>')
+
+
+def flow_bars(sessions: list) -> str:
+    """Paired FII / DII net-flow bars per session.
+
+    sessions: list of (axis_label, fii_net, dii_net) oldest first, in any
+    unit. Bar height is relative to the largest absolute value; green is a
+    net-buy day, red net-sell. Missing values render as an empty slot.
+    """
+    vals = [abs(v) for _, f, d in sessions for v in (f, d) if v is not None and v == v]
+    peak = max(vals, default=0.0) or 1.0
+
+    def _bar(v, who):
+        if v is None or v != v:
+            return f'<div class="flow-b flow-{who}" style="height:0"></div>'
+        tone = "bull" if v >= 0 else "bear"
+        return (f'<div class="flow-b flow-{who}" title="{who.upper()} {v:+,.0f}" '
+                f'style="height:{max(abs(v) / peak * 100, 2):.0f}%;background:var(--{tone})"></div>')
+
+    cols = "".join(f'<div class="flow-col">{_bar(f, "fii")}{_bar(d, "dii")}</div>'
+                   for _, f, d in sessions)
+    axis = "".join(f"<span>{lbl}</span>" for lbl, _, _ in sessions)
+    return f'<div class="flow-bars">{cols}</div><div class="flow-axis">{axis}</div>'

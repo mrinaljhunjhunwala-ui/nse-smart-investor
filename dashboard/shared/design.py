@@ -1241,6 +1241,47 @@ def apply_design():
     .quiet-kv dd { margin: 0; font-family: var(--font-mono); color: var(--ink); text-align: right; }
     .quiet-note { margin-top: 18px; font-size: 11.5px; line-height: 1.5; color: var(--faint); }
 
+    /* Market Breadth (artboard 07): gauge panel, MA bars, FII/DII flow bars. */
+    .breadth-panel {
+        background: var(--card-lift); border: 1px solid var(--hairline);
+        border-radius: 6px; padding: 16px 18px; margin-bottom: 14px;
+    }
+    .breadth-lbl {
+        font-size: 10px; font-weight: 700; color: var(--dim);
+        letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px;
+    }
+    .breadth-h {
+        font-family: var(--font-serif); font-size: 22px; letter-spacing: -0.01em;
+        color: var(--ink); margin: 0 0 14px 0;
+    }
+    .breadth-panel .alloc { padding: 4px 0; }
+    .breadth-panel .alloc-bar { height: 18px; }
+    .gauge-row { display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; }
+    .breadth-gauge { width: 200px; height: 116px; display: block; }
+    .breadth-gauge-t { font-family: var(--font-mono); font-size: 9px; fill: var(--dim); }
+    .gauge-num { font-family: var(--font-mono); font-size: 28px; font-weight: 500; color: var(--ink); }
+    .gauge-sub { font-size: 12px; color: var(--dim); margin-top: 3px; }
+    .gauge-note { margin-top: 12px; font-size: 13px; line-height: 1.5; color: var(--ink-mid); }
+    .b-stats {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+        margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hairline);
+    }
+    .b-stat { padding: 8px 10px; background: var(--sunken); border-radius: 4px; }
+    .b-stat-k { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
+    .b-stat-v { font-family: var(--font-mono); font-size: 16px; color: var(--ink); margin-top: 2px; }
+    .breadth-foot { padding-top: 10px; font-size: 12px; line-height: 1.5; color: var(--dim); }
+    .flow-legend { margin: -8px 0 12px 0; font-size: 12px; color: var(--dim); }
+    .flow-bars { display: flex; align-items: flex-end; height: 100px; gap: 6px; padding: 0 4px; }
+    .flow-col { flex: 1; display: flex; align-items: flex-end; gap: 2px; height: 100%; }
+    .flow-b { flex: 1; min-height: 0; border-radius: 1px 1px 0 0; }
+    .flow-b.flow-dii { opacity: 0.6; }
+    .flow-axis {
+        display: flex; justify-content: space-between; gap: 6px; padding: 4px 4px 0; margin-top: 6px;
+        border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 10px; color: var(--dim);
+    }
+    .flow-axis span { flex: 1; text-align: center; }
+    @media (max-width: 900px) { .gauge-row { grid-template-columns: 1fr; } }
+
     @media (max-width: 900px) {
         .gate-strip, .fu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .gate-cell { border-bottom: 1px solid var(--hairline-soft); }
