@@ -39,6 +39,13 @@ if _ROOT not in sys.path:
 
 def apply_design():
     """Register Plotly template + inject CSS. Idempotent across pages."""
+    # FIX LAYOUT-WIDE (2026-09-26): with pages/ routing, app.py's
+    # set_page_config(layout="wide") is lost after st.switch_page, because
+    # each page runs as its own script. Every page rendered in Streamlit's
+    # narrow 736px column. Re-assert only the layout here: set_page_config
+    # is additive and callable more than once per run since Streamlit 1.44
+    # (floor is 1.52), so title and icon from app.py are left alone.
+    st.set_page_config(layout="wide")
     if "nse_pro" not in pio.templates:
         pio.templates["nse_pro"] = go.layout.Template(
             layout=dict(
