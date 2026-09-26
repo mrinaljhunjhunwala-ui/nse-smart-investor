@@ -61,7 +61,10 @@ def _synthetic_ohlcv(n: int = 260, seed: int = 42) -> pd.DataFrame:
     """
     rng = np.random.default_rng(seed)
     close = 100.0
-    dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=n)
+    # Anchor on the last business day: with a weekend `end`, bdate_range can
+    # return n-1 dates and the frame construction below fails on Sat/Sun.
+    end = pd.offsets.BDay().rollback(pd.Timestamp.today().normalize())
+    dates = pd.bdate_range(end=end, periods=n)
     rows = []
     for _ in range(n):
         drift = rng.normal(0.0005, 0.012)      # ~0.05% mean, 1.2% sd
