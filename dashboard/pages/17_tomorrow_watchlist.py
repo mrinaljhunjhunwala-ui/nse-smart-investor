@@ -21,6 +21,22 @@ W2  Paper-trade reason string no longer silently truncates the headline.
     does truncate, the truncation will be on the DB layer (consistent),
     not duplicated/hidden here. We additionally add an ellipsis-safe local
     helper for the CARD display copy only (not the stored reason).
+
+LAYOUT (mockup artboard 03, 2026-09-12 "proposed layout" artifact)
+────────────────────────────────────────────────────────────────────
+Gate strip (scan coverage · shortlist · bucket split · 5-day follow-through ·
+regime) → previous session's picks as follow-through cards → one ranked
+table per bucket with rank chips, plus a single detail card with actions for
+the selected setup instead of a long card list.
+
+W4  The follow-through strip had three bugs, fixed with the move to the kit:
+      * it read an `action` column the ledger does not have (it stores
+        `composite_action`), so every card said "logged";
+      * ledger returns are stored in PERCENT, but were treated as fractions
+        (a 3% move rendered as +300%, and the ±2% band was really ±0.02%);
+      * it picked the newest ledger rows, which are today's own picks with no
+        forward data yet, and judged every pick as long-only, so a breakdown
+        name that fell read as "Stopped".
 """
 
 import os, sys
@@ -28,20 +44,26 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import datetime
+import html
+import math
 import time
 import threading
-import concurrent.futures
 
 import streamlit as st
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.cache import (
-    _tomorrow_watchlist, get_tomorrow_watchlist, get_display_name, _trade_type,
+    _tomorrow_watchlist, get_tomorrow_watchlist, get_display_name,
+    get_tw_ledger, get_regime_snapshot, _picks_live_prices,
 )
 from dashboard.shared.trade_utils import _display_label, _paper_trade_popover
 from dashboard.shared.flags_ui import render_flag_badge_html  # QF2: shortlist-only flag badge
-from dashboard.shared.ui_components import chip_pill, chip_delta
+from dashboard.shared.ui_components import (
+    chip_pill, chip_delta, chip_tag, empty_state, fmt_inr,
+    section_header, gate_strip, rank_chip, signal_table, follow_card,
+)
 
 apply_design()
 render_sidebar(current="Tomorrow's Watchlist")
@@ -50,126 +72,10 @@ render_top_bar()
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown('<h1 class="page-title-serif">Tomorrow\'s <em>Watchlist</em></h1>', unsafe_allow_html=True)
 st.markdown(
-    "Stocks worth watching for the **next trading session**, based on today's close "
-    "signals — distinct from intraday Top Picks. Breakouts setting up, breakdown risks, "
-    "and divergence/reversal candidates."
+    '<p class="page-subtitle">Next-session setups from today\'s close: breakouts setting up, '
+    'breakdown risks and divergence candidates. Separate from intraday Top Picks.</p>',
+    unsafe_allow_html=True,
 )
-
-# FIX SCR-XREF — see the matching note in 06_smart_screener.py.
-with st.expander("↔️ Also see: Smart Screener · TQS Scanner", expanded=False):
-    st.markdown(
-        "- **Smart Screener** — run the same 4-screen scan interactively with your "
-        "own universe / parameters. Use when this pre-computed list doesn't have "
-        "what you're after.\n"
-        "- **TQS Scanner** — a *different* scoring engine (four-pillar Trend "
-        "Quality Score) applied to the same universes. Cross-check a shortlisted "
-        "name against its TQS reading before acting."
-    )
-
-# ── UI/UX 2026-09 · Task 4.2 β · yesterday's-picks follow-through strip ─────
-# Data-unblocked 2026-09-15: ledger has accumulated >1 week of
-# source="tomorrow_watchlist" rows since the writes started in PR #65
-# on 2026-09-07. The strip solves user complaint: "scanning the full
-# table takes too long to tell the stock names". Reads verdict_ledger
-# with the backfilled forward returns so no live-price fetch is needed.
-try:
-    from analysis.verdict_ledger import load_ledger as _yp_load_ledger
-    _yp_df = _yp_load_ledger(source="tomorrow_watchlist", limit=40)
-    if _yp_df is not None and not _yp_df.empty:
-        # Take the most recent row per ticker, up to 5
-        _yp_df = _yp_df.sort_values("logged_at", ascending=False)
-        _yp_seen: set = set()
-        _yp_rows: list = []
-        for _r in _yp_df.itertuples():
-            _tk = getattr(_r, "ticker", None)
-            if not _tk or _tk in _yp_seen:
-                continue
-            _yp_seen.add(_tk)
-            _yp_rows.append(_r)
-            if len(_yp_rows) >= 5:
-                break
-        if _yp_rows:
-            _yp_cards_html = []
-            for _idx, _r in enumerate(_yp_rows, start=1):
-                _sym    = str(getattr(_r, "ticker", "?")).replace(".NS", "")
-                _sc     = float(getattr(_r, "score", 0) or 0)
-                _act    = str(getattr(_r, "action", "") or "").strip()
-                _ret1   = getattr(_r, "ret_1d", None)
-                _ret5   = getattr(_r, "ret_5d", None)
-                _ret20  = getattr(_r, "ret_20d", None)
-                _r_shown = _ret1 if _ret1 is not None else (
-                           _ret5 if _ret5 is not None else _ret20)
-                _r_label = ("1D" if _ret1 is not None else
-                            "5D" if _ret5 is not None else
-                            "20D" if _ret20 is not None else "—")
-                # Follow-through pill from forward return — routed through
-                # chip_pill/chip_delta so every posture chip in the app uses
-                # the same vocabulary (see docs/UI_UX_DESIGN_2026-09.md §4).
-                if _r_shown is None:
-                    _pill_tone, _pill_txt = "neutral", "Pending"
-                    _card_bg = "var(--surface)"
-                    _card_bd = "var(--hairline)"
-                elif _r_shown >= 0.02:
-                    _pill_tone, _pill_txt = "good", "Working"
-                    _card_bg = "linear-gradient(180deg,rgba(22,199,132,.06),var(--surface) 80%)"
-                    _card_bd = "rgba(22,199,132,.3)"
-                elif _r_shown <= -0.02:
-                    _pill_tone, _pill_txt = "bad", "Stopped"
-                    _card_bg = "linear-gradient(180deg,rgba(255,77,77,.06),var(--surface) 80%)"
-                    _card_bd = "rgba(255,77,77,.25)"
-                else:
-                    _pill_tone, _pill_txt = "warn", "Flat"
-                    _card_bg = "var(--surface)"
-                    _card_bd = "var(--hairline)"
-                _ret_html = (
-                    chip_delta(_r_shown * 100)
-                    if _r_shown is not None else
-                    '<span style="color:var(--faint);font-size:11px">no data yet</span>'
-                )
-                _pill_html = chip_pill(_pill_txt, tone=_pill_tone)
-                _yp_cards_html.append(
-                    f'<div style="background:{_card_bg};border:1px solid {_card_bd};'
-                    f'border-radius:6px;padding:12px 14px;position:relative;overflow:hidden">'
-                    f'<div style="position:absolute;top:9px;right:12px;'
-                    f'font-family:var(--font-mono);font-size:10px;color:var(--faint);'
-                    f'letter-spacing:.08em">RANK {_idx:02d}</div>'
-                    f'<div style="font-weight:600;font-size:14px;color:var(--ink);'
-                    f'letter-spacing:-.005em">{_sym}</div>'
-                    f'<div style="color:var(--dim);font-size:11px;margin-top:1px">'
-                    f'Score {_sc:.0f}/90 · {_act or "logged"}</div>'
-                    f'<div style="display:flex;justify-content:space-between;'
-                    f'align-items:baseline;margin-top:10px;padding-top:8px;'
-                    f'border-top:1px dotted var(--hairline)">'
-                    f'<span style="color:var(--dim);font-size:10px;'
-                    f'text-transform:uppercase;letter-spacing:.08em">{_r_label} ret</span>'
-                    f'{_ret_html}</div>'
-                    f'<div style="margin-top:9px">{_pill_html}</div>'
-                    f'</div>'
-                )
-            st.markdown(
-                '<div style="margin:14px 0 6px 0;display:flex;'
-                'justify-content:space-between;align-items:baseline">'
-                '<h3 style="margin:0;font-family:\'Instrument Serif\',Georgia,serif;'
-                'font-weight:400;font-size:20px;letter-spacing:-.01em;color:var(--ink)">'
-                'Yesterday\'s picks · follow-through</h3>'
-                f'<span style="font-size:10px;color:var(--faint);'
-                'text-transform:uppercase;letter-spacing:.1em;'
-                'font-family:var(--font-mono)">source: verdict_ledger · '
-                f'{len(_yp_rows)} shown</span>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="display:grid;grid-template-columns:repeat(5,1fr);'
-                'gap:10px;margin-bottom:22px">'
-                + "".join(_yp_cards_html)
-                + '</div>',
-                unsafe_allow_html=True,
-            )
-except Exception as _yp_err:
-    import logging
-    logging.getLogger("dashboard.tomorrow_watchlist").debug(
-        "yesterday's-picks strip render failed: %s", _yp_err)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX W1 — non-blocking scan with stale-while-revalidate pattern
@@ -293,12 +199,140 @@ if _wl is None:
 
 _is_stale = st.session_state.get("tw_stale", False)
 
-st.caption(
-    f"🕒 Scanned: **{_wl.get('scan_time', '—')}**"
-    + (" · ⚠️ showing previous session (refresh in progress)" if _is_stale else "")
-    + " · Runs EOD, cached until the next session · not intraday. "
-      "Levels are based on today's daily close."
-)
+_brk_items = _wl.get("breakout_candidates", []) or []
+_bdn_items = _wl.get("breakdown_watch", []) or []
+_rev_items = _wl.get("reversal_watch", []) or []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Small helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def _num(v):
+    """float(v) when finite, else None."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _px(v) -> str:
+    f = _num(v)
+    if not f or f <= 0:
+        return "–"
+    return "₹" + fmt_inr(f, 2 if f < 1000 else 0)
+
+
+_BEARISH_ACTIONS = frozenset({"EXIT", "CAUTION", "AVOID", "SELL", "STRONG SELL"})
+_MOVE_BAND = 2.0   # % move that counts as following through / against the setup
+
+
+def _setup_direction(action, score) -> int:
+    """+1 for a bullish setup, -1 for a bearish one.
+
+    Mirrors the breakdown gate in cache._tomorrow_watchlist (EXIT/CAUTION or
+    score < 40). The ledger does not record which bucket a pick came from, so
+    bearish-divergence names from the reversal bucket read as bullish here;
+    the strip says "direction from logged posture" so the basis is visible.
+    """
+    sc = _num(score)
+    if str(action or "").strip().upper() in _BEARISH_ACTIONS or (sc is not None and sc < 40):
+        return -1
+    return 1
+
+
+def _conviction(score) -> tuple:
+    """Composite-band conviction label (same bands as the grade thresholds)."""
+    sc = _num(score) or 0.0
+    if sc >= 70:
+        return "High", "good"
+    if sc >= 55:
+        return "Developing", "warn"
+    return "Watch only", "neutral"
+
+
+def _rr(item):
+    rr = _num(item.get("rr"))
+    if rr and rr > 0:
+        return rr
+    e, s, t = _num(item.get("entry")), _num(item.get("sl")), _num(item.get("tp"))
+    if e and s and t and abs(e - s) > 1e-9:
+        return abs(t - e) / abs(e - s)
+    return None
+
+
+def _setup_name(signal_type: str) -> str:
+    """'🚀 Breakout setup' → 'Breakout setup' (emoji stays out of the table)."""
+    s = str(signal_type or "").strip()
+    if s and not s[0].isalnum():
+        s = s.split(" ", 1)[-1]
+    return s
+
+
+def _sym(ticker) -> str:
+    return html.escape(str(ticker or "?").replace(".NS", ""))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Gate strip — five cells (UI_UX_DESIGN §4.1 ceiling)
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    _ledger = get_tw_ledger()
+except Exception:
+    _ledger = None
+
+
+def _follow_through_rate(ledger):
+    """(hit %, n) over settled 5-day rows, direction-aware; (None, n) under 5."""
+    if ledger is None or getattr(ledger, "empty", True) or "ret_5d" not in ledger.columns:
+        return None, 0
+    df = ledger[ledger["ret_5d"].notna()]
+    n = len(df)
+    if n < 5:
+        return None, n
+    hits = 0
+    for act, sc, ret in zip(df.get("composite_action", [None] * n),
+                            df.get("composite_score", [None] * n), df["ret_5d"]):
+        r = _num(ret)
+        if r is not None and _setup_direction(act, sc) * r > 0:
+            hits += 1
+    return hits / n * 100.0, n
+
+
+def _gate_cells() -> list:
+    n_uni, n_sc = _wl.get("n_universe"), _wl.get("n_scored")
+    n_short = len(_brk_items) + len(_bdn_items) + len(_rev_items)
+    cells = [
+        ("Scanned",
+         f"{n_sc:,}" if n_sc else "–",
+         (f"of {n_uni:,} · Nifty 500" if n_uni else "Nifty 500") if n_sc
+         else "count arrives with the next scan"),
+        ("Shortlisted", f"{n_short}",
+         f"{n_short / n_sc * 100:.1f}% cleared a bucket" if n_sc else "setups on today's scan"),
+        ("Split", f"{len(_brk_items)} · {len(_bdn_items)} · {len(_rev_items)}",
+         "breakout · breakdown · reversal"),
+    ]
+    _ft, _ft_n = _follow_through_rate(_ledger)
+    cells.append(("5D follow-through",
+                  f"{_ft:.0f}%" if _ft is not None else "–",
+                  f"n={_ft_n} · moved with the setup" if _ft is not None
+                  else f"{_ft_n} settled so far, needs 5"))
+    try:
+        _reg = get_regime_snapshot() or {}
+    except Exception:
+        _reg = {}
+    _lab = str(_reg.get("label") or "unknown")
+    _tone = {"trend_up": "bull", "trend_down": "bear", "risk_off": "bear", "range": "amber"}.get(_lab, "dim")
+    _conf = str(_reg.get("confidence") or "").strip().lower()   # low | medium | high
+    cells.append(("Regime",
+                  f'<span style="color:var(--{_tone})">{html.escape(_lab.replace("_", " ").title())}</span>',
+                  f"{html.escape(_conf)} confidence" if _conf
+                  else ("live snapshot" if _reg else "feed unavailable")))
+    return cells
+
+
+st.markdown(gate_strip(_gate_cells()), unsafe_allow_html=True)
+
 # DT1 + DT2 · scan-time attribution with the source pill.
 try:
     from dashboard.shared.ui_components import data_as_of as _tw_asof
@@ -310,12 +344,99 @@ try:
     )
 except Exception:
     pass
+st.caption(
+    "Runs end-of-day on today's daily close and stays cached until the next session; "
+    "not intraday."
+    + (" · ⚠️ showing the previous session while a refresh runs." if _is_stale else "")
+)
 
 from dashboard.shared.disclosures import (
     render_regime_reliability_note as _tw_regime_note,
 )
 _tw_regime_note()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Previous session's picks — follow-through strip (fix W4)
+# ─────────────────────────────────────────────────────────────────────────────
+def _render_follow_through() -> None:
+    _hdr = "Previous picks · follow-through"
+    _prior = None
+    if _ledger is not None and not getattr(_ledger, "empty", True) and "logged_date" in _ledger.columns:
+        _dates = _ledger["logged_date"].astype(str)
+        _prior = _ledger[_dates < datetime.date.today().isoformat()]
+    if _prior is None or _prior.empty:
+        st.markdown(section_header(_hdr, "source: verdict_ledger"), unsafe_allow_html=True)
+        st.caption("Appears once the ledger holds a previous session's picks. "
+                   "Every end-of-day scan logs its shortlist.")
+        return
+
+    _last = _prior["logged_date"].astype(str).max()
+    _day = _prior[_prior["logged_date"].astype(str) == _last]
+    if "composite_score" in _day.columns:
+        _day = _day.sort_values("composite_score", ascending=False)
+    _day = _day.drop_duplicates("ticker").head(5)
+    try:
+        _live = _picks_live_prices(tuple(str(t) for t in _day["ticker"]))
+    except Exception:
+        _live = {}
+
+    _cards = []
+    for _rank, _r in enumerate(_day.to_dict("records"), start=1):
+        _act = _r.get("composite_action")
+        _sc = _num(_r.get("composite_score"))
+        _dir = _setup_direction(_act, _sc)
+        _entry = _num(_r.get("entry_price"))
+        _now = _num((_live.get(str(_r.get("ticker"))) or {}).get("price"))
+
+        _rows = [("Entry", _px(_entry))]
+        _move = None
+        if _entry and _now:
+            _move = (_now / _entry - 1.0) * 100.0
+            _rows.append(("Now", f"{_px(_now)} {chip_delta(_move)}"))
+        else:
+            for _h in ("1d", "5d", "20d"):          # ledger returns are in percent
+                _v = _num(_r.get(f"ret_{_h}"))
+                if _v is not None:
+                    _move = _v
+                    _rows.append((f"{_h.upper()} ret", chip_delta(_v)))
+                    break
+            else:
+                _rows.append(("Now", '<span style="color:var(--faint)">pending</span>'))
+
+        if _move is None:
+            _pill, _tone = chip_pill("Pending", "neutral"), ""
+        elif _dir * _move >= _MOVE_BAND:
+            _pill, _tone = chip_pill("Following through", "good"), "good"
+        elif _dir * _move <= -_MOVE_BAND:
+            _pill, _tone = chip_pill("Against setup", "bad"), "bad"
+        else:
+            _pill, _tone = chip_pill("Flat", "neutral"), ""
+
+        _sub = (f"{_sc:.0f}/90 · " if _sc is not None else "") + html.escape(
+            _display_label(str(_act or "")) or "logged")
+        _sub += " · bearish setup" if _dir < 0 else " · bullish setup"
+        _cards.append(follow_card(_rank, _sym(_r.get("ticker")), _sub, _rows, _pill, _tone))
+
+    st.markdown(
+        section_header(_hdr, f"logged {html.escape(_last)} · top {len(_cards)} by score · "
+                             "direction from logged posture"),
+        unsafe_allow_html=True,
+    )
+    st.markdown(f'<div class="fu-grid">{"".join(_cards)}</div>', unsafe_allow_html=True)
+
+
+try:
+    _render_follow_through()
+except Exception as _yp_err:
+    import logging
+    logging.getLogger("dashboard.tomorrow_watchlist").debug(
+        "follow-through strip render failed: %s", _yp_err)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fresh picks — ranked table per bucket + one detail card with actions
+# ─────────────────────────────────────────────────────────────────────────────
 _ACCENT = {"breakout": "var(--bull)", "breakdown": "var(--bear)", "reversal": "var(--violet)"}
 
 
@@ -327,161 +448,169 @@ def _card_bg(tok: str) -> str:
 
 _BG = {"breakout": _card_bg("bull"), "breakdown": _card_bg("bear"), "reversal": _card_bg("violet")}
 
+_TABLE_COLS = [("#", "l"), ("Ticker", "l"), ("Entry", "r"), ("Stop", "r"), ("Target", "r"),
+               ("R:R", "r"), ("Score", "r"), ("Conviction", "l"), ("Setup", "l")]
 
-def _render_cards(items, kind, key_prefix):
-    if not items:
-        st.caption("No candidates in this bucket on today's scan.")
-        return
+
+def _table_row(rank: int, it: dict) -> list:
+    _s = _sym(it.get("ticker"))
+    _name = html.escape(get_display_name(str(it.get("ticker", ""))))
+    _co = f'<span class="co">{_name}</span>' if _name and _name != _s else ""
+    _rr_v = _rr(it)
+    _conv, _conv_tone = _conviction(it.get("score"))
+    _hz = str(it.get("horizon") or "").split(" (")[0]
+    if _hz.lower().startswith("watch only"):   # the conviction pill already says so
+        _hz = ""
+    return [
+        rank_chip(rank),
+        f'<span class="sym">{_s}</span>{_co}',
+        _px(it.get("entry")), _px(it.get("sl")), _px(it.get("tp")),
+        f"1 : {_rr_v:.1f}" if _rr_v else "–",
+        f"{_num(it.get('score')) or 0:.0f}",
+        chip_pill(_conv, _conv_tone),
+        chip_tag(html.escape(_setup_name(it.get("signal_type", "")))) + (chip_tag(html.escape(_hz)) if _hz else ""),
+    ]
+
+
+def _render_detail(it: dict, rank: int, kind: str, key_prefix: str) -> None:
+    """Detail card + actions for the one setup selected under the table."""
     accent = _ACCENT[kind]
-    # Task 4.2 PR beta (audit docs/TOMORROW_WATCHLIST_AUDIT_2026-09.md, FM2
-    # follow-up): rank prefix so a user reading a card can tell at a glance
-    # whether this is the #1 conviction pick of the bucket or #15 of 15.
-    # Items already arrive sorted by _tomorrow_watchlist (desc score for
-    # breakout / reversal, asc for breakdown) so enumerate() from 1 is the
-    # displayed rank directly.
-    for _idx, _it in enumerate(items, start=1):
-        _lbl = _it["ticker"].replace(".NS", "")
-        _rank_chip = (
-            f'<span style="display:inline-block;padding:1px 6px;border-radius:4px;'
-            f'font-size:10px;font-weight:700;font-family:var(--font-mono, ui-monospace);'
-            f'letter-spacing:0.3px;color:{accent};'
-            f'background:color-mix(in srgb, {accent} 14%, transparent);'
-            f'border:1px solid color-mix(in srgb, {accent} 40%, transparent);'
-            f'margin-right:8px">#{_idx}</span>'
+    _lbl = str(it["ticker"]).replace(".NS", "")
+    _entry = it.get("entry") or 0
+    _sl    = it.get("sl")    or 0
+    _tp    = it.get("tp")    or 0
+    _show_levels = _entry > 0 and _sl > 0 and _tp > 0
+
+    _headline_full = it.get("headline", "")
+    # FIX W2: card display copy gets an honest ellipsis if truncated;
+    # the FULL headline (not truncated) is used for the stored reason below.
+    _headline_card = (
+        _headline_full[:90] + "…" if len(_headline_full) > 90 else _headline_full
+    )
+    # FIX HZ1-WL: holding-period label from score_stock()'s _pick_horizon.
+    _horizon = it.get("horizon", "")
+    _valid_until = it.get("valid_until", "")
+    # QF2: qualitative flag badge — safe here because this is the already-
+    # shortlisted list, NOT the wide universe scan (see flags_ui.py docstring).
+    try:
+        _flag_badge = render_flag_badge_html(it["ticker"])
+    except Exception:
+        _flag_badge = ""
+    _conv, _conv_tone = _conviction(it.get("score"))
+
+    st.markdown(
+        f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
+        f'border-radius:10px;padding:11px 14px;margin:4px 0 6px 0">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+        f'<span style="display:inline-flex;align-items:center;gap:8px;font-size:16px;'
+        f'font-weight:700;color:var(--ink)">{rank_chip(rank)}{html.escape(_lbl)}'
+        f'{chip_pill(_conv, _conv_tone)}</span>'
+        f'<span style="font-size:13px;font-weight:700;color:{accent}">'
+        f'{it["score"]:.0f}/90 · {_display_label(it["action"])}</span>'
+        f'</div>'
+        f'{_flag_badge}'
+        f'<div style="font-size:11px;color:{accent};font-weight:600;margin-top:3px">'
+        f'{it["signal_type"]} · key level {it["key_level"]}</div>'
+        f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{html.escape(_headline_card)}</div>'
+        + (
+            f'<div style="font-size:11px;color:var(--dim);margin-top:2px">'
+            f'⏳ {_horizon}' + (f' · fresh until {_valid_until}' if _valid_until else '')
+            + '</div>'
+            if _horizon else ""
         )
-        _tt_lbl, _tt_emo, _tt_col = _trade_type(_it.get("headline", ""))
-
-        _entry = _it.get("entry") or 0
-        _sl    = _it.get("sl")    or 0
-        _tp    = _it.get("tp")    or 0
-        _show_levels = _entry > 0 and _sl > 0 and _tp > 0
-
-        _headline_full = _it.get("headline", "")
-        # FIX W2: card display copy gets an honest ellipsis if truncated;
-        # the FULL headline (not truncated) is used for the stored reason below.
-        _headline_card = (
-            _headline_full[:90] + "…" if len(_headline_full) > 90 else _headline_full
+        + (
+            f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
+            f'Entry ₹{_entry:,.2f} · SL ₹{_sl:,.2f} · TP ₹{_tp:,.2f}</div>'
+            if _show_levels else ""
         )
-
-        # FIX HZ1-WL: holding-period label — already computed by score_stock()
-        # for every stock (see analysis/score.py's _pick_horizon), just wasn't
-        # threaded through this page before. Answers "how long is this setup
-        # good for" directly on the card instead of leaving it unclear.
-        _horizon = _it.get("horizon", "")
-        _valid_until = _it.get("valid_until", "")
-
-        # QF2: qualitative flag badge — safe to call here because this is
-        # the already-shortlisted, already-ranked list (≤15 items/bucket),
-        # NOT the wide universe scan. Never call this inside the scan pass
-        # in dashboard/shared/cache.py — see flags_ui.py docstring for why.
-        try:
-            _flag_badge = render_flag_badge_html(_it["ticker"])
-        except Exception:
-            _flag_badge = ""
-
-        # Task 4.2 M2 (audit docs/TOMORROW_WATCHLIST_AUDIT_2026-09.md): show
-        # an honest conviction chip based on the composite score band, so a
-        # card's visible label matches what the score actually says instead
-        # of promising more than the number supports. Bands match the
-        # composite-score grade thresholds elsewhere in the app.
-        _sc = float(_it.get("score", 0) or 0)
-        if _sc >= 70:
-            _conv_label, _conv_col = "high conviction", "var(--bull)"
-        elif _sc >= 55:
-            _conv_label, _conv_col = "developing", "var(--amber)"
-        else:
-            _conv_label, _conv_col = "watch only", "var(--dim)"
-        _conv_chip = (
-            f'<span style="display:inline-block;padding:1px 7px;border-radius:999px;'
-            f'font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;'
-            f'color:{_conv_col};border:1px solid {_conv_col};'
-            f'background:color-mix(in srgb, {_conv_col} 12%, transparent);'
-            f'margin-left:6px">{_conv_label}</span>'
-        )
-
-        st.markdown(
-            f'<div style="background:{_BG[kind]};border-left:4px solid {accent};'
-            f'border-radius:10px;padding:11px 14px;margin-bottom:6px">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center">'
-            f'<span style="font-size:16px;font-weight:700;color:var(--ink)">{_rank_chip}{_lbl}{_conv_chip}</span>'
-            f'<span style="font-size:13px;font-weight:700;color:{accent}">'
-            f'{_it["score"]:.0f}/90 · {_display_label(_it["action"])}</span>'
-            f'</div>'
-            f'{_flag_badge}'
-            f'<div style="font-size:11px;color:{accent};font-weight:600;margin-top:3px">'
-            f'{_it["signal_type"]} · key level {_it["key_level"]}</div>'
-            f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_headline_card}</div>'
-            + (
-                f'<div style="font-size:11px;color:var(--dim);margin-top:2px">'
-                f'⏳ {_horizon}' + (f' · fresh until {_valid_until}' if _valid_until else '')
-                + '</div>'
-                if _horizon else ""
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    if _show_levels:
+        # FIX W2: full headline (not truncated) for the stored trade reason.
+        _btn_col1, _btn_col2 = st.columns([1, 1])
+        with _btn_col1:
+            _paper_trade_popover(
+                it["ticker"], _entry, _sl, _tp,
+                reason=f"Tomorrow Watch ({it['signal_type']}): {_headline_full}",
+                key=f"{key_prefix}_{it['ticker']}",
+                label=f"📌 Paper Trade {_lbl}",
             )
-            + (
-                f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
-                f'Entry ₹{_entry:,.2f} · SL ₹{_sl:,.2f} · TP ₹{_tp:,.2f}</div>'
-                if _show_levels else ""
-            )
-            + "</div>",
-            unsafe_allow_html=True,
-        )
-        if _show_levels:
-            # FIX W2: use the full headline (not [:45]-truncated) for the
-            # stored trade reason, so the Paper Trades journal shows the
-            # complete context rather than a mid-word cut.
-            _btn_col1, _btn_col2 = st.columns([1, 1])
-            with _btn_col1:
-                _paper_trade_popover(
-                    _it["ticker"], _entry, _sl, _tp,
-                    reason=f"Tomorrow Watch ({_it['signal_type']}): {_headline_full}",
-                    key=f"{key_prefix}_{_it['ticker']}",
-                    label=f"📌 Paper Trade {_lbl}",
-                )
-            with _btn_col2:
-                # FIX NAV-TW: this page had no way to jump into the full
-                # Analyze Stock view at all — same canonical handoff used on
-                # My Portfolio / Command Centre / Quality Watch (FIX NAV1).
-                if st.button(f"📊 Analyze {_lbl}", key=f"{key_prefix}_{_it['ticker']}_analyze",
-                             width="stretch"):
-                    st.session_state["analyze_ticker"] = _it["ticker"]
-                    st.session_state["_goto_page"] = "🔍 Analyze Stock"
-                    st.rerun()
-        else:
-            # No valid entry/SL/TP to paper-trade on, but Analyze is still useful.
-            if st.button(f"📊 Analyze {_lbl}", key=f"{key_prefix}_{_it['ticker']}_analyze_only",
+        with _btn_col2:
+            # FIX NAV-TW: canonical handoff into Analyze Stock (FIX NAV1).
+            if st.button(f"📊 Analyze {_lbl}", key=f"{key_prefix}_{it['ticker']}_analyze",
                          width="stretch"):
-                st.session_state["analyze_ticker"] = _it["ticker"]
+                st.session_state["analyze_ticker"] = it["ticker"]
                 st.session_state["_goto_page"] = "🔍 Analyze Stock"
                 st.rerun()
+    else:
+        # No valid entry/SL/TP to paper-trade on, but Analyze is still useful.
+        if st.button(f"📊 Analyze {_lbl}", key=f"{key_prefix}_{it['ticker']}_analyze_only",
+                     width="stretch"):
+            st.session_state["analyze_ticker"] = it["ticker"]
+            st.session_state["_goto_page"] = "🔍 Analyze Stock"
+            st.rerun()
 
 
-_n_brk = len(_wl.get("breakout_candidates", []))
-_n_bdn = len(_wl.get("breakdown_watch",     []))
-_n_rev = len(_wl.get("reversal_watch",      []))
+def _render_bucket(items: list, kind: str, key_prefix: str) -> None:
+    if not items:
+        st.markdown(empty_state("No candidates in this bucket",
+                                "Today's scan found no setups that pass this bucket's gate."),
+                    unsafe_allow_html=True)
+        return
+    # Items arrive ranked by _tomorrow_watchlist (desc score for breakout /
+    # reversal, asc for breakdown), so enumerate() from 1 is the rank.
+    st.markdown(signal_table(_TABLE_COLS, [_table_row(i, it) for i, it in enumerate(items, 1)]),
+                unsafe_allow_html=True)
+    _sel = st.selectbox(
+        "Setup detail & actions",
+        options=list(range(len(items))),
+        format_func=lambda i: (f"#{i + 1}  {str(items[i]['ticker']).replace('.NS', '')}"
+                               f" · {_num(items[i].get('score')) or 0:.0f}/90"),
+        key=f"{key_prefix}_sel",
+    )
+    _render_detail(items[_sel], _sel + 1, kind, key_prefix)
 
+
+st.markdown(
+    section_header("Fresh picks · next session",
+                   "ranked by composite within each bucket · rank chip = top 3"),
+    unsafe_allow_html=True,
+)
 _t1, _t2, _t3 = st.tabs([
-    f"🚀 Breakout Watch ({_n_brk})",
-    f"🔻 Breakdown Watch ({_n_bdn})",
-    f"🔄 Reversal Watch ({_n_rev})",
+    f"🚀 Breakout Watch ({len(_brk_items)})",
+    f"🔻 Breakdown Watch ({len(_bdn_items)})",
+    f"🔄 Reversal Watch ({len(_rev_items)})",
 ])
 with _t1:
     st.caption(
-        "Constructive setups approaching resistance with momentum & volume building — "
+        "Constructive setups approaching resistance with momentum and volume building; "
         "watch for a breakout at next open."
     )
-    _render_cards(_wl.get("breakout_candidates", []), "breakout", "tw_brk")
+    _render_bucket(_brk_items, "breakout", "tw_brk")
 with _t2:
     st.caption(
-        "Weak names below key moving averages with distribution volume — watch for a "
+        "Weak names below key moving averages with distribution volume; watch for a "
         "potential breakdown."
     )
-    _render_cards(_wl.get("breakdown_watch", []), "breakdown", "tw_bdn")
+    _render_bucket(_bdn_items, "breakdown", "tw_bdn")
 with _t3:
     st.caption(
-        "Divergences — price and momentum disagreeing (a potential turn). Confirm before "
+        "Divergences: price and momentum disagreeing (a potential turn). Confirm before "
         "acting; these are watch-only, not signals."
     )
-    _render_cards(_wl.get("reversal_watch", []), "reversal", "tw_rev")
+    _render_bucket(_rev_items, "reversal", "tw_rev")
+
+# FIX SCR-XREF — see the matching note in 06_smart_screener.py.
+with st.expander("↔️ Also see: Smart Screener · TQS Scanner", expanded=False):
+    st.markdown(
+        "- **Smart Screener** — run the same 4-screen scan interactively with your "
+        "own universe / parameters. Use when this pre-computed list doesn't have "
+        "what you're after.\n"
+        "- **TQS Scanner** — a *different* scoring engine (four-pillar Trend "
+        "Quality Score) applied to the same universes. Cross-check a shortlisted "
+        "name against its TQS reading before acting."
+    )
 
 # Manual refresh control — lets the user trigger a re-scan without waiting
 # for the cache TTL, using the same non-blocking pattern as the cold start.

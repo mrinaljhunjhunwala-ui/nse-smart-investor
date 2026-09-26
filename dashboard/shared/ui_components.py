@@ -1159,3 +1159,88 @@ def bull_bear_risk_card(bull_factors: list,
         f'{_bbr_column("risk", key_risks     or [], limit_per_column)}'
         f'</div>'
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mockup layout kit (2026-09-12 "proposed layout" artifact)
+# String builders for the .sec-hd / .gate-strip / .sig-table / .rank-chip /
+# .fu-card classes in design.py. Callers stamp the result with
+# st.markdown(unsafe_allow_html=True). Cell / value arguments are raw HTML
+# so chips can nest; escape user or feed text before passing it in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def section_header(title: str, aside: str = "") -> str:
+    """Serif section title with an optional mono provenance note on the right.
+
+    A div with role="heading", not an <h3>: Streamlit's markdown heading
+    rules outrank the class (they forced Source Sans 28/600) and add a
+    hover anchor link.
+    """
+    aside_html = f'<span class="sec-hd-a">{aside}</span>' if aside else ""
+    return (f'<div class="sec-hd"><div class="sec-hd-t" role="heading" aria-level="3">'
+            f"{title}</div>{aside_html}</div>")
+
+
+def gate_strip(cells: list) -> str:
+    """Summary ribbon of (label, value_html, sub) tuples.
+
+    Capped at five cells: the §4.1 five-metric ceiling. A sixth cell is
+    dropped rather than wrapped, so callers must choose what to show.
+    """
+    parts = []
+    for label, value, sub in list(cells)[:5]:
+        sub_html = f'<span class="gate-s">{sub}</span>' if sub else ""
+        parts.append(
+            f'<div class="gate-cell"><span class="gate-k">{label}</span>'
+            f'<span class="gate-v">{value}</span>{sub_html}</div>'
+        )
+    return f'<div class="gate-strip">{"".join(parts)}</div>'
+
+
+def rank_chip(rank: int) -> str:
+    """Square rank badge. Ranks 1-3 carry the accent in falling strength."""
+    tier = f" r{rank}" if 1 <= rank <= 3 else ""
+    return f'<span class="rank-chip{tier}">{rank}</span>'
+
+
+def signal_table(columns: list, rows: list) -> str:
+    """Ranked data table.
+
+    columns: list of (header, align) where align is "l" or "r".
+             Right-aligned columns render in the mono face.
+    rows:    list of lists of cell HTML, one entry per column.
+    """
+    aligns = [a for _, a in columns]
+    head = "".join(
+        f'<th class="{a}">{h}</th>' if a == "r" else f"<th>{h}</th>"
+        for h, a in columns
+    )
+    body = "".join(
+        "<tr>" + "".join(
+            f'<td class="{aligns[i]}">{c}</td>' if aligns[i] == "r" else f"<td>{c}</td>"
+            for i, c in enumerate(row)
+        ) + "</tr>"
+        for row in rows
+    )
+    return (f'<div class="sig-table-wrap"><table class="sig-table">'
+            f"<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>")
+
+
+def follow_card(rank: int, symbol: str, sub: str, rows: list,
+                foot_html: str = "", tone: str = "") -> str:
+    """Compact follow-through card.
+
+    rows: list of (key, value_html) pairs shown under a dotted rule.
+    tone: "good" / "bad" tints the card; anything else stays neutral.
+    """
+    tone_cls = f" {tone}" if tone in ("good", "bad") else ""
+    rows_html = "".join(
+        f'<div class="fu-row"><span class="fu-k">{k}</span><span class="fu-v">{v}</span></div>'
+        for k, v in rows
+    )
+    foot = f'<div class="fu-foot">{foot_html}</div>' if foot_html else ""
+    return (
+        f'<div class="fu-card{tone_cls}"><div class="fu-rank">RANK {rank:02d}</div>'
+        f'<div class="fu-sym">{symbol}</div><div class="fu-sub">{sub}</div>'
+        f"{rows_html}{foot}</div>"
+    )

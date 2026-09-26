@@ -1205,6 +1205,7 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
         return {"ticker": s["ticker"], "score": s["score"], "headline": s["headline"],
                 "signal_type": signal_type, "key_level": key_level,
                 "action": s["action"], "entry": s["entry"], "sl": s["sl"], "tp": s["tp"],
+                "rr": s.get("rr"),
                 "horizon": s.get("horizon", ""), "valid_until": s.get("valid_until", "")}
 
     # FIX C1: track how many stocks would have matched more than one bucket,
@@ -1265,6 +1266,10 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     out["breakout_candidates"] = out["breakout_candidates"][:n]
     out["breakdown_watch"]     = out["breakdown_watch"][:n]
     out["reversal_watch"]      = out["reversal_watch"][:n]
+    # Gate-strip inputs on the page: how many names the scan covered and
+    # how many it actually scored. Older persisted snapshots lack these keys.
+    out["n_universe"] = len(_UNIV)
+    out["n_scored"]   = len(results)
 
     # FIX C7: log per-bucket counts and warn on empty buckets, so a silently-
     # empty bucket (the original threshold bug) is visible in logs going
@@ -1393,6 +1398,25 @@ def get_tomorrow_watchlist(n: int = 15) -> dict:
     result = dict(result)
     result["source"] = "live_scan"
     return result
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_tw_ledger(limit: int = 400) -> pd.DataFrame:
+    """Recent Tomorrow's Watchlist rows from verdict_ledger, forward returns
+    joined. Never raises: load_ledger already returns an empty frame on error."""
+    from analysis.verdict_ledger import load_ledger
+    return load_ledger(source="tomorrow_watchlist", limit=limit)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_regime_snapshot() -> "dict | None":
+    """Live market-regime snapshot as a dict, or None when feeds are down."""
+    try:
+        from analysis.regime import snapshot_live
+        return snapshot_live().as_dict()
+    except Exception as _e:
+        _log.debug("cache.get_regime_snapshot failed: %s", _e)
+        return None
 
 
 @st.cache_data(ttl=3600, show_spinner=False)   # 1-hour cache — heavy multi-fetch
