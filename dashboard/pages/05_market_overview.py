@@ -451,100 +451,86 @@ with _tab_macro:
 # TAB 3 — BREADTH (formerly Market Internals' Market Breadth tab)
 # ═══════════════════════════════════════════════════════════════════════════
 with _tab_breadth:
-    st.caption(
-        "Breadth confirms price trends. "
-        "Price up + breadth expanding = sustainable rally. "
-        "Price up + breadth shrinking = narrow / fragile move."
+    from dashboard.shared.ui_components import (
+        breadth_gauge, empty_state, flow_bars, section_header, share_bars,
     )
 
-    if st.button("🔄 Refresh Breadth Data", type="primary", key="ov_breadth_refresh"):
-        compute_market_breadth.clear()
-
-    st.info("⏱️ Scanning all 50 Nifty stocks takes ~3 minutes. Results are cached for 15 minutes.")
-    run_breadth = st.button("🔍 Compute Breadth Now", type="primary", key="breadth_btn")
+    _bc1, _bc2 = st.columns([3, 1], vertical_alignment="center")
+    _bc1.caption(
+        "Participation, not price. Price up + breadth expanding = broad rally; "
+        "price up + breadth shrinking = narrow move. Nifty 50 scan takes ~3 min, cached 15 min."
+    )
+    with _bc2:
+        run_breadth = st.button("Compute breadth", type="primary", key="breadth_btn", width="stretch")
+        if st.button("Clear cached scan", key="ov_breadth_refresh", width="stretch"):
+            compute_market_breadth.clear()
+            st.session_state.pop("ov_breadth", None)
 
     if run_breadth:
         with st.spinner("Scanning Nifty 50 breadth (~3 min)…"):
-            breadth = compute_market_breadth(_NIFTY50_TICKERS)
+            st.session_state["ov_breadth"] = compute_market_breadth(_NIFTY50_TICKERS)
+    breadth = st.session_state.get("ov_breadth")
 
-        st.markdown("---")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Advancing",           breadth["advance"])
-        c2.metric("Declining",           breadth["decline"])
-        c3.metric("A/D Ratio",           f"{breadth['ad_ratio']:.2f}",
-                  help="> 1.5 = strong; < 0.7 = weak")
-        c4.metric("Near 52W High / Low", f"{breadth['near_52w_high']} / {breadth['near_52w_low']}")
-
-        st.markdown("---")
-        st.markdown(
-            '<div class="t-h2" style="margin:14px 0 6px 0">'
-            '% of Nifty 50 Stocks Above Key Moving Averages</div>',
-            unsafe_allow_html=True,
-        )
-        bvals = {
-            "Above SMA20":  breadth["pct_above_20"],
-            "Above SMA50":  breadth["pct_above_50"],
-            "Above SMA200": breadth["pct_above_200"],
-        }
-        bar_fig = go.Figure()
-        for label, val in bvals.items():
-            bclr = _TK["bull"] if val > 60 else (_TK["amber"] if val > 40 else _TK["bear"])
-            bar_fig.add_trace(go.Bar(
-                x=[label], y=[val], name=label,
-                marker_color=bclr,
-                text=[f"{val:.0f}%"], textposition="auto",
-            ))
-        bar_fig.add_hline(y=70, line_dash="dot", line_color=_TK["bull"],
-                          annotation_text="Strong (70%)", annotation_position="right")
-        bar_fig.add_hline(y=40, line_dash="dot", line_color=_TK["bear"],
-                          annotation_text="Weak (40%)", annotation_position="right")
-        bar_fig.update_layout(
-            template="nse_pro", height=340,
-            yaxis_title="% of stocks", yaxis_range=[0, 100],
-            showlegend=False,
-            margin=dict(l=0, r=0, t=20, b=0),
-        )
-        st.plotly_chart(bar_fig, width="stretch")
-
+    if not breadth or not breadth.get("total"):
+        st.markdown(empty_state(
+            "No breadth scan yet",
+            "Press Compute breadth to scan the Nifty 50. Institutional flows below load from the local ledger.",
+        ), unsafe_allow_html=True)
+    else:
+        _adv, _dec = breadth["advance"], breadth["decline"]
         pct200 = breadth["pct_above_200"]
         if pct200 >= 70:
-            sig_txt, sig_clr = "🟢 **Strong Bull Market breadth** — Majority above SMA200 — a broad, well-supported uptrend.", "bull"
+            _b_label, _b_tone, _b_note = ("Strong breadth", "bull",
+                                          "Most of the index trades above its 200-day average: a broad uptrend.")
         elif pct200 >= 50:
-            sig_txt, sig_clr = "🟡 **Moderate breadth** — More than half in uptrend. Leadership is narrower; moves are more stock-specific.", "amber"
+            _b_label, _b_tone, _b_note = ("Moderate breadth", "amber",
+                                          "More than half above the 200-day average; leadership is narrower.")
         elif pct200 >= 30:
-            sig_txt, sig_clr = "🟠 **Weakening breadth** — Over half below SMA200; historically a higher-drawdown regime.", "accent"
+            _b_label, _b_tone, _b_note = ("Weakening breadth", "accent",
+                                          "Over half below the 200-day average; historically a higher-drawdown regime.")
         else:
-            sig_txt, sig_clr = "🔴 **Bear market breadth** — Most below SMA200 — a broad downtrend across the index.", "bear"
-        st.markdown(
-            f'<div style="background:var(--tint-{sig_clr});padding:12px;border-radius:8px;'
-            f'border-left:4px solid var(--{sig_clr});font-size:15px;margin:10px 0">'
-            f'{sig_txt}</div>', unsafe_allow_html=True
+            _b_label, _b_tone, _b_note = ("Weak breadth", "bear",
+                                          "Most of the index below the 200-day average: a broad downtrend.")
+
+        st.markdown(section_header(
+            "Market breadth",
+            f"Nifty 50 · {breadth['total']} stocks counted · {breadth['pct_above_50']:.0f}% above 50-DMA",
+        ), unsafe_allow_html=True)
+
+        _g1, _g2 = st.columns([1.15, 1])
+        _g1.markdown(
+            '<div class="breadth-panel"><div class="breadth-lbl">Advance / decline</div>'
+            f'<div class="breadth-h" role="heading" aria-level="3">{_b_label}</div>'
+            f'<div class="gauge-row">{breadth_gauge(_adv / max(_adv + _dec, 1))}<div>'
+            f'<div class="gauge-num">{_adv} : {_dec}</div>'
+            f'<div class="gauge-sub">advances : declines · {breadth["ad_ratio"]:.2f} A/D ratio</div>'
+            f'<div class="gauge-note">{_b_note}</div></div></div>'
+            '<div class="b-stats">'
+            f'<div class="b-stat"><div class="b-stat-k">Near 52-w high</div>'
+            f'<div class="b-stat-v">{breadth["near_52w_high"]}</div></div>'
+            f'<div class="b-stat"><div class="b-stat-k">Near 52-w low</div>'
+            f'<div class="b-stat-v">{breadth["near_52w_low"]}</div></div>'
+            '</div><div class="breadth-foot">'
+            'Within 5% of the 52-week high / low.</div></div>',
+            unsafe_allow_html=True,
         )
 
-        st.markdown("---")
-        col_pie, col_tbl = st.columns([1, 1])
-        with col_pie:
-            st.markdown(
-                '<div class="t-h2" style="margin:14px 0 6px 0">'
-                "Today's Advance / Decline</div>",
-                unsafe_allow_html=True,
-            )
-            pie_fig = go.Figure(data=go.Pie(
-                labels=["Advancing", "Declining"],
-                values=[breadth["advance"], breadth["decline"]],
-                marker_colors=[_TK["bull"], _TK["bear"]], hole=0.4,
-            ))
-            pie_fig.update_layout(
-                template="nse_pro", height=260,
-                margin=dict(l=0, r=0, t=20, b=0),
-            )
-            st.plotly_chart(pie_fig, width="stretch")
-        with col_tbl:
-            st.markdown(
-                '<div class="t-h2" style="margin:14px 0 6px 0">'
-                'Breadth Interpretation Guide</div>',
-                unsafe_allow_html=True,
-            )
+        def _ma_tone(v):
+            return "var(--bull)" if v > 60 else ("var(--amber)" if v > 40 else "var(--bear)")
+
+        _g2.markdown(
+            '<div class="breadth-panel"><div class="breadth-lbl">Above moving averages</div>'
+            '<div class="breadth-h" role="heading" aria-level="3">Trend health</div>'
+            + share_bars([
+                (f"Above {n}-DMA", breadth[k], f"{breadth[k]:.0f}%", _ma_tone(breadth[k]))
+                for n, k in ((20, "pct_above_20"), (50, "pct_above_50"), (200, "pct_above_200"))
+            ], absolute=True)
+            + '<div class="breadth-foot">'
+              '&gt;70% broad participation · &lt;40% weak.</div></div>',
+            unsafe_allow_html=True,
+        )
+
+        with st.expander("Breadth interpretation guide"):
             st.dataframe(pd.DataFrame([
                 {"% Above SMA200": "> 70%",  "Signal": "Strong Bull",    "Historically": "Broad uptrends; pullbacks have tended to be bought"},
                 {"% Above SMA200": "50–70%", "Signal": "Healthy uptrend","Historically": "Healthy uptrend with rotation"},
@@ -552,22 +538,46 @@ with _tab_breadth:
                 {"% Above SMA200": "< 30%",  "Signal": "Bear market",    "Historically": "Downtrend; rallies have tended to fade"},
             ]), hide_index=True)
 
-        st.markdown("---")
+    # ── Institutional flows: local FII/DII ledger only (no network here) ──────
+    try:
+        from analysis import fii_dii as _fd
+        _flows = _fd.load_history(days=10)
+    except Exception as _fe:
+        _log.debug("breadth tab: FII/DII ledger unavailable: %s", _fe)
+        _flows = pd.DataFrame()
+    if _flows is not None and not _flows.empty and {"date", "fii_net", "dii_net"} <= set(_flows.columns):
+        _flows = _flows.copy()
+        _flows["date"] = pd.to_datetime(_flows["date"], errors="coerce")
+        for _c in ("fii_net", "dii_net"):
+            _flows[_c] = pd.to_numeric(_flows[_c], errors="coerce")
+        _flows = _flows.dropna(subset=["date"]).sort_values("date")
+    if _flows is None or _flows.empty or "fii_net" not in _flows.columns:
         st.markdown(
-            '<div class="t-h2" style="margin:14px 0 6px 0">'
-            '52-Week High / Low Distribution</div>',
+            '<div class="breadth-panel"><div class="breadth-lbl">Institutional flows</div>'
+            + empty_state("No FII / DII history stored yet",
+                          "Open the FII / DII Flows page to fetch it; this panel reads the local ledger.")
+            + "</div>",
             unsafe_allow_html=True,
         )
-        hl_fig = go.Figure(go.Bar(
-            x=["Near 52W High (within 5%)", "Near 52W Low (within 5%)"],
-            y=[breadth["near_52w_high"], breadth["near_52w_low"]],
-            marker_color=[_TK["bull"], _TK["bear"]],
-            text=[breadth["near_52w_high"], breadth["near_52w_low"]],
-            textposition="auto",
-        ))
-        hl_fig.update_layout(
-            template="nse_pro", height=260,
-            yaxis_title="Number of Nifty 50 stocks",
-            margin=dict(l=0, r=0, t=20, b=0),
+    else:
+        def _cr(v):
+            return "—" if pd.isna(v) else f"{'+' if v >= 0 else '−'}₹{abs(v):,.0f} Cr"
+
+        _fii_sum, _dii_sum = _flows["fii_net"].sum(), _flows["dii_net"].sum()
+        _sessions = [
+            (d.strftime("%d %b"), None if pd.isna(f) else float(f), None if pd.isna(x) else float(x))
+            for d, f, x in zip(_flows["date"], _flows["fii_net"], _flows["dii_net"])
+        ]
+        st.markdown(
+            f'<div class="breadth-panel"><div class="breadth-lbl">Institutional flows · '
+            f'{len(_flows)}-session net</div>'
+            '<div class="breadth-h" role="heading" aria-level="3">FII &amp; DII activity</div>'
+            '<div class="flow-legend">Green = net-buy session, red = net-sell. '
+            'FII solid (left), DII faded (right).</div>'
+            + flow_bars(_sessions)
+            + '<div class="b-stats">'
+            f'<div class="b-stat"><div class="b-stat-k">FII net</div><div class="b-stat-v">{_cr(_fii_sum)}</div></div>'
+            f'<div class="b-stat"><div class="b-stat-k">DII net</div><div class="b-stat-v">{_cr(_dii_sum)}</div></div>'
+            "</div></div>",
+            unsafe_allow_html=True,
         )
-        st.plotly_chart(hl_fig, width="stretch")
