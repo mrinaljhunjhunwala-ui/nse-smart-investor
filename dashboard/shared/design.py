@@ -921,6 +921,121 @@ def apply_design():
     }
     .pick-card details.pick-more > summary::before { content: "▸ "; }
     .pick-card details.pick-more[open] > summary::before { content: "▾ "; }
+
+    /* ── Mockup layout kit (2026-09-12 "proposed layout" artifact) ─────────
+       Shared by the page-by-page mockup rollout. Python builders live in
+       ui_components.py: section_header / gate_strip / rank_chip /
+       signal_table / follow_card. Dark-only; every colour is a token. */
+    .sec-hd {
+        display: flex; flex-wrap: wrap; align-items: baseline;
+        justify-content: space-between; gap: 4px 12px; margin: 20px 0 10px 0;
+    }
+    .sec-hd-t {
+        font-family: var(--font-serif); font-weight: 400; font-size: 20px;
+        letter-spacing: -0.01em; color: var(--ink); margin: 0;
+    }
+    .sec-hd-a {
+        font-family: var(--font-mono); font-size: 10px; color: var(--faint);
+        letter-spacing: 0.08em; text-transform: uppercase;
+    }
+
+    /* Five-cell summary ribbon. Five is the ceiling (UI_UX_DESIGN §4.1). */
+    .gate-strip {
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+        background: var(--sunken); border: 1px solid var(--hairline);
+        border-radius: 6px; overflow: hidden; margin: 6px 0 14px 0;
+    }
+    .gate-cell { padding: 10px 14px; border-right: 1px solid var(--hairline-soft); min-width: 0; }
+    .gate-cell:last-child { border-right: none; }
+    .gate-k {
+        display: block; font-size: 10px; font-weight: 600; color: var(--dim);
+        letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    .gate-v {
+        display: block; margin-top: 3px; font-family: var(--font-mono);
+        font-size: 16px; font-weight: 600; color: var(--ink);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .gate-s { display: block; margin-top: 2px; font-size: 11px; color: var(--faint); }
+
+    /* Ranked data table: mono right-aligned numbers, hairline rows. */
+    .sig-table-wrap {
+        background: var(--card-lift); border: 1px solid var(--hairline);
+        border-radius: 6px; overflow-x: auto; margin-bottom: 10px;
+    }
+    table.sig-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.sig-table th {
+        padding: 9px 12px; text-align: left; white-space: nowrap;
+        background: var(--sunken); border-bottom: 1px solid var(--hairline);
+        font-size: 10px; font-weight: 600; color: var(--dim);
+        letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    table.sig-table td {
+        padding: 8px 12px; color: var(--ink); vertical-align: middle;
+        border-bottom: 1px solid var(--hairline-soft);
+    }
+    table.sig-table tr:last-child td { border-bottom: none; }
+    table.sig-table tbody tr:hover td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+    table.sig-table th.r, table.sig-table td.r {
+        text-align: right; white-space: nowrap;
+        font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    }
+    table.sig-table .sym { font-weight: 600; }
+    table.sig-table .co { display: block; margin-top: 1px; font-size: 11px; color: var(--dim); }
+
+    /* Rank chip: top three carry the accent in falling strength. */
+    .rank-chip {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 22px; height: 22px; border-radius: 3px;
+        font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+        background: var(--sunken); color: var(--ink-mid); border: 1px solid var(--hairline);
+    }
+    .rank-chip.r1 { background: var(--accent); color: var(--ground); border-color: var(--accent); }
+    .rank-chip.r2 {
+        background: color-mix(in srgb, var(--accent) 45%, var(--sunken)); color: var(--ink);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--hairline));
+    }
+    .rank-chip.r3 {
+        background: color-mix(in srgb, var(--accent) 22%, var(--sunken)); color: var(--ink);
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--hairline));
+    }
+
+    /* Follow-through cards (five across). */
+    .fu-grid {
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px; margin-bottom: 18px;
+    }
+    .fu-card {
+        position: relative; overflow: hidden; min-width: 0; padding: 12px 14px;
+        background: var(--surface); border: 1px solid var(--hairline); border-radius: 6px;
+    }
+    .fu-card.good {
+        background: linear-gradient(180deg, color-mix(in srgb, var(--bull) 7%, var(--surface)), var(--surface) 80%);
+        border-color: color-mix(in srgb, var(--bull) 30%, var(--hairline));
+    }
+    .fu-card.bad {
+        background: linear-gradient(180deg, color-mix(in srgb, var(--bear) 7%, var(--surface)), var(--surface) 80%);
+        border-color: color-mix(in srgb, var(--bear) 28%, var(--hairline));
+    }
+    .fu-rank {
+        position: absolute; top: 9px; right: 12px; font-family: var(--font-mono);
+        font-size: 10px; color: var(--faint); letter-spacing: 0.08em;
+    }
+    .fu-sym { font-weight: 600; font-size: 14px; color: var(--ink); }
+    .fu-sub { margin-top: 1px; font-size: 11px; color: var(--dim); }
+    .fu-row {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
+        margin-top: 8px; padding-top: 7px; border-top: 1px dotted var(--hairline);
+    }
+    .fu-k { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
+    .fu-v { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+    .fu-foot { margin-top: 9px; }
+
+    @media (max-width: 900px) {
+        .gate-strip, .fu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .gate-cell { border-bottom: 1px solid var(--hairline-soft); }
+    }
     </style>""".replace("/*__COLOR_TOKENS__*/", f"      /* colour tokens: dashboard/shared/tokens.py */\n{_css_vars()}"),
         unsafe_allow_html=True,
     )
