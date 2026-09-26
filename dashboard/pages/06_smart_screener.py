@@ -1,237 +1,217 @@
-"""Smart Screener - NSE Smart Investor (multipage page; body verbatim from app.py)."""
+"""Smart Screener - NSE Smart Investor.
+
+LAYOUT (mockup artboard 08, 2026-09-12 "proposed layout" artifact)
+────────────────────────────────────────────────────────────────────
+Screen presets across the top, a filter panel on the left, the result set
+on the right: count + export header, the ranked table, and one detail panel
+for the selected setup (replaces 30 stacked expanders).
+
+SCR-PERSIST  Results now live in st.session_state. Before, they only existed
+             in the run where "Run Screen" was clicked, so any later widget
+             interaction threw a finished multi-minute scan away. The revenue
+             growth filter now narrows the stored result set live instead of
+             being frozen at scan time.
+"""
 import os
 import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import datetime as _dt
+import html
+import logging
+
 import pandas as pd
 import streamlit as st
 
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
-from dashboard.shared.cache import get_vix_info
-from dashboard.shared.trade_utils import _action_color, _action_emoji
+from dashboard.shared.cache import get_vix_info, get_display_name
 from dashboard.shared.chart_helpers import render_top_bar
+from dashboard.shared.trade_utils import _display_label, _paper_trade_popover
+from dashboard.shared.ui_components import (
+    chip_pill, chip_tag, empty_state, fmt_inr, gate_strip, rank_chip, section_header,
+)
+
+_log = logging.getLogger("dashboard.smart_screener")
 
 apply_design()
 render_sidebar(current="Smart Screener")
 render_top_bar()
 
-# ───────────────────────── page body (de-indented from app.py) ─────────────────────────
 st.markdown('<h1 class="page-title-serif">Smart <em>Stock Screener</em></h1>', unsafe_allow_html=True)
-
 st.markdown(
-    "Scan the NSE universe using 4 proven screens — oversold bounce, "
-    "momentum leaders, breakouts, and pullback entries.  \n"
-    "Each match is enriched with a **trend-quality score** (0–90 composite — trend health, "
-    "not a return forecast)."
+    '<p class="page-subtitle">Scan an NSE universe with a screen preset. Each match can carry the '
+    '0–90 trend-quality composite: trend health, not a return forecast.</p>',
+    unsafe_allow_html=True,
 )
 
-# FIX SCR-XREF — the three screener-family pages (this one, Tomorrow's Watchlist,
-# TQS Scanner) all answer "which names should I look at" but pick different
-# universes / different scoring engines / different refresh cadences. Users
-# regularly ran ONE of the three, didn't find what they expected, and gave up
-# — not realising the other two existed. Cross-links here so someone starting
-# on any of the three learns the map.
-with st.expander("↔️ Also see: Tomorrow's Watchlist · TQS Scanner", expanded=False):
-    st.markdown(
-        "- **Tomorrow's Watchlist** — the same style of scan, but pre-computed in "
-        "the background on yesterday's close so you don't wait. Use when you want "
-        "next-session setups without kicking off a live scan.\n"
-        "- **TQS Scanner** — a *different* scoring engine (four-pillar Trend "
-        "Quality Score, 0-90) applied to the same universes. Cross-check a "
-        "name here against its TQS reading before acting."
-    )
-
-# Phase 1 (UI honesty): regime reliability next to live score output
-from dashboard.shared.disclosures import (
-    render_regime_reliability_note as _scr_regime_note,
-    render_score_methodology as _scr_score_methodology,
+# ── Presets across the top ───────────────────────────────────────────────────
+_PRESETS = {
+    "All 4 screens":    "all",
+    "Oversold bounce":  "oversold",
+    # FIX SR1: was "momentum" — collided with the legacy CLI strategy string in
+    # trading/signals.py and silently ran check_momentum_signal() instead of
+    # check_momentum_leader().
+    "Momentum leaders": "momentum_leader",
+    "Breakouts":        "breakout",
+    "Pullback to SMA20": "pullback_SMA20",
+    "VCP (Minervini)":  "vcp",
+}
+screen_choice = st.pills(
+    "Screen preset", list(_PRESETS), default="All 4 screens", required=True,
+    key="scr_preset", label_visibility="collapsed",
+    help=("VCP = Volatility Contraction Pattern (Mark Minervini). Finds the OPPOSITE "
+          "of oversold: Stage-2 uptrend, tight base, volume dry-up, right at the pivot. "
+          "Very selective; expect fewer matches than the other screens."),
 )
-_scr_regime_note()
-_scr_score_methodology()
+screen_key = _PRESETS.get(screen_choice or "All 4 screens", "all")
 
-sc1, sc2, sc3 = st.columns(3)
-with sc1:
-    universe_choice = st.selectbox(
-        "Universe",
-        ["NIFTY 50 (50 stocks)", "NIFTY 100 (100 stocks)",
-         "NIFTY 200 (200 stocks)", "NIFTY 500 (~400 stocks)"],
-    )
-    universe_map = {
-        "NIFTY 50 (50 stocks)":    "nifty50",
-        "NIFTY 100 (100 stocks)":  "nifty100",
-        "NIFTY 200 (200 stocks)":  "nifty200",
-        "NIFTY 500 (~400 stocks)": "nifty500",
-    }
-    universe_key = universe_map[universe_choice]
-with sc2:
-    screen_choice = st.selectbox(
-        "Screen type",
-        ["All 4 screens", "Oversold Bounce", "Momentum Leaders",
-         "Breakouts", "Pullback to SMA", "VCP (Minervini)"],
-        help=(
-            "VCP = Volatility Contraction Pattern (Mark Minervini). Finds "
-            "the OPPOSITE of oversold: Stage-2 uptrend, tight base, volume "
-            "dry-up, right at the pivot. Very selective — expect fewer "
-            "matches than the other screens."
-        ),
-    )
-    screen_map = {
-        "All 4 screens": "all",
-        "Oversold Bounce": "oversold",
-        "Momentum Leaders": "momentum_leader",   # FIX SR1: was "momentum" — collided
-                                                  # with the legacy CLI strategy string
-                                                  # in trading/signals.py and silently
-                                                  # ran check_momentum_signal() instead
-                                                  # of check_momentum_leader().
-        "Breakouts": "breakout",
-        "Pullback to SMA": "pullback_SMA20",
-        "VCP (Minervini)": "vcp",
-    }
-    screen_key = screen_map[screen_choice]
-with sc3:
-    enrich_scores = st.checkbox("Enrich with trend-quality score", value=True,
-                                help="Adds the 0–90 composite score to each result (slower)")
+_UNIVERSES = {
+    "NIFTY 50 (50 stocks)":    "nifty50",
+    "NIFTY 100 (100 stocks)":  "nifty100",
+    "NIFTY 200 (200 stocks)":  "nifty200",
+    "NIFTY 500 (~400 stocks)": "nifty500",
+}
+_RG_THRESH = {"Any": None, "> 0%": 0.0, "> 5%": 5.0, "> 10%": 10.0, "> 15%": 15.0}
 
-# ── Revenue-growth filter (R1 — per docs/REVENUE_GROWTH_DISCOVERY_AUDIT.md) ────────
-# Thresholds capped at 15%: the audit showed >20% concentrates results into one
-# sector and silently removes 19/21 top trend-quality names. Default "Any" so
-# the column informs without filtering; missing data is included by default.
-rgf1, rgf2 = st.columns([2, 3])
-with rgf1:
-    rg_filter = st.selectbox(
-        "Revenue growth filter",
-        ["Any", "> 0%", "> 5%", "> 10%", "> 15%"],
-        index=0, key="scr_rg_filter",
-        help="Filters results by annualised revenue growth (audited statements). "
-             "Capped at 15% — higher thresholds were shown to distort discovery.",
-    )
-with rgf2:
-    st.write("")
-    rg_excl_missing = st.toggle(
-        "Exclude stocks without growth data",
-        value=False, key="scr_rg_excl",
-        help="Off (default): stocks with no growth data stay visible and show '—'. "
-             "Only ~4% of the universe lacks data.",
-    )
+_left, _right = st.columns([1.15, 3], gap="large")
 
-scan_btn = st.button("🔍 Run Screen", type="primary")
+# ── Filter panel (left) ──────────────────────────────────────────────────────
+with _left:
+    with st.container(border=True):
+        st.markdown('<div class="t-label">Filters</div>', unsafe_allow_html=True)
+        universe_choice = st.selectbox("Universe", list(_UNIVERSES))
+        enrich_scores = st.toggle(
+            "Trend-quality score", value=True,
+            help="Adds the 0–90 composite score to each result (slower).")
+        # Revenue-growth filter (R1 — docs/REVENUE_GROWTH_DISCOVERY_AUDIT.md).
+        # Capped at 15%: >20% concentrated results into one sector and silently
+        # removed 19/21 top trend-quality names. Default "Any" so the column
+        # informs without filtering; missing data is included by default.
+        rg_filter = st.selectbox(
+            "Revenue growth", list(_RG_THRESH), index=0, key="scr_rg_filter",
+            help="Filters results by annualised revenue growth (audited statements). "
+                 "Capped at 15%: higher thresholds were shown to distort discovery.")
+        rg_excl_missing = st.toggle(
+            "Hide missing growth data", value=False, key="scr_rg_excl",
+            help="Off (default): stocks with no growth data stay visible and show '–'. "
+                 "Only ~4% of the universe lacks data.")
+        scan_btn = st.button("🔍 Run screen", type="primary", width="stretch")
 
-if scan_btn:
+    # Phase 1 (UI honesty): regime reliability next to live score output
+    from dashboard.shared.disclosures import (
+        render_regime_reliability_note as _scr_regime_note,
+        render_score_methodology as _scr_score_methodology,
+    )
+    _scr_regime_note()
+    _scr_score_methodology()
+
+    # FIX SCR-XREF — the three screener-family pages (this one, Tomorrow's
+    # Watchlist, TQS Scanner) answer "which names should I look at" with
+    # different universes / engines / cadences. Cross-links teach the map.
+    with st.expander("↔️ Also see", expanded=False):
+        st.markdown(
+            "- **Tomorrow's Watchlist**: the same style of scan, pre-computed on "
+            "yesterday's close so you don't wait.\n"
+            "- **TQS Scanner**: a *different* scoring engine (four-pillar Trend "
+            "Quality Score, 0-90) on the same universes. Cross-check a name here "
+            "against its TQS reading before acting."
+        )
+
+
+# ── Scan (writes the result set to session state) ────────────────────────────
+def _run_scan() -> None:
     from data.universe import get_universe
     from trading.signals import scan_tickers
-    universe = get_universe(universe_key)
+    universe = get_universe(_UNIVERSES[universe_choice])
 
     with st.spinner(f"Scanning {len(universe)} stocks… this may take a few minutes…"):
         signals = scan_tickers(universe, strategy=screen_key, period="1y")
 
-    if not signals:
-        st.info("No signals found for the current screen. Try a broader universe or different screen.")
-    else:
-        st.success(f"✅ Found **{len(signals)} setups** across {len(universe)} stocks!")
+    if signals and enrich_scores:
+        from analysis.score import score_stock
         vix_info = get_vix_info()
+        prog = st.progress(0, text="Scoring matches…")
+        for i, sig in enumerate(signals):
+            try:
+                cs = score_stock(sig["ticker"], period="1y", vix_info=vix_info)
+                sig["composite_score"] = round(cs.score, 1)
+                sig["grade"]           = cs.grade
+                sig["action"]          = cs.action
+                sig["narrative"]       = cs.headline
+                sig["stop_loss"]       = round(cs.stop_loss, 2)
+                sig["target"]          = round(cs.target, 2)
+            except Exception as _score_e:
+                _log.debug("score_stock failed for %s: %s — marking unscored",
+                           sig.get("ticker"), _score_e)
+                # Unscored — never fake a neutral 50/"C" and rank it alongside
+                # real results.
+                sig["composite_score"] = None
+                sig["grade"]           = "–"
+                sig["action"]          = sig.get("action", "WATCHLIST")
+                sig["narrative"]       = ""
+            prog.progress((i + 1) / len(signals), text="Scoring matches…")
+        prog.empty()
+        signals = sorted(
+            signals,
+            key=lambda x: (x.get("composite_score") is not None, x.get("composite_score") or 0),
+            reverse=True)  # unscored rows sort last
 
-        if enrich_scores:
-            from analysis.score import score_stock
-            scored_signals = []
-            prog = st.progress(0)
-            for i, sig in enumerate(signals):
-                try:
-                    cs = score_stock(sig["ticker"], period="1y", vix_info=vix_info)
-                    sig["composite_score"] = round(cs.score, 1)
-                    sig["grade"]           = cs.grade
-                    sig["action"]          = cs.action
-                    sig["narrative"]       = cs.headline
-                    sig["stop_loss"]       = round(cs.stop_loss, 2)
-                    sig["target"]          = round(cs.target, 2)
-                except Exception as _score_e:
-                    import logging; logging.getLogger("dashboard.smart_screener").debug("score_stock failed for %s: %s — marking unscored", sig.get("ticker"), _score_e)
-                    # Unscored — never fake a neutral 50/"C" and rank it
-                    # alongside real results.
-                    sig["composite_score"] = None
-                    sig["grade"]           = "—"
-                    sig["action"]          = sig.get("action", "WATCHLIST")
-                    sig["narrative"]       = "—"
-                scored_signals.append(sig)
-                prog.progress((i + 1) / len(signals))
-            signals = sorted(
-                scored_signals,
-                key=lambda x: (x.get("composite_score") is not None, x.get("composite_score") or 0),
-                reverse=True)  # unscored rows sort last
+    from concurrent.futures import ThreadPoolExecutor, wait as _fwait
+    if signals:
+        # Revenue-growth enrichment (R1) — bounded fetch, graceful "–". Per
+        # the discovery audit: never block indefinitely; display/filter only,
+        # the composite ordering above is never touched.
+        def _rg_for(sig):
+            try:
+                from analysis.fundamentals.service import default_service
+                from analysis.fundamentals.analytics import revenue_cagr
+                cf = default_service().get_fundamentals(sig["ticker"])
+                if cf is not None:
+                    r = revenue_cagr(cf, years=5)
+                    if getattr(r, "available", False) and r.value is not None:
+                        return float(r.value)
+            except Exception as _rg_thr_e:
+                _log.debug("rev growth fetch failed for %s: %s", sig.get("ticker"), _rg_thr_e)
+            return None
 
-        # ── Revenue-growth enrichment (R1) — bounded fetch, graceful "—" ──────
-        # Per the discovery audit: never block indefinitely; anything not back
-        # within the time budget renders as "—". Display/filter only — the
-        # ordering above (composite score) is never touched.
         with st.spinner("Fetching revenue growth for results…"):
-            from concurrent.futures import ThreadPoolExecutor, wait as _fwait
-
-            def _rg_for(sig):
-                try:
-                    from analysis.fundamentals.service import default_service
-                    from analysis.fundamentals.analytics import revenue_cagr
-                    cf = default_service().get_fundamentals(sig["ticker"])
-                    if cf is not None:
-                        r = revenue_cagr(cf, years=5)
-                        if getattr(r, "available", False) and r.value is not None:
-                            return float(r.value)
-                except Exception as _rg_thr_e:
-                    import logging; logging.getLogger("dashboard.smart_screener").debug("rev growth fetch failed for %s: %s", sig.get('ticker'), _rg_thr_e)
-                return None
-
             _rg_pool = ThreadPoolExecutor(max_workers=8)
             try:
                 _rg_futs = {_rg_pool.submit(_rg_for, s): s for s in signals}
-                _done, _ = _fwait(list(_rg_futs.keys()), timeout=30)
+                _done, _ = _fwait(list(_rg_futs), timeout=30)
                 for _f in _done:
                     try:
                         _rg_futs[_f]["rev_growth"] = _f.result(timeout=0)
-                    except Exception as _rg_res_e:
-                        import logging; logging.getLogger("dashboard.smart_screener").debug("rev growth result fetch failed for %s: %s", _rg_futs[_f].get("ticker"), _rg_res_e)
+                    except Exception:
                         _rg_futs[_f]["rev_growth"] = None
             finally:
-                # BUGFIX: previously shutdown(wait=False) left any still-running
-                # fetch threads executing in the background indefinitely after
-                # this function returned. cancel_futures=True (Py3.9+) drops
-                # everything that hasn't started yet instead of leaking threads;
-                # already-running fetches still finish naturally but are no
-                # longer joined or waited on.
+                # cancel_futures drops anything not yet started instead of
+                # leaking threads after the page run ends.
                 _rg_pool.shutdown(wait=False, cancel_futures=True)
-            for s in signals:
-                s.setdefault("rev_growth", None)
+        for s in signals:
+            s.setdefault("rev_growth", None)
 
-        # ── Apply the growth filter (subsets only — never reorders) ───────────
-        _rg_th = {"Any": None, "> 0%": 0.0, "> 5%": 5.0,
-                  "> 10%": 10.0, "> 15%": 15.0}[rg_filter]
-        _n_before = len(signals)
-        if _rg_th is not None or rg_excl_missing:
-            def _passes(s):
-                g = s.get("rev_growth")
-                if g is None:
-                    return not rg_excl_missing
-                return True if _rg_th is None else g > _rg_th
-            signals = [s for s in signals if _passes(s)]
-            _n_missing_kept = sum(1 for s in signals if s.get("rev_growth") is None)
-            st.caption(
-                f"🔎 Revenue-growth filter: **{len(signals)} of {_n_before}** setups kept"
-                + (f" (incl. {_n_missing_kept} without growth data — shown as '—')"
-                   if _n_missing_kept else "")
-                + ". Ordering is unchanged — the filter only narrows the list."
-            )
-        from dashboard.shared.disclosures import (
-            render_revenue_growth_evidence as _scr_rg_evidence,
-        )
-        _scr_rg_evidence()
+        # Sparklines — 22 daily closes via the 5-min-cached _sparkline_closes;
+        # anything not back in 15 s renders as an empty cell.
+        from dashboard.shared.cache import _sparkline_closes
+        _sp_pool = ThreadPoolExecutor(max_workers=8)
+        try:
+            _sp_futs = {_sp_pool.submit(_sparkline_closes, s["ticker"]): s for s in signals[:30]}
+            _sp_done, _ = _fwait(list(_sp_futs), timeout=15)
+            for _f in _sp_done:
+                try:
+                    _sp_futs[_f]["_spark"] = _f.result(timeout=0) or []
+                except Exception:
+                    _sp_futs[_f]["_spark"] = []
+        finally:
+            _sp_pool.shutdown(wait=False, cancel_futures=True)
 
-        # P2 · signal-table pattern — one-glance ranked summary above the
-        # per-setup cards: rank chip, posture (shape + honest label), sector,
-        # score bar, R:R and revenue growth. Same `signals` list, same order.
-        # R:R computed once per signal, reused by the summary table and cards.
-        # Falls back to None ("—") whenever the risk leg isn't a sane long —
-        # never clamps a zero/negative risk up to 0.01 (inflated R:R bug).
-        for _sg in (signals or [])[:30]:
+        # R:R computed once per signal. None ("–") whenever the risk leg isn't
+        # a sane long — never clamp a zero/negative risk up to 0.01.
+        for _sg in signals:
             _rr = _sg.get("rr_ratio")
             if _rr is None:
                 _px = _sg.get("price", 0) or 0
@@ -241,60 +221,155 @@ if scan_btn:
                 _rr = round((_tp - _px) / _risk, 1) if (_tp and _risk > 0.01) else None
             _sg["_rr"] = _rr
 
-        if signals:
+    st.session_state["scr_run"] = {
+        "signals":  signals or [],
+        "universe": universe_choice,
+        "n_universe": len(universe),
+        "screen":   screen_choice,
+        "enriched": bool(enrich_scores),
+        "ran_at":   _dt.datetime.now().strftime("%d %b %H:%M"),
+    }
+    st.session_state.pop("scr_detail", None)
+
+
+def _px(v) -> str:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "–"
+    if not f or f <= 0:
+        return "–"
+    return "₹" + fmt_inr(f, 2 if f < 1000 else 0)
+
+
+def _rg_passes(sig) -> bool:
+    g = sig.get("rev_growth")
+    if g is None:
+        return not rg_excl_missing
+    th = _RG_THRESH.get(rg_filter)
+    return True if th is None else g > th
+
+
+def _render_detail(sig: dict, rank: int, enriched: bool) -> None:
+    t = sig["ticker"].replace(".NS", "")
+    price = sig.get("price", 0) or 0
+    sl = sig.get("sl", sig.get("stop_loss", 0)) or 0
+    tp = sig.get("tp", sig.get("target", None))
+    rr = sig.get("_rr")
+    rg = sig.get("rev_growth")
+    sector = sig.get("sector", "") or ""
+    cs = sig.get("composite_score")
+    with st.container(border=True):
+        _chips = chip_tag(html.escape(str(sig.get("screen", "") or "screen").replace("_", " ")))
+        if sector:
+            _chips += chip_tag(html.escape(sector))
+        _score = (f'<span class="t-value-sm">{cs:.0f}/90</span>' if (enriched and cs is not None) else "")
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+            f'{rank_chip(rank)}<span style="font-weight:700;font-size:16px;color:var(--ink)">{html.escape(t)}</span>'
+            f'<span style="color:var(--dim);font-size:12px">{html.escape(get_display_name(sig["ticker"]))}</span>'
+            f'{chip_pill(html.escape(_display_label(sig.get("action", "WATCHLIST"))), "neutral")}'
+            f'{_chips}<span style="margin-left:auto">{_score}</span></div>',
+            unsafe_allow_html=True,
+        )
+        _rr_tone = ("bull" if rr >= 2 else "amber") if rr else "dim"
+        st.markdown(gate_strip([
+            ("Entry", _px(price), "last close"),
+            ("Stop", _px(sl), str(sig.get("stop_type", "atr")).upper() + " stop"),
+            ("Target", _px(tp) if tp else "Trail SMA20", "scenario, not a call"),
+            ("R:R", f'<span style="color:var(--{_rr_tone})">{rr:.1f}x</span>' if rr else "–",
+             "reward per unit of risk"),
+            ("Rev growth /yr", f"{rg:+.1f}%" if rg is not None else "–", "audited statements"),
+        ]), unsafe_allow_html=True)
+        if sig.get("reason"):
+            st.caption(f"📌 {sig['reason']}")
+        if enriched and sig.get("narrative"):
+            st.markdown(f'<div class="t-body" style="color:var(--ink-mid)">{html.escape(sig["narrative"])}</div>',
+                        unsafe_allow_html=True)
+        b1, b2 = st.columns(2)
+        with b1:
+            if price and sl and tp and price > sl:
+                _paper_trade_popover(sig["ticker"], price, sl, tp,
+                                     reason=f"Screener ({sig.get('screen', '')}): {sig.get('reason', '')}",
+                                     key=f"scr_{sig['ticker']}", label=f"📌 Paper Trade {t}")
+        with b2:
+            if st.button(f"📊 Analyze {t}", key=f"scr_{sig['ticker']}_analyze", width="stretch"):
+                st.session_state["analyze_ticker"] = sig["ticker"]
+                st.session_state["_goto_page"] = "🔍 Analyze Stock"
+                st.rerun()
+
+
+# ── Result set (right) ───────────────────────────────────────────────────────
+with _right:
+    if scan_btn:
+        _run_scan()
+
+    run = st.session_state.get("scr_run")
+    if not run:
+        st.markdown(empty_state(
+            "Pick a preset and run the screen",
+            "Results stay on the page while you filter and inspect them.", icon="🔍"),
+            unsafe_allow_html=True)
+    elif not run["signals"]:
+        st.markdown(empty_state(
+            "No setups for this screen",
+            f"{run['screen']} on {run['universe']} found nothing. "
+            "Try a broader universe or another preset.", icon="∅"),
+            unsafe_allow_html=True)
+    else:
+        _all = run["signals"]
+        signals = [s for s in _all if _rg_passes(s)]
+        _enriched = run["enriched"]
+        _hc1, _hc2 = st.columns([4, 1], vertical_alignment="bottom")
+        with _hc1:
+            _filtered_note = (f" · revenue filter kept {len(signals)} of {len(_all)}"
+                              if len(signals) != len(_all) else "")
+            st.markdown(
+                section_header(
+                    f'<span style="color:var(--accent)">{len(signals)}</span> setups match',
+                    f"{html.escape(run['screen'])} · {html.escape(run['universe'])} · "
+                    f"run {run['ran_at']}{_filtered_note}"),
+                unsafe_allow_html=True)
+        with _hc2:
+            st.download_button(
+                "↗ Export CSV",
+                data=pd.DataFrame(signals).drop(columns=["_spark"], errors="ignore")
+                    .to_csv(index=False).encode(),
+                file_name="nse_screener.csv", mime="text/csv", width="stretch",
+            )
+
+        if not signals:
+            st.markdown(empty_state("Revenue filter removed every setup",
+                                    "Loosen the revenue-growth filter to see them again."),
+                        unsafe_allow_html=True)
+        else:
             from dashboard.shared.table_styles import (
                 posture_label as _ts_posture, pinned_text_col as _ts_pin,
             )
-            # Sparkline column — 22 daily closes per row via the shared,
-            # 5-min-cached _sparkline_closes. Same bounded-pool pattern as the
-            # revenue-growth fetch above: anything not back in 15 s renders as
-            # an empty cell, never blocks the table.
-            from concurrent.futures import ThreadPoolExecutor as _SpPool, wait as _sp_wait
-            from dashboard.shared.cache import _sparkline_closes
-            _spark = {}
-            _sp_pool = _SpPool(max_workers=8)
-            try:
-                _sp_futs = {_sp_pool.submit(_sparkline_closes, _sg["ticker"]): _sg["ticker"]
-                            for _sg in signals[:30]}
-                _sp_done, _ = _sp_wait(list(_sp_futs), timeout=15)
-                for _f in _sp_done:
-                    try:
-                        _spark[_sp_futs[_f]] = _f.result(timeout=0) or []
-                    except Exception:
-                        _spark[_sp_futs[_f]] = []
-            finally:
-                _sp_pool.shutdown(wait=False, cancel_futures=True)
-
-            _sig_rows = []
-            for _rank, _sg in enumerate(signals[:30], start=1):
-                _sg_px = _sg.get("price", 0) or 0
-                _sig_rows.append({
-                    "#": f"#{_rank}",
-                    "Ticker": _sg["ticker"].replace(".NS", ""),
-                    "Posture": _ts_posture(_sg.get("action", "WATCHLIST")),
-                    "Screen": _sg.get("screen", "") or "—",
-                    "Sector": _sg.get("sector", "") or "—",
-                    "Score": _sg.get("composite_score") if enrich_scores else None,
-                    "Price": _sg_px,
-                    "22d": _spark.get(_sg["ticker"], []),
-                    "R:R": _sg["_rr"],
-                    "Rev Growth /yr": _sg.get("rev_growth"),
-                })
-            _sig_df = pd.DataFrame(_sig_rows)
+            _top = signals[:30]
+            _sig_df = pd.DataFrame([{
+                "#": f"#{i}",
+                "Ticker": s["ticker"].replace(".NS", ""),
+                "Posture": _ts_posture(s.get("action", "WATCHLIST")),
+                "Screen": (s.get("screen", "") or "–").replace("_", " "),
+                "Sector": s.get("sector", "") or "–",
+                "Score": s.get("composite_score") if _enriched else None,
+                "Price": s.get("price", 0) or 0,
+                "22d": s.get("_spark", []),
+                "R:R": s.get("_rr"),
+                "Rev Growth /yr": s.get("rev_growth"),
+            } for i, s in enumerate(_top, start=1)])
             # Coerce numeric columns so a missing value renders as an empty
             # cell — an all-None leading run left R:R as object dtype and the
             # grid printed the literal string "None".
             for _nc in ("Score", "Price", "R:R", "Rev Growth /yr"):
                 _sig_df[_nc] = pd.to_numeric(_sig_df[_nc], errors="coerce")
-            if not enrich_scores:
+            if not _enriched:
                 _sig_df = _sig_df.drop(columns=["Score"])
             st.dataframe(
-                _sig_df,
-                hide_index=True,
-                width="stretch",
+                _sig_df, hide_index=True, width="stretch",
                 column_config={
-                    # Pin rank too — pinned columns render first, so pinning only Ticker
-                    # pushed "#" to the right of it.
+                    # Pin rank too — pinned columns render first.
                     "#": st.column_config.TextColumn("#", width="small", pinned=True),
                     "Ticker": _ts_pin("Ticker"),
                     "Score": st.column_config.ProgressColumn(
@@ -307,80 +382,30 @@ if scan_btn:
                         help="Last 22 daily closes (shape only — each row is self-scaled)."),
                 },
             )
-            st.caption("Ranked summary — expand a setup below for entry, "
-                       "stop and target detail.")
+            if len(signals) > 30:
+                st.caption(f"Showing the top 30 of {len(signals)} by composite; "
+                           "the CSV export has all of them.")
 
-        # Display results as Trade Setup Cards
-        for sig in signals[:30]:  # cap at 30 for performance
-            t      = sig["ticker"].replace(".NS", "")
-            action = sig.get("action", "WATCHLIST")
-            card   = _action_color(action)
-            emoji  = _action_emoji(action)
-            _s_price = sig.get("price", 0)
-            _s_sl    = sig.get("sl", sig.get("stop_loss", 0)) or 0
-            _s_tp    = sig.get("tp", sig.get("target", None))
-            _s_rr = sig.get("_rr")
-            _s_sector    = sig.get("sector", "")
-            _s_stop_type = sig.get("stop_type", "atr")
-            _cs_v = sig.get("composite_score")
-            _s_score_str = ((f"Score {_cs_v}/90 " if _cs_v is not None else "Score —/90 ")
-                            + f"[{sig.get('grade', '—')}]") if enrich_scores else ""
-            _s_rr_str    = f"R:R {_s_rr:.1f}x" if _s_rr else ""
-            _header = (f"{emoji} {t}  |  ₹{_s_price:,.2f}  "
-                       f"|  {sig.get('screen','')}  "
-                       + (f"|  {_s_rr_str}  " if _s_rr_str else "")
-                       + (f"|  {_s_sector}  " if _s_sector else "")
-                       + _s_score_str)
-            _s_rg = sig.get("rev_growth")
-            with st.expander(_header, expanded=False):
-                d1, d2, d3, d4, d5, d6 = st.columns(6)
-                d1.metric("Entry",  f"₹{_s_price:,.2f}")
-                d2.metric("Stop-Loss", f"₹{_s_sl:,.2f}",
-                          delta=f"({_s_stop_type})",
-                          delta_color="off")
-                d3.metric("Target", f"₹{_s_tp:,.2f}" if _s_tp else "Trail SMA20")
-                d4.metric("R:R",    f"{_s_rr:.1f}x" if _s_rr else "—",
-                          delta="✅ Good" if (_s_rr or 0) >= 2 else "⚠️ Low",
-                          delta_color="normal" if (_s_rr or 0) >= 2 else "inverse")
-                d5.metric("Sector", _s_sector or "—")
-                d6.metric("Rev Growth /yr",
-                          f"{_s_rg:+.1f}%" if _s_rg is not None else "—",
-                          help="Annualised revenue growth from audited statements — "
-                               "a research-backed observation, not a buy signal.")
-                if sig.get("reason"):
-                    st.caption(f"📌 {sig['reason']}")
-                if enrich_scores and sig.get("narrative"):
-                    st.markdown(
-                        f'<div class="{card}" style="padding:10px 14px">'
-                        f'<b>{sig.get("narrative","")}</b></div>',
-                        unsafe_allow_html=True
-                    )
+            _sel = st.selectbox(
+                "Setup detail & actions", options=list(range(len(_top))),
+                format_func=lambda i: (f"#{i + 1}  {_top[i]['ticker'].replace('.NS', '')}"
+                                       + (f" · {_top[i]['composite_score']:.0f}/90"
+                                          if _enriched and _top[i].get("composite_score") is not None
+                                          else "")),
+                key="scr_detail",
+            )
+            _render_detail(_top[_sel], _sel + 1, _enriched)
 
-        # DT1 + DT2 · attribution below the screener results. Prices come
-        # from data/fetcher.py's tiered pipeline; screens run per-scan.
+        from dashboard.shared.disclosures import (
+            render_revenue_growth_evidence as _scr_rg_evidence,
+        )
+        _scr_rg_evidence()
+
+        # DT1 + DT2 · attribution below the results. Prices come from
+        # data/fetcher.py's tiered pipeline; screens run per scan.
         try:
             from dashboard.shared.ui_components import data_as_of as _scr_asof
-            import datetime as _scr_dt
-            _scr_when = _scr_dt.datetime.now().strftime("%H:%M IST")
-            st.markdown(
-                _scr_asof(_scr_when, source="yfinance",
-                          ttl_hint="scan cache 15 min"),
-                unsafe_allow_html=True,
-            )
+            st.markdown(_scr_asof(run["ran_at"], source="yfinance", ttl_hint="scan cache 15 min"),
+                        unsafe_allow_html=True)
         except Exception:
             pass
-
-        # Download results
-        result_df = pd.DataFrame(signals)
-        if not result_df.empty:
-            st.download_button(
-                "📥 Download Watchlist CSV",
-                data=result_df.to_csv(index=False).encode(),
-                file_name="nse_watchlist.csv",
-                mime="text/csv",
-            )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 5 — PAPER TRADES  (full UI — enter, track, close, analyse)
-# ═══════════════════════════════════════════════════════════════════════════════

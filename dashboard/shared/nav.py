@@ -911,9 +911,10 @@ def render_sidebar(current: str = None) -> None:
         from utils.vix import get_india_vix_regime as _nb_vix
         _nvr = _nb_vix().get("regime", "normal")
         if _nvr in ("fear", "panic"):
-            _notifs.append(("🔴", f"Market in {_nvr.upper()} (VIX) — protect capital", "#ff4757"))
+            # CC-COPY: descriptive only, no instruction (CLAUDE.md rule 1).
+            _notifs.append(("🔴", f"India VIX in the {_nvr} zone", "#ff4757"))
         elif _nvr == "complacency":
-            _notifs.append(("😴", "VIX complacent — tighten stops", "#ff9500"))
+            _notifs.append(("😴", "India VIX unusually low (complacency zone)", "#ff9500"))
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass

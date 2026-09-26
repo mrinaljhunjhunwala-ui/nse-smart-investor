@@ -1039,6 +1039,63 @@ def apply_design():
     .fu-v { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
     .fu-foot { margin-top: 9px; }
 
+    /* Sector heat grid: tint strength is set inline per cell (color-mix
+       of --bull / --bear into --surface), so only structure lives here. */
+    .heat-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+        gap: 1px; background: var(--hairline); border: 1px solid var(--hairline);
+        border-radius: 6px; overflow: hidden; margin-bottom: 16px;
+    }
+    .heat-cell {
+        min-height: 76px; padding: 11px 12px 12px; background: var(--surface);
+        display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .heat-name {
+        font-size: 11px; font-weight: 600; color: var(--ink-mid);
+        letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .heat-val { font-family: var(--font-mono); font-size: 15px; font-weight: 600; }
+    .heat-sub { font-family: var(--font-mono); font-size: 10px; color: var(--dim); }
+
+    /* Panel shell with a title bar (two-column rows). */
+    .kit-panel {
+        background: var(--card-lift); border: 1px solid var(--hairline);
+        border-radius: 6px; overflow: hidden; margin-bottom: 12px;
+    }
+    .kit-panel-hd {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+        padding: 11px 14px; border-bottom: 1px solid var(--hairline);
+    }
+    .kit-panel-t { font-weight: 600; font-size: 13px; color: var(--ink); }
+    .kit-panel-s { font-size: 11px; color: var(--dim); }
+    .kit-panel .sig-table-wrap { border: none; border-radius: 0; margin: 0; background: none; }
+
+    /* Change feed (verdict ledger). */
+    .ledger-list { list-style: none; margin: 0; padding: 0; }
+    .ledger-list li {
+        display: grid; grid-template-columns: 52px 1fr; gap: 12px;
+        padding: 10px 14px; border-bottom: 1px solid var(--hairline-soft); font-size: 13px;
+    }
+    .ledger-list li:last-child { border-bottom: none; }
+    .ledger-when { font-family: var(--font-mono); font-size: 11px; color: var(--dim); padding-top: 3px; }
+    .ledger-sym { font-weight: 600; color: var(--ink); margin-right: 6px; }
+    .ledger-note { margin-top: 3px; font-size: 11.5px; color: var(--dim); }
+
+    /* One-line provider health strip. */
+    .health-strip {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+        padding: 8px 12px; margin: 4px 0 8px 0; background: var(--sunken);
+        border: 1px solid var(--hairline); border-radius: 6px;
+        font-family: var(--font-mono); font-size: 11px; color: var(--dim);
+    }
+    .health-strip b {
+        font-family: var(--font-sans); font-size: 11px; font-weight: 600; color: var(--ink-mid);
+        letter-spacing: 0.08em; text-transform: uppercase;
+        padding-right: 10px; border-right: 1px solid var(--hairline);
+    }
+    .health-item { display: inline-flex; align-items: center; gap: 5px; }
+    .health-dot { width: 6px; height: 6px; border-radius: 50%; }
+
     @media (max-width: 900px) {
         .gate-strip, .fu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .gate-cell { border-bottom: 1px solid var(--hairline-soft); }
