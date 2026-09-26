@@ -90,7 +90,10 @@ from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
 from dashboard.shared.chart_helpers import render_top_bar
 from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
-from dashboard.shared.ui_components import chip_pill, ticker_hover_wrap
+import html as _html
+from dashboard.shared.ui_components import (
+    chip_pill, ticker_hover_wrap, section_header, share_bars, fmt_inr as _fmt_inr,
+)
 from dashboard.shared.trade_utils import (
     _action_emoji,
     _display_label,                # Phase 2 UI honesty
@@ -347,19 +350,22 @@ if _csv_source is not None:
     # quick 60s live-price cache. No per-stock table here anymore — that's
     # what the Decision Summary cards below are for, using PM's own
     # today_chg_pct so there's exactly one number per stock, not two.
+    _live_prices: dict = {}
+    _total_today_pnl = None
     try:
         _port_csv = _csv_source.copy()
         _port_tickers = tuple(
             (t if t.endswith(".NS") else t + ".NS")
             for t in _port_csv["ticker"].tolist()
         )
-        _live_col, _refresh_col = st.columns([5, 1])
+        # Mockup artboard 04: one KPI row. The separate live-price strip is
+        # gone; today's move is computed here and shown on the NAV tile.
+        _live_col, _refresh_col = st.columns([5, 1], vertical_alignment="bottom")
         with _refresh_col:
-            st.write("")
-            if st.button("🔄 Refresh Prices", key="port_refresh_live"):
+            if st.button("🔄 Refresh prices", key="port_refresh_live", width="stretch"):
                 clear_price_caches()
         with _live_col:
-            st.markdown("#### 📡 Live Prices (updates every 60 s)")
+            st.caption("Live prices refresh every 60 s; scores every 5 min.")
         _live_prices = _portfolio_live_prices(_port_tickers)
         if _live_prices:
             _total_today_pnl   = 0.0
@@ -378,29 +384,6 @@ if _csv_source is not None:
                     _total_port_value  += _cur * _qty
                     _total_invested    += _buy * _qty
 
-            _td_c = "var(--bull)" if _total_today_pnl >= 0 else "var(--bear)"
-            _ov_c = "var(--bull)" if _total_overall_pnl >= 0 else "var(--bear)"
-            _td_a = "▲" if _total_today_pnl >= 0 else "▼"
-            _ov_a = "▲" if _total_overall_pnl >= 0 else "▼"
-            _ov_p = (_total_overall_pnl / _total_invested * 100) if _total_invested > 0 else 0
-            st.markdown(
-                f'<div class="mobile-stack" style="display:flex;gap:14px;margin:0 0 14px 0">'
-                f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid {_td_c}">'
-                f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s Change</div>'
-                f'<div style="font-size:24px;font-weight:700;color:{_td_c}">{_td_a} ₹{abs(_total_today_pnl):,.0f}</div>'
-                f'</div>'
-                f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid {_ov_c}">'
-                f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Overall P&amp;L</div>'
-                f'<div style="font-size:24px;font-weight:700;color:{_ov_c}">{_ov_a} ₹{abs(_total_overall_pnl):,.0f} '
-                f'<span style="font-size:14px">({_ov_p:+.1f}%)</span></div>'
-                f'</div>'
-                f'<div style="flex:1;background:var(--surface);padding:14px 18px;border-radius:10px;border-left:5px solid var(--accent)">'
-                f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Portfolio Value</div>'
-                f'<div style="font-size:24px;font-weight:700;color:var(--ink)">₹{_total_port_value:,.0f}</div>'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
         else:
             st.caption("⚠️ Live prices unavailable — trying again. Showing scored data below once ready.")
     except Exception as _e:
@@ -461,23 +444,30 @@ if _csv_source is not None:
             _k_d   = "margin-top:3px;font-family:var(--font-mono);font-size:12px"
             _k_txt = ("font-family:'Inter',sans-serif;font-size:14px;"
                       "font-weight:500;margin-top:4px;letter-spacing:-.005em")
+            if _total_today_pnl is not None:
+                _nav_up = _total_today_pnl >= 0
+                _nav_delta = (
+                    f'<span style="color:{"var(--bull)" if _nav_up else "var(--bear)"}">'
+                    f'{"▲" if _nav_up else "▼"} ₹{_fmt_inr(abs(_total_today_pnl), 0)}</span>'
+                    '<span style="color:var(--dim)"> today</span>')
+            else:
+                _nav_delta = f'<span style="color:{_pn_col}">{_pn_sign}₹{_fmt_inr(summary.total_pnl, 0)}</span>'
             st.markdown(
-                f'<div style="display:grid;grid-template-columns:repeat(5,1fr);'
+                f'<div class="mobile-stack" style="display:grid;grid-template-columns:repeat(5,1fr);'
                 f'gap:10px;margin:8px 0 14px 0">'
                 # NAV -- hero tile
                 f'<div style="{_tile_hero}">'
                 f'<div style="{_k_lbl}">NAV</div>'
                 f'<div style="{_k_v}"><span style="{_k_ccy}">₹</span>'
-                f'{summary.total_current_value:,.0f}</div>'
-                f'<div style="{_k_d};color:{_pn_col}">'
-                f'{_pn_sign}₹{summary.total_pnl:,.0f}</div>'
+                f'{_fmt_inr(summary.total_current_value, 0)}</div>'
+                f'<div style="{_k_d}">{_nav_delta}</div>'
                 f'</div>'
                 # Total return
                 f'<div style="{_tile_common}">'
                 f'<div style="{_k_lbl}">Total return</div>'
                 f'<div style="{_k_v};color:{_pn_col}">'
                 f'{_pn_sign}{summary.total_pnl_pct:.1f}%</div>'
-                f'<div style="{_k_d};color:var(--dim)">vs cost</div>'
+                f'<div style="{_k_d};color:var(--dim)">{_pn_sign}₹{_fmt_inr(summary.total_pnl, 0)} vs cost</div>'
                 f'</div>'
                 # Health score
                 f'<div style="{_tile_common}">'
@@ -502,11 +492,35 @@ if _csv_source is not None:
                 unsafe_allow_html=True,
             )
 
+            # ── Portfolio posture strip (mockup artboard 04) ─────────────
+            # Spread of holdings across trend postures, by market value,
+            # plus the existing summary narrative. Holdings carry no pillar
+            # sub-scores, so none are shown (no invented numbers).
+            _PV_ORDER = ["STRONG BUY", "BUY", "WATCHLIST", "HOLD", "CAUTION", "EXIT"]
+            _PV_FILL = {"STRONG BUY": "var(--bull)", "BUY": "var(--bull)",
+                        "WATCHLIST": "var(--accent)", "HOLD": "var(--dim)",
+                        "CAUTION": "var(--amber)", "EXIT": "var(--bear)"}
+            _pv_hold = list(summary.holdings)
+            _pv_tot = sum(max(h.current_value, 0) for h in _pv_hold) or 1.0
+            _pv_rows = []
+            for _pa in _PV_ORDER + sorted({h.action for h in _pv_hold} - set(_PV_ORDER)):
+                _phs = [h for h in _pv_hold if h.action == _pa]
+                if not _phs:
+                    continue
+                _pvv = sum(max(h.current_value, 0) for h in _phs) / _pv_tot * 100
+                _pv_rows.append((_html.escape(_display_label(_pa)), _pvv,
+                                 f"{len(_phs)} · {_pvv:.0f}%", _PV_FILL.get(_pa, "var(--dim)")))
+            _pv_tone = {"A": "good", "B": "good", "C": "warn", "D": "bad", "F": "bad"}.get(
+                str(_grade_letter or "")[:1], "neutral")
             st.markdown(
-                f'<div class="card-blue"><span class="narrative">'
-                f'💡 <b>Portfolio Summary:</b> {summary.summary_narrative}'
-                f'</span></div>',
-                unsafe_allow_html=True
+                f'<div class="kit-panel"><div class="kit-panel-hd">'
+                f'<span class="kit-panel-t">Portfolio posture &nbsp;'
+                f'{chip_pill("Grade " + _html.escape(str(_grade_letter)), tone=_pv_tone)}</span>'
+                f'<span class="kit-panel-s">{summary.portfolio_score:.0f}/90 value-weighted · '
+                f'{len(_pv_hold)} holdings · share of value by posture</span></div>'
+                + share_bars(_pv_rows)
+                + f'<div class="kit-panel-note">{_html.escape(summary.summary_narrative or "")}</div></div>',
+                unsafe_allow_html=True,
             )
 
             # ── Auto-Signal Monitor — signal changes right above the decision cards ─
@@ -523,7 +537,8 @@ if _csv_source is not None:
             save_signal_monitor_state(_pf_cur)
 
             _sg1, _sg2 = st.columns([5, 2])
-            _sg1.markdown("### 🎯 Your Decision Summary")
+            _sg1.markdown(section_header("Holdings", "same scoring pass as the tiles above"),
+                          unsafe_allow_html=True)
             _pf_auto = _sg2.toggle("Auto-refresh (5 min)", key="pf_auto_signal")
 
             _pf_buys  = [h for h in summary.holdings if h.action in _PF_BUY]
@@ -569,7 +584,7 @@ if _csv_source is not None:
             # score_stock() — sector rank, VIX context, pattern detection,
             # entry/SL/TP reasoning — instead of throwing it away.
             _hh1, _hh2 = st.columns([3, 2])
-            _hh1.markdown("Sorted so the stock most needing a decision is easy to find.")
+            _hh1.caption("Sort order applies to the table and the holding picker.")
             with _hh2:
                 _h_sort = st.selectbox(
                     "Sort by",
@@ -609,77 +624,97 @@ if _csv_source is not None:
             # fetch — so it's mechanically the same numbers, just also
             # available at a glance across every holding at once, which the
             # cards' one-stock-at-a-time layout doesn't give you.
-            st.markdown("##### 📋 Holdings Table")
-            _tbl_rows = []
-            for _th in _hold_sorted:
-                _th_today = getattr(_th, "today_chg_pct", None)
-                _th_today_pnl = (
-                    _th.current_price * _th.quantity * (_th_today / 100.0)
-                    if _th_today is not None else None
+            _tbl_col, _alloc_col = st.columns([1.7, 1], gap="medium")
+            with _alloc_col:
+                # Sector allocation bars replace the pie that sat in
+                # "Deeper Analysis" (mockup artboard 04, right column).
+                _dv = summary.diversification
+                if _dv.sector_weights:
+                    _al_rows = [(_html.escape(str(_sn)), _sw, f"{_sw:.1f}%")
+                                for _sn, _sw in sorted(_dv.sector_weights.items(), key=lambda kv: -kv[1])]
+                    st.markdown(
+                        f'<div class="kit-panel"><div class="kit-panel-hd">'
+                        f'<span class="kit-panel-t">Sector allocation</span>'
+                        f'<span class="kit-panel-s">by market value · {_dv.n_sectors} sectors</span></div>'
+                        + share_bars(_al_rows)
+                        + f'<div class="kit-panel-note">Concentration '
+                          f'<b>{_html.escape(str(_dv.concentration_risk).lower())}</b>. '
+                          f'{_html.escape(_dv.advice or "")}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption("Sector allocation needs priced holdings.")
+            with _tbl_col:
+                _tbl_rows = []
+                for _th in _hold_sorted:
+                    _th_today = getattr(_th, "today_chg_pct", None)
+                    _th_today_pnl = (
+                        _th.current_price * _th.quantity * (_th_today / 100.0)
+                        if _th_today is not None else None
+                    )
+                    _tbl_rows.append({
+                        "Ticker": _th.ticker.replace(".NS", ""),
+                        "Price (₹)": _th.current_price,
+                        "Today %": _th_today,
+                        "Today ₹": _th_today_pnl,
+                        "Qty": _th.quantity,
+                        "Invested (₹)": _th.avg_buy_price * _th.quantity,
+                        "Value (₹)": _th.current_price * _th.quantity,
+                        "P&L (₹)": _th.pnl,
+                        "P&L %": _th.pnl_pct,
+                        "Posture": _display_label(_th.action),
+                        "Score": _th.score,
+                    })
+                # P2 · P&L table pattern — rows tinted by P&L %, ▲/▼ + sign
+                # colour on the signed columns (bold on big moves), Indian digit
+                # grouping on ₹ columns, Ticker pinned while scrolling sideways.
+                from dashboard.shared.table_styles import (
+                    arrow_fmt as _ts_arrow, pnl_styler as _ts_pnl,
+                    pinned_text_col as _ts_pin,
                 )
-                _tbl_rows.append({
-                    "Ticker": _th.ticker.replace(".NS", ""),
-                    "Price (₹)": _th.current_price,
-                    "Today %": _th_today,
-                    "Today ₹": _th_today_pnl,
-                    "Qty": _th.quantity,
-                    "Invested (₹)": _th.avg_buy_price * _th.quantity,
-                    "Value (₹)": _th.current_price * _th.quantity,
-                    "P&L (₹)": _th.pnl,
-                    "P&L %": _th.pnl_pct,
-                    "Posture": _display_label(_th.action),
-                    "Score": _th.score,
-                })
-            # P2 · P&L table pattern — rows tinted by P&L %, ▲/▼ + sign
-            # colour on the signed columns (bold on big moves), Indian digit
-            # grouping on ₹ columns, Ticker pinned while scrolling sideways.
-            from dashboard.shared.table_styles import (
-                arrow_fmt as _ts_arrow, pnl_styler as _ts_pnl,
-                pinned_text_col as _ts_pin,
-            )
-            from dashboard.shared.ui_components import fmt_inr as _ts_inr
-            _inr0 = lambda v: "—" if pd.isna(v) else f"₹{_ts_inr(v, 0)}"
-            _tbl_df = pd.DataFrame(_tbl_rows)
-            st.dataframe(
-                _ts_pnl(
-                    _tbl_df,
-                    tint_col="P&L %",
-                    signed_cols=["Today %", "Today ₹", "P&L (₹)", "P&L %"],
-                    bold_at={"Today %": 2.0, "P&L %": 10.0},
-                    formats={
-                        "Price (₹)":    lambda v: "—" if pd.isna(v) else f"₹{_ts_inr(v, 2)}",
-                        "Today %":      _ts_arrow(2, "%"),
-                        "Today ₹":      _ts_arrow(0, "", prefix="₹", indian=True),
-                        "Qty":          "{:.0f}",
-                        "Invested (₹)": _inr0,
-                        "Value (₹)":    _inr0,
-                        "P&L (₹)":      _ts_arrow(0, "", prefix="₹", indian=True),
-                        "P&L %":        _ts_arrow(2, "%"),
-                        "Score":        "{:.0f}/90",
-                    },
-                ),
-                width="stretch",
-                hide_index=True,
-                column_config={"Ticker": _ts_pin("Ticker")},
-            )
-            st.caption(
-                "Same numbers as the cards below, sourced from the same "
-                "scoring pass — just laid out for a quick scan across every "
-                "holding at once."
-            )
-            # DT1 + DT2 · attribution on the holdings table. Prices flow
-            # through data/fetcher.py's tiered pipeline (Angel One → Stooq
-            # → Yahoo); scores come out of PortfolioManager's per-run pass.
-            try:
-                from dashboard.shared.ui_components import data_as_of as _mp_asof
-                _mp_when = _dt.datetime.now().strftime("%H:%M IST")
-                st.markdown(
-                    _mp_asof(_mp_when, source="yfinance",
-                             ttl_hint="live-price cache 60 s · score cache 5 min"),
-                    unsafe_allow_html=True,
+                from dashboard.shared.ui_components import fmt_inr as _ts_inr
+                _inr0 = lambda v: "—" if pd.isna(v) else f"₹{_ts_inr(v, 0)}"
+                _tbl_df = pd.DataFrame(_tbl_rows)
+                st.dataframe(
+                    _ts_pnl(
+                        _tbl_df,
+                        tint_col="P&L %",
+                        signed_cols=["Today %", "Today ₹", "P&L (₹)", "P&L %"],
+                        bold_at={"Today %": 2.0, "P&L %": 10.0},
+                        formats={
+                            "Price (₹)":    lambda v: "—" if pd.isna(v) else f"₹{_ts_inr(v, 2)}",
+                            "Today %":      _ts_arrow(2, "%"),
+                            "Today ₹":      _ts_arrow(0, "", prefix="₹", indian=True),
+                            "Qty":          "{:.0f}",
+                            "Invested (₹)": _inr0,
+                            "Value (₹)":    _inr0,
+                            "P&L (₹)":      _ts_arrow(0, "", prefix="₹", indian=True),
+                            "P&L %":        _ts_arrow(2, "%"),
+                            "Score":        "{:.0f}/90",
+                        },
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                    column_config={"Ticker": _ts_pin("Ticker")},
                 )
-            except Exception:
-                pass
+                st.caption(
+                    "Same numbers as the cards below, sourced from the same "
+                    "scoring pass — just laid out for a quick scan across every "
+                    "holding at once."
+                )
+                # DT1 + DT2 · attribution on the holdings table. Prices flow
+                # through data/fetcher.py's tiered pipeline (Angel One → Stooq
+                # → Yahoo); scores come out of PortfolioManager's per-run pass.
+                try:
+                    from dashboard.shared.ui_components import data_as_of as _mp_asof
+                    _mp_when = _dt.datetime.now().strftime("%H:%M IST")
+                    st.markdown(
+                        _mp_asof(_mp_when, source="yfinance",
+                                 ttl_hint="live-price cache 60 s · score cache 5 min"),
+                        unsafe_allow_html=True,
+                    )
+                except Exception:
+                    pass
 
             # Aligned to design.py's "Dealing Room v2" tokens (bull #16c784 /
             # bear #ff4d4d / caution #f2a93b / accent #ff9500) instead of the
@@ -712,8 +747,17 @@ if _csv_source is not None:
             # pulse — that's correct (nothing ticked). commit() at loop end
             # prunes any tickers removed from the manual holdings list.
             _pf_pulse, _pf_pulse_commit = tick_pulse_tracker("_pf_holdings_prev")
-            _hc_grid = st.columns(2)
-            for _hi, h in enumerate(_hold_sorted):
+            # Mockup pattern shared with the scanner pages: the table is the
+            # overview; one selected holding gets the full card + actions
+            # (was a two-column wall of every card).
+            _pf_sel = (st.selectbox(
+                "Holding detail & actions", options=list(range(len(_hold_sorted))),
+                format_func=lambda i: (f"{_hold_sorted[i].ticker.replace('.NS', '')} · "
+                                       f"{_display_label(_hold_sorted[i].action)} · "
+                                       f"{_hold_sorted[i].pnl_pct:+.1f}%"),
+                key="pf_detail") if _hold_sorted else None)
+            _hc_grid = st.columns([1.3, 1])
+            for _hi, h in ([(0, _hold_sorted[_pf_sel])] if _pf_sel is not None else []):
                 _h_ac, _h_bg = _ACT_CARD_STYLE.get(
                     h.action, ("var(--dim)", "var(--sunken)"),
                 )
@@ -839,36 +883,7 @@ if _csv_source is not None:
             st.markdown("---")
             st.markdown("## 📊 Deeper Analysis (optional)")
 
-            # ── Diversification ────────────────────────────────────────
-            div = summary.diversification
-            if div.sector_weights:
-                with st.expander("📊 Sector Breakdown", expanded=False):
-                    div_df = pd.DataFrame(
-                        list(div.sector_weights.items()),
-                        columns=["Sector", "Weight (%)"]
-                    ).sort_values("Weight (%)", ascending=False)
-                    col_pie, col_txt = st.columns([1, 1])
-                    with col_pie:
-                        fig_pie = px.pie(
-                            div_df, names="Sector", values="Weight (%)",
-                            title="Portfolio by Sector",
-                            color_discrete_sequence=px.colors.qualitative.Set3,
-                        )
-                        fig_pie.update_layout(
-                            template="nse_pro", height=300,
-                            margin=dict(l=0, r=0, t=40, b=0),
-                        )
-                        st.plotly_chart(fig_pie, width="stretch")
-                    with col_txt:
-                        risk_color = {"LOW": "card-green", "MEDIUM": "card-yellow",
-                                      "HIGH": "card-red", "VERY HIGH": "card-red"}.get(
-                            div.concentration_risk, "card-blue")
-                        st.markdown(
-                            f'<div class="{risk_color}">'
-                            f'<b>Concentration Risk: {div.concentration_risk}</b><br>'
-                            f'{div.advice}</div>',
-                            unsafe_allow_html=True
-                        )
+            # Sector breakdown now lives beside the holdings table (mockup artboard 04).
 
             # ── Portfolio Heatmap (moved here from the old top-of-page ──
             # live-price strip — this is deeper analysis, not a decision).
