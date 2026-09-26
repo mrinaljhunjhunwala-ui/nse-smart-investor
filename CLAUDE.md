@@ -39,7 +39,7 @@ trade_store.py                   persistence: SQLite by default, Postgres when D
 4. **`analysis/` is pure.** No `import streamlit`, no `st.cache_*`, no session state. Cache at the `dashboard/shared/cache.py` layer.
 5. **Every page must survive network being blocked.** The `test_pages_smoke.py` suite runs each page with the network stubbed; graceful degraded rendering is not optional.
 6. **Windows-first shell.** Use `py` launcher, not `python`. Set `PYTHONUTF8=1` for ₹-symbol output.
-7. **Two Streamlit config calls is a crash.** `st.set_page_config` is called exactly once, in `dashboard/app.py`. Pages must not call it.
+7. **Page config has exactly two call sites.** `dashboard/app.py` sets title / icon / layout for the entry run, and `apply_design()` re-asserts `layout="wide"` on every page, because `pages/` routing drops app.py's config after `st.switch_page` (every page silently fell back to the narrow 736px column). Streamlit ≥1.44 makes repeated calls additive, so this is safe. Pages themselves still must not call `st.set_page_config`.
 8. **Secrets live in `.streamlit/secrets.toml` (gitignored) or the platform's secret store** — never in code, never in commits.
 
 ## Where things live
