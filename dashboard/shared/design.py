@@ -17,13 +17,11 @@ files reference these directly. Only the tokens/values inside change.
 ────────────────────────────────────────────────────────────────────────────
 """
 from __future__ import annotations
-import os, sys, sqlite3, warnings, io, json, math, datetime
-import numpy as np
-import pandas as pd
+import os
+import sys
+import warnings
 import plotly.graph_objects as go
-import plotly.express as px
 import plotly.io as pio
-from plotly.subplots import make_subplots
 import streamlit as st
 
 from dashboard.shared.tokens import COLORS as _C, css_vars as _css_vars
@@ -35,6 +33,16 @@ warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+
+
+# Film-grain noise tile for the page background. Kept out of the CSS literal
+# because a data-URI can't be line-wrapped inside its quotes.
+_NOISE_SVG_URI = (
+    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'>"
+    "<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/>"
+    "<feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.03 0'/></filter>"
+    "<rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")"
+)
 
 
 def apply_design():
@@ -267,7 +275,7 @@ def apply_design():
            single background: shorthand so it stays as one paint pass. */
         background-image:
           radial-gradient(ellipse 90% 40% at 50% -10%, rgba(255,149,0,0.05) 0%, transparent 60%),
-          url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.03 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+          /*__NOISE_SVG__*/;
         background-attachment: fixed;
         background-size: auto, 160px 160px;
     }
@@ -292,27 +300,63 @@ def apply_design():
     .card-orange { background:rgba(242,169,59,.07);  border-left:3px solid #f2a93b; }
 
     /* ── Score & typography ───────────────────────────────────────────────────── */
-    .score-big    { font-family:'IBM Plex Mono',monospace; font-size:54px; font-weight:700; letter-spacing:-1px; font-variant-numeric: tabular-nums; }
+    .score-big {
+        font-family:'IBM Plex Mono',monospace; font-size:54px; font-weight:700; letter-spacing:-1px;
+        font-variant-numeric: tabular-nums;
+    }
     .signal-big   { font-size:21px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; }
     .narrative    { font-size:14px; line-height:1.75; color:#8b8d93; }
     .ticker-label { font-size:23px; font-weight:700; color:#edeef0; letter-spacing:-.2px; }
 
     /* ── Pills ───────────────────────────────────────────────────────────────── */
-    .pill-green  { display:inline-block; background:rgba(22,199,132,.12); color:#16c784; border:1px solid rgba(22,199,132,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
-    .pill-red    { display:inline-block; background:rgba(255,77,77,.12);  color:#ff4d4d; border:1px solid rgba(255,77,77,.4);  border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
-    .pill-yellow { display:inline-block; background:rgba(242,169,59,.12); color:#f2a93b; border:1px solid rgba(242,169,59,.4); border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
-    .pill-gray   { display:inline-block; background:rgba(255,255,255,.06); color:#8b8d93; border:1px solid rgba(255,255,255,.14); border-radius:20px; padding:3px 14px; font-size:12px; }
-    .pill-blue   { display:inline-block; background:rgba(255,149,0,.12);  color:#ff9500; border:1px solid rgba(255,149,0,.4);  border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600; }
+    .pill-green {
+        display:inline-block; background:rgba(22,199,132,.12); color:#16c784; border:1px solid rgba(22,199,132,.4);
+        border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600;
+    }
+    .pill-red {
+        display:inline-block; background:rgba(255,77,77,.12); color:#ff4d4d; border:1px solid rgba(255,77,77,.4);
+        border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600;
+    }
+    .pill-yellow {
+        display:inline-block; background:rgba(242,169,59,.12); color:#f2a93b; border:1px solid rgba(242,169,59,.4);
+        border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600;
+    }
+    .pill-gray {
+        display:inline-block; background:rgba(255,255,255,.06); color:#8b8d93; border:1px solid rgba(255,255,255,.14);
+        border-radius:20px; padding:3px 14px; font-size:12px;
+    }
+    .pill-blue {
+        display:inline-block; background:rgba(255,149,0,.12); color:#ff9500; border:1px solid rgba(255,149,0,.4);
+        border-radius:20px; padding:3px 14px; font-size:12px; font-weight:600;
+    }
 
     /* ── Signal badges ───────────────────────────────────────────────────────── */
-    .badge-buy   { background:rgba(22,199,132,.14); color:#16c784; border:1px solid #16c784; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
-    .badge-sell  { background:rgba(255,77,77,.14);  color:#ff4d4d; border:1px solid #ff4d4d; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
-    .badge-hold  { background:rgba(242,169,59,.14); color:#f2a93b; border:1px solid #f2a93b; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
-    .badge-watch { background:rgba(255,149,0,.14); color:#ff9500; border:1px solid #ff9500; border-radius:6px; padding:4px 14px; font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block; }
+    .badge-buy {
+        background:rgba(22,199,132,.14); color:#16c784; border:1px solid #16c784; border-radius:6px; padding:4px 14px;
+        font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block;
+    }
+    .badge-sell {
+        background:rgba(255,77,77,.14); color:#ff4d4d; border:1px solid #ff4d4d; border-radius:6px; padding:4px 14px;
+        font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block;
+    }
+    .badge-hold {
+        background:rgba(242,169,59,.14); color:#f2a93b; border:1px solid #f2a93b; border-radius:6px; padding:4px 14px;
+        font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block;
+    }
+    .badge-watch {
+        background:rgba(255,149,0,.14); color:#ff9500; border:1px solid #ff9500; border-radius:6px; padding:4px 14px;
+        font-size:13px; font-weight:700; letter-spacing:.5px; display:inline-block;
+    }
 
     /* ── Angel One badges ────────────────────────────────────────────────────── */
-    .ao-badge-on  { background:rgba(22,199,132,.08); border:1px solid rgba(22,199,132,.4); border-radius:8px; padding:10px 14px; font-size:12px; color:#16c784; margin:4px 0; display:flex; align-items:center; gap:8px; }
-    .ao-badge-off { background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.08); border-radius:8px; padding:10px 14px; font-size:12px; color:#55575e; margin:4px 0; display:block; }
+    .ao-badge-on {
+        background:rgba(22,199,132,.08); border:1px solid rgba(22,199,132,.4); border-radius:8px; padding:10px 14px;
+        font-size:12px; color:#16c784; margin:4px 0; display:flex; align-items:center; gap:8px;
+    }
+    .ao-badge-off {
+        background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.08); border-radius:8px;
+        padding:10px 14px; font-size:12px; color:#55575e; margin:4px 0; display:block;
+    }
 
     /* ── Streamlit metric override ─────────────────────────────────────────────
        §9.2 · sits on the pure-black ground as a 2% white lift instead of
@@ -323,8 +367,12 @@ def apply_design():
         border: 1px solid var(--hairline);
         border-radius: var(--r-base); padding: 14px 18px;
     }
-    [data-testid="stMetricValue"] { font-family:'IBM Plex Mono',monospace; font-weight:700; letter-spacing:-.3px; font-size:20px; }
-    [data-testid="stMetricLabel"] { font-size:11px; color:#55575e; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+    [data-testid="stMetricValue"] {
+        font-family:'IBM Plex Mono',monospace; font-weight:700; letter-spacing:-.3px; font-size:20px;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size:11px; color:#55575e; text-transform:uppercase; letter-spacing:1px; font-weight:600;
+    }
     /* Never clip/ellipsis metric text — always show the full value, label and delta */
     [data-testid="stMetric"] { overflow: visible !important; }
     [data-testid="stMetricValue"], [data-testid="stMetricValue"] *,
@@ -577,25 +625,42 @@ def apply_design():
         font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
         font-weight: 600; border-bottom: 1px solid rgba(255,255,255,.07) !important;
     }
-    [data-testid="stDataFrame"] tbody td { color: #c8cad0 !important; font-family:'IBM Plex Mono',monospace; font-size:13px; }
+    [data-testid="stDataFrame"] tbody td {
+        color: #c8cad0 !important; font-family:'IBM Plex Mono',monospace; font-size:13px;
+    }
     [data-testid="stDataFrame"] tbody tr:hover td { background: rgba(255,149,0,.05) !important; }
 
     /* ── Order form ──────────────────────────────────────────────────────────── */
-    .order-buy  { background:rgba(22,199,132,.06); border:1px solid rgba(22,199,132,.3); border-radius:10px; padding:18px; }
-    .order-sell { background:rgba(255,77,77,.06);  border:1px solid rgba(255,77,77,.3);  border-radius:10px; padding:18px; }
+    .order-buy {
+        background:rgba(22,199,132,.06); border:1px solid rgba(22,199,132,.3); border-radius:10px; padding:18px;
+    }
+    .order-sell {
+        background:rgba(255,77,77,.06); border:1px solid rgba(255,77,77,.3); border-radius:10px; padding:18px;
+    }
 
     /* ── Custom metric box ─────────────────────────────────────────────────────
        §9.2 · card-lift + hairline pairing. Label size / letter-spacing
        aligned with .t-label so the two vocabularies read as one. */
-    .metric-box       { background: var(--card-lift); border-radius: var(--r-base); padding:16px; text-align:center; border:1px solid var(--hairline); }
-    .metric-val       { font-family: var(--font-mono); font-size:27px; font-weight:700; margin:4px 0; letter-spacing:-.3px; color: var(--ink); }
-    .metric-lbl       { font-size:11px; color: var(--dim); text-transform:uppercase; letter-spacing:.12em; font-weight:600; }
+    .metric-box {
+        background: var(--card-lift); border-radius: var(--r-base); padding:16px; text-align:center;
+        border:1px solid var(--hairline);
+    }
+    .metric-val {
+        font-family: var(--font-mono); font-size:27px; font-weight:700; margin:4px 0; letter-spacing:-.3px;
+        color: var(--ink);
+    }
+    .metric-lbl {
+        font-size:11px; color: var(--dim); text-transform:uppercase; letter-spacing:.12em; font-weight:600;
+    }
     .metric-delta-pos { color: var(--bull); font-size:13px; font-weight:600; font-family: var(--font-mono); }
     .metric-delta-neg { color: var(--bear); font-size:13px; font-weight:600; font-family: var(--font-mono); }
 
     /* ── Section divider ─────────────────────────────────────────────────────── */
     .sec-div { display:flex; align-items:center; gap:12px; margin:28px 0 18px; }
-    .sec-div-label { font-size:11px; font-weight:700; color:#55575e; text-transform:uppercase; letter-spacing:1.5px; white-space:nowrap; }
+    .sec-div-label {
+        font-size:11px; font-weight:700; color:#55575e; text-transform:uppercase; letter-spacing:1.5px;
+        white-space:nowrap;
+    }
     .sec-div-line  { flex:1; height:1px; background:linear-gradient(90deg,rgba(255,255,255,.09),transparent); }
 
     /* ── Glass panel — reserved for hero/summary panels only (soft radius tier).
@@ -636,8 +701,14 @@ def apply_design():
     .delta-neg::before { content: "\25BC  "; font-size: 0.85em; }  /* ▼ */
 
     /* ── Animations — functional only (live-signal pulse), not decorative ──────── */
-    @keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(22,199,132,.35)} 50%{box-shadow:0 0 0 8px rgba(22,199,132,0)} }
-    @keyframes pulse-red   { 0%,100%{box-shadow:0 0 0 0 rgba(255,77,77,.35)}  50%{box-shadow:0 0 0 8px rgba(255,77,77,0)}  }
+    @keyframes pulse-green {
+        0%,100% { box-shadow:0 0 0 0 rgba(22,199,132,.35) }
+        50% { box-shadow:0 0 0 8px rgba(22,199,132,0) }
+    }
+    @keyframes pulse-red {
+        0%,100% { box-shadow:0 0 0 0 rgba(255,77,77,.35) }
+        50% { box-shadow:0 0 0 8px rgba(255,77,77,0) }
+    }
     .pulse-green { animation:pulse-green 2s infinite; }
     .pulse-red   { animation:pulse-red 2s infinite; }
 
@@ -1115,7 +1186,9 @@ def apply_design():
         .gate-strip, .fu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .gate-cell { border-bottom: 1px solid var(--hairline-soft); }
     }
-    </style>""".replace("/*__COLOR_TOKENS__*/", f"      /* colour tokens: dashboard/shared/tokens.py */\n{_css_vars()}"),
+    </style>"""
+        .replace("/*__COLOR_TOKENS__*/", f"      /* colour tokens: dashboard/shared/tokens.py */\n{_css_vars()}")
+        .replace("/*__NOISE_SVG__*/", _NOISE_SVG_URI),
         unsafe_allow_html=True,
     )
 
@@ -1126,12 +1199,15 @@ def apply_design():
 def _glass_metric(label: str, value: str, delta: str = "", delta_pos: bool = True) -> str:
     d_color = "#16c784" if delta_pos else "#ff4d4d"
     d_sym   = "▲" if delta_pos else "▼"
-    d_html  = (f'<div style="font-size:12px;color:{d_color};margin-top:4px;font-weight:600;font-family:\'IBM Plex Mono\',monospace">'
+    d_html  = (f'<div style="font-size:12px;color:{d_color};margin-top:4px;font-weight:600;'
+               f'font-family:\'IBM Plex Mono\',monospace">'
                f'{d_sym} {delta}</div>') if delta else ""
     return (
         f'<div class="glass-panel" style="text-align:center;min-height:80px">'
-        f'<div style="font-size:11px;color:#55575e;text-transform:uppercase;letter-spacing:1.2px;font-weight:600">{label}</div>'
-        f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:23px;font-weight:700;color:#edeef0;margin-top:6px;letter-spacing:-.3px">{value}</div>'
+        f'<div style="font-size:11px;color:#55575e;text-transform:uppercase;letter-spacing:1.2px;'
+        f'font-weight:600">{label}</div>'
+        f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:23px;font-weight:700;color:#edeef0;'
+        f'margin-top:6px;letter-spacing:-.3px">{value}</div>'
         f'{d_html}</div>'
     )
 
@@ -1155,7 +1231,8 @@ def _signal_card(ticker, action, price, entry, stop, target, reason, score=None,
     }
     tc, bc = COLORS.get(action, COLORS["HOLD"])
     rr = (target - entry) / (entry - stop) if (entry - stop) > 0.01 else 0
-    sc_html = (f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:28px;font-weight:700;color:{tc}">{score}</div>'
+    sc_html = (f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:28px;font-weight:700;'
+               f'color:{tc}">{score}</div>'
                f'<div style="font-size:10px;color:#55575e">SCORE</div>') if score is not None else ""
     sect_html = (f'<span style="font-size:11px;color:#55575e;font-weight:400;margin-left:8px">{sector}</span>'
                  if sector else "")
@@ -1170,10 +1247,15 @@ def _signal_card(ticker, action, price, entry, stop, target, reason, score=None,
         f'<div style="font-size:18px;font-weight:700;color:#edeef0">{ticker}{sect_html}</div>'
         f'<div style="font-size:12px;color:#55575e;margin:4px 0">{reason}</div>'
         f'<div style="display:flex;gap:20px;margin-top:10px;font-size:13px;font-family:\'IBM Plex Mono\',monospace">'
-        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">LTP</span><br><b style="color:#c8cad0">₹{price:.2f}</b></div>'
-        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">ENTRY</span><br><b style="color:#c8cad0">₹{entry:.2f}</b></div>'
-        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">STOP</span><br><b style="color:#ff4d4d">₹{stop:.2f}</b></div>'
-        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">TARGET</span><br><b style="color:#16c784">₹{target:.2f}</b></div>'
-        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">R:R</span><br><b style="color:{tc}">{rr:.1f}x</b></div>'
+        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">'
+        f'LTP</span><br><b style="color:#c8cad0">₹{price:.2f}</b></div>'
+        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">'
+        f'ENTRY</span><br><b style="color:#c8cad0">₹{entry:.2f}</b></div>'
+        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">'
+        f'STOP</span><br><b style="color:#ff4d4d">₹{stop:.2f}</b></div>'
+        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">'
+        f'TARGET</span><br><b style="color:#16c784">₹{target:.2f}</b></div>'
+        f'<div><span style="color:#55575e;font-size:11px;font-family:\'IBM Plex Sans\'">'
+        f'R:R</span><br><b style="color:{tc}">{rr:.1f}x</b></div>'
         f'</div></div></div>'
     )
