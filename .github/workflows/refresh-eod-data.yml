@@ -1,0 +1,79 @@
+name: Refresh EOD market data
+
+# Refreshes the end-of-day tables the composite score reads from trade_store
+# (Postgres): FII/DII cash flows, FII index futures, F&O open interest,
+# option chain PCR / max pain, and bhavcopy delivery %. These used to be
+# Windows scheduled tasks on one laptop, which silently stopped running in
+# 2026-09 (see the "eod store" rows in the Command Centre Data health panel).
+#
+# Requires DATABASE_URL to point at the SAME Postgres the Streamlit Cloud app
+# uses (as warm-top-picks.yml does). Each step runs even if an earlier one
+# failed, so one blocked NSE endpoint doesn't stop the others; the job still
+# goes red. `--days 3` lets a missed evening heal on the next run (upserts).
+#
+# NSE publishes bhavcopy / FII stats roughly 18:00-19:30 IST. The option
+# chain sits behind Akamai bot protection, which often blocks cloud runners;
+# if that step keeps failing, set the NSE_COOKIE secret or run it locally.
+
+on:
+  schedule:
+    - cron: "15 14 * * 1-5"   # 14:15 UTC = 19:45 IST, Mon-Fri
+    - cron: "30 16 * * 1-5"   # 16:30 UTC = 22:00 IST retry for late publications
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Weekdays to (re)fetch for the bhavcopy-style datasets"
+        default: "3"
+
+concurrency:
+  group: refresh-eod-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PYTHONUTF8: "1"
+      DAYS: ${{ github.event.inputs.days || '3' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Require DATABASE_URL
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret is not set - rows would go to a throwaway SQLite file"
+            exit 1
+          fi
+
+      - name: FII/DII cash flows
+        if: ${{ !cancelled() }}
+        run: python -c "from analysis.fii_dii import refresh; print(refresh(force=True))"
+
+      - name: FII index futures
+        if: ${{ !cancelled() }}
+        run: python -m scripts.fetch_nse_fii_deriv --days "$DAYS"
+
+      - name: F&O open interest (bhavcopy)
+        if: ${{ !cancelled() }}
+        run: python -m scripts.fetch_nse_fno_bhavcopy --days "$DAYS"
+
+      - name: Delivery % (bhavcopy)
+        if: ${{ !cancelled() }}
+        run: python -m scripts.fetch_nse_delivery --days "$DAYS"
+
+      - name: Option chain (F&O universe)
+        if: ${{ !cancelled() }}
+        env:
+          NSE_COOKIE: ${{ secrets.NSE_COOKIE }}
+        run: python -m scripts.fetch_nse_option_chain --fno-all
