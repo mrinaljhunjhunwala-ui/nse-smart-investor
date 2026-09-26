@@ -1182,6 +1182,65 @@ def apply_design():
     .health-item { display: inline-flex; align-items: center; gap: 5px; }
     .health-dot { width: 6px; height: 6px; border-radius: 50%; }
 
+    /* Quiet tool layout (Position Sizer, artboard 05): underline inputs on
+       the left, one sunken output panel on the right. Widgets are scoped by
+       the keyed container class Streamlit emits (st-key-<key>). */
+    .quiet-eyebrow {
+        font-size: 10px; font-weight: 600; color: var(--dim);
+        letter-spacing: 0.16em; text-transform: uppercase; margin: 6px 0 2px 0;
+    }
+    .st-key-quiet_inputs, .st-key-kelly_inputs { padding-right: 12px; }
+    .st-key-quiet_inputs [data-testid="stWidgetLabel"] p,
+    .st-key-kelly_inputs [data-testid="stWidgetLabel"] p {
+        font-size: 11px !important; font-weight: 600; color: var(--dim);
+        letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    .st-key-quiet_inputs [data-baseweb="input"],
+    .st-key-kelly_inputs [data-baseweb="input"] {
+        background: transparent !important; border: none !important;
+        border-bottom: 1px solid var(--hairline-strong, var(--hairline)) !important;
+        border-radius: 0 !important;
+    }
+    .st-key-quiet_inputs [data-baseweb="base-input"],
+    .st-key-kelly_inputs [data-baseweb="base-input"],
+    .st-key-quiet_inputs [data-testid^="stNumberInputStep"],
+    .st-key-kelly_inputs [data-testid^="stNumberInputStep"] {
+        background: transparent !important; color: var(--dim) !important;
+    }
+    .st-key-quiet_inputs [data-baseweb="input"]:focus-within,
+    .st-key-kelly_inputs [data-baseweb="input"]:focus-within {
+        border-bottom-color: var(--accent) !important;
+    }
+    .st-key-quiet_inputs .stNumberInput input,
+    .st-key-kelly_inputs .stNumberInput input {
+        background: transparent !important; border: none !important; box-shadow: none !important;
+        padding-left: 0; font-family: var(--font-mono); font-size: 19px; color: var(--ink);
+    }
+    .quiet-hint { font-size: 11px; color: var(--faint); margin: -6px 0 18px 0; }
+    .quiet-output {
+        background: var(--sunken); border: 1px solid var(--hairline-soft);
+        border-radius: 6px; padding: 28px 32px;
+    }
+    .quiet-out-lbl {
+        font-size: 10px; font-weight: 700; color: var(--dim);
+        letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px;
+    }
+    .quiet-lead {
+        font-family: var(--font-serif); font-size: 56px; line-height: 1;
+        letter-spacing: -0.03em; color: var(--ink);
+    }
+    .quiet-lead-u { font-size: 18px; color: var(--dim); letter-spacing: 0; margin-left: 6px; }
+    .quiet-lead-sub { font-family: var(--font-mono); font-size: 12.5px; color: var(--dim); margin-top: 8px; }
+    .quiet-kv { margin: 24px 0 0 0; }
+    .quiet-kv > div {
+        display: flex; justify-content: space-between; gap: 12px; padding: 10px 0;
+        border-bottom: 1px dotted var(--hairline); font-size: 13px;
+    }
+    .quiet-kv > div:last-child { border-bottom: none; }
+    .quiet-kv dt { color: var(--dim); }
+    .quiet-kv dd { margin: 0; font-family: var(--font-mono); color: var(--ink); text-align: right; }
+    .quiet-note { margin-top: 18px; font-size: 11.5px; line-height: 1.5; color: var(--faint); }
+
     @media (max-width: 900px) {
         .gate-strip, .fu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .gate-cell { border-bottom: 1px solid var(--hairline-soft); }

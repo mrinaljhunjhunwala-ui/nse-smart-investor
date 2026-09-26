@@ -1265,3 +1265,19 @@ def share_bars(rows: list, fill: str = "var(--accent)") -> str:
             f'<span class="alloc-val">{text}</span></div>'
         )
     return f'<div class="alloc">{"".join(out)}</div>'
+
+
+def quiet_output(label: str, lead: str, unit: str = "", sub: str = "",
+                 rows: Optional[list] = None, note: str = "") -> str:
+    """Sunken output panel for a one-calculation tool (Position Sizer).
+
+    One big serif number, a mono sub-line, then a dotted key/value list of
+    (label, value) rows and an optional muted footnote.
+    """
+    unit_html = f'<span class="quiet-lead-u">{unit}</span>' if unit else ""
+    sub_html = f'<div class="quiet-lead-sub">{sub}</div>' if sub else ""
+    kv = "".join(f"<div><dt>{k}</dt><dd>{v}</dd></div>" for k, v in (rows or []))
+    kv_html = f'<dl class="quiet-kv">{kv}</dl>' if kv else ""
+    note_html = f'<div class="quiet-note">{note}</div>' if note else ""
+    return (f'<div class="quiet-output"><div class="quiet-out-lbl">{label}</div>'
+            f'<div class="quiet-lead">{lead}{unit_html}</div>{sub_html}{kv_html}{note_html}</div>')

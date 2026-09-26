@@ -30,39 +30,32 @@ render_sidebar(current="Position Sizer")
 render_top_bar()
 
 # ───────────────────────── page body (de-indented from app.py) ─────────────────────────
-st.markdown('<h1 class="page-title-serif">Position <em>Sizer</em></h1><p class="page-subtitle">Kelly Criterion + Risk Calculator.</p>', unsafe_allow_html=True)
+from dashboard.shared.ui_components import fmt_inr, quiet_output  # noqa: E402
 
 st.markdown(
-    "Calculate exact position size using Kelly Criterion and fixed-risk rules.  \n"
-    "Illustrative sizing maths — see how many shares a given risk budget implies *before* committing capital."
+    '<h1 class="page-title-serif">Position <em>Sizer</em></h1>'
+    '<p class="page-subtitle">One calculation: how many shares a fixed risk budget '
+    'implies for a given entry and stop. Illustrative maths only; nothing is submitted anywhere.</p>',
+    unsafe_allow_html=True,
 )
 
-_ps_tab1, _ps_tab2 = st.tabs(["💰 Fixed Risk Calculator", "📊 Kelly Criterion"])
+_ps_tab1, _ps_tab2 = st.tabs(["Fixed risk", "Kelly criterion"])
 
 with _ps_tab1:
-    st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
-        'Fixed-Risk Position Sizing</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption("Most common approach: risk a fixed % of capital per trade.")
-
     # ── Optional: auto-fill entry/SL/TP from a stock's LIVE price ──────────────
     for _k, _v in (("ps_entry", 500.0), ("ps_sl", 480.0), ("ps_tp", 550.0)):
         st.session_state.setdefault(_k, _v)
     _ps_opts = sorted(
         f"{n}  ({s.replace('.NS', '')})" for n, s in STOCK_SEARCH_MAP.items()
     )
-    _ps_pc1, _ps_pc2 = st.columns([3, 1])
+    _ps_pc1, _ps_pc2 = st.columns([3, 1], vertical_alignment="bottom")
     with _ps_pc1:
         _ps_pick = st.selectbox(
             "Auto-fill from a stock (optional) — pulls the live price",
             ["— none —"] + _ps_opts, index=0, key="ps_pick",
         )
     with _ps_pc2:
-        st.write("")
-        st.write("")
-        if st.button("⚡ Use live price", key="ps_fetch", width="stretch"):
+        if st.button("Use live price", key="ps_fetch", width="stretch"):
             if _ps_pick != "— none —":
                 _psym = _ps_pick.rsplit("(", 1)[-1].rstrip(")")
                 _psym = _psym if _psym.endswith(".NS") else _psym + ".NS"
@@ -72,7 +65,7 @@ with _ps_tab1:
                     st.session_state["ps_entry"] = round(_plive, 2)
                     st.session_state["ps_sl"]    = round(_plive * 0.98, 2)
                     st.session_state["ps_tp"]    = round(_plive * 1.04, 2)
-                    st.toast(f"⚡ Loaded live ₹{_plive:,.2f} for "
+                    st.toast(f"Loaded live ₹{_plive:,.2f} for "
                              f"{_psym.replace('.NS','')}", icon="✅")
                     st.rerun()
                 else:
@@ -80,121 +73,104 @@ with _ps_tab1:
             else:
                 st.info("Pick a stock from the list first.")
 
-    # P2 · F1/F3 widget chrome — group the form into bordered cards with
-    # §9.4 eyebrow labels so inputs read as one grouped control surface.
-    _psc1, _psc2 = st.columns(2)
-    _psc1 = _psc1.container(border=True)
-    _psc2 = _psc2.container(border=True)
-    _psc1.markdown('<div class="t-label">Account &amp; risk</div>', unsafe_allow_html=True)
-    _psc2.markdown('<div class="t-label">Trade levels</div>', unsafe_allow_html=True)
-    with _psc1:
-        _ps_capital   = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="ps_cap")
+    _q_in, _q_gap, _q_out = st.columns([1, 0.12, 1])
+    with _q_in.container(key="quiet_inputs"):
+        st.markdown('<div class="quiet-eyebrow">Risk-first sizing</div>', unsafe_allow_html=True)
+        _ps_capital   = st.number_input("Portfolio size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="ps_cap")
         _ps_risk_pct  = st.slider("Risk per trade (%)", 0.5, 3.0, 1.0, 0.25, key="ps_risk_pct")
-        _ps_entry     = st.number_input("Entry Price (₹)", min_value=1.0, max_value=100_000.0,
+        st.markdown(f'<div class="quiet-hint">of ₹{fmt_inr(_ps_capital)} · risk budget '
+                    f'₹{fmt_inr(_ps_capital * _ps_risk_pct / 100)}</div>', unsafe_allow_html=True)
+        _ps_entry     = st.number_input("Entry price (₹)", min_value=1.0, max_value=100_000.0,
                                         step=0.5, key="ps_entry", format="%.2f")
-    with _psc2:
-        _ps_sl        = st.number_input("Stop-Loss Price (₹)", min_value=1.0, max_value=100_000.0,
+        st.markdown('<div class="quiet-hint">live price if loaded · adjust for expected fill</div>',
+                    unsafe_allow_html=True)
+        _ps_sl        = st.number_input("Stop-loss price (₹)", min_value=1.0, max_value=100_000.0,
                                         step=0.5, key="ps_sl", format="%.2f")
-        _ps_tp        = st.number_input("Target Price (₹)", min_value=1.0, max_value=200_000.0,
+        st.markdown(f'<div class="quiet-hint">{(_ps_entry - _ps_sl) / _ps_entry * 100:.2f}% below entry</div>',
+                    unsafe_allow_html=True)
+        _ps_tp        = st.number_input("Target price (₹)", min_value=1.0, max_value=200_000.0,
                                         step=0.5, key="ps_tp", format="%.2f")
-        _ps_lot_size  = st.number_input("Lot / Board Lot (shares, 1 for equity)", 1, 10000, 1, key="ps_lot")
+        st.markdown('<div class="quiet-hint">a scenario level for the R:R maths, not a call</div>',
+                    unsafe_allow_html=True)
+        _ps_lot_size  = st.number_input("Lot size (shares, 1 for equity)", 1, 10000, 1, key="ps_lot")
 
-    if _ps_entry > _ps_sl > 0:
-        _risk_rs    = _ps_capital * _ps_risk_pct / 100
-        _rps        = _ps_entry - _ps_sl
-        _raw_shares = _risk_rs / _rps
-        _lots       = max(1, int(_raw_shares / _ps_lot_size))
-        _shares     = _lots * _ps_lot_size
-        _notional   = _shares * _ps_entry
-        _actual_risk = _shares * _rps
-        _rr         = (_ps_tp - _ps_entry) / _rps if _rps > 0 else 0
-        _exp_profit = _shares * (_ps_tp - _ps_entry)
+    with _q_out:
+        if _ps_entry > _ps_sl > 0:
+            _risk_rs    = _ps_capital * _ps_risk_pct / 100
+            _rps        = _ps_entry - _ps_sl
+            _raw_shares = _risk_rs / _rps
+            _lots       = max(1, int(_raw_shares / _ps_lot_size))
+            _shares     = _lots * _ps_lot_size
+            _notional   = _shares * _ps_entry
+            _actual_risk = _shares * _rps
+            _rr         = (_ps_tp - _ps_entry) / _rps if _rps > 0 else 0
+            _exp_profit = _shares * (_ps_tp - _ps_entry)
 
-        st.markdown("---")
-        r1, r2, r3, r4, r5 = st.columns(5)
-        r1.metric("Position (shares)",   f"{_shares:,}")
-        r2.metric("Notional",        f"₹{_notional:,.0f}")
-        r3.metric("Risk ₹",          f"₹{_actual_risk:,.0f}",
-                  delta=f"{_actual_risk/_ps_capital*100:.2f}% of capital")
-        r4.metric("R:R Ratio",       f"{_rr:.1f}x",
-                  delta="✅ Good" if _rr >= 2 else "⚠️ Low")
-        r5.metric("Potential Profit",f"₹{_exp_profit:,.0f}")
-
-        _card_color = "card-green" if _rr >= 2 else ("card-yellow" if _rr >= 1.5 else "card-red")
-        st.markdown(f"""
-        <div class="{_card_color}">
-        <b>📋 Trade Plan: {_ps_entry:.2f} entry</b><br>
-        Size <b>{_shares:,} shares</b> at ₹{_ps_entry:.2f} &nbsp;|&nbsp;
-        Stop ₹{_ps_sl:.2f} &nbsp;|&nbsp;
-        Target ₹{_ps_tp:.2f}<br>
-        Risk: ₹{_actual_risk:,.0f} ({_actual_risk/_ps_capital*100:.2f}% of ₹{_ps_capital:,}) &nbsp;|&nbsp;
-        R:R = {_rr:.1f}:1 &nbsp;|&nbsp; Potential profit: ₹{_exp_profit:,.0f}
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.warning("Entry price must be greater than stop-loss price.")
+            _rows = [
+                ("Risk per share", f"₹{_rps:,.2f}"),
+                ("Risk amount", f"₹{fmt_inr(_actual_risk)} · {_actual_risk / _ps_capital * 100:.2f}%"),
+                ("Reward at target (scenario)", f"₹{fmt_inr(_exp_profit)}"),
+                ("R:R at target (scenario)", f"{_rr:.1f} : 1"),
+                ("Position value, % of capital", f"{_notional / _ps_capital * 100:.1f}%"),
+            ]
+            if _ps_lot_size > 1:
+                _rows.append(("Lots", f"{_lots:,} × {_ps_lot_size:,}"))
+            st.markdown(quiet_output(
+                "Position size", f"{_shares:,}", "shares",
+                f"₹{fmt_inr(_notional)} position value",
+                _rows,
+                note="Shares at this risk budget, rounded down to whole lots (minimum one lot). "
+                     "Educational sizing maths, not investment advice.",
+            ), unsafe_allow_html=True)
+        else:
+            st.warning("Entry price must be greater than stop-loss price.")
 
 with _ps_tab2:
     st.markdown(
-        '<div class="t-h2" style="margin:14px 0 6px 0">'
-        'Kelly Criterion Position Sizing</div>',
+        '<div class="quiet-eyebrow">Edge-based sizing</div>'
+        '<p class="page-subtitle">Kelly formula <code>f* = (b × p − q) / b</code>, where b = R:R, '
+        'p = win rate, q = 1 − p. Full Kelly is volatile; the fraction slider scales it down.</p>',
         unsafe_allow_html=True,
     )
-    st.caption("Mathematically optimal position size based on your historical win rate and R:R.")
-    st.markdown("""
-    **Kelly Formula:**  `f* = (b × p − q) / b`  where `b` = R:R ratio, `p` = win rate, `q` = 1 − p
 
-    ⚠️ *Use Half-Kelly (50% of Kelly output) in practice — full Kelly is too aggressive.*
-    """)
-
-    _kc1, _kc2 = st.columns(2)
-    _kc1 = _kc1.container(border=True)
-    _kc2 = _kc2.container(border=True)
-    _kc1.markdown('<div class="t-label">Edge inputs</div>', unsafe_allow_html=True)
-    _kc2.markdown('<div class="t-label">Risk limits &amp; levels</div>', unsafe_allow_html=True)
-    with _kc1:
-        _k_capital  = st.number_input("Portfolio Size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="k_cap")
-        _k_winrate  = st.slider("Historical Win Rate (%)", 30, 75, 55, 1, key="k_wr") / 100
-        _k_rr       = st.slider("Average R:R Ratio", 0.5, 5.0, 2.0, 0.1, key="k_rr")
-    with _kc2:
-        _k_fraction = st.slider("Kelly Fraction (0.5 = Half-Kelly)", 0.1, 1.0, 0.5, 0.05, key="k_frac")
-        _k_max_risk = st.slider("Max Risk Cap (%)", 0.5, 5.0, 2.0, 0.25, key="k_maxrisk")
-        _k_entry    = st.number_input("Entry Price (₹)", 1.0, 100_000.0, 500.0, 0.5, key="k_entry", format="%.2f")
-        _k_sl       = st.number_input("Stop-Loss (₹)",  1.0, 100_000.0, 480.0, 0.5, key="k_sl",    format="%.2f")
+    _k_in, _k_gap, _k_out = st.columns([1, 0.12, 1])
+    with _k_in.container(key="kelly_inputs"):
+        _k_capital  = st.number_input("Portfolio size (₹)", 50_000, 50_000_000, 500_000, 50_000, key="k_cap")
+        _k_winrate  = st.slider("Historical win rate (%)", 30, 75, 55, 1, key="k_wr") / 100
+        _k_rr       = st.slider("Average R:R ratio", 0.5, 5.0, 2.0, 0.1, key="k_rr")
+        _k_fraction = st.slider("Kelly fraction (0.5 = half-Kelly)", 0.1, 1.0, 0.5, 0.05, key="k_frac")
+        _k_max_risk = st.slider("Max risk cap (%)", 0.5, 5.0, 2.0, 0.25, key="k_maxrisk")
+        _k_entry    = st.number_input("Entry price (₹)", 1.0, 100_000.0, 500.0, 0.5, key="k_entry", format="%.2f")
+        _k_sl       = st.number_input("Stop-loss (₹)",  1.0, 100_000.0, 480.0, 0.5, key="k_sl",    format="%.2f")
 
     from trading.signals import kelly_position_size, shares_from_risk
-    try:
-        _k_result   = kelly_position_size(
-            win_rate=_k_winrate, rr_ratio=_k_rr,
-            capital=_k_capital, fraction=_k_fraction, max_risk_pct=_k_max_risk,
-        )
-        _k_shares   = shares_from_risk(_k_entry, _k_sl, _k_result["risk_rs"]) if _k_entry > _k_sl else 0
-        _k_notional = _k_shares * _k_entry
-        _k_actual_r = _k_shares * (_k_entry - _k_sl)
+    with _k_out:
+        try:
+            _k_result   = kelly_position_size(
+                win_rate=_k_winrate, rr_ratio=_k_rr,
+                capital=_k_capital, fraction=_k_fraction, max_risk_pct=_k_max_risk,
+            )
+            _k_shares   = shares_from_risk(_k_entry, _k_sl, _k_result["risk_rs"]) if _k_entry > _k_sl else 0
+            _k_notional = _k_shares * _k_entry
+            _k_actual_r = _k_shares * (_k_entry - _k_sl)
 
-        st.markdown("---")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Kelly %",       f"{_k_result['kelly_pct']:.1f}%")
-        k2.metric("Applied Risk %", f"{_k_result['risk_pct']:.1f}%")
-        k3.metric("Risk ₹",        f"₹{_k_result['risk_rs']:,.0f}")
-        k4.metric("Shares",        f"{_k_shares:,}")
-
-        st.info(_k_result["notes"])
-        if _k_result["kelly_pct"] > 0:
-            st.markdown(f"""
-            <div class="card-blue">
-            <b>Kelly Plan @ ₹{_k_entry:.2f}</b><br>
-            Optimal risk: <b>{_k_result['risk_pct']:.1f}%</b> of capital = ₹{_k_result['risk_rs']:,.0f}<br>
-            Shares: <b>{_k_shares:,}</b> × ₹{_k_entry:.2f} = ₹{_k_notional:,.0f} notional<br>
-            Actual risk: ₹{_k_actual_r:,.0f} with SL at ₹{_k_sl:.2f}
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.error("Negative Kelly — this setup has negative expected value on these inputs.")
-    except Exception as _ke:
-        st.error(f"Kelly calculation error: {_ke}")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 13 — SWING TRADE CHECKLIST  [NEW]
-# ═══════════════════════════════════════════════════════════════════════════════
+            if _k_result["kelly_pct"] > 0:
+                st.markdown(quiet_output(
+                    "Kelly-implied size", f"{_k_shares:,}", "shares",
+                    f"₹{fmt_inr(_k_notional)} position value",
+                    [
+                        ("Raw Kelly", f"{_k_result['kelly_pct']:.1f}%"),
+                        ("Applied risk", f"{_k_result['risk_pct']:.1f}% · ₹{fmt_inr(_k_result['risk_rs'])}"),
+                        ("Risk at stop", f"₹{fmt_inr(_k_actual_r)} · SL ₹{_k_sl:,.2f}"),
+                    ],
+                    note=_k_result["notes"],
+                ), unsafe_allow_html=True)
+            else:
+                st.markdown(quiet_output(
+                    "Kelly-implied size", "0", "shares", "",
+                    [("Raw Kelly", f"{_k_result['kelly_pct']:.1f}%")],
+                    note=_k_result["notes"],
+                ), unsafe_allow_html=True)
+                st.error("Negative Kelly — this setup has negative expected value on these inputs.")
+        except Exception as _ke:
+            st.error(f"Kelly calculation error: {_ke}")
