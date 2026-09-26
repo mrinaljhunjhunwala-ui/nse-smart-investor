@@ -1244,3 +1244,24 @@ def follow_card(rank: int, symbol: str, sub: str, rows: list,
         f'<div class="fu-sym">{symbol}</div><div class="fu-sub">{sub}</div>'
         f"{rows_html}{foot}</div>"
     )
+
+
+def share_bars(rows: list, fill: str = "var(--accent)") -> str:
+    """Horizontal share bars: rows of (label, pct 0-100, value_text[, fill]).
+
+    Bar length is the share of the largest row, so the biggest item always
+    spans the track; the printed value stays the true percentage.
+    """
+    rows = list(rows)
+    peak = max((float(r[1]) for r in rows), default=0.0) or 1.0
+    out = []
+    for r in rows:
+        label, pct, text = r[0], float(r[1]), r[2]
+        colour = r[3] if len(r) > 3 else fill
+        out.append(
+            f'<div class="alloc-row"><span class="alloc-name">{label}</span>'
+            f'<div class="alloc-bar"><div class="alloc-fill" '
+            f'style="width:{max(pct / peak * 100, 1.5):.1f}%;background:{colour}"></div></div>'
+            f'<span class="alloc-val">{text}</span></div>'
+        )
+    return f'<div class="alloc">{"".join(out)}</div>'

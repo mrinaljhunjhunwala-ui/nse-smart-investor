@@ -1081,6 +1081,21 @@ def apply_design():
     .ledger-sym { font-weight: 600; color: var(--ink); margin-right: 6px; }
     .ledger-note { margin-top: 3px; font-size: 11.5px; color: var(--dim); }
 
+    /* Share bars (sector allocation, posture spread). */
+    .alloc { display: grid; gap: 8px; padding: 12px 14px; }
+    .alloc-row {
+        display: grid; grid-template-columns: minmax(90px, 130px) 1fr 58px;
+        gap: 10px; align-items: center; font-size: 12px;
+    }
+    .alloc-name { color: var(--ink-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .alloc-bar { height: 8px; background: var(--sunken); border-radius: 2px; overflow: hidden; }
+    .alloc-fill { height: 100%; background: var(--accent); }
+    .alloc-val { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); text-align: right; }
+    .kit-panel-note {
+        padding: 10px 14px 12px; border-top: 1px solid var(--hairline-soft);
+        font-size: 12px; line-height: 1.5; color: var(--dim);
+    }
+
     /* One-line provider health strip. */
     .health-strip {
         display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
