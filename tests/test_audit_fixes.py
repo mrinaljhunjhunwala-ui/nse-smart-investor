@@ -262,6 +262,17 @@ def test_sma_stack_not_penalised_when_sma200_is_still_warming_up():
     assert detail["sma_available"] is False
 
 
+def test_technical_total_excludes_availability_flag():
+    """FIX TECH-BOOL: the sma_available flag (a bool) must not be counted as a point."""
+    from analysis.score import _score_technical
+
+    df = add_all_indicators(_ohlcv(n=260, drift=0.9))   # SMA_200 available
+    total, detail = _score_technical(df)
+    assert detail["sma_available"] is True
+    assert total == pytest.approx(
+        min(detail["rsi"] + detail["macd"] + detail["sma"] + detail["adx"], 40.0))
+
+
 def test_missing_60d_history_is_neutral_not_penalised():
     """Under 60 bars, the 3-month momentum component must score the neutral
     midpoint. It used to fall through to the `r60d > -10` branch (1.0/10) —
