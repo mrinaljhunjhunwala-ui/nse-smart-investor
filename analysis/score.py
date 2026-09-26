@@ -472,7 +472,10 @@ def _score_technical(df: pd.DataFrame) -> Tuple[float, Dict]:
     elif adx > 20:  pts["adx"] = 3.0
     else:           pts["adx"] = 1.0
 
-    total = sum(pts.values())
+    # FIX TECH-BOOL (2026-09-26) — sum the named sub-scores only. A plain
+    # sum(pts.values()) also added pts["sma_available"] (True == 1), so every
+    # stock with a 200-day SMA got a free +1 and warm-up names did not.
+    total = pts["rsi"] + pts["macd"] + pts["sma"] + pts["adx"]
     return round(min(total, 40.0), 2), pts
 
 
