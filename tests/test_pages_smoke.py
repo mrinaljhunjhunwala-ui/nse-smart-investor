@@ -14,6 +14,8 @@ from __future__ import annotations
 import glob
 import os
 import socket
+import threading
+import time
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -54,6 +56,28 @@ def _no_network():
     finally:
         socket.socket.connect = orig_connect
         socket.create_connection = orig_create
+
+
+@pytest.fixture(autouse=True)
+def _join_page_threads():
+    """Wait for the background threads a page starts before the test ends.
+
+    Pages start daemon threads that outlive AppTest.run() — Tomorrow's
+    Watchlist's ``_tw_worker`` scan (which logs picks via log_verdict), the
+    Command Centre picks scan, live-price pools. conftest.py points
+    trade_store at a per-test tmp SQLite by patching a module global, so a
+    thread still running when the NEXT test starts writes into THAT test's
+    database (seen as an intermittent failure in test_purge_test_rows.py:
+    real tickers appearing in its ledger). This fixture tears down before
+    conftest's isolation does, so late writes land in this test's own DB.
+    With the network blocked the threads finish within seconds; the deadline
+    only guards against a genuine hang.
+    """
+    before = set(threading.enumerate())
+    yield
+    deadline = time.monotonic() + 120
+    for t in set(threading.enumerate()) - before:
+        t.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 def test_all_pages_present():
