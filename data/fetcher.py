@@ -755,6 +755,11 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         _af = importlib.import_module(".angel_fetcher", __package__)
         _ao_fetch, _ao_ok = _af.fetch_historical, _af.is_configured
         AngelBusy = getattr(_af, "AngelBusy", _SkipAngel)
+        # Index symbols (^NSEI, ^INDIAVIX) have no Angel One EQ token: every
+        # try failed after ~1 s and counted toward Angel's circuit breaker,
+        # which then paused Angel for the real stocks in the same scan.
+        if str(ticker).startswith("^"):
+            raise _SkipAngel
         if _ao_ok():
             try:
                 df = _ao_fetch(ticker, period=period, interval=interval)

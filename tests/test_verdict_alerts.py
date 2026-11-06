@@ -172,3 +172,37 @@ def test_digest_and_test_header_show_scan_date(monkeypatch):
     import re
     assert re.search(r"\d\d:\d\d IST, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}; may be stale", hdr)
     assert re.search(r"scan at \d\d:\d\d IST, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}\)", sub)
+
+
+def _setup_full(monkeypatch, buys, all_scored, verdicts, *, same_scan=True):
+    sent = _setup(monkeypatch, buys, verdicts)
+    import trade_store
+    snap = trade_store.kv_get("top_picks_snapshot")
+    full = {"generated_at": snap["generated_at"] if same_scan else "2020-01-01T00:00:00+00:00",
+            "data": {p["ticker"]: p for p in all_scored}}
+    monkeypatch.setattr(trade_store, "kv_get",
+                        lambda key, **k: full if key == "all_scored_snapshot" else snap)
+    return sent
+
+
+def test_reads_buy_names_beyond_the_shortlist(monkeypatch):
+    buys = [_pick("AAA.NS", 70, "STRONG BUY")]
+    rest = [buys[0], _pick("DDD.NS", 58, "BUY"), _pick("EEE.NS", 50, "WATCHLIST")]
+    sent = _setup_full(monkeypatch, buys, rest,
+                       {"AAA.NS": "STRONG BUY", "DDD.NS": "BUY", "EEE.NS": "BUY"})
+    assert ca.check_verdict_alerts({}, "2026-10-02") == 2      # EEE's action is not BUY
+    assert "AAA" in sent[0] and "DDD" in sent[1]
+
+
+def test_ignores_full_map_from_another_scan(monkeypatch):
+    sent = _setup_full(monkeypatch, [], [_pick("DDD.NS", 58, "BUY")], {"DDD.NS": "BUY"},
+                       same_scan=False)
+    assert ca.check_verdict_alerts({}, "2026-10-02") == 0 and not sent
+
+
+def test_per_run_cap_then_rest_next_run(monkeypatch):
+    rest = [_pick(f"X{i}.NS", 60 + i, "BUY") for i in range(ca._VERDICT_MAX_PER_RUN + 3)]
+    _setup_full(monkeypatch, [], rest, {p["ticker"]: "BUY" for p in rest})
+    state = {}
+    assert ca.check_verdict_alerts(state, "2026-10-02") == ca._VERDICT_MAX_PER_RUN
+    assert ca.check_verdict_alerts(state, "2026-10-02") == 3
