@@ -135,7 +135,8 @@ def test_renderer_shows_flags_and_stays_silent_for_normal_stocks(monkeypatch):
     assert shown and "Non-compliant company" in shown[0]
     shown.clear()
     monkeypatch.setattr(NSI, "get_security_info", lambda t: {"series": "EQ", "band": None})
-    UI.render_edge_flags("RELIANCE.NS", _frame())
+    # Frame ends today: a fixed end date reads as stale bars once it ages out.
+    UI.render_edge_flags("RELIANCE.NS", _frame(end=dt.date.today().isoformat()))
     assert shown == []
     monkeypatch.setattr(NSI, "get_security_info", lambda t: (_ for _ in ()).throw(OSError("x")))
     assert UI.flags_for("X.NS", _frame()) == []

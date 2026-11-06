@@ -631,7 +631,9 @@ def check_pick_moves(state: dict, today: str) -> int:
 
 
 _VERDICT_ALERT_TIERS = ("STRONG BUY", "BUY")
-_VERDICT_MAX_SNAPSHOT_AGE_H = 2      # the warmer refreshes every 15 min in market hours
+_VERDICT_MAX_SNAPSHOT_AGE_H = 2      # the warmer refreshes every 45 min in market hours
+_VERDICT_MAX_PER_RUN = 8
+_TOMORROW_MAX_SNAPSHOT_AGE_H = 3             # caps a burst now that the whole scan is read
 
 
 def _verdict_of(b: dict):
@@ -702,8 +704,30 @@ def check_verdict_alerts(state: dict, today: str) -> int:
         print(f"[verdicts] snapshot is stale (generated_at={gen_at}) — skipping")
         return 0
 
+    # The shortlist holds only the top 20 by score; the full scored map
+    # (same scan, same generated_at) also carries BUY / STRONG BUY names
+    # further down. Read it too so those reach Telegram.
+    candidates = list(snap["data"].get("buys") or [])
+    seen = {_base_symbol(b.get("ticker")) for b in candidates}
+    try:
+        full = store.kv_get("all_scored_snapshot", user_id="_system")
+    except Exception as e:
+        print(f"[verdicts] all-scored kv_get failed: {e}")
+        full = None
+    if (full and isinstance(full, dict) and isinstance(full.get("data"), dict)
+            and full.get("generated_at") == gen_at):
+        for s in full["data"].values():
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("action", "")).upper().replace("_", " ") not in _VERDICT_ALERT_TIERS:
+                continue
+            base = _base_symbol(s.get("ticker"))
+            if base and base not in seen:
+                seen.add(base)
+                candidates.append(s)
+
     hits = []
-    for b in snap["data"].get("buys") or []:
+    for b in candidates:
         try:
             fv = compose_finalverdict_for_card(b, tqs=None, log_source=None)
         except Exception as e:
@@ -721,6 +745,9 @@ def check_verdict_alerts(state: dict, today: str) -> int:
         key = f"verdict_{verdict.replace(' ', '_').lower()}_{base}"
         if _already_fired(state, key, today):
             continue
+        if sent >= _VERDICT_MAX_PER_RUN:
+            print(f"[verdicts] per-run cap {_VERDICT_MAX_PER_RUN} reached; the rest go next run")
+            break
         lines = _format_verdict_alert(verdict, b, fv, regime, gen_at)
         if dispatch("\n".join(lines)):
             _mark_fired(state, key, today)
@@ -1445,6 +1472,67 @@ def check_intraday_watchlist(state: dict, today: str, *, max_picks: int = 5) -> 
 # my thesis basket evolve" question rather than "what's fresh today".
 # ─────────────────────────────────────────────────────────────────────────────
 
+def check_tomorrow_watchlist(state: dict, today: str, *, top_n: int = 5) -> int:
+    """After-close message from the Tomorrow's Watchlist snapshot the 15:50
+    warm-up just wrote: top breakout and reversal names for the next session.
+    Once per day. Descriptive, not advice."""
+    key = "tomorrow_watchlist"
+    if _already_fired(state, key, today):
+        return 0
+    try:
+        import trade_store as store
+        from utils.snapshot_time import snapshot_age_seconds
+        snap = store.kv_get("tomorrow_watchlist_snapshot", user_id="_system")
+    except Exception as e:
+        print(f"[tomorrow] snapshot read failed: {e}")
+        return 0
+    if not (snap and isinstance(snap, dict) and isinstance(snap.get("data"), dict)):
+        print("[tomorrow] no Tomorrow's Watchlist snapshot")
+        return 0
+    gen_at = snap.get("generated_at", "unknown")
+    _age = snapshot_age_seconds(gen_at)
+    if _age is None or _age / 3600 > _TOMORROW_MAX_SNAPSHOT_AGE_H:
+        print(f"[tomorrow] snapshot is stale (generated_at={gen_at}) — skipping")
+        return 0
+    lines = tomorrow_watchlist_lines(snap["data"], gen_at, top_n=top_n)
+    if not lines:
+        print("[tomorrow] breakout and reversal lists are empty — nothing to send")
+        return 0
+    if dispatch("\n".join(lines), subject="Tomorrow's Watchlist — NSE Smart Investor"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+def tomorrow_watchlist_lines(data: dict, gen_at, *, top_n: int = 5) -> list:
+    """Message body for check_tomorrow_watchlist; [] when there is nothing to show."""
+    sections = [("🚀 <b>Breakout setups</b>", data.get("breakout_candidates") or []),
+                ("🔄 <b>Reversal watch</b>", data.get("reversal_watch") or [])]
+    if not any(items for _, items in sections):
+        return []
+    lines = [f"🌙 <b>Tomorrow's Watchlist</b> (scan at {_snapshot_ist_label(gen_at, with_date=True)})", ""]
+    for title, items in sections:
+        if not items:
+            continue
+        lines.append(title)
+        for i, p in enumerate(items[:top_n], start=1):
+            row = f"{i}. <b>{_h(_base_symbol(p.get('ticker')))}</b> · score {p.get('score')}/90"
+            try:
+                if p.get("entry"):
+                    row += f" · ref ₹{float(p['entry']):,.2f}"
+                if p.get("sl"):
+                    row += f" · invalidation ₹{float(p['sl']):,.2f}"
+            except (TypeError, ValueError):
+                pass
+            lines.append(row)
+            if p.get("signal_type"):
+                lines.append(f"   {_h(p['signal_type'])}")
+        lines.append("")
+    lines.append("<i>Next-session setups from today's close. Model output from past price data — "
+                 "not investment advice.</i>")
+    return lines
+
+
 def check_weekly_digest(state: dict, today: str) -> int:
     """Sunday-only weekly summary. Once per week."""
     # Dedup by ISO week — one fire per week, not per day
@@ -1589,7 +1677,7 @@ def main() -> int:
     _bypass_market_hours = (
         "morning-digest", "portfolio-posture", "test", "test-verdict", "test-digest",
         "test-posture",
-        "weekly-digest", "intraday-watchlist",
+        "weekly-digest", "intraday-watchlist", "tomorrow-watchlist",
     )
     if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
@@ -1614,6 +1702,8 @@ def main() -> int:
         total += check_portfolio_posture(state, today)
     elif mode == "weekly-digest":
         total += check_weekly_digest(state, today)
+    elif mode == "tomorrow-watchlist":
+        total += check_tomorrow_watchlist(state, today)
     elif mode == "test":
         total += check_test_alert(state, today)
     elif mode == "test-verdict":

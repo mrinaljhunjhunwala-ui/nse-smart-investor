@@ -64,3 +64,33 @@ jobs:
           ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
         run: python scripts/warm_tomorrow_watchlist.py
+
+      # After-close Telegram/Gmail message with the top breakout and reversal
+      # names from the snapshot just written. Shares the alert-state cache
+      # with the other alert jobs, so it goes out at most once a day.
+      - name: Restore alert state
+        id: restore_state
+        uses: actions/cache/restore@v5
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
+          restore-keys: |
+            alert-state-
+
+      - name: Send Tomorrow's Watchlist
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+        run: python alerts/check_alerts.py --mode=tomorrow-watchlist
+
+      - name: Save alert state
+        if: always() && steps.restore_state.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: data/alert_state.json
+          key: alert-state-${{ github.run_id }}
