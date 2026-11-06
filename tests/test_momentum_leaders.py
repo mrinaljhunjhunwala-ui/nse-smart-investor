@@ -21,7 +21,7 @@ def _frame(drift: float, n: int = 260, price: float = 100.0, volume: float = 1e6
     close = price * np.exp(np.cumsum(drift + rng.normal(0, 0.005, n)))
     vol = np.full(n, float(volume))
     vol[-5:] *= vol_tail
-    idx = pd.bdate_range("2025-09-01", periods=n)
+    idx = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=n)   # current bars: stale ones are excluded
     return pd.DataFrame({"Open": close, "High": close * 1.01, "Low": close * 0.99,
                          "Close": close, "Volume": vol}, index=idx)
 

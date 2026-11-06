@@ -146,3 +146,11 @@ def test_scan_peek_key_matches_score_stock_fetch(monkeypatch):
     monkeypatch.undo()
     S2._load_deps()
     assert all(S2._resolve_ticker(t) == t for t in get_universe("nifty500")[:50])
+
+
+def test_suspended_stock_is_excluded_recent_one_is_not():
+    # last bar 22 Oct, scanned 6 Nov: many sessions without a trade
+    stale = _frame(end="2026-10-22")
+    assert list_exclusion(stale, {}, today=dt.date(2026, 11, 6)).startswith("no trades")
+    # Friday's bar on the following Monday is current, not stale
+    assert list_exclusion(_frame(end="2026-10-02"), {}, today=_TODAY) is None

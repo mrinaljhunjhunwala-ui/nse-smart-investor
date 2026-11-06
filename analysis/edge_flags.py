@@ -92,6 +92,9 @@ _LIST_EXCLUDED = {
     "series_bz": "BZ series",
     "upper_circuit": "locked at upper circuit",
     "lower_circuit": "locked at lower circuit",
+    # Suspended / untraded names: the score describes a price that no longer
+    # trades (one Nifty Total Market name had no bar after 22 Oct 2026).
+    "no_recent_bars": "no trades in recent sessions (suspended or illiquid)",
 }
 
 
