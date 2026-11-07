@@ -1,3 +1,55 @@
+# Latest — 2026-11-07 · Actions unblocked, alerts widened, keep-awake (read this first)
+
+This section is the running memory between sessions; older sections below are history.
+
+## What happened
+- **9 Oct → 3 Nov:** every scheduled job failed in ~3 s with no runner (GitHub Actions minutes /
+  billing lock). The owner made the repo public (free Actions minutes); jobs run again since 4 Nov.
+  The verdict ledger has a **~3½-week logging gap** (no warm Top Picks runs in that window).
+- **Merged this session:** #321 data reliability (yfinance 1.x pin, holiday/placeholder bar cleaning,
+  NSE FII/DII fallback, F&O list from NSE) · #322 after-close **Tomorrow's Watchlist on Telegram**
+  (`check_alerts --mode=tomorrow-watchlist`, sent by `warm_tomorrow_watchlist.yml`), BUY/STRONG BUY
+  alerts read the full `all_scored_snapshot` (max 8 new per run), `^` index symbols skip Angel One ·
+  #323 `no_recent_bars` (>3 sessions without a bar) joins the list exclusions, so suspended names stay
+  off Top Picks / Tomorrow's Watchlist / Momentum Leaders · #324/#325 `keep-streamlit-awake.yml`
+  (Playwright visit every 4 h; app made public 7 Nov; first run green).
+- Two tests had fixed dates that aged out (`test_edge_flags` renderer, `test_momentum_leaders`
+  frames); both now build frames ending today. Watch for more date-pinned fixtures.
+
+## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
+- [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
+  checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
+  **204**. "Treat 3xx as success" must stay OFF. This job also carries the 15:15 picks recap and the
+  intraday BUY alerts.
+- [ ] **Weekly digest:** failed with an HTTP error on 1 Nov. Body
+  `{"ref":"main","inputs":{"mode":"weekly-digest","force":"false"}}` plus `Content-Type: application/json`.
+- [ ] **Momentum digest (job #5):** not created yet. `market-digest.yml`, body
+  `{"ref":"main","inputs":{"mode":"momentum","force":"false"}}`, crontab `0,30 10-14 * * 1-5` IST.
+
+## Open decisions (owner)
+- **Tomorrow's Watchlist in bear regimes** (details further down): rank-based gates vs. showing
+  the lists as regime-suppressed. On 6 Nov the breakout list had 15 names, so it only bites in a
+  falling market.
+- **Live checks during market hours:** Live Ticker 30 s refresh and the Angel One connected panel
+  have only been verified by stubbed tests.
+
+## Research clock
+- **Verdict Calibration decision rule** (registered 2026-09-29: 20 sessions, ≥150 bullish verdicts
+  over ≥30 days, day-clustered Wilson lower bound vs NIFTY > 50%, plus a Rising-NIFTY-only copy):
+  earliest verdict ~mid-December 2026 because of the logging gap. Do not retune it.
+- Shadow breadth label re-test ~April 2027; range-regime sector-neutral reversal re-test late 2027;
+  point-in-time index membership would remove survivorship bias from every study.
+
+## Verified closed (don't re-open)
+- Index symbols and Angel One: every candle path goes through `data.fetcher.fetch_single`, which
+  skips Angel for `^` symbols (#322); Angel is only used for stock live quotes and holdings.
+- "~9 silent swallows" in `analysis/hedging.py`, `portfolio_risk.py`, `portfolio_manager.py`:
+  every handler there logs or re-raises (checked by AST scan on 7 Nov).
+- Persistence on the live deploy: the warm jobs write snapshots to Postgres
+  (`backend=postgres` in their logs).
+
+---
+
 # Handoff — 2026-09-28 · Bear-regime fix, warmers working, Stooq off, EOD pipeline
 
 ## Repo state

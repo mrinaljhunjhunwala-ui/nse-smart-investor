@@ -1,6 +1,6 @@
 # CLAUDE.md — NSE Smart Investor
 
-Read this before doing anything in the repo. It's the one-page brief that keeps agents from wasting turns re-deriving what the codebase already documents.
+Read this before doing anything in the repo, then the **"Latest" section at the top of `HANDOFF.md`** (open work, owner to-dos, research clock). It's the one-page brief that keeps agents from wasting turns re-deriving what the codebase already documents.
 
 ## What this is
 
