@@ -208,6 +208,36 @@ if _ledger.empty:
     )
     st.stop()
 
+# ── The answer, in plain words ────────────────────────────────────────────────
+# One card with the registered test's state, before any table: "is the model
+# working?" Uses all sources, like the test itself. Descriptive only.
+if _NEW_API and hasattr(_vl, "plain_summary"):
+    _ps_res = _vl.evaluate_decision_rule()
+    _ps_h = int(_ps_res["rule"]["horizon_days"])
+    _ps_col = f"ret_{_ps_h}d"
+    _ps_pending = 0
+    if _ps_col in _ledger.columns:
+        _ps_wait = _ledger[_ledger["verdict"].isin(_vl.BULLISH_VERDICTS) & _ledger[_ps_col].isna()]
+        _ps_pending = int(_ps_wait["logged_date"].nunique())
+    _ps = _vl.plain_summary(_ps_res, pending_days=_ps_pending)
+    _ps_tone = {"passing": "success", "failing": "warning", "unavailable": "warning"}.get(_ps["state"], "info")
+    getattr(st, _ps_tone)(
+        f"**Is the model working?** {_ps['headline']}\n\n{_ps['detail']}"
+        + (f"\n\n{_ps['so_far']}" if _ps["so_far"] else ""),
+        icon={"success": "✅", "warning": "⚠️", "info": "⏳"}[_ps_tone],
+    )
+    if _ps["state"] in ("too_early", "passing", "failing"):
+        _pc1, _pc2 = st.columns(2)
+        _pc1.progress(_ps["picks_progress"],
+                      text=f"Scored picks: {_ps['picks']} / {_ps['picks_needed']}")
+        _pc2.progress(_ps["days_progress"],
+                      text=f"Separate days: {_ps['days']} / {_ps['days_needed']}")
+        st.caption(
+            f"The test: {_ps_h} sessions (~1 month) after each bullish read, did that day's picks "
+            "beat the Nifty? It answers only once both bars are full. The tables further down are "
+            "the detail behind this card."
+        )
+
 # ── Source filter ─────────────────────────────────────────────────────────────
 # Each surface logs its own verdicts. "All" keeps the pooled view; a single
 # source shows how that surface's calls did on their own. The pre-registered

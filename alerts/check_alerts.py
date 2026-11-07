@@ -1513,6 +1513,10 @@ def tomorrow_watchlist_lines(data: dict, gen_at, *, top_n: int = 5) -> list:
     lines = [f"🌙 <b>Tomorrow's Watchlist</b> (scan at {_snapshot_ist_label(gen_at, with_date=True)})", ""]
     for title, items in sections:
         if not items:
+            if "Breakout" in title and data.get("bear_scoring_active"):
+                rg = str(data.get("regime_label") or "bear").replace("_", " ")
+                lines += [title, f"   None today: held back in the {_h(rg)} market, where scores are "
+                          "kept mid-range on purpose. The list refills when the trend turns.", ""]
             continue
         lines.append(title)
         for i, p in enumerate(items[:top_n], start=1):
@@ -1530,6 +1534,76 @@ def tomorrow_watchlist_lines(data: dict, gen_at, *, top_n: int = 5) -> list:
         lines.append("")
     lines.append("<i>Next-session setups from today's close. Model output from past price data — "
                  "not investment advice.</i>")
+    return lines
+
+
+def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | None = None) -> int:
+    """Friday after the close: how this week's BUY / STRONG BUY reads moved
+    since they were logged, against the Nifty over the same span. Once per ISO
+    week. Descriptive only — a record of past calls, not advice."""
+    now = (now or datetime.datetime.now(_IST)).astimezone(_IST)
+    if now.weekday() != 4:
+        print(f"[scorecard] not Friday (weekday={now.weekday()}) — skipping")
+        return 0
+    key = f"weekly_scorecard_{now:%G-W%V}"
+    if _already_fired(state, key, today):
+        return 0
+    try:
+        from analysis import verdict_ledger as vl
+        from data.fetcher import fetch_single
+        ledger = vl.load_ledger(limit=1_000_000)
+    except Exception as e:
+        print(f"[scorecard] ledger read failed: {e}")
+        return 0
+    if vl.ledger_error(ledger) or ledger.empty:
+        print("[scorecard] ledger empty or unreadable — nothing to send")
+        return 0
+    monday = (now - datetime.timedelta(days=now.weekday())).date().isoformat()
+    week = ledger[(ledger["logged_date"].astype(str) >= monday)
+                  & (ledger["logged_date"].astype(str) <= today)
+                  & ledger["verdict"].isin(vl.BULLISH_VERDICTS)]
+    if week.empty:
+        print("[scorecard] no bullish reads logged this week")
+        return 0
+    prices = {}
+    for tk in week["ticker"].unique():
+        q = _quote(_base_symbol(tk))
+        if q:
+            prices[tk] = float(q["price"])
+    nifty_close, nifty_now = None, None
+    try:
+        nifty = fetch_single("^NSEI", period="1mo")
+        nifty_close = nifty["Close"]
+        nifty_now = float(nifty_close.dropna().iloc[-1])
+    except Exception as e:
+        print(f"[scorecard] Nifty history unavailable: {e}")
+    card = vl.week_scorecard(week, prices, nifty_close, nifty_now)
+    if not card:
+        print("[scorecard] no prices for this week's reads — nothing to send")
+        return 0
+    lines = weekly_scorecard_lines(card, monday, today)
+    if dispatch("\n".join(lines), subject="Weekly report card — NSE Smart Investor"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+def weekly_scorecard_lines(card: dict, monday: str, today: str) -> list:
+    """Message body for check_weekly_scorecard."""
+    lines = [f"🧾 <b>Weekly report card</b> ({monday} → {today})",
+             f"<i>This week's bullish reads: {card['n']} names, measured from the "
+             "price when each was logged to today.</i>", "",
+             f"Average move: <b>{card['mean_move']:+.1f}%</b> · {card['up']} up / "
+             f"{card['n'] - card['up']} down or flat"]
+    if card.get("mean_edge") is not None:
+        lines.append(f"Versus the Nifty over the same days: <b>{card['mean_edge']:+.1f} pts</b> · "
+                     f"{card['ahead']} of {card['n_edge']} ahead")
+    for title, rows in (("Biggest moves up", card["best"]), ("Biggest moves down", card["worst"])):
+        if rows:
+            lines += ["", f"<b>{title}</b>"]
+            lines += [f"• {_h(_base_symbol(r['ticker']))} {r['move']:+.1f}%" for r in rows]
+    lines += ["", "<i>One week is noise; the Verdict Calibration page runs the proper 20-session "
+              "test. A record of past model output, not investment advice.</i>"]
     return lines
 
 
@@ -1677,7 +1751,7 @@ def main() -> int:
     _bypass_market_hours = (
         "morning-digest", "portfolio-posture", "test", "test-verdict", "test-digest",
         "test-posture",
-        "weekly-digest", "intraday-watchlist", "tomorrow-watchlist",
+        "weekly-digest", "intraday-watchlist", "tomorrow-watchlist", "weekly-scorecard",
     )
     if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
@@ -1704,6 +1778,8 @@ def main() -> int:
         total += check_weekly_digest(state, today)
     elif mode == "tomorrow-watchlist":
         total += check_tomorrow_watchlist(state, today)
+    elif mode == "weekly-scorecard":
+        total += check_weekly_scorecard(state, today)
     elif mode == "test":
         total += check_test_alert(state, today)
     elif mode == "test-verdict":

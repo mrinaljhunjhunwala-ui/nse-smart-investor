@@ -37,3 +37,13 @@ def test_stale_or_empty_snapshot_sends_nothing(monkeypatch):
     assert ca.check_tomorrow_watchlist({}, "2026-11-06") == 0
     sent = _setup(monkeypatch, {"breakout_candidates": [], "reversal_watch": []})
     assert ca.check_tomorrow_watchlist({}, "2026-11-06") == 0 and not sent
+
+
+def test_empty_breakout_in_bear_market_says_why(monkeypatch):
+    from tests.test_alert_copy_no_advice import _assert_descriptive
+    data = {"breakout_candidates": [], "reversal_watch": [_p("A.NS", 50, "🔄 Bullish divergence")],
+            "bear_scoring_active": True, "regime_label": "trend_down"}
+    sent = _setup(monkeypatch, data)
+    assert ca.check_tomorrow_watchlist({}, "2026-11-06") == 1
+    _assert_descriptive(sent[0])
+    assert "held back in the trend down market" in sent[0] and "A</b>" in sent[0]
