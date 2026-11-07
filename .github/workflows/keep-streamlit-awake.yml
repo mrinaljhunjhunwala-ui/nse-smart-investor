@@ -1,0 +1,40 @@
+name: Keep Streamlit awake
+
+# Streamlit Community Cloud hibernates a free app after ~12h without a visitor,
+# and a plain HTTP ping doesn't count as one. This opens the app in a headless
+# browser (and presses "Yes, get this app back up!" if it's already asleep).
+# GitHub's cron is best-effort for this repo (it has fired hours late), which is
+# fine here: any visit inside each 12h window keeps the app up. Optionally add
+# a cron-job.org trigger (alerts/README.md) for a firm cadence.
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"       # every 4h (UTC), off the hour
+  workflow_dispatch:
+
+concurrency:
+  group: keep-streamlit-awake
+  cancel-in-progress: true
+
+jobs:
+  visit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright + Chromium
+        run: |
+          pip install --quiet "playwright>=1.45,<2"
+          python -m playwright install --with-deps chromium
+
+      - name: Visit the app
+        env:
+          STREAMLIT_APP_URL: https://mrinaljhunjhunwala-ui-nse-smart-investor-dashboardapp-mduwav.streamlit.app
+        run: python scripts/keep_streamlit_awake.py
