@@ -37,7 +37,7 @@ Effort: S ≤ ½ day · M ≤ 2 days · L > 2 days
 | # | Item | Pri | Effort | Skill / status |
 |---|---|---|---|---|
 | F1 | ✅ **Design-token audit** — hex routed through `design.py` tokens across all pages. Shipped in #92 (Quality Watch + Deep Dive), #94 (Market Live / My Portfolio / Paper Trades / Intraday), #100 (FII/DII Plotly). F1 hook in `.claude/hooks/block_page_hex.py` prevents regressions. | ✅ Done | — | `trading-dashboard-design` |
-| F2 | **Mobile / narrow-viewport pass (<900 px)**. Streamlit's default column stacking gets ugly. Add media queries in `design.py`, collapse the top-bar to a compact strip, force single-column card grids under 768 px. | 🟧 P1 | M | `apple-design` + `trading-dashboard-design` |
+| F2 | ✅ **Mobile / narrow-viewport pass** — stacking, compact top bar and type scale shipped earlier; 2026-11-07 measured 6 pages at 390 px with Playwright (no horizontal overflow) and fixed the rest: Live Ticker "Refresh Now" over the meta line, metric-only rows 2-up, sticky first column in `sig-table`, 44 px buttons, 16 px inputs (no iOS zoom). | ✅ Shipped | — | — |
 | F3 | ✅ **Dark-mode parity** — default Streamlit widget chrome (light borders, wrong hover) that was bleeding through on Paper Trades / Intraday / Angel One. Shipped in #139 (widget-parity block in `design.py` for `text_area`, `slider`, `radio`, `checkbox`, `toggle`, `download_button`). | ✅ Done | — | — |
 | F4 | ✅ **Motion policy** — `prefers-reduced-motion` guard + shared tokens wired on `hero_verdict`. Shipped in #97. | ✅ Done | — | — |
 | F5 | ✅ **Empty-state kit** — `empty_state(icon, title, hint)` helper in `ui_components.py` (#95) + rollout across 6 pages including Watchlist and Paper Trades (#96). | ✅ Done | — | — |

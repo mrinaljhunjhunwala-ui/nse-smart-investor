@@ -894,6 +894,43 @@ def apply_design():
             min-width: 0 !important;
         }
 
+        /* Streamlit pulls the next block up 16 px under every markdown block
+           (it expects a trailing <p> margin). The Live Ticker meta strip ends
+           in a <div>, so once the header columns stack, "Refresh Now" rode
+           over the "Next open" line. Give the strip that margin back. */
+        .lt-meta { margin-bottom: 16px; }
+
+        /* Rows made only of st.metric tiles: two per row instead of one
+           full-width tile each (a 4-tile strip cost a whole screen). */
+        [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stMetric"]):not(
+            :has(> [data-testid="stColumn"] :is([data-testid="stButton"], [data-testid="stSelectbox"],
+                 [data-testid="stTextInput"], [data-testid="stNumberInput"], [data-testid="stPlotlyChart"],
+                 [data-testid="stDataFrame"], [data-testid="stRadio"], [data-testid="stProgress"]))) {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+        }
+        [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stMetric"]):not(
+            :has(> [data-testid="stColumn"] :is([data-testid="stButton"], [data-testid="stSelectbox"],
+                 [data-testid="stTextInput"], [data-testid="stNumberInput"], [data-testid="stPlotlyChart"],
+                 [data-testid="stDataFrame"], [data-testid="stRadio"], [data-testid="stProgress"])))
+            > [data-testid="stColumn"] {
+            width: calc(50% - 4px) !important;
+            flex: 0 0 calc(50% - 4px) !important;
+        }
+
+        /* Wide ranked tables already scroll sideways; keep the name column
+           pinned so a row stays readable while scrolling the numbers. */
+        table.sig-table th:first-child, table.sig-table td:first-child {
+            position: sticky; left: 0; z-index: 1; background: var(--card-lift);
+        }
+        table.sig-table th:first-child { background: var(--sunken); }
+
+        /* Thumb-sized tap targets, and 16 px inputs so iOS doesn't zoom the
+           page when a field is focused. */
+        [data-testid="stButton"] button, [data-testid="stFormSubmitButton"] button { min-height: 44px; }
+        [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
+        [data-testid="stDateInput"] input, [data-baseweb="select"] input { font-size: 16px !important; }
+
         /* Opt-in utility for raw <div style="display:flex"> card grids that
            can't reach data-testid. Pages that hand-wrote a 2- or 3-card row
            with inline flex (Command Centre Market Pulse, My Portfolio stat
