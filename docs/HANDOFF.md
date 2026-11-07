@@ -104,11 +104,8 @@ tools/validate_valuation.py  live valuation regression diagnostic (NOT a CI test
 | `DEPLOYMENT_CHECKLIST.md` + `PERSISTENCE_ACCEPTANCE.md` | how to make persistence durable + prove it |
 
 ## 8. Known gaps / deferred (nothing is blocking)
-- **Persistence not yet PROVEN on the live deploy** — set a free Postgres `DATABASE_URL`
-  (Neon/Supabase) and run the redeploy check in `PERSISTENCE_ACCEPTANCE.md`. Until then paper
-  trades/watchlist reset on redeploy (SQLite is ephemeral on Streamlit Cloud).
-- **Reliability tail** — ~9 silent swallows remain in `analysis/hedging`, `portfolio_risk`,
-  `portfolio_manager` (deferred; low risk).
+- Persistence and the reliability tail were closed by 2026-11-07; see the root `HANDOFF.md`
+  "Latest" section, which is now the running list of open work.
 - **NOT doing** (decided, with evidence): EODHD/paid providers, NIM/GNPA/CASA financials pack,
   historical valuation bands (C2), prediction tracking, AI-narration of the thesis.
 
