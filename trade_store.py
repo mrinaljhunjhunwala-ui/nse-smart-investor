@@ -169,6 +169,15 @@ def _q(sql: str) -> str:
 # that already use ``_store.read_sql_df``.
 from utils.sql import read_sql_df  # noqa: E402,F401
 
+_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+
+def _now_ist_iso() -> str:
+    """Trade timestamps in IST wall-clock, same naive ISO format as before.
+    Streamlit Cloud and Actions run in UTC, so datetime.now() stamped trades
+    5h30m behind and dated 00:00-05:30 IST trades to the previous day."""
+    return datetime.datetime.now(_IST).replace(tzinfo=None).isoformat()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Startup validation
@@ -343,7 +352,7 @@ def open_trade(
         raise ValueError(f"Stop loss ({sl}) must be below entry price ({price}) for a BUY trade")
 
     ensure_schema()
-    now  = datetime.datetime.now().isoformat()
+    now  = _now_ist_iso()
     cols = "account,ticker,strategy,action,price,quantity,sl,tp,capital,reason,timestamp"
     vals = (account, ticker, strategy, action.upper(), price, qty, sl, tp, price * qty, reason, now)
 
@@ -361,7 +370,7 @@ def open_trade(
 
 
 def close_trade(trade_id: int, exit_price: float, reason: str = "Manual close") -> None:
-    now = datetime.datetime.now().isoformat()
+    now = _now_ist_iso()
     with _get_conn() as conn:
         cur = conn.cursor()
         cur.execute(_q("SELECT price, quantity, action FROM trades WHERE id=?"), (trade_id,))
