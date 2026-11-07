@@ -1497,3 +1497,100 @@ def _none_if_nan(v: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return None if np.isnan(f) else f
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plain-language read of the registered test, and a weekly report card
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plain_summary(res: Dict[str, Any], *, pending_days: int = 0) -> Dict[str, Any]:
+    """One-glance reading of evaluate_decision_rule()'s result for a non-expert.
+
+    pending_days: distinct days with bullish verdicts already logged whose
+    horizon return hasn't matured yet. They count toward the day floor once
+    they mature, so they shorten the wait. Descriptive only, never advice.
+    """
+    rule = res.get("rule") or DECISION_RULE
+    h, need_v, need_d = int(rule["horizon_days"]), int(rule["min_verdicts"]), int(rule["min_days"])
+    have_v, have_d = int(res.get("n_alpha") or 0), int(res.get("alpha_days") or 0)
+    win = res.get("day_win_vs_nifty")
+    so_far = (f"So far, the day's bullish picks beat the Nifty on {win:.0f}% of the "
+              f"{have_d} scored days." if win is not None and have_d else "")
+    out: Dict[str, Any] = {
+        "state": "too_early", "picks": have_v, "picks_needed": need_v,
+        "days": have_d, "days_needed": need_d,
+        "picks_progress": min(1.0, have_v / need_v) if need_v else 1.0,
+        "days_progress": min(1.0, have_d / need_d) if need_d else 1.0,
+        "so_far": so_far, "horizon_days": h,
+    }
+    status = res.get("status")
+    if status == "unavailable":
+        out.update(state="unavailable", headline="Couldn't read the results right now.",
+                   detail="The database didn't answer; reload in a minute. Counts are unknown, not zero.")
+    elif status == "met":
+        out.update(state="passing",
+                   headline="Passing: the bullish picks beat the Nifty more often than luck would explain.",
+                   detail=f"Checked {h} sessions after each pick. Past calls only; not a forecast or advice.")
+    elif status == "not_met":
+        out.update(state="failing",
+                   headline="Not passing: the bullish picks haven't beaten the Nifty reliably.",
+                   detail=(f"Enough data is in, but over {h} sessions the picks did not beat the Nifty "
+                           "more often than chance. Past calls only."))
+    else:
+        short = max(0, need_d - have_d)
+        if short and pending_days >= short:
+            wait = (f"Enough days are already logged; they finish their {h}-session window over "
+                    "the next few weeks.")
+        elif short:
+            wait = (f"About {short - pending_days} more trading days of picks are needed, then "
+                    f"{h} sessions for each to finish.")
+        else:
+            wait = f"{need_v - have_v} more scored picks are needed."
+        out.update(headline="Too early to tell. No conclusion either way yet.", detail=wait)
+    return out
+
+
+def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
+                   nifty_close: pd.Series, nifty_now: Optional[float]) -> Optional[Dict[str, Any]]:
+    """How this week's bullish reads moved since they were logged.
+
+    rows: ledger rows (ticker, logged_date, entry_price, verdict) for the week.
+    One row per ticker (its first bullish log of the week). The Nifty leg is
+    its close on the log date (or the last session before) to nifty_now.
+    Returns None when nothing can be scored. Descriptive only.
+    """
+    if rows is None or rows.empty:
+        return None
+    df = rows[rows["verdict"].isin(BULLISH_VERDICTS)].copy()
+    df = df.sort_values("logged_date").drop_duplicates("ticker", keep="first")
+    nifty_close = nifty_close.dropna().sort_index() if nifty_close is not None else pd.Series(dtype=float)
+    out_rows = []
+    for _, r in df.iterrows():
+        try:
+            entry, now = float(r["entry_price"]), float(price_now.get(r["ticker"]) or 0)
+        except (TypeError, ValueError):
+            continue
+        if entry <= 0 or now <= 0:
+            continue
+        move = (now / entry - 1) * 100
+        nifty_move = None
+        if nifty_now and not nifty_close.empty:
+            past = nifty_close[nifty_close.index <= pd.Timestamp(str(r["logged_date"]))]
+            if not past.empty and float(past.iloc[-1]) > 0:
+                nifty_move = (float(nifty_now) / float(past.iloc[-1]) - 1) * 100
+        out_rows.append({"ticker": r["ticker"], "move": move, "nifty_move": nifty_move})
+    if not out_rows:
+        return None
+    moves = [x["move"] for x in out_rows]
+    edges = [x["move"] - x["nifty_move"] for x in out_rows if x["nifty_move"] is not None]
+    ranked = sorted(out_rows, key=lambda x: -x["move"])
+    return {
+        "n": len(out_rows),
+        "mean_move": float(np.mean(moves)),
+        "up": sum(m > 0 for m in moves),
+        "mean_edge": float(np.mean(edges)) if edges else None,
+        "ahead": sum(e > 0 for e in edges),
+        "n_edge": len(edges),
+        "best": ranked[:3],
+        "worst": ranked[-3:][::-1] if len(ranked) > 3 else [],
+    }

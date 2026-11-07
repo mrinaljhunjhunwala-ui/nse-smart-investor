@@ -88,6 +88,19 @@ jobs:
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
         run: python alerts/check_alerts.py --mode=tomorrow-watchlist
 
+      # Fridays only (the mode checks the weekday): how this week's BUY /
+      # STRONG BUY reads moved since they were logged, vs the Nifty.
+      - name: Send weekly report card
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+        run: python alerts/check_alerts.py --mode=weekly-scorecard
+
       - name: Save alert state
         if: always() && steps.restore_state.outcome == 'success'
         uses: actions/cache/save@v5

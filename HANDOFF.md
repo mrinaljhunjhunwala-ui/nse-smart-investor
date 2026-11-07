@@ -16,6 +16,10 @@ This section is the running memory between sessions; older sections below are hi
 - Two tests had fixed dates that aged out (`test_edge_flags` renderer, `test_momentum_leaders`
   frames); both now build frames ending today. Watch for more date-pinned fixtures.
 
+- **Added 7 Nov:** a plain-language "Is the model working?" card with two progress bars at the top of
+  Verdict Calibration (`verdict_ledger.plain_summary`), and a Friday 🧾 weekly report card on
+  Telegram (`check_alerts --mode=weekly-scorecard`, sent from `warm_tomorrow_watchlist.yml`).
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
@@ -27,9 +31,8 @@ This section is the running memory between sessions; older sections below are hi
   `{"ref":"main","inputs":{"mode":"momentum","force":"false"}}`, crontab `0,30 10-14 * * 1-5` IST.
 
 ## Open decisions (owner)
-- **Tomorrow's Watchlist in bear regimes** (details further down): rank-based gates vs. showing
-  the lists as regime-suppressed. On 6 Nov the breakout list had 15 names, so it only bites in a
-  falling market.
+- ~~Tomorrow's Watchlist in bear regimes~~ **Decided 7 Nov: option (b)**: keep the gates and say why
+  the list is empty (page already did; the 🌙 Telegram message now does too). Don't add rank-based gates.
 - **Live checks during market hours:** Live Ticker 30 s refresh and the Angel One connected panel
   have only been verified by stubbed tests.
 
