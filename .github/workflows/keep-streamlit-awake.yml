@@ -38,3 +38,11 @@ jobs:
         env:
           STREAMLIT_APP_URL: https://mrinaljhunjhunwala-ui-nse-smart-investor-dashboardapp-mduwav.streamlit.app
         run: python scripts/keep_streamlit_awake.py
+
+      - name: Upload screenshot (when the app didn't load)
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: keep-awake-screenshot
+          path: keep_awake.png
+          if-no-files-found: ignore

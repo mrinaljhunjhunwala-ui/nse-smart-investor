@@ -14,6 +14,9 @@ from playwright.sync_api import TimeoutError as PWTimeout
 from playwright.sync_api import sync_playwright
 
 _WAKE_TEXT = "get this app back up"
+# Streamlit's root container; the test id changed across releases, so accept any.
+_APP_SELECTORS = ('[data-testid="stApp"], [data-testid="stAppViewContainer"], '
+                  '[data-testid="stMain"], .stApp')
 
 
 def main() -> int:
@@ -34,10 +37,10 @@ def main() -> int:
             print("app is awake (no wake-up button)")
         # The app renders inside an iframe on *.streamlit.app; wait for Streamlit's root.
         loaded = False
-        for frame_wait in range(12):                   # up to ~3 min for a cold start
+        for _ in range(12):                            # up to ~3 min for a cold start
             for f in page.frames:
                 try:
-                    if f.query_selector('[data-testid="stApp"]'):
+                    if f.query_selector(_APP_SELECTORS):
                         loaded = True
                         break
                 except Exception:
@@ -45,6 +48,16 @@ def main() -> int:
             if loaded:
                 break
             page.wait_for_timeout(15_000)
+        if not loaded:
+            # What the browser actually saw, so a red run says why.
+            print(f"page title: {page.title()!r}")
+            for f in page.frames:
+                print(f"frame: {f.url}")
+            try:
+                print("body text:", page.inner_text("body")[:400].replace("\n", " | "))
+            except Exception as e:
+                print(f"body text unavailable: {e}")
+            page.screenshot(path="keep_awake.png", full_page=True)
         browser.close()
     print("app loaded" if loaded else "app did NOT load within ~3 min")
     return 0 if loaded else 1
