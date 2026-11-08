@@ -79,16 +79,20 @@ def relock(scope: str) -> None:
     st.session_state.pop(_unlock_key(scope), None)
 
 
-def require_pin(scope: str = "angel_one", label: str = "Angel One") -> None:
-    """Render the PIN form and st.stop() until this session is unlocked."""
+def require_pin(scope: str = "angel_one", label: str = "Angel One",
+                guards: str = "holdings and funds and place real orders") -> None:
+    """Render the PIN form and st.stop() until this session is unlocked.
+
+    `guards` finishes "This page can show/edit …" in the locked message, so a
+    gate on a non-broker page doesn't talk about orders."""
     if is_unlocked(scope):
         return
 
     expected = configured_pin()
     if expected is None:
         st.error(
-            f"🔒 **{label} is locked.** This page can show holdings and funds and place "
-            "real orders, so it needs a PIN before it opens."
+            f"🔒 **{label} is locked.** This page can show {guards}, "
+            "so it needs a PIN before it opens."
         )
         st.markdown(
             "Add a PIN to the app's secrets (Streamlit Cloud → App settings → Secrets, "
@@ -98,7 +102,7 @@ def require_pin(scope: str = "angel_one", label: str = "Angel One") -> None:
         st.stop()
 
     st.markdown(f"#### 🔒 {label} is PIN-protected")
-    st.caption("Holdings, funds and order placement open after the owner's PIN. "
+    st.caption("Opens after the owner's PIN. "
                f"The unlock lasts {UNLOCK_TTL_S // 60} minutes in this browser.")
     left = lockout_remaining(scope)
     if left:
@@ -118,3 +122,13 @@ def require_pin(scope: str = "angel_one", label: str = "Angel One") -> None:
         else:
             st.error("Wrong PIN.")
     st.stop()
+
+
+def holdings_unlocked() -> bool:
+    """True once this browser session has unlocked My Portfolio. Every other
+    place that reads the manual holdings (sidebar quick view, Analyze Stock's
+    position / portfolio fit) checks this, so a locked session never sees them."""
+    try:
+        return is_unlocked("my_portfolio")
+    except Exception:
+        return False

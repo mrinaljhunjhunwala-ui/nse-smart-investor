@@ -20,6 +20,11 @@ This section is the running memory between sessions; older sections below are hi
   Verdict Calibration (`verdict_ledger.plain_summary`), and a Friday 🧾 weekly report card on
   Telegram (`check_alerts --mode=weekly-scorecard`, sent from `warm_tomorrow_watchlist.yml`).
 
+- **PIN on holdings (8 Nov):** My Portfolio uses the same owner PIN as Angel One (`[angel_one] page_pin`
+  or `ANGEL_PAGE_PIN`; fails closed). The sidebar Portfolio Quick View and Analyze Stock's position /
+  Portfolio Fit only read holdings after that unlock (`pin_gate.holdings_unlocked`). Paper Trades,
+  Watchlist and Journal stay open by the owner's choice.
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
