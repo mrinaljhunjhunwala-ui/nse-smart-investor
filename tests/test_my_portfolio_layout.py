@@ -58,6 +58,9 @@ def _stubs(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _blocked)
     monkeypatch.setattr(socket, "create_connection", _blocked)
 
+    import dashboard.shared.pin_gate as pg
+    monkeypatch.setattr(pg, "require_pin", lambda *a, **k: None)   # gate has its own tests
+
     import dashboard.shared.trade_utils as tu
     import analysis.portfolio_manager as pm_mod
     monkeypatch.setattr(tu, "load_manual_holdings", lambda: [dict(h) for h in _HOLDINGS])

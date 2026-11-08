@@ -119,6 +119,13 @@ render_top_bar()
 
 st.markdown('<h1 class="page-title-serif">My <em>Portfolio</em></h1>', unsafe_allow_html=True)
 
+# The app is public (made so 2026-11-07 for free Actions minutes and the
+# keep-awake visit) and has no login, so anyone with the link could read and
+# edit these holdings, which also drive the Telegram portfolio alerts. Same
+# owner PIN as the Angel One page; fails closed when no PIN is configured.
+from dashboard.shared.pin_gate import require_pin as _require_pin  # noqa: E402
+_require_pin("my_portfolio", "My Portfolio", guards="and edit your holdings")
+
 st.markdown(
     "Your holdings health check — live prices, trend-quality scores, and plain English guidance for each stock."
 )

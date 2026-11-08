@@ -604,7 +604,8 @@ if analyze_btn or _prefill_active or (
             _pctx = None
             try:
                 _short = ticker.replace(".NS", "")
-                for _h in load_manual_holdings() or []:
+                from dashboard.shared.pin_gate import holdings_unlocked as _hu
+                for _h in (load_manual_holdings() if _hu() else []) or []:
                     if str(_h.get("ticker", "")).upper().replace(".NS", "") == _short:
                         _hq = int(float(_h.get("quantity", 0) or 0))
                         _havg = float(_h.get("avg_buy_price", _h.get("avg_price", 0)) or 0.0)
@@ -2390,7 +2391,11 @@ if analyze_btn or _prefill_active or (
                 )
                 try:
                     # FIX A9: manual holdings (kv-backed) replace the old CSV path read
-                    _pf_holds_raw = load_manual_holdings()
+                    from dashboard.shared.pin_gate import holdings_unlocked as _hu2
+                    _pf_holds_raw = load_manual_holdings() if _hu2() else []
+                    if not _hu2():
+                        st.caption("🔒 Unlock **My Portfolio** with your PIN to compare this stock "
+                                   "with your holdings.")
                     _pf_holds = []
                     for _r in _pf_holds_raw:
                         _t = str(_r.get("ticker", "")).strip()
@@ -2400,7 +2405,9 @@ if analyze_btn or _prefill_active or (
                         if _t and _q > 0:
                             _pf_holds.append({"ticker": _t, "quantity": _q})
 
-                    if not _pf_holds:
+                    if not _pf_holds and not _hu2():
+                        pass                     # locked: the caption above says why
+                    elif not _pf_holds:
                         # F5 empty-state kit -- see dashboard/shared/ui_components.py.
                         from dashboard.shared.ui_components import empty_state as _empty
                         st.markdown(
