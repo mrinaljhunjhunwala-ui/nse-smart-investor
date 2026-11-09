@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:in-gaap="http://www.icai.org/xbrl/taxonomy/2016-03-31/in-gaap"
+            xmlns:ind-as="http://www.mca.gov.in/XBRL/2019/ind-as"
+            xmlns:xbrldi="http://xbrl.org/2006/xbrldi">
+  <xbrli:context id="FY26"><xbrli:entity><xbrli:identifier scheme="cin">L17110MH1973PLC019786</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2025-04-01</xbrli:startDate><xbrli:endDate>2026-03-31</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:context id="FY25"><xbrli:entity><xbrli:identifier scheme="cin">L17110MH1973PLC019786</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2024-04-01</xbrli:startDate><xbrli:endDate>2025-03-31</xbrli:endDate></xbrli:period></xbrli:context>
+  <xbrli:context id="I26"><xbrli:entity><xbrli:identifier scheme="cin">L17110MH1973PLC019786</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2026-03-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="I25"><xbrli:entity><xbrli:identifier scheme="cin">L17110MH1973PLC019786</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2025-03-31</xbrli:instant></xbrli:period></xbrli:context>
+  <xbrli:context id="FY26_seg"><xbrli:entity><xbrli:identifier scheme="cin">L17110MH1973PLC019786</xbrli:identifier>
+    <xbrli:segment><xbrldi:explicitMember dimension="ind-as:SegmentsAxis">ind-as:RetailMember</xbrldi:explicitMember></xbrli:segment></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2025-04-01</xbrli:startDate><xbrli:endDate>2026-03-31</xbrli:endDate></xbrli:period></xbrli:context>
+  <ind-as:NameOfCompany contextRef="FY26">SAMPLE INDUSTRIES LIMITED</ind-as:NameOfCompany>
+  <ind-as:CorporateIdentityNumber contextRef="FY26">L17110MH1973PLC019786</ind-as:CorporateIdentityNumber>
+  <ind-as:NatureOfReportStandaloneConsolidated contextRef="FY26">Consolidated</ind-as:NatureOfReportStandaloneConsolidated>
+  <ind-as:RevenueFromOperations contextRef="FY26" unitRef="INR" decimals="-5">1000000000</ind-as:RevenueFromOperations>
+  <ind-as:RevenueFromOperations contextRef="FY25" unitRef="INR" decimals="-5">800000000</ind-as:RevenueFromOperations>
+  <ind-as:RevenueFromOperations contextRef="FY26_seg" unitRef="INR" decimals="-5">400000000</ind-as:RevenueFromOperations>
+  <ind-as:FinanceCosts contextRef="FY26" unitRef="INR">20000000</ind-as:FinanceCosts>
+  <ind-as:DepreciationDepletionAndAmortisationExpense contextRef="FY26" unitRef="INR">30000000</ind-as:DepreciationDepletionAndAmortisationExpense>
+  <ind-as:ProfitBeforeTax contextRef="FY26" unitRef="INR">150000000</ind-as:ProfitBeforeTax>
+  <ind-as:TaxExpense contextRef="FY26" unitRef="INR">40000000</ind-as:TaxExpense>
+  <ind-as:ProfitLossForPeriod contextRef="FY26" unitRef="INR">110000000</ind-as:ProfitLossForPeriod>
+  <ind-as:ProfitLossForPeriod contextRef="FY25" unitRef="INR">90000000</ind-as:ProfitLossForPeriod>
+  <ind-as:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations contextRef="FY26" unitRef="INRPerShare">11.0</ind-as:BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations>
+  <ind-as:Assets contextRef="I26" unitRef="INR">2000000000</ind-as:Assets>
+  <ind-as:Assets contextRef="I25" unitRef="INR">1800000000</ind-as:Assets>
+  <ind-as:Equity contextRef="I26" unitRef="INR">1000000000</ind-as:Equity>
+  <ind-as:BorrowingsNoncurrent contextRef="I26" unitRef="INR">200000000</ind-as:BorrowingsNoncurrent>
+  <ind-as:BorrowingsCurrent contextRef="I26" unitRef="INR">50000000</ind-as:BorrowingsCurrent>
+  <ind-as:CurrentAssets contextRef="I26" unitRef="INR">600000000</ind-as:CurrentAssets>
+  <ind-as:CurrentLiabilities contextRef="I26" unitRef="INR">400000000</ind-as:CurrentLiabilities>
+  <ind-as:CashFlowsFromUsedInOperatingActivities contextRef="FY26" unitRef="INR">160000000</ind-as:CashFlowsFromUsedInOperatingActivities>
+  <ind-as:PurchaseOfPropertyPlantAndEquipment contextRef="FY26" unitRef="INR">-60000000</ind-as:PurchaseOfPropertyPlantAndEquipment>
+</xbrli:xbrl>

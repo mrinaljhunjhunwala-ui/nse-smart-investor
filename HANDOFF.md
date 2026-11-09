@@ -25,6 +25,13 @@ This section is the running memory between sessions; older sections below are hi
   Portfolio Fit only read holdings after that unlock (`pin_gate.holdings_unlocked`). Paper Trades,
   Watchlist and Journal stay open by the owner's choice.
 
+- **Official-filing fundamentals (9 Nov):** Analyze Stock → Fundamentals has a source picker:
+  Auto (Yahoo + Screener) · Exchange filing (NSE annual-results XBRL, fetched on demand by
+  `data/nse_filings_xbrl.py`) · ROC filing (owner uploads the MCA AOC-4 XBRL; MCA21 needs login +
+  fee, so no auto-fetch). Parsed by `analysis/fundamentals/xbrl_filing.py`, stored in KV
+  `filing_fund:<source>:<SYM>`, served by `providers/filing_fundamentals.py` as the primary provider
+  with Yahoo/Screener filling gaps. Only that tab uses the picker; scoring/valuation stay on Auto.
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
