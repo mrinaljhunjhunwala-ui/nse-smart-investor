@@ -325,6 +325,11 @@ class CompositeScore:
     is_fno:             bool            = False # FIX POS1: True when the ticker is F&O-eligible per data.fno_universe
     technical_raw:      Optional[float] = None  # FIX BEAR-NEUTRAL: pre-neutralisation technical pts (descriptive uses: thesis, ledger tags)
     overlay_score:      Optional[int]   = None  # FIX OVERLAY1 (Task 3.3): TQS x valuation sidecar, 0-100. NEVER blended into .score.
+    # FIX DATA-COVERAGE (2026-11-09): which score inputs were actually measured.
+    # Keys: sma200, r60d, momentum_history, rs_vs_nifty, sector_rank -> True when
+    # measured, False when missing (held neutral / not measured). Empty dict on
+    # sentinel scores. Read via analysis.score_coverage.neutralised_parts().
+    coverage:           Dict[str, bool] = field(default_factory=dict)
     timestamp:          str          = field(default_factory=lambda: datetime.now().isoformat())
 
     def as_dict(self) -> Dict:
@@ -1911,6 +1916,13 @@ def score_dataframe(
         sector            = sector,
         vix_regime        = vix_info.get("regime", "normal"),
         sector_rank       = sector_rank,
+        coverage          = {
+            "sma200":           bool(tech_detail.get("sma_available", True)),
+            "momentum_history": not momentum_fallback,
+            "r60d":             bool(mom_detail.get("r60d_available", not momentum_fallback)),
+            "rs_vs_nifty":      bool(mom_detail.get("rs_available", False)),
+            "sector_rank":      sector_rank is not None,
+        },
     )
 
 
