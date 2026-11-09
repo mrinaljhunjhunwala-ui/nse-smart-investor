@@ -9,7 +9,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "12_position_sizer.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "16_position_sizer.py")
 
 
 @pytest.fixture(autouse=True)

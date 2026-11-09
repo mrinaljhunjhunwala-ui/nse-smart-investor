@@ -1,6 +1,6 @@
 """dashboard/shared/pick_freshness.py — shared helpers for pick-card freshness.
 
-Extracted from dashboard/pages/02_command_centre.py so any page rendering a
+Extracted from dashboard/pages/01_command_centre.py so any page rendering a
 pick card (Command Centre Top Picks, My Watchlist, Deep Dive live-snapshot,
 Tomorrow's Watchlist, ...) uses the same re-anchoring + cost logic.
 

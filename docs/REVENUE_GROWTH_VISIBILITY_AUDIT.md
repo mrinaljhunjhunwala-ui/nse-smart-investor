@@ -16,9 +16,9 @@ while weaker-or-non-return signals (Trend Quality ρ +0.04, Portfolio Fit
 
 | Surface | Where | Prominence | Detail |
 |---|---|---|---|
-| Analyze Stock | "📊 Fundamentals **(beta)**" section ([04_analyze_stock.py:486-521](dashboard/pages/04_analyze_stock.py)) | **Secondary** | One `st.metric` of four (Revenue CAGR, EPS CAGR, ROE, D/E), positioned below the score hero, chart and news; section still labelled "(beta)"; honest confidence captions already present |
+| Analyze Stock | "📊 Fundamentals **(beta)**" section ([13_analyze_stock.py:486-521](dashboard/pages/13_analyze_stock.py)) | **Secondary** | One `st.metric` of four (Revenue CAGR, EPS CAGR, ROE, D/E), positioned below the score hero, chart and news; section still labelled "(beta)"; honest confidence captions already present |
 | Analyze Stock | Thesis section (via `thesis_rules.py:82-85`) | **Tertiary** | Appears only as a bull-factor sentence when CAGR crosses the "strong" threshold; otherwise invisible |
-| My Portfolio | Fundamental Quality table ([03_my_portfolio.py:601](dashboard/pages/03_my_portfolio.py)) | **Hidden** | "Rev CAGR %" column exists but only after clicking the opt-in "Score my holdings on fundamentals" button (network-gated by design) |
+| My Portfolio | Fundamental Quality table ([06_my_portfolio.py:601](dashboard/pages/06_my_portfolio.py)) | **Hidden** | "Rev CAGR %" column exists but only after clicking the opt-in "Score my holdings on fundamentals" button (network-gated by design) |
 | Smart Screener | — | **Not surfaced** | No growth column, no growth filter — you cannot screen by the best signal |
 | Command Centre / Top Picks | — | **Not surfaced** | Cards show TQ score, entry/SL/TP, sector, live price — no fundamentals |
 | Tomorrow's Watchlist | — | **Not surfaced** | |

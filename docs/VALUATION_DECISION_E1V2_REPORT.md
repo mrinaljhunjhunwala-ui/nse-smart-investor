@@ -10,7 +10,7 @@ Implements `VALUATION_DECISION_E1_V2_SPEC.md` exactly, following the §11 build 
 | File | Change |
 |---|---|
 | `analysis/fundamentals/valuation_decision.py` | **NEW** — `ValuationInputs`, `ValuationAssessment`, `assess()` (the ordered pipeline), `assess_valuation()` integration seam, `CYCLICAL_GROUPS`, posture constants + `PHRASES` |
-| `dashboard/pages/04_analyze_stock.py` | **NEW** "🧮 Valuation Assessment" sub-section (descriptive; posture + basis + reasons + caveats + confidence factors). **Not** a verdict-moving thesis factor |
+| `dashboard/pages/13_analyze_stock.py` | **NEW** "🧮 Valuation Assessment" sub-section (descriptive; posture + basis + reasons + caveats + confidence factors). **Not** a verdict-moving thesis factor |
 | `tests/test_valuation_decision.py` | **NEW** — 49 deterministic tests |
 
 No schema, provider, or other module changed — inputs reuse `ValuationContext` (C1), `analytics.compute_all` (D1), `SectorProfile` (D1), and existing `net_income`/`operating_cash_flow`.

@@ -26,7 +26,7 @@ _Generated 2026-09-02 from `tasks/plan.md`. Update the checkboxes as each task l
 ---
 
 ### Task 0.2: Audit and land in-flight Analyze Stock edit
-**Description:** `dashboard/pages/04_analyze_stock.py` has uncommitted changes. Same pattern as 0.1.
+**Description:** `dashboard/pages/13_analyze_stock.py` has uncommitted changes. Same pattern as 0.1.
 
 **Acceptance criteria:**
 - [ ] Diff explained in commit message
@@ -34,11 +34,11 @@ _Generated 2026-09-02 from `tasks/plan.md`. Update the checkboxes as each task l
 - [ ] `page-smoke-check` on this page green
 
 **Verification:**
-- [ ] `py -m pytest tests/test_pages_smoke.py -k "04_analyze_stock" -q`
+- [ ] `py -m pytest tests/test_pages_smoke.py -k "13_analyze_stock" -q`
 
 **Dependencies:** 0.1 (if the Analyze Stock edit touches fetcher output shape)
 
-**Files likely touched:** `dashboard/pages/04_analyze_stock.py`
+**Files likely touched:** `dashboard/pages/13_analyze_stock.py`
 
 **Scope:** S
 
@@ -82,12 +82,12 @@ _302 raw hex literals across the two pages migrated to `var(--token)` references
 - [ ] Visual diff before/after is intentional only
 
 **Verification:**
-- [ ] `py -m pytest tests/test_pages_smoke.py -k "02_command_centre or 04_analyze_stock" -q`
+- [ ] `py -m pytest tests/test_pages_smoke.py -k "01_command_centre or 13_analyze_stock" -q`
 - [ ] Manual before/after screenshot pair in `docs/UI_AUDIT_2026-09_SPRINT1.md`
 
 **Dependencies:** 0.3
 
-**Files likely touched:** `dashboard/pages/02_command_centre.py`, `dashboard/pages/04_analyze_stock.py`
+**Files likely touched:** `dashboard/pages/01_command_centre.py`, `dashboard/pages/13_analyze_stock.py`
 
 **Scope:** M
 
@@ -101,7 +101,7 @@ _Both added to `dashboard/shared/ui_components.py`; Command Centre paper-trades 
 - `panel(kind, tone, title, body_html)` – replaces the three ad-hoc card variants (`.card-*`, inline glass-panel divs, `_pto_cell` helper).
 - `stat(label, value, delta=None, spark_series=None)` – replaces the Streamlit `st.metric` / `.metric-box` / `_pto_cell` triple.
 
-Refactor Command Centre paper-trades overview (`dashboard/pages/02_command_centre.py:128-141`) as the first consumer to prove the API.
+Refactor Command Centre paper-trades overview (`dashboard/pages/01_command_centre.py:128-141`) as the first consumer to prove the API.
 
 **Acceptance criteria:**
 - [ ] Two public functions with docstrings and type hints
@@ -114,7 +114,7 @@ Refactor Command Centre paper-trades overview (`dashboard/pages/02_command_centr
 
 **Dependencies:** 0.3
 
-**Files likely touched:** `dashboard/shared/ui_components.py`, `dashboard/pages/02_command_centre.py`
+**Files likely touched:** `dashboard/shared/ui_components.py`, `dashboard/pages/01_command_centre.py`
 
 **Scope:** M
 
@@ -132,12 +132,12 @@ _`verdict_card()` in `dashboard/shared/ui_components.py`; wired at the top of An
 - [ ] Copy passes SEBI-language check: no "buy X" / "sell X" imperatives; posture only
 
 **Verification:**
-- [ ] `py -m pytest tests/test_pages_smoke.py -k "04_analyze_stock" -q`
+- [ ] `py -m pytest tests/test_pages_smoke.py -k "13_analyze_stock" -q`
 - [ ] Manual: search a ticker, verdict card is the largest thing on the page
 
 **Dependencies:** 1.2, 1.3
 
-**Files likely touched:** `dashboard/shared/ui_components.py`, `dashboard/pages/04_analyze_stock.py`
+**Files likely touched:** `dashboard/shared/ui_components.py`, `dashboard/pages/13_analyze_stock.py`
 
 **Scope:** M
 
@@ -244,7 +244,7 @@ _.claude/hooks/block_page_hex.py + settings.json wiring. Surfaces 96 raw hex lit
 
 **Dependencies:** 1.3, 2.2
 
-**Files likely touched:** `dashboard/pages/02_command_centre.py`, `dashboard/shared/data_health.py` (new)
+**Files likely touched:** `dashboard/pages/01_command_centre.py`, `dashboard/shared/data_health.py` (new)
 
 **Scope:** M
 
@@ -489,7 +489,7 @@ _Flag defaults OFF. Flipping the default blocked on running `py -m research.scor
 ---
 
 ### Task 5.4: Panel wiring in Analyze Stock (first page)
-**Description:** Wire the panel into `dashboard/pages/04_analyze_stock.py`. Only `panel.py` may `import streamlit` per Guardrail 13.
+**Description:** Wire the panel into `dashboard/pages/13_analyze_stock.py`. Only `panel.py` may `import streamlit` per Guardrail 13.
 
 **Acceptance criteria:**
 - [ ] Panel opens, sends, receives, ends every reply with the educational disclaimer
@@ -500,7 +500,7 @@ _Flag defaults OFF. Flipping the default blocked on running `py -m research.scor
 
 **Dependencies:** 5.2, 5.3, 1.4
 
-**Files likely touched:** `dashboard/shared/ai/panel.py`, `dashboard/pages/04_analyze_stock.py`
+**Files likely touched:** `dashboard/shared/ai/panel.py`, `dashboard/pages/13_analyze_stock.py`
 
 **Scope:** M
 

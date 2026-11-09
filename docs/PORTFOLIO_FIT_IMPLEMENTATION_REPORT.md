@@ -14,7 +14,7 @@ book. **Existing systems only — no AI, no new data providers.**
 | Test suite (20+ target) | ✅ **28 tests** | `tests/test_portfolio_fit.py` |
 | Methodology document | ✅ | `PORTFOLIO_FIT_METHODOLOGY.md` |
 | Implementation report | ✅ | this file |
-| UI section | ✅ | `dashboard/pages/04_analyze_stock.py` — "🧩 Portfolio Fit Assessment" |
+| UI section | ✅ | `dashboard/pages/13_analyze_stock.py` — "🧩 Portfolio Fit Assessment" |
 
 ## Inputs — existing systems only
 **Candidate:** thesis verdict (Phase A1 `generate_thesis`), beta (`analysis.hedging`), sector

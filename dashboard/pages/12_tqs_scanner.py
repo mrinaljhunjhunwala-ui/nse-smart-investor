@@ -1,10 +1,10 @@
 """
-dashboard/pages/18_tqs_scanner.py
+dashboard/pages/12_tqs_scanner.py
 Trend Quality Score (TQS) — Universe Scanner.
 
 Score a universe of tickers by TQS, rank them, show a sortable table +
 heatmap. The single-stock DEEP DIVE mode this page used to have was folded
-into 04_analyze_stock.py's "🌊 TQS breakdown" expander (Analysis
+into 13_analyze_stock.py's "🌊 TQS breakdown" expander (Analysis
 consolidation #2) so a user gets both the composite verdict AND the TQS
 pillar decomposition in one place — no need to visit two pages.
 """
@@ -36,7 +36,7 @@ st.caption(
     "Validated baseline: +0.41 rank correlation with staying in an uptrend next month."
 )
 
-# FIX SCR-XREF — see the matching note in 06_smart_screener.py.
+# FIX SCR-XREF — see the matching note in 10_smart_screener.py.
 with st.expander("↔️ Also see: Smart Screener · Tomorrow's Watchlist", expanded=False):
     st.markdown(
         "TQS is a *different scoring engine* to the composite score used by "

@@ -96,35 +96,37 @@ _group_icons: dict = {
 
 
 _PAGE_FILE = {
-    "Live Ticker":     "pages/01_market_live.py",   # renamed from "Market Live" — file path kept
-    "Command Centre":  "pages/02_command_centre.py",
-    "My Portfolio":    "pages/03_my_portfolio.py",
-    "Analyze Stock":   "pages/04_analyze_stock.py",
-    "Market Breadth":  "pages/05_market_overview.py",  # renamed from "Overview" — file path kept
-    "Smart Screener":  "pages/06_smart_screener.py",
+    # File numbers follow the sidebar order in _NAV_GROUPS (renumbered
+    # 2026-11-09). Streamlit's URL slug drops the numeric prefix, so a
+    # renumber never changes a page's URL.
+    # Home
+    "Command Centre":  "pages/01_command_centre.py",
+    # Markets
+    "Live Ticker":     "pages/02_market_live.py",   # renamed from "Market Live" — file name kept
+    "Market Breadth":  "pages/03_market_overview.py",  # renamed from "Overview" — file name kept
+    "Quality Watch":   "pages/04_quality_watch.py",
+    "FII / DII Flows": "pages/05_fii_dii_flows.py",
+    # Portfolio
+    "My Portfolio":    "pages/06_my_portfolio.py",
     "Paper Trades":    "pages/07_paper_trades.py",
-    "Backtest":        "pages/08_backtest.py",
-    # "Market Internals" removed — merged into "Overview" above.
-    # dashboard/pages/09_market_internals.py should be DELETED from the repo;
-    # its content now lives in Overview's "🌍 Macro" / "📈 Breadth" tabs.
-    # "OI & Options" removed — merged into "Intraday Trader" above (FIX MERGE1).
-    # dashboard/pages/10_oi_options.py should be DELETED from the repo;
-    # its content now lives in Intraday Trader's "Options Strategy" /
-    # "Max Pain Calculator" / "PCR Zone Reference" tabs.
-    "Intraday Trader": "pages/11_intraday_trader.py",
-    "Position Sizer":  "pages/12_position_sizer.py",
-    "Stock Journal":   "pages/13_stock_journal.py",
-    "My Watchlist":    "pages/14_my_watchlist.py",
-    "Investor Guide":  "pages/15_investor_guide.py",
-    "Angel One":       "pages/16_angel_one.py",
-    "Tomorrow's Watchlist": "pages/17_tomorrow_watchlist.py",
-    "Trend Quality Score": "pages/18_tqs_scanner.py", # <-- Added File Route Mapping
-    "Quality Watch":   "pages/19_quality_watch.py",  # NEW: Long-Term Holds + Quality Watch
-    # "Deep Dive Analysis" removed -- Slice 2 folded it into Analyze Stock as
-    # the "🔬 Deep Dive" tab. dashboard/pages/20_deep_dive.py DELETED.
-    # 2026-08-30 sprint: durable-persistence-backed learning pages
-    "Verdict Calibration": "pages/21_verdict_calibration.py",
-    "FII / DII Flows":     "pages/22_fii_dii_flows.py",
+    "My Watchlist":    "pages/08_my_watchlist.py",
+    "Stock Journal":   "pages/09_stock_journal.py",
+    # Scanners & Signals
+    "Smart Screener":  "pages/10_smart_screener.py",
+    "Tomorrow's Watchlist": "pages/11_tomorrow_watchlist.py",
+    "Trend Quality Score":  "pages/12_tqs_scanner.py",
+    # Analysis
+    "Analyze Stock":   "pages/13_analyze_stock.py",
+    "Backtest":        "pages/14_backtest.py",
+    # Tools & Ops
+    "Intraday Trader": "pages/15_intraday_trader.py",
+    "Position Sizer":  "pages/16_position_sizer.py",
+    "Angel One":       "pages/17_angel_one.py",
+    "Verdict Calibration": "pages/18_verdict_calibration.py",
+    "Investor Guide":  "pages/19_investor_guide.py",
+    # Removed pages (merged elsewhere): Market Internals → Market Breadth's
+    # Macro / Breadth tabs; OI & Options → Intraday Trader tabs (FIX MERGE1);
+    # Deep Dive → Analyze Stock's "🔬 Deep Dive" tab (Slice 2).
 }
 
 
@@ -386,7 +388,7 @@ def _render_command_bar() -> None:
 
     # When the box is empty and the user has previously analyzed some
     # tickers this session, surface them as quick-jump buttons. Writing
-    # side lives on Analyze Stock (04_analyze_stock.py) — see
+    # side lives on Analyze Stock (13_analyze_stock.py) — see
     # st.session_state['__recent_tickers'].
     if not hits and not (q or "").strip():
         _recent = st.session_state.get("__recent_tickers", [])
@@ -829,7 +831,7 @@ def render_sidebar(current: str = None) -> None:
     # widget ... is instantiated" because the text_input has already been
     # created earlier in this same script run. The fix (same deferred-flag
     # + st.rerun() pattern already used for the search boxes in
-    # dashboard/pages/04_analyze_stock.py's "_as_clear_pending" flag): set
+    # dashboard/pages/13_analyze_stock.py's "_as_clear_pending" flag): set
     # a plain flag when "＋" is clicked, then consume it up here, before the
     # widget is instantiated on the *next* run.
     if st.session_state.pop("_wl_add_clear_pending", False):

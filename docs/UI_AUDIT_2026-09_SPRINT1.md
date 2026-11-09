@@ -33,7 +33,7 @@ Sprint 1 rebuilt the visual foundation the rest of the audit trail sits on. Thes
 - **`panel()` and `stat()` shared components**: [`dashboard/shared/ui_components.py:181`](../dashboard/shared/ui_components.py) - replaced 3 ad-hoc card variants and Streamlit's `st.metric` respectively. Every new UI block from Sprint 1 onward uses these.
 - **`verdict_card()` hero**: [`dashboard/shared/ui_components.py:276`](../dashboard/shared/ui_components.py) - the top-of-Analyze-Stock component that shows action + conviction + entry/stop/target/R:R/size + footer stats.
 
-## Page: Command Centre ([`dashboard/pages/02_command_centre.py`](../dashboard/pages/02_command_centre.py))
+## Page: Command Centre ([`dashboard/pages/01_command_centre.py`](../dashboard/pages/01_command_centre.py))
 
 Touched by PRs #47 (v2 scoring chip), #48 (regime notes refresh), #58 (data_health panel).
 
@@ -56,7 +56,7 @@ _TODO attach screenshot(s)_
 - [ ] No raw emoji in the page title
 - [ ] Regime badge caption reads "trending up. Momentum-heavy signals..." or one of the refreshed alternatives per regime
 
-## Page: Analyze Stock ([`dashboard/pages/04_analyze_stock.py`](../dashboard/pages/04_analyze_stock.py))
+## Page: Analyze Stock ([`dashboard/pages/13_analyze_stock.py`](../dashboard/pages/13_analyze_stock.py))
 
 Touched by PRs #49 (overlay sidecar), #50 (Positioning /100 label), #52 (AI collector fill), #53 (AI wiring cleanup).
 

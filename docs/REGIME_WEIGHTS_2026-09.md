@@ -65,7 +65,7 @@ Default-off byte-equivalence to pre-Rec-5 confirmed on all three of {no regime, 
 ## Tests
 
 - `tests/test_smoke_score_indicators.py`, `test_audit_fixes.py`, `test_regime.py`, `test_valuation_golden_snapshot.py`, `test_provenance_nse_delivery.py`: 64/64 in 6s
-- `tests/test_pages_smoke.py -k "04_analyze_stock or 02_command_centre"`: 2/2 in 56s
+- `tests/test_pages_smoke.py -k "13_analyze_stock or 01_command_centre"`: 2/2 in 56s
 
 ## What you'll see on the app
 

@@ -978,7 +978,7 @@ def apply_design():
         .ticker-content   { font-size: 11px !important; }
     }
 
-    /* ── P2 · Investor Guide long-form typography (15_investor_guide.py) ───
+    /* ── P2 · Investor Guide long-form typography (19_investor_guide.py) ───
        Self-contained block. Scoped via the .guide-doc marker on the page H1
        so no other page's markdown picks up the 15/1.6 body scale.
        H2 22/700 · body 15/1.6. The H1 deliberately keeps the shared
@@ -1067,7 +1067,7 @@ def apply_design():
     }
 
     /* ── P2 · Command Centre regime strip / pick-more ──
-       Self-contained block (02_command_centre.py). */
+       Self-contained block (01_command_centre.py). */
     .regime-strip {
         display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center;
         padding: 6px 12px; margin: -4px 0 10px 0;

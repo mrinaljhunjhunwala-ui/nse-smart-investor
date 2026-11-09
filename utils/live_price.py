@@ -459,7 +459,7 @@ def get_live_prices_batch(
         # still finish, bounded by their own per-tier timeouts.
         #
         # This was also what made tests/test_pages_smoke.py pathological:
-        # 04_analyze_stock.py resolves ~50 Nifty quotes, its leftover queued
+        # 13_analyze_stock.py resolves ~50 Nifty quotes, its leftover queued
         # tasks outlived the test, and once the per-test socket block was torn
         # down they escaped into REAL network calls with real multi-second
         # timeouts. That one page test took 7,754s (2h9m) in a full-suite run

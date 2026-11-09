@@ -1,4 +1,4 @@
-"""04_analyze_stock feeds FinalVerdict's quality_score from the fundamentals
+"""13_analyze_stock feeds FinalVerdict's quality_score from the fundamentals
 analytics layer. Guard the contract: the analytics keys the page maps from
 exist, and the mapped dict yields a real compute_quality_score value.
 (Previously the page called a non-existent ``.to_metrics_dict()``, so
@@ -11,7 +11,7 @@ from analysis.fundamentals import analytics
 from analysis.fundamentals.analytics import AnalyticResult
 from analysis.portfolio_fundamentals import compute_quality_score
 
-PAGE = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "04_analyze_stock.py"
+PAGE = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "13_analyze_stock.py"
 KEY_MAP = {"roe": "roe", "roce": "roce", "revenue_cagr": "revenue_cagr_5y", "eps_cagr": "eps_cagr_5y"}
 
 

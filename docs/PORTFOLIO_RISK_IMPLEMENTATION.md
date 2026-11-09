@@ -11,7 +11,7 @@ price feed via the existing tiered fetcher).
   - `compute_portfolio_risk(holdings, period, rf_annual, price_loader)` → `PortfolioRiskResult`.
   - Standalone, unit-testable metric functions: `max_drawdown`, `sharpe_ratio`, `sortino_ratio`,
     `calmar_ratio`, `correlation_matrix`, `risk_contributions`.
-- **`dashboard/pages/03_my_portfolio.py`** — a "📉 Portfolio Risk & Performance" section:
+- **`dashboard/pages/06_my_portfolio.py`** — a "📉 Portfolio Risk & Performance" section:
   NAV/equity area chart, 8 metric cards, correlation heatmap, risk-contribution table, a
   lookback selector, a confidence warning, and a Methodology & assumptions expander.
 - **`tests/test_portfolio_risk.py`** — 21 tests (suite now **67 passing**).

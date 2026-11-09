@@ -34,7 +34,7 @@ def test_no_instruction_copy_on_pages(phrase):
 
 
 def test_analyze_stock_does_not_render_tracebacks():
-    src = (_PAGES / "04_analyze_stock.py").read_text(encoding="utf-8")
+    src = (_PAGES / "13_analyze_stock.py").read_text(encoding="utf-8")
     assert "st.code(traceback.format_exc())" not in src
 
 

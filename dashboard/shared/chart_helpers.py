@@ -396,7 +396,7 @@ def rdylgn_bg(val: float, vmin: float, vmax: float) -> str:
     ImportError on Streamlit Cloud despite working fine in local testing
     (matplotlib happened to be present in the dev sandbox, masking it).
     Shared here rather than duplicated per-page since three separate pages
-    (08_backtest.py, 05_market_overview.py, 03_my_portfolio.py) each had
+    (14_backtest.py, 03_market_overview.py, 06_my_portfolio.py) each had
     their own background_gradient() call and would each hit the same crash.
 
     Usage: df.style.map(lambda v: rdylgn_bg(v, df[col].min(), df[col].max()),

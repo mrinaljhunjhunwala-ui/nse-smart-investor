@@ -77,19 +77,19 @@ All six IR items shipped in the Sept 2026 sprint. Left here for provenance.
 
 Every entry links to the page it fixes. Numbers reference the current top-of-file "FIX" comments where relevant.
 
-### [`01_market_live.py`](../dashboard/pages/01_market_live.py) — Market Live
+### [`02_market_live.py`](../dashboard/pages/02_market_live.py) — Market Live
 - ✅ ~~Ticker tape uses generic Streamlit container border~~ — shipped: `.ml-tape` terminal tape (32 px fixed height, IBM Plex Mono, gradient edge mask, pauses on hover, reduced-motion safe) + `ticker_hover_wrap` on movers + news chips on `PLOT_COLORS` (no raw hex). Original: wrap in the terminal-grade "tape" component from `references/components.md` (fixed-height, monospaced, subtle gradient mask on edges).
 - ✅ ~~Sector heatmap: reads as flat blocks~~ — shipped: sector treemap via `diverging_colors` (hue = sign, alpha = magnitude), % on hover only. Original — apply diverging palette from `dataviz` skill; add small % labels on hover only.
 
-### [`02_command_centre.py`](../dashboard/pages/02_command_centre.py) — Command Centre
+### [`01_command_centre.py`](../dashboard/pages/01_command_centre.py) — Command Centre
 - ✅ ~~The v2 scoring active chip added in #47~~ — shipped: single `.regime-strip` (India VIX zone · breadth % > SMA50 · scoring v1/v2). Original: the chip works but sits alone above the cards; move it into a "regime strip" alongside VIX zone and market breadth so status lives in one place.
 - ✅ ~~Top-picks cards: 6 metrics per card~~ — shipped: R:R + freshness stamps demoted to a `<details>` "R:R & freshness" row; action chip now via `_display_label`. Original: 6 metrics per card is > "5 above the fold" rule. Demote 2 to expander per `references/layout-patterns.md`.
 
-### [`03_my_portfolio.py`](../dashboard/pages/03_my_portfolio.py) — My Portfolio
+### [`06_my_portfolio.py`](../dashboard/pages/06_my_portfolio.py) — My Portfolio
 - ✅ IR2 + IR3 + IR4 + IR5 + IR6 all landed here (see §3).
 - ✅ Holdings table → P&L table pattern: rows tinted by P&L %, ▲/▼ + bold on big moves, Indian ₹ grouping, pinned Ticker column (shared `table_styles.py`).
 
-### [`04_analyze_stock.py`](../dashboard/pages/04_analyze_stock.py) — Analyze Stock
+### [`13_analyze_stock.py`](../dashboard/pages/13_analyze_stock.py) — Analyze Stock
 - ✅ SH1/SH2 chips (SH1: chip vocabulary #90; SH2: evidence-gated #109).
 - ✅ IR1 Bull/Bear/Risk card (#116).
 - ✅ Deep Dive absorbed as a tab (Slice 2, #115).
@@ -98,10 +98,10 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ Conviction section (FIX A3) — "confirmation unavailable" branch now carries a `⏸` prefix so it's distinguishable from actual `⚠` warnings.
 - ✅ Earnings status → shared `chip_pill` with ⚠/◆/●/✓ glyphs; "avoid fresh buys" copy replaced with "event risk" (no-instruction rule).
 
-### [`05_market_overview.py`](../dashboard/pages/05_market_overview.py) — Market Overview
+### [`03_market_overview.py`](../dashboard/pages/03_market_overview.py) — Market Overview
 - ✅ Two-column layout — verified: page uses only `st.columns` (no inline flex grids), which the F2 `stHorizontalBlock` media query (#146) stacks on mobile. No change needed.
 
-### [`06_smart_screener.py`](../dashboard/pages/06_smart_screener.py) — Smart Screener
+### [`10_smart_screener.py`](../dashboard/pages/10_smart_screener.py) — Smart Screener
 - ✅ Signal-table summary above setup cards: rank, shape-coded posture, sector, score bar, R:R, rev growth. Sparkline column (22 daily closes via cached `_sparkline_closes`, bounded 15 s pool) added in the follow-up.
 
 ### [`07_paper_trades.py`](../dashboard/pages/07_paper_trades.py) — Paper Trades
@@ -109,54 +109,54 @@ Every entry links to the page it fixes. Numbers reference the current top-of-fil
 - ✅ F5 empty state (#96).
 - ✅ P&L block now uses Indian lakh/crore comma grouping via the shared `fmt_inr()` helper — `12,34,567` not `1,234,567`. Sign remains carried by the leading ▲/▼ arrow.
 
-### [`08_backtest.py`](../dashboard/pages/08_backtest.py) — Backtest
+### [`14_backtest.py`](../dashboard/pages/14_backtest.py) — Backtest
 - ✅ Equity curve + comparison chart both set `template="nse_pro"` (and it's the global `pio.templates.default`) — verified.
 - ✅ Results tables: RdYlGn gradient replaced with the P&L pattern (row tint + ▲/▼ + bold beyond ±10%).
 
-### [`11_intraday_trader.py`](../dashboard/pages/11_intraday_trader.py) — Intraday Trader
+### [`15_intraday_trader.py`](../dashboard/pages/15_intraday_trader.py) — Intraday Trader
 - ✅ F3 widget chrome (#139).
 - ✅ "Market is closed" state — F5 `empty_state()` driven by `market_hours.market_status()` (closed / holiday / weekend) with next-open time; Options reference tabs stay usable.
 
-### [`12_position_sizer.py`](../dashboard/pages/12_position_sizer.py) — Position Sizer
+### [`16_position_sizer.py`](../dashboard/pages/16_position_sizer.py) — Position Sizer
 - ✅ Form inputs grouped into bordered cards with §9.4 `.t-label` eyebrows (inherits F3 widget chrome); advice-toned copy ("Shares to Buy", "Do not trade") neutralised.
 
-### [`14_my_watchlist.py`](../dashboard/pages/14_my_watchlist.py) — Watchlist
+### [`08_my_watchlist.py`](../dashboard/pages/08_my_watchlist.py) — Watchlist
 - ✅ SH1 posture chips (chip vocabulary sweep).
 - ✅ F5 empty state (#95/#96).
 - ✅ DT1/DT2 source pill + data-as-of (#127).
 
-### [`15_investor_guide.py`](../dashboard/pages/15_investor_guide.py) — Investor Guide
+### [`19_investor_guide.py`](../dashboard/pages/19_investor_guide.py) — Investor Guide
 - ✅ Typography hierarchy H1 32/700 · H2 22/700 · body 15/1.6 via page-scoped `.guide-doc` / `.guide-h2` block in design.py.
 
-### [`16_angel_one.py`](../dashboard/pages/16_angel_one.py) — Angel One
+### [`17_angel_one.py`](../dashboard/pages/17_angel_one.py) — Angel One
 - ✅ F3 widget chrome (#139).
 - ✅ "Not connected" state → `empty_state()` + numbered `panel()` steps (4-step wizard kept); placeholder-only credential sample.
 
-### [`13_stock_journal.py`](../dashboard/pages/13_stock_journal.py) — Stock Journal
+### [`09_stock_journal.py`](../dashboard/pages/09_stock_journal.py) — Stock Journal
 - ✅ §9.4 audit (`### Reviews due` → `.t-h2`), status colours → `PLOT_COLORS` tokens, DT1/DT2 `data_as_of` + `source_pill` under the entries table.
 
-### [`17_tomorrow_watchlist.py`](../dashboard/pages/17_tomorrow_watchlist.py) — Tomorrow's Watchlist
+### [`11_tomorrow_watchlist.py`](../dashboard/pages/11_tomorrow_watchlist.py) — Tomorrow's Watchlist
 - ✅ SH1 chips (#89).
 - ✅ DT1/DT2 source pill + data-as-of (#127).
 - ✅ Freshness badge via `dashboard/shared/pick_freshness.py`.
 
-### [`18_tqs_scanner.py`](../dashboard/pages/18_tqs_scanner.py) — TQS Scanner
+### [`12_tqs_scanner.py`](../dashboard/pages/12_tqs_scanner.py) — TQS Scanner
 - ✅ SH1 chips.
 - ✅ §9.4 typography sweep (#128).
 - ✅ 4-pillar radar (per ticker, % of 22.5 max) vs top-10 median; stacked-bar colours moved to `PLOT_COLORS` tokens.
 
-### [`19_quality_watch.py`](../dashboard/pages/19_quality_watch.py) — Quality Watch
+### [`04_quality_watch.py`](../dashboard/pages/04_quality_watch.py) — Quality Watch
 - ✅ §9.4 typography sweep (#128).
 - ✅ Ranked list grouped into Clean / Amber / Red bands; flag counts are `chip_pill`s with ●/◆/✓ glyphs.
 
 ### `20_deep_dive.py` — Deep Dive
 - ✅ Removed. Folded into Analyze Stock as a tab in Slice 2 (#115). Page count went 22 → 20.
 
-### [`21_verdict_calibration.py`](../dashboard/pages/21_verdict_calibration.py) — Verdict Calibration
+### [`18_verdict_calibration.py`](../dashboard/pages/18_verdict_calibration.py) — Verdict Calibration
 - ✅ §9.4 typography sweep (#131).
 - ✅ Summary chart adopts `nse_pro` template explicitly; bar colours → `PLOT_COLORS` tokens.
 
-### [`22_fii_dii_flows.py`](../dashboard/pages/22_fii_dii_flows.py) — FII/DII Flows
+### [`05_fii_dii_flows.py`](../dashboard/pages/05_fii_dii_flows.py) — FII/DII Flows
 - ✅ Regime card (#101), F1 Plotly hex → tokens (#100), DT1/DT2 wired (#126), §9.4 typography (#128).
 - ✅ Daily flows split into FII / DII panels, hue = sign only (bull/bear), opacity = magnitude via `diverging_colors()`; cumulative lines no longer use bull green for identity.
 

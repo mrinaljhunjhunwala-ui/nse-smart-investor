@@ -3,7 +3,7 @@
 Why this file exists
 ────────────────────
 Commit 4abaf90 shipped a dangling `@st.fragment(run_every=20)` decorator above
-an `import` block in dashboard/pages/02_command_centre.py. That is invalid
+an `import` block in dashboard/pages/01_command_centre.py. That is invalid
 Python — ast.parse rejects it — and it crashed the deployed Streamlit Cloud
 app with "SyntaxError: invalid syntax" the moment the page tried to load.
 

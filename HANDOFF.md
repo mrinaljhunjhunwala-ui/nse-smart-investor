@@ -32,6 +32,11 @@ This section is the running memory between sessions; older sections below are hi
   `filing_fund:<source>:<SYM>`, served by `providers/filing_fundamentals.py` as the primary provider
   with Yahoo/Screener filling gaps. Only that tab uses the picker; scoring/valuation stay on Auto.
 
+- **Pages renumbered (9 Nov):** `dashboard/pages/` files now run 01–19 in sidebar order
+  (`01_command_centre.py` … `19_investor_guide.py`, e.g. Analyze Stock is `13_analyze_stock.py`).
+  Name parts are unchanged, so page URLs are unchanged. `test_page_numbers_follow_sidebar_order`
+  fails if `nav._NAV_GROUPS` and the file numbers drift apart.
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers

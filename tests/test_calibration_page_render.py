@@ -20,7 +20,7 @@ if _ROOT not in sys.path:
 import trade_store  # noqa: E402
 from analysis import verdict_ledger as vl  # noqa: E402
 
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "21_verdict_calibration.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "18_verdict_calibration.py")
 
 
 @pytest.fixture

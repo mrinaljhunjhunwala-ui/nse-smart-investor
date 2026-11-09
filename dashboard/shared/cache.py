@@ -408,7 +408,7 @@ def _horizon_countdown(valid_until: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # FIX CC-LIVE1 — bounded live price for Buy/Sell cards
 #
-# FIX CC-LOAD1 (see 02_command_centre.py) pulled per-pick live price, SL/TP
+# FIX CC-LOAD1 (see 01_command_centre.py) pulled per-pick live price, SL/TP
 # re-anchoring AND qty sizing out of this section entirely, because doing
 # all three for up to ~40 tickers on every rerun of a 20s-refreshing fragment
 # was real, unbounded network cost paid whether or not anyone was looking.
@@ -613,7 +613,7 @@ def _top_picks_ticker(n: int = 12) -> list:
         return []
 
     # Union tuple matches what _render_top_picks_section builds in
-    # 02_command_centre.py (see FIX CC-LIVE1 there) — same order, same
+    # 01_command_centre.py (see FIX CC-LIVE1 there) — same order, same
     # dedupe, so this hits the same _picks_live_prices cache entry.
     union = tuple(sorted({b["ticker"] for b in buys_all} |
                          {s["ticker"] for s in sells_all}))
@@ -956,7 +956,7 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
             # FIX TP1 (backend side): the Command Centre page already expects
             # each buy to carry a "tier" field and the response to carry a
             # "meta" dict (see the FIX TP1 comment in
-            # dashboard/pages/02_command_centre.py) — this function never
+            # dashboard/pages/01_command_centre.py) — this function never
             # actually set either, so _picks.get("meta", {}) was always {},
             # which made the page's elif branch fire on EVERY scan that found
             # at least one buy ("0 genuine strong BUY-grade setup(s) today"),
@@ -1480,7 +1480,7 @@ def get_tomorrow_watchlist(n: int = 15) -> dict:
     close) and writes a fresh scan result to trade_store. This function reads
     that snapshot first; only if it's missing or no longer describes the
     latest closed session (_tw_snapshot_current) does it fall back to a live scan (which
-    17_tomorrow_watchlist.py's own FIX W1 stale-while-revalidate handles
+    11_tomorrow_watchlist.py's own FIX W1 stale-while-revalidate handles
     non-blockingly either way).
     """
     try:

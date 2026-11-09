@@ -14,7 +14,7 @@ The `DEPLOYMENT_CHECKLIST.md` claims were re-checked against the current impleme
 | `kv_set` is non-silent (returns bool + logs ERROR) | `trade_store.kv_set` |
 | `kv_get` / `fetch_open` / `load_by_account` log on failure | `trade_store` (P2) |
 | Paper trades → `trades` table; watchlist/settings → `user_kv` | `trade_store.ensure_schema` / `_kv_ensure` |
-| Default `portfolio.csv` committed; uploads session-only | `dashboard/pages/03_my_portfolio.py` (uploads held in `st.session_state`) |
+| Default `portfolio.csv` committed; uploads session-only | `dashboard/pages/06_my_portfolio.py` (uploads held in `st.session_state`) |
 | `psycopg2-binary` present for Postgres | `requirements.txt` |
 
 All accurate. No corrections required.

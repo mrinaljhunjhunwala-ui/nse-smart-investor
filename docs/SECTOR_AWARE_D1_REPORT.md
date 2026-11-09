@@ -25,7 +25,7 @@ framework future metrics depend on. Secondary: add **ROCE + FCF** where economic
 | `analysis/thesis/thesis_models.py` | `ThesisInputs.{roce,fcf,sector_profile}`; `ThesisResult.notes` |
 | `analysis/thesis/thesis_rules.py` | leverage rules gated; ROCE/FCF factors; `sector_notes()` |
 | `analysis/thesis/thesis_engine.py` | classify sector in `build_inputs`; ROCE/FCF + notes wired |
-| `dashboard/pages/04_analyze_stock.py` | sector note, ROCE/FCF (gated), EV/EBITDA n/a + preferred lens |
+| `dashboard/pages/13_analyze_stock.py` | sector note, ROCE/FCF (gated), EV/EBITDA n/a + preferred lens |
 | `tests/test_sector_aware.py` | **NEW** — 30 deterministic tests |
 
 ## 3. New metrics added
