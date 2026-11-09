@@ -32,7 +32,7 @@ TU6  _live_quote_price() — tenacity retry with exponential back-off (3
      return None and cascade into the entry-price square-off fallback (TU2).
 
 FIX3 clear_price_caches() — added as a named public export so
-     03_my_portfolio.py can bust only the live-price TTL caches (60 s) on
+     06_my_portfolio.py can bust only the live-price TTL caches (60 s) on
      the user's "Refresh Prices" click without clearing risk or fundamental
      caches.  Calls _portfolio_live_prices.clear() and
      _fetch_single_live_price.clear() — both are @st.cache_data functions
@@ -495,7 +495,7 @@ def upload_validate_portfolio_csv(
 def clear_price_caches() -> None:
     """Invalidate only the live-price TTL caches (60 s).
 
-    Called from 03_my_portfolio.py when the user clicks 'Refresh Prices'.
+    Called from 06_my_portfolio.py when the user clicks 'Refresh Prices'.
     Deliberately leaves risk and fundamental caches untouched so an on-demand
     price refresh does not trigger expensive re-fetches of unrelated data.
 

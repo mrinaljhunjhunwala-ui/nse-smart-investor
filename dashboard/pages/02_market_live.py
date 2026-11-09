@@ -437,7 +437,7 @@ else:
             _da, _db, _dc = st.columns(3)
             if _da.button("📊 Analyze", key=f"ml_an_{_dt_full}", width="stretch"):
                 # FIX NAV1: canonical analyze_ticker hand-off (see
-                # 04_analyze_stock.py FIX A8) instead of manual_ticker_input +
+                # 13_analyze_stock.py FIX A8) instead of manual_ticker_input +
                 # last_analyzed — traced through and confirmed the old path
                 # did work here, but standardizing every "Analyze" button in
                 # the app on one tested contract removes a whole class of

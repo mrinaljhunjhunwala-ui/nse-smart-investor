@@ -3,7 +3,7 @@ tools/backfill_ledger.py — fill the verdict ledger's forward returns after
 the close, so nobody has to open the Calibration page for them to happen.
 
 Background (2026-10-05): backfill_returns() / backfill_sector_returns() ran
-only when someone rendered dashboard/pages/21_verdict_calibration.py, 200 rows
+only when someone rendered dashboard/pages/18_verdict_calibration.py, 200 rows
 per visit. Nobody visited between 23 Sep and 5 Oct, so every Tomorrow's
 Watchlist row logged from 25 Sep on still had NULL ret_1d / ret_5d — and the
 watchlist's "Past results", follow-through hit rate and the digest's record

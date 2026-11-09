@@ -11,7 +11,7 @@ An 18-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scor
 ```
 dashboard/                       Streamlit UI — the "view" layer
 ├── app.py                       thin entry: page config + theme + redirect
-├── pages/*.py                   19 pages (01–22), one per screen, explicit imports
+├── pages/*.py                   19 pages (01–19, numbered in sidebar order), one per screen
 └── shared/                      cross-page utilities (design/theme, nav, cache, chart helpers)
 analysis/                        PURE engine — NO Streamlit imports here
 ├── score.py                     composite score (technical 40 + momentum 25 + volume 15 + sentiment 10)
@@ -68,10 +68,10 @@ py -m streamlit run dashboard/app.py --server.port 8501 --server.headless true
 py -m pytest -m "not slow" -q
 
 # One page's smoke test only (fast during dashboard/pages/ edits)
-py -m pytest tests/test_pages_smoke.py -k "04_analyze_stock" -q
+py -m pytest tests/test_pages_smoke.py -k "13_analyze_stock" -q
 
 # Lint a single file (config: pyproject.toml → [tool.ruff], max-line 120)
-py -m ruff check dashboard/pages/04_analyze_stock.py
+py -m ruff check dashboard/pages/13_analyze_stock.py
 
 # Slow end-to-end backtest (needs network — gated out of CI)
 py -m pytest -m slow -q

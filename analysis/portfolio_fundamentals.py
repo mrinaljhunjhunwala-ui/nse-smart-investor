@@ -4,7 +4,7 @@ analysis/portfolio_fundamentals.py — Portfolio fundamental-quality wrapper.
 Thin adapter over analysis/fundamentals/ — the established, provider-agnostic,
 sector-aware fundamentals engine (single source of truth, unit-tested). This
 module exists ONLY to preserve the dict-based public API consumed by
-dashboard/pages/03_my_portfolio.py, so that page needs zero changes.
+dashboard/pages/06_my_portfolio.py, so that page needs zero changes.
 
 DO NOT add provider / fetching logic here. All fetching and metric computation
 is delegated to FundamentalsService + analysis.fundamentals.analytics. The

@@ -2,7 +2,7 @@
 dashboard/shared/checklist_ui.py — 8-factor swing-trade go/no-go checklist.
 
 Extracted verbatim from dashboard/pages/13_swing_checklist.py so it can be
-embedded inside 04_analyze_stock.py as an expander (Analysis-page
+embedded inside 13_analyze_stock.py as an expander (Analysis-page
 consolidation #5). The standalone page is redundant once Analyze Stock
 also renders this — one location instead of two.
 

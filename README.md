@@ -84,8 +84,8 @@ SQLite for storage.
 ```
 dashboard/
   app.py                 thin entry point (page config + theme + redirect to Command Centre)
-  pages/01..19_*.py      one file per page (explicit imports — no global injection), incl.
-                         18_tqs_scanner.py and 19_quality_watch.py
+  pages/01..19_*.py      one file per page, numbered in sidebar order (explicit imports), incl.
+                         12_tqs_scanner.py and 04_quality_watch.py
   shared/                design.py (NSE Pro theme) · nav.py · cache.py · chart_helpers.py · trade_utils.py
 analysis/                PURE engine, no Streamlit — heavily unit-tested
   score.py · hedging.py · portfolio_risk.py · portfolio_manager.py · liquidity.py

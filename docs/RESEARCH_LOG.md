@@ -73,7 +73,7 @@ the most useful entries for avoiding repeat work.
 - **Revenue growth by regime, short window.** Re-run #301 with YoY growth (the definition
   that carries signal) instead of long CAGR. Evidence will stay thin: 41 dates, and few
   outside trend_up.
-- **Screener "Revenue Growth" filter basis.** `dashboard/pages/06_smart_screener.py` uses a
+- **Screener "Revenue Growth" filter basis.** `dashboard/pages/10_smart_screener.py` uses a
   5y `revenue_cagr`. The research that justified the filter measured 1–3y growth (Yahoo-only
   history), and 5–10y CAGR shows no signal (#306). Consider a shorter or YoY definition, or
   stop calling it a research-backed signal. That's a display decision for the dashboard owner.

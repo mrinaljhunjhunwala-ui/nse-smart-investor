@@ -1,6 +1,6 @@
 """analysis/quality_watch.py — pure Quality Score (0-100) for page 19.
 
-Moved out of dashboard/pages/19_quality_watch.py (audit 2026-09-24) so it is
+Moved out of dashboard/pages/04_quality_watch.py (audit 2026-09-24) so it is
 unit-testable and so ratio selection routes through
 analysis/sector_classification.py.
 

@@ -91,7 +91,7 @@ def _wl_get_all():
 # would raise "cannot be modified after the widget ... is instantiated"
 # since the widgets have already rendered earlier in this same run. Fixed
 # with the same deferred-flag pattern used in dashboard/shared/nav.py's
-# Add-ticker box and dashboard/pages/04_analyze_stock.py's search boxes:
+# Add-ticker box and dashboard/pages/13_analyze_stock.py's search boxes:
 # set a flag before the existing st.rerun(), consume it up here before any
 # of the four widgets are instantiated on the next run.
 if st.session_state.pop("_wl_page_add_clear_pending", False):

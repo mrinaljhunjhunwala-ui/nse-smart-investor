@@ -133,7 +133,7 @@ def _flag_card_html(f: QualitativeFlag) -> str:
     News-sourced flags (parse_news_flags) store the article URL in `detail`,
     not a description — dumping that raw URL as text stretched the whole
     card/page width for long Google News redirect links, so the headline links
-    to it instead (same pattern as the news tab in 19_quality_watch.py).
+    to it instead (same pattern as the news tab in 04_quality_watch.py).
     RSS/announcement flags put a real description in `detail`, shown as text.
 
     FIX FLAG-XSS (audit 2026-10-03): headline / detail / source come from RSS,

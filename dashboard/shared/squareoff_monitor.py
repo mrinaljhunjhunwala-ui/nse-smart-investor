@@ -144,7 +144,7 @@ def render_squareoff_monitor(
 
             # FIX SQ1: st.fragment's run_every is fixed at decoration time and
             # can't be changed mid-flight, so a page opened with poll_every=60
-            # (the live default — see dashboard/pages/03_my_portfolio.py)
+            # (the live default — see dashboard/pages/06_my_portfolio.py)
             # would otherwise keep ticking every 60s straight through the
             # 15-minute square-off window, well short of the 20s cadence this
             # function documents. While inside the window, sleep the

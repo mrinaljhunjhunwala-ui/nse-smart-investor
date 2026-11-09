@@ -29,7 +29,7 @@ Pass the actual functions in from trade_store at the call site, e.g.:
 
 REFRESH CADENCE — daily, not real-time. These are announcement/filing-
 driven events, not tick-driven. Run once at pre-open, e.g. alongside the
-existing Top Picks background scan in 02_command_centre.py.
+existing Top Picks background scan in 01_command_centre.py.
 
 This module never touches analysis/score.py or CompositeScore.
 """

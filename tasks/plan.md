@@ -41,7 +41,7 @@ revised against constraints that surfaced after the audit was written:
 ### Phase 0 · Quarantine and land in-flight work · **COMPLETE**
 - Task 0.1: Audit + land in-flight `data/` and `analysis/fundamentals/`
   edits - shipped
-- Task 0.2: Audit + land in-flight `dashboard/pages/04_analyze_stock.py`
+- Task 0.2: Audit + land in-flight `dashboard/pages/13_analyze_stock.py`
   edit - shipped
 - Task 0.3: Commit design-tokens block - shipped
 

@@ -3,7 +3,7 @@ dashboard/app.py — NSE Smart Investor Platform (multipage entry point)
 
 This file is intentionally thin. The UI lives in:
     dashboard/shared/   design.py · nav.py · cache.py · trade_utils.py · chart_helpers.py
-    dashboard/pages/    01_market_live.py … 17_tomorrow_watchlist.py
+    dashboard/pages/    01_command_centre.py … 19_investor_guide.py (sidebar order)
 
 app.py only:
     1. calls st.set_page_config (ONCE per session — must not appear in any page)
@@ -134,4 +134,4 @@ _prime_hot_caches_bg()
 # Default landing → Command Centre. Streamlit's own pages/ nav is hidden via
 # .streamlit/config.toml (showSidebarNavigation = false); custom nav lives in
 # render_sidebar(). Each page renders its own sidebar + top bar.
-st.switch_page("pages/02_command_centre.py")
+st.switch_page("pages/01_command_centre.py")

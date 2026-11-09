@@ -13,7 +13,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "06_smart_screener.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "10_smart_screener.py")
 
 _FAKE_SIGNALS = [
     {"ticker": "AAA.NS", "price": 100.0, "sl": 95.0, "tp": 112.0, "screen": "Breakout",

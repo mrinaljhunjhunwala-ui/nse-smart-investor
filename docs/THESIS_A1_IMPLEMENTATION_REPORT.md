@@ -13,7 +13,7 @@ structured investment reasoning. **No AI, no LLM, no narrative generation** — 
 | Test suite (20+ target) | ✅ **31 tests** | `tests/test_thesis_engine.py` |
 | Methodology document | ✅ | `THESIS_ENGINE_METHODOLOGY.md` |
 | Implementation report | ✅ | this file |
-| UI (structured lists, no prose) | ✅ | `dashboard/pages/04_analyze_stock.py` — "🧭 Investment Thesis (structured)" |
+| UI (structured lists, no prose) | ✅ | `dashboard/pages/13_analyze_stock.py` — "🧭 Investment Thesis (structured)" |
 
 ## Architecture
 Three files, clean separation:

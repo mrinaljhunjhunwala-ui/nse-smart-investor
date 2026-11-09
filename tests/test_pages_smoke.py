@@ -98,6 +98,9 @@ def _join_page_threads():
 
 def test_all_pages_present():
     # Guard: the universe of pages the smoke covers (catches an accidentally-dropped page).
+    # 2026-11-09: pages renumbered 01-19 to follow the sidebar order (see
+    # test_page_numbers_follow_sidebar_order). File names in the history below
+    # are as they were at the time, before that renumber.
     # 17 after merging Macro Dashboard + Market Breadth → Market Internals.
     # 18 after adding 18_tqs_scanner.py.
     # Still 18 after: merging Market Overview + Market Internals → Overview
@@ -134,6 +137,17 @@ def test_all_pages_present():
     assert len(_PAGES) == 19, f"expected 19 pages, found {len(_PAGES)}: {_IDS}"
 
 
+def test_page_numbers_follow_sidebar_order():
+    """File numbers are contiguous 01..N in the order the sidebar lists the
+    pages (nav._NAV_GROUPS), and every page file is routed from nav._PAGE_FILE."""
+    from dashboard.shared import nav
+
+    ordered = [p for grp in nav._NAV_GROUPS.values() for p in grp]
+    files = [os.path.basename(nav._PAGE_FILE[p]) for p in ordered]
+    assert files == _IDS, f"sidebar order {files} != files on disk {_IDS}"
+    assert [f[:2] for f in files] == [f"{i:02d}" for i in range(1, len(files) + 1)]
+
+
 @pytest.mark.smoke
 @pytest.mark.parametrize("page", _PAGES, ids=_IDS)
 def test_page_loads_without_exception(page):
@@ -151,7 +165,7 @@ def test_page_loads_without_exception(page):
     # IndentationError, ...) itself: it logs "Script compilation error" and fires
     # SCRIPT_STOPPED_WITH_COMPILE_ERROR instead of emitting an exception element.
     # AppTest ignores that event, so ``at.exception`` stays EMPTY and the test
-    # used to pass on a page that could not even parse (16_angel_one.py regression).
+    # used to pass on a page that could not even parse (17_angel_one.py regression).
     with open(page, encoding="utf-8") as fh:
         source = fh.read()
     try:
@@ -178,7 +192,7 @@ def test_command_centre_hero_says_no_read_when_feeds_are_down():
     """replica-test S3 (2026-10-04): with every feed blocked the hero used to
     read "Mixed · no clear trend" under a "range regime" kicker — a market call
     made from no data. It must say the feeds are unavailable instead."""
-    at = AppTest.from_file(os.path.join(_PAGES_DIR, "02_command_centre.py"),
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "01_command_centre.py"),
                            default_timeout=240).run()
     assert not at.exception, at.exception
     html = "\n".join(str(m.value) for m in at.markdown)

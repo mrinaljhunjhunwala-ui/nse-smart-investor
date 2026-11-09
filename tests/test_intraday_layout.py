@@ -15,7 +15,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "11_intraday_trader.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "15_intraday_trader.py")
 
 
 def _bars(interval="5m", days=3):

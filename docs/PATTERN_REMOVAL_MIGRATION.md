@@ -58,7 +58,7 @@ drift is uniformly conservative — no stock scores *higher* than before.
 | File | Change |
 |---|---|
 | `analysis/score.py` | `total = tech + mom + vol + sent` (pattern excluded); `pattern_score` field now always `0.0`; `_score_pattern` retained for narrative pattern detection; module docstring updated (90-pt max, rationale + references) |
-| `dashboard/pages/15_investor_guide.py` | Score header "0 – 90"; four-factor description; component table marks Candlestick as "0 pts — info only" with the study rationale |
+| `dashboard/pages/19_investor_guide.py` | Score header "0 – 90"; four-factor description; component table marks Candlestick as "0 pts — info only" with the study rationale |
 | `dashboard/shared/disclosures.py` | "What this score measures" updated (max 90; patterns shown for context, not scored) |
 
 Not changed: weights of remaining factors, all thresholds, grades, actions,

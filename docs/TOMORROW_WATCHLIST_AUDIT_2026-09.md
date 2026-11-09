@@ -48,7 +48,7 @@ _is_bear_rev  = 45 <= sc <= 68 and mom < 5 and tech >= 22
    ascending for breakdown) then truncated to `n=15`.
 6. **Persistence**: snapshot to `trade_store` KV (`_TW_KV_KEY`), TTL 6 h, refreshed
    by `scripts/warm_tomorrow_watchlist.py` at 10:20 UTC (15:50 IST) once daily.
-7. **Page render**: `dashboard/pages/17_tomorrow_watchlist.py` reads the snapshot
+7. **Page render**: `dashboard/pages/11_tomorrow_watchlist.py` reads the snapshot
    via `get_tomorrow_watchlist()` with stale-while-revalidate + background scan.
    Cards render bespoke HTML directly, bypassing the `pick_freshness` helpers.
 
@@ -126,10 +126,10 @@ and Task 4.2's scope.
 
 ### FM4 - No follow-through · CONFIRMED (HIGH)
 
-The bespoke card renderer in `17_tomorrow_watchlist.py::_render_cards`
+The bespoke card renderer in `11_tomorrow_watchlist.py::_render_cards`
 builds HTML directly and never calls `dashboard.shared.pick_freshness`'s
 `_render_pick_verdict` helper. That helper is the ONLY place in the app
-outside `04_analyze_stock.py` that writes to `verdict_ledger` (see
+outside `13_analyze_stock.py` that writes to `verdict_ledger` (see
 [`pick_freshness.py:141`](../dashboard/shared/pick_freshness.py) -
 `from analysis.verdict_ledger import log_verdict as _vl_log`).
 
@@ -137,7 +137,7 @@ Consequences:
 
 - Every day's ~45 shortlist picks (15 × 3 buckets) are surfaced to the user
   and then thrown away.
-- The Verdict Calibration page (`21_verdict_calibration.py`) can't answer
+- The Verdict Calibration page (`18_verdict_calibration.py`) can't answer
   "how did Tomorrow's Watchlist picks perform 5d/20d/60d out" for any pick
   that the user didn't also happen to open in Analyze Stock.
 - Shadow-trade analysis is complete for Analyze Stock but has a zero-length
@@ -154,7 +154,7 @@ inside the cached function is safe even on retries. Emit `source=
 can slice by "picks the model surfaced on the Watchlist page specifically".
 
 **Fix F2**: add a "How did yesterday's picks do?" strip at the top of
-`17_tomorrow_watchlist.py` showing the previous scan's picks alongside
+`11_tomorrow_watchlist.py` showing the previous scan's picks alongside
 next-day return / hit-rate. Powered by the F1 ledger writes, read via
 `verdict_ledger.load_ledger(source_in=["tomorrow_watchlist"])`. Same
 principle as Verdict Calibration but scoped to this one source, so the
@@ -199,14 +199,14 @@ Task 4.2 acceptance = PR α merged + follow-up issue for PR β.
 
 ## See also
 
-- [`dashboard/pages/17_tomorrow_watchlist.py`](../dashboard/pages/17_tomorrow_watchlist.py) - page renderer.
+- [`dashboard/pages/11_tomorrow_watchlist.py`](../dashboard/pages/11_tomorrow_watchlist.py) - page renderer.
 - [`dashboard/shared/cache.py`](../dashboard/shared/cache.py) at
   `_tomorrow_watchlist` / `get_tomorrow_watchlist` - scoring pipeline + snapshot.
 - [`analysis/verdict_ledger.py`](../analysis/verdict_ledger.py) - the ledger
   we should be writing to.
 - [`dashboard/shared/pick_freshness.py`](../dashboard/shared/pick_freshness.py) -
   the existing helper that already knows how to log; TW just doesn't use it.
-- [`dashboard/pages/21_verdict_calibration.py`](../dashboard/pages/21_verdict_calibration.py) -
+- [`dashboard/pages/18_verdict_calibration.py`](../dashboard/pages/18_verdict_calibration.py) -
   the read side that F1's writes will feed.
 - [`scripts/warm_tomorrow_watchlist.py`](../scripts/warm_tomorrow_watchlist.py) +
   [`.github/workflows/warm_tomorrow_watchlist.yml`](../.github/workflows/warm_tomorrow_watchlist.yml) -

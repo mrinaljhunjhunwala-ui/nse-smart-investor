@@ -11,7 +11,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "05_market_overview.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "03_market_overview.py")
 
 _BREADTH = {
     "advance": 34, "decline": 16, "total": 50, "ad_ratio": 2.12,
