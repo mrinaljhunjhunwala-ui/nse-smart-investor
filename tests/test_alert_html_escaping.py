@@ -61,6 +61,7 @@ def test_test_posture_sends_hold_rows_without_dedup(monkeypatch):
     import data.angel_fetcher as af
     import data.fetcher as df_
     hold = SimpleNamespace(symbol="J&KBANK", posture="HOLD", pnl_pct=2.0, reason="trend intact")
+    monkeypatch.setattr(ca, "_manual_holdings_for_posture", lambda: [])
     monkeypatch.setattr(af, "get_holdings", lambda: [{"tradingsymbol": "J&KBANK"}])
     monkeypatch.setattr(af, "get_positions", lambda: {"day": []})
     monkeypatch.setattr(df_, "fetch_single", lambda *a, **k: None)
@@ -76,6 +77,7 @@ def test_test_posture_sends_hold_rows_without_dedup(monkeypatch):
 
 
 def _posture_env(monkeypatch, analysed, skipped_rows):
+    monkeypatch.setattr(ca, "_manual_holdings_for_posture", lambda: [])   # Angel fallback path
     import analysis.portfolio_posture as pp
     import data.angel_fetcher as af
     import data.fetcher as df_
@@ -130,3 +132,23 @@ def test_telegram_other_errors_do_not_retry(monkeypatch):
 
     monkeypatch.setattr(ca.urllib.request, "urlopen", fake_urlopen)
     assert ca.send_telegram("hi") is False and len(calls) == 1
+
+
+def test_posture_reads_my_portfolio_holdings_first(monkeypatch):
+    import trade_store
+    import analysis.portfolio_posture as pp
+    import data.angel_fetcher as af
+    import data.fetcher as df_
+    monkeypatch.setattr(trade_store, "kv_get", lambda *a, **k: [
+        {"ticker": "RELIANCE.NS", "quantity": "10", "avg_buy_price": "1400"},
+        {"ticker": "", "quantity": 5}, {"ticker": "TCS", "quantity": 0}])
+    monkeypatch.setattr(af, "get_holdings", lambda: (_ for _ in ()).throw(AssertionError("broker read")))
+    monkeypatch.setattr(af, "get_positions", lambda: {"day": []})
+    monkeypatch.setattr(df_, "fetch_single", lambda *a, **k: None)
+    seen = []
+    monkeypatch.setattr(pp, "analyse_holdings",
+                        lambda holdings, *a, **k: seen.extend(holdings) or [])
+    monkeypatch.setattr(pp, "analyse_positions", lambda *a, **k: [])
+    monkeypatch.setattr(ca, "dispatch", lambda m, **k: True)
+    ca.check_portfolio_posture({}, "2026-11-09", always=True)
+    assert seen == [{"symbol": "RELIANCE", "qty": 10, "avg_price": 1400.0}]
