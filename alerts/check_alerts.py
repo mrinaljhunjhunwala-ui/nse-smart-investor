@@ -742,25 +742,55 @@ def check_verdict_alerts(state: dict, today: str) -> int:
             hits.append((verdict, b, fv))
     print(f"[verdicts] {len(hits)} BUY/STRONG BUY in scan at {_snapshot_ist_label(gen_at)}")
 
-    sent = 0
     regime = _regime_note()
+    sent_today = sum(1 for k, v in state.items() if k.startswith("verdict_") and v == today)
+    room = min(_VERDICT_MAX_PER_RUN, max(0, _VERDICT_MAX_PER_DAY - sent_today))
+    batch = []
     for verdict, b, fv in sorted(hits, key=lambda h: (h[0] != "STRONG BUY", -float(h[1].get("score") or 0))):
-        base = _base_symbol(b.get("ticker"))
-        key = f"verdict_{verdict.replace(' ', '_').lower()}_{base}"
+        key = f"verdict_{verdict.replace(' ', '_').lower()}_{_base_symbol(b.get('ticker'))}"
         if _already_fired(state, key, today):
             continue
-        if sent >= _VERDICT_MAX_PER_RUN:
-            print(f"[verdicts] per-run cap {_VERDICT_MAX_PER_RUN} reached; the rest go next run")
+        if len(batch) >= room:
+            print(f"[verdicts] cap reached ({_VERDICT_MAX_PER_RUN}/run, {_VERDICT_MAX_PER_DAY}/day, "
+                  f"{sent_today} already today); the rest are on Top Picks")
             break
-        sent_today = sum(1 for k, v in state.items() if k.startswith("verdict_") and v == today)
-        if sent_today >= _VERDICT_MAX_PER_DAY:
-            print(f"[verdicts] daily cap {_VERDICT_MAX_PER_DAY} reached; the rest are on Top Picks")
-            break
-        lines = _format_verdict_alert(verdict, b, fv, regime, gen_at)
-        if dispatch("\n".join(lines)):
+        batch.append((key, verdict, b, fv))
+    if not batch:
+        return 0
+    # One Telegram message per run, not one per stock (9 Nov: ~40 separate pings).
+    lines = _format_verdict_batch(batch, regime, gen_at)
+    if dispatch("\n".join(lines), subject=f"{len(batch)} new strong read(s) — NSE Smart Investor"):
+        for key, *_ in batch:
             _mark_fired(state, key, today)
-            sent += 1
-    return sent
+        return len(batch)
+    return 0
+
+
+def _format_verdict_batch(batch: list, regime: str, gen_at) -> list:
+    """One message for a run's new BUY / STRONG BUY reads, strongest first."""
+    n = len(batch)
+    lines = [f"🟢 <b>{n} new strong read{'s' if n != 1 else ''}</b> (scan at {_snapshot_ist_label(gen_at)})"]
+    if regime:
+        lines.append(f"<i>{_h(regime)}</i>")
+    lines.append("")
+    for i, (_key, verdict, b, fv) in enumerate(batch, start=1):
+        icon = "🟢🟢" if verdict == "STRONG BUY" else "🟢"
+        price = b.get("price")
+        price_str = f" · ₹{float(price):,.2f}" if isinstance(price, (int, float)) else ""
+        lines.append(f"{i}. {icon} <b>{_h(_base_symbol(b.get('ticker')))}</b> — "
+                     f"{verdict_display_label(verdict)} · score {b.get('score')}/90"
+                     f" · conviction {getattr(fv, 'conviction', '?')}{price_str}")
+        meta = [_h(str(x)) for x in ((b.get("sector") or "").strip(), b.get("horizon") or "") if x]
+        if b.get("sl") and b.get("tp"):
+            try:
+                meta.append(f"invalidation ₹{float(b['sl']):,.2f} · target ₹{float(b['tp']):,.2f}")
+            except (TypeError, ValueError):
+                pass
+        if meta:
+            lines.append("   " + " · ".join(meta))
+    lines += ["", "<i>Model output from past price data — not investment advice; live track record "
+              "on the Verdict Calibration page.</i>"]
+    return lines
 
 
 def check_picks_recap(state: dict, today: str, now: datetime.datetime | None = None) -> int:
