@@ -101,6 +101,25 @@ jobs:
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
         run: python alerts/check_alerts.py --mode=weekly-scorecard
 
+      # After-close portfolio posture from the Angel One holdings. Used to need
+      # its own cron-job.org trigger at 14:00 (never set up); it rides this
+      # post-close job instead. --always sends a one-line "all steady" note
+      # when nothing needs attention, so there is a portfolio text every day.
+      - name: Send portfolio after the close
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python alerts/check_alerts.py --mode=portfolio-posture --always
+
       - name: Save alert state
         if: always() && steps.restore_state.outcome == 'success'
         uses: actions/cache/save@v5

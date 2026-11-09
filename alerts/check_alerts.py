@@ -1283,7 +1283,8 @@ def check_test_alert(state: dict, today: str) -> int:
 # (only_actionable=True by default in format_portfolio_message).
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_portfolio_posture(state: dict, today: str, *, test: bool = False) -> int:
+def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
+                            always: bool = False) -> int:
     """Fetch Angel One holdings + positions, run posture analysis, alert only
     on actionable rows. Requires ANGEL_* env vars — silently no-ops otherwise
     (Angel One is optional; we can't analyse a portfolio we can't see).
@@ -1358,6 +1359,16 @@ def check_portfolio_posture(state: dict, today: str, *, test: bool = False) -> i
     # point of an alert is to surface something. If everything is HOLD,
     # count it as fired-successfully (dedup key set) so we don't keep polling.
     if NO_FLAGGED_POSTURES in msg and not skipped:
+        if always:
+            # After-close run (--always): the owner wants a daily portfolio
+            # line even when nothing needs attention.
+            steady = (f"📋 <b>Portfolio after the close</b>\nAll {len(hpost)} holding(s) read "
+                      "steady — no posture change needs attention today.\n"
+                      "<i>Descriptive model read, not investment advice.</i>")
+            if dispatch(steady, subject="Portfolio after the close — all steady"):
+                _mark_fired(state, key, today)
+                return 1
+            return 0
         _mark_fired(state, key, today)
         print("[portfolio] all HOLD/RUNNING — no message sent")
         return 0
@@ -1781,7 +1792,7 @@ def main() -> int:
     elif mode == "momentum":
         total += check_momentum_opportunities(state, today)
     elif mode == "portfolio-posture":
-        total += check_portfolio_posture(state, today)
+        total += check_portfolio_posture(state, today, always="--always" in sys.argv)
     elif mode == "weekly-digest":
         total += check_weekly_digest(state, today)
     elif mode == "tomorrow-watchlist":

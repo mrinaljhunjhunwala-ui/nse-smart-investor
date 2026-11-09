@@ -108,6 +108,17 @@ def test_posture_all_hold_and_nothing_skipped_stays_silent(monkeypatch):
     assert ca.check_portfolio_posture({}, "2026-10-03") == 0 and not sent
 
 
+def test_posture_all_hold_after_close_sends_steady_line(monkeypatch):
+    from tests.test_alert_copy_no_advice import _assert_descriptive
+    hold = SimpleNamespace(symbol="A", posture="HOLD", pnl_pct=1.0, reason="ok")
+    sent = _posture_env(monkeypatch, [hold], [])
+    state = {}
+    assert ca.check_portfolio_posture(state, "2026-11-09", always=True) == 1
+    assert "All 1 holding(s) read steady" in sent[0]
+    _assert_descriptive(sent[0])
+    assert ca.check_portfolio_posture(state, "2026-11-09", always=True) == 0   # once a day
+
+
 def test_telegram_other_errors_do_not_retry(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "c")
