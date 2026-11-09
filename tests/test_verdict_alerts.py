@@ -33,9 +33,12 @@ def test_sends_buy_and_strong_buy_once_per_day(monkeypatch):
     sent = _setup(monkeypatch, buys, {"AAA.NS": "STRONG BUY", "BBB.NS": "BUY", "CCC.NS": "WATCH"})
     state = {}
     assert ca.check_verdict_alerts(state, "2026-10-02") == 2
-    assert "AAA" in sent[0] and "Strong trend" in sent[0]     # strongest first
-    assert "BBB" in sent[1] and "not investment advice" in sent[1]
+    assert len(sent) == 1                                      # one message per run
+    msg = sent[0]
+    assert "2 new strong reads" in msg and "Strong trend" in msg and "not investment advice" in msg
+    assert msg.index("AAA") < msg.index("BBB") and "CCC" not in msg   # strongest first
     assert ca.check_verdict_alerts(state, "2026-10-02") == 0   # deduped
+    assert len(sent) == 1
 
 
 def test_upgrade_fires_again(monkeypatch):
@@ -57,7 +60,7 @@ def test_verdict_alert_copy_is_descriptive(monkeypatch):
                   {"AAA.NS": "STRONG BUY", "BBB.NS": "BUY"})
     ca.check_verdict_alerts({}, "2026-10-02")
     assert ca.check_test_verdict_alert({}, "2026-10-02") == 1
-    assert len(sent) == 3
+    assert len(sent) == 2                                      # combined run message + test alert
     for m in sent:
         _assert_descriptive(m)
 
@@ -191,7 +194,7 @@ def test_reads_buy_names_beyond_the_shortlist(monkeypatch):
     sent = _setup_full(monkeypatch, buys, rest,
                        {"AAA.NS": "STRONG BUY", "DDD.NS": "BUY", "EEE.NS": "BUY"})
     assert ca.check_verdict_alerts({}, "2026-10-02") == 2      # EEE's action is not BUY
-    assert "AAA" in sent[0] and "DDD" in sent[1]
+    assert len(sent) == 1 and "AAA" in sent[0] and "DDD" in sent[0] and "EEE" not in sent[0]
 
 
 def test_ignores_full_map_from_another_scan(monkeypatch):
@@ -216,3 +219,9 @@ def test_daily_cap_across_runs(monkeypatch):
     assert ca.check_verdict_alerts(state, "2026-11-09") == ca._VERDICT_MAX_PER_DAY - ca._VERDICT_MAX_PER_RUN
     assert ca.check_verdict_alerts(state, "2026-11-09") == 0
     assert ca.check_verdict_alerts(state, "2026-11-10") == ca._VERDICT_MAX_PER_RUN   # new day
+
+
+def test_combined_message_escapes_html(monkeypatch):
+    sent = _setup(monkeypatch, [_pick("M&M.NS", 70, "STRONG BUY")], {"M&M.NS": "STRONG BUY"})
+    assert ca.check_verdict_alerts({}, "2026-10-02") == 1
+    assert "M&amp;M" in sent[0] and "1 new strong read</b>" in sent[0]
