@@ -216,3 +216,75 @@ def test_invalid_ticker_query_param_is_ignored(_stubs):
     at.run()
     assert not at.exception, at.exception
     assert not any("Opened from link" in str(c.value) for c in at.caption)
+
+
+def test_data_unavailable_score_is_not_rendered(_stubs):
+    """score_stock's DATA_UNAVAILABLE sentinel (score 0, grade F) is a refusal,
+    not a score: the page says "not scored" and renders no posture hero."""
+    mp, cache = _stubs
+
+    def _unavail(t):
+        from analysis.score import CompositeScore
+        return CompositeScore(
+            ticker=t, price=0.0, score=0.0, grade="F", action="DATA_UNAVAILABLE",
+            technical_score=0, momentum_score=0, volume_score=0, sentiment_score=0,
+            entry=0, stop_loss=0, target=0, risk_reward=0,
+            headline=f"Data unavailable: Insufficient data for {t}",
+            narrative="Could not fetch data.", sector="Other", vix_regime="unknown",
+            sector_rank=None)
+    mp.setattr(cache, "get_composite_score", _unavail)
+    at = AppTest.from_file(_PAGE, default_timeout=240)
+    at.session_state["analyze_ticker"] = "NEWCO.NS"
+    at.run()
+    assert not at.exception, at.exception
+    assert any("was not scored — insufficient data" in str(w.value) for w in at.warning)
+    html = _html(at)
+    assert "Posture ·" not in html and 'class="hv-pillar"' not in html
+
+
+def test_coverage_note_lists_neutral_parts(_stubs):
+    mp, cache = _stubs
+
+    def _cs(t):
+        cs = _score(t, "Energy", "Gap Co Ltd")
+        cs.sector_rank = None
+        cs.coverage = {"sma200": True, "momentum_history": True, "r60d": True,
+                       "rs_vs_nifty": False, "sector_rank": False}
+        return cs
+    mp.setattr(cache, "get_composite_score", _cs)
+    at = AppTest.from_file(_PAGE, default_timeout=240)
+    at.session_state["analyze_ticker"] = "GAPCO.NS"
+    at.run()
+    assert not at.exception, at.exception
+    note = next(str(c.value) for c in at.caption if "Data coverage ·" in str(c.value))
+    assert "Relative strength vs Nifty" in note and "Sector strength" in note
+
+
+def test_negative_equity_valuation_explains_why(_stubs):
+    """ALOKINDS-style: equity negative and losses -> the valuation card says the
+    data WAS found and why the method does not apply, not a bare guard code."""
+    mp, cache = _stubs
+    import analysis.fundamentals.service as fsvc
+    from datetime import date
+    from analysis.fundamentals.models import (BalanceSheet, CompanyFundamentals,
+                                              FiscalPeriod, IncomeStatement, RatioSnapshot)
+
+    def _neg(symbol):
+        p = FiscalPeriod(period_end=date(2026, 3, 31), fiscal_year=2026)
+        return CompanyFundamentals(
+            symbol=symbol, provider_name="StubProvider",
+            income_statements=[IncomeStatement(period=p, revenue=4.0e10, net_income=-8.0e9)],
+            balance_sheets=[BalanceSheet(period=p, total_equity=-1.6e11)],
+            ratios=RatioSnapshot(pe=None, pb=None))
+
+    class _Svc:
+        def get_fundamentals(self, ticker):
+            return _neg(ticker)
+    mp.setattr(fsvc, "default_service", lambda: _Svc())
+    at = _run(cache, mp, "NEGEQ", "Textiles", "Neg Equity Ltd")
+    assert not at.exception, at.exception
+    infos = [str(i.value) for i in at.info]
+    hit = next((i for i in infos if "Not assessed" in i), "")
+    assert "Data found: shareholders' equity is negative (-₹16,000 cr)" in hit, infos
+    assert "P/E- and P/B-based valuation does not apply" in hit
+    assert not any("🛡 Guard:" in str(c.value) for c in at.caption)
