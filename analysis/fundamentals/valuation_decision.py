@@ -583,3 +583,99 @@ def assess_valuation(valuation_context, analytics: dict, sector_profile,
     """Build ValuationInputs from existing objects, then assess. Defensive/wrapped."""
     return assess(build_valuation_inputs(valuation_context, analytics, sector_profile,
                                          cf=cf, is_psu=is_psu))
+
+
+# ── plain-language refusal explanation (UI helper; posture logic untouched) ──────
+REFUSAL_NOT_APPLICABLE = "not_applicable"   # data WAS found; this method does not apply
+REFUSAL_MISSING_DATA = "missing_data"       # a required figure was not available
+
+
+def _inr_cr(x: Optional[float]) -> Optional[str]:
+    """Absolute INR → '₹1,234 cr' / '-₹1,234 cr'. None when unavailable."""
+    if x is None:
+        return None
+    try:
+        cr = float(x) / 1e7
+    except (TypeError, ValueError):
+        return None
+    sign = "-" if cr < 0 else ""
+    return f"{sign}₹{abs(cr):,.0f} cr"
+
+
+def explain_refusal(assessment: ValuationAssessment,
+                    inputs: Optional[ValuationInputs] = None):
+    """Explain WHY a valuation was not assessed, in plain words.
+
+    Returns ``(kind, text)``:
+      * ``kind == "not_applicable"`` — the company's data was found, but this
+        valuation method does not apply to it (negative equity, losses,
+        implausible P/E, insurer, too new, cyclical extreme).
+      * ``kind == "missing_data"`` — a figure the method needs was not
+        available from the data sources (names which one).
+    Returns ``(None, "")`` when the assessment is not a refusal.
+    Pure and descriptive — never a recommendation; does not change posture.
+    """
+    if assessment is None or assessment.posture != INSUFFICIENT_EVIDENCE:
+        return None, ""
+    guard = assessment.triggered_guard or ""
+    inp = inputs
+
+    if guard == "H2-negative-equity":
+        eq = _inr_cr(inp.total_equity) if inp is not None else None
+        fig = f" ({eq})" if eq else ""
+        return REFUSAL_NOT_APPLICABLE, (
+            f"Data found: shareholders' equity is negative{fig}, so P/E- and P/B-based "
+            "valuation does not apply (book value and return on equity are not meaningful "
+            "when equity is below zero).")
+    if guard == "H1-negative-earnings":
+        ni = _inr_cr(inp.net_income) if inp is not None else None
+        fig = f" (latest net profit {ni})" if ni else ""
+        return REFUSAL_NOT_APPLICABLE, (
+            f"Data found: the company is loss-making or at zero profit{fig}, so a P/E-based "
+            "valuation does not apply (a price-to-earnings multiple needs positive earnings).")
+    if guard == "H6-implausible":
+        pe = f" ({inp.pe:,.0f}×)" if (inp is not None and inp.pe is not None) else ""
+        return REFUSAL_NOT_APPLICABLE, (
+            f"Data found: the P/E{pe} is above {PE_IMPLAUSIBLE:.0f}×, which usually means "
+            "earnings are temporarily depressed or distorted, so a P/E-based valuation "
+            "would not be meaningful.")
+    if guard == "H4-insurance":
+        return REFUSAL_NOT_APPLICABLE, (
+            "Data found: this is an insurer. Insurers are valued on embedded value "
+            "(P/EV), which the data sources do not provide, so P/E- and P/B-based "
+            "valuation does not apply.")
+    if guard == "H5-newly-listed":
+        return REFUSAL_NOT_APPLICABLE, (
+            "Data found: under two years of reported earnings history, so there is not "
+            "enough track record to compare the P/E against growth.")
+    if guard == "G1-cyclical-peak":
+        return REFUSAL_NOT_APPLICABLE, (
+            "Data found: the figures look like a cyclical peak (low P/E with unusually high "
+            "returns and margin-led growth), so peak earnings would make the multiple "
+            "misleading. " + (assessment.justification or "")).strip()
+    if guard == "TR-cyclical-trough":
+        return REFUSAL_NOT_APPLICABLE, (
+            "Data found: the figures look like a cyclical trough (depressed earnings "
+            "distort the multiple), so a multiple-based valuation would be misleading.")
+    if guard == "H3-missing-metric":
+        missing: List[str] = []
+        if inp is not None:
+            if inp.is_financial:
+                if inp.pb is None:
+                    missing.append("price-to-book (P/B)")
+                if inp.roe is None:
+                    missing.append("return on equity (ROE)")
+            elif inp.pe is None:
+                missing.append("price-to-earnings (P/E)")
+        if not missing:
+            missing = (["price-to-book (P/B) or return on equity (ROE)"]
+                       if assessment.sector_branch == "financial"
+                       else ["price-to-earnings (P/E)"])
+        return REFUSAL_MISSING_DATA, (
+            "Data missing: " + " and ".join(missing)
+            + (" was" if len(missing) == 1 else " were")
+            + " not available from the data sources, so the valuation was not assessed "
+            "rather than guessed.")
+    # Unknown guard — fall back to the engine's own reason, still plain text.
+    return REFUSAL_NOT_APPLICABLE, (assessment.justification
+                                    or "This valuation method does not apply here.")

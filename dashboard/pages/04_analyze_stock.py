@@ -560,6 +560,21 @@ if analyze_btn or _prefill_active or (
                 )
                 st.stop()
 
+            # score_stock() refuses (action DATA_UNAVAILABLE, score 0, grade F)
+            # when there is too little usable price history. That 0/F is a
+            # placeholder, not a score — say so and stop instead of rendering it.
+            if cs.action == "DATA_UNAVAILABLE":
+                st.warning(
+                    f"**{ticker.replace('.NS','')} was not scored — insufficient data.** "
+                    "The composite score needs at least 30 trading days of usable price "
+                    "history, and the price sources did not return that. No score is shown "
+                    "rather than an invented one. Newly listed stocks become scoreable once "
+                    "enough sessions have traded."
+                )
+                if getattr(cs, "headline", ""):
+                    st.caption(f"Detail: {cs.headline}")
+                st.stop()
+
             # ── Task 3.3: TQS x valuation sidecar overlay ───────────────────
             # Populate cs.overlay_score BEFORE the verdict card renders so it
             # picks up the Quality x Value stat in its footer row. Both
@@ -1154,6 +1169,13 @@ if analyze_btn or _prefill_active or (
                     _conf_bits.append(f"{_bull} of {_tot} confirmation signals agree")
                 _conf_bits.append("educational analysis only – not SEBI-registered investment advice")
                 st.caption("Confidence · " + " · ".join(_conf_bits))
+                try:
+                    from analysis.score_coverage import coverage_note as _cov_note
+                    _cov_txt = _cov_note(cs)
+                    if _cov_txt:
+                        st.caption(_cov_txt)
+                except Exception as _cov_e:
+                    _log.debug("score coverage note failed: %s", _cov_e)
                 _render_regime_note()
 
                 # ── Context chips: earnings window + thesis freshness ───────
@@ -2228,9 +2250,17 @@ if analyze_btn or _prefill_active or (
 
                     st.markdown("**🧮 Valuation Assessment** *(growth- & quality-adjusted, descriptive)*")
                     try:
-                        from analysis.fundamentals.valuation_decision import assess_valuation
+                        from analysis.fundamentals.valuation_decision import (
+                            assess as _va_assess,
+                            build_valuation_inputs as _va_build,
+                            explain_refusal as _va_explain,
+                        )
                         _va_res = _fund_analytics.compute_all(_val_cf)
-                        _va     = assess_valuation(_val, _va_res, _spv, cf=_val_cf)
+                        # Same as assess_valuation(), split so the refusal
+                        # explanation can quote the actual input figures.
+                        _va_inp = _va_build(_val, _va_res, _spv, cf=_val_cf)
+                        _va     = _va_assess(_va_inp)
+                        _va_kind, _va_why = _va_explain(_va, _va_inp)
 
                         # UX-FIX: the old rendering was a small blockquote + a
                         # trailing "confidence: X" line that read as an admission
@@ -2264,16 +2294,27 @@ if analyze_btn or _prefill_active or (
                             f'</div>',
                             unsafe_allow_html=True,
                         )
+                        # Not assessed: say WHY in plain words, and whether the
+                        # data was found (method does not apply) or was missing.
+                        if _va_kind is not None:
+                            _va_head = ("Not assessed — this valuation method does not apply"
+                                        if _va_kind == "not_applicable"
+                                        else "Not assessed — required data missing")
+                            st.info(f"**{_va_head}.** {_va_why}")
                         _vac1, _vac2 = st.columns(2)
                         with _vac1:
                             if _va.justification and _post != "INSUFFICIENT_EVIDENCE":
                                 st.markdown(f"**Basis:** {_va.justification}")
-                            if _va.reasons:
+                            if _va.reasons and _va_kind is None:
                                 st.markdown("**Reasons:**")
                                 for _rz in _va.reasons:
                                     st.markdown(f"- {_rz}")
                             if _va.triggered_guard:
-                                st.caption(f"🛡 Guard: {_va.triggered_guard}")
+                                st.markdown(
+                                    f'<span style="font-size:11px;color:var(--dim)">'
+                                    f'rule: {_va.triggered_guard}</span>',
+                                    unsafe_allow_html=True,
+                                )
                         with _vac2:
                             if _va.caveats:
                                 st.markdown("**Caveats:**")
