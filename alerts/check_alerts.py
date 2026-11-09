@@ -1283,6 +1283,28 @@ def check_test_alert(state: dict, today: str) -> int:
 # (only_actionable=True by default in format_portfolio_message).
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _manual_holdings_for_posture() -> list:
+    """My Portfolio holdings (KV manual_portfolio_holdings) in the shape
+    analysis.portfolio_posture expects: symbol / qty / avg_price."""
+    try:
+        import trade_store as store
+        rows = store.kv_get(_PF_HOLDINGS_KEY, None) or []
+    except Exception as e:
+        print(f"[portfolio] My Portfolio read failed: {e}")
+        return []
+    out = []
+    for h in rows if isinstance(rows, list) else []:
+        sym = str(h.get("ticker", "")).upper().replace(".NS", "").replace(".BO", "").strip()
+        try:
+            qty = int(float(h.get("quantity") or h.get("qty") or 0))
+            avg = float(h.get("avg_buy_price") or h.get("avg_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if sym and qty > 0:
+            out.append({"symbol": sym, "qty": qty, "avg_price": avg})
+    return out
+
+
 def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
                             always: bool = False) -> int:
     """Fetch Angel One holdings + positions, run posture analysis, alert only
@@ -1306,11 +1328,18 @@ def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
         print(f"[portfolio] import failed: {_e}")
         return 0
 
-    try:
-        holdings = get_holdings() or []
-    except Exception as _e:
-        print(f"[portfolio] get_holdings failed (Angel One session issue?): {_e}")
-        return 0
+    # Holdings come from the My Portfolio page (owner's choice, 9 Nov); Angel
+    # One is only the fallback when that list is empty. Intraday positions
+    # exist only at the broker, so they still come from Angel when configured.
+    holdings = _manual_holdings_for_posture()
+    if holdings:
+        print(f"[portfolio] using {len(holdings)} My Portfolio holding(s)")
+    else:
+        try:
+            holdings = get_holdings() or []
+        except Exception as _e:
+            print(f"[portfolio] get_holdings failed (Angel One session issue?): {_e}")
+            holdings = []
     try:
         positions = (get_positions() or {}).get("day", []) or []
     except Exception as _e:
@@ -1322,8 +1351,12 @@ def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
         return 0
 
     def _fetch(sym):
+        # Holdings carry bare NSE symbols (RELIANCE); the price tiers want RELIANCE.NS.
+        s = str(sym).upper()
+        if not s.endswith((".NS", ".BO")) and not s.startswith("^"):
+            s += ".NS"
         try:
-            return fetch_single(sym, period="2y")
+            return fetch_single(s, period="2y")
         except Exception:
             return None
 
