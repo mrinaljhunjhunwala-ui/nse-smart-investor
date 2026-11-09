@@ -53,7 +53,7 @@ Most dashboard-layer silent passes are *intentional, graceful UI fallbacks* (cos
 |---|---|---|---|
 | B1 | **Survivorship bias** — backtests run on `get_universe("nifty500")`, a *current* static membership list. Stocks delisted/removed/that went to zero are absent, so historical returns are optimistically biased. | High (inflates backtested edge) | **Documented.** Inherent without point-in-time constituents; flag in UI as a known limitation. Confidence: High. |
 | B2 | **No slippage / liquidity model** — fills at exact OHLC prices. Indian mid/small-caps have real spread + impact. | Medium (overstates returns, esp. small-caps) | **Recommend** adding a slippage bps to `commission` or a fill-price haircut. Confidence: High. |
-| B3 | **`dropna(inplace=True)` after `add_all_indicators`** dropped every row with a NaN in *any* of ~40 indicator columns; a sparse/flat-stock column could punch a **mid-series gap**, silently distorting bar timing. | Medium | **[FIXED]** now `dropna(subset=OHLCV)` (08_backtest.py + backtest/runner.py) — bars stay contiguous; strategies handle their own warm-up. `test_indicators_no_scattered_midseries_nan` guards core columns. |
+| B3 | **`dropna(inplace=True)` after `add_all_indicators`** dropped every row with a NaN in *any* of ~40 indicator columns; a sparse/flat-stock column could punch a **mid-series gap**, silently distorting bar timing. | Medium | **[FIXED]** now `dropna(subset=OHLCV)` (14_backtest.py + backtest/runner.py) — bars stay contiguous; strategies handle their own warm-up. `test_indicators_no_scattered_midseries_nan` guards core columns. |
 | B4 | **SL/TP anchored to signal-bar close, not fill price** — `stop/tp` computed from bar *T* close but entry fills at bar *T+1* open. | Low (minor R:R mismatch) | Documented. |
 | B5 | **Buy&Hold baseline** now spans the warm-up prefix (side-effect of B3 fix) — slightly different denominator, arguably more correct. | Low | Documented. |
 
@@ -94,7 +94,7 @@ Most dashboard-layer silent passes are *intentional, graceful UI fallbacks* (cos
 | **High** | B1 | `data/universe.py` (used by `backtest/`) | Static current membership = survivorship bias | Backtested returns optimistically biased | Use point-in-time constituents, or label results "survivors-only" in UI | High |
 | **High** | P1-a | `analysis/portfolio_manager.py:291` | Swallowed parallel-score failure | Holding can vanish from portfolio total/P&L | **[FIXED]** logging; consider surfacing an explicit "N holdings failed to score" caption | High |
 | **Medium** | B2 | `strategies/*`, `backtest/runner.py` | No slippage model | Overstates backtest returns (small-caps) | Add slippage bps to commission / fill haircut | High |
-| **Medium** | B3 | `dashboard/pages/08_backtest.py`, `backtest/runner.py` | `dropna(any)` → possible mid-series gap | Distorted bar timing | **[FIXED]** `dropna(subset=OHLCV)` | High |
+| **Medium** | B3 | `dashboard/pages/14_backtest.py`, `backtest/runner.py` | `dropna(any)` → possible mid-series gap | Distorted bar timing | **[FIXED]** `dropna(subset=OHLCV)` | High |
 | **Medium** | P1-b | `data/fetcher.py`, `utils/live_price.py` | Swallowed per-tier fetch failures | Bad/stale data path invisible | Add `log.warning` per tier | High |
 | **Medium** | P4-a | `data/fetcher.py` (Yahoo) | Cookie/crumb scraping is fragile | Live data can break silently | Prefer Angel One (Tier 0) when configured | Medium |
 | **Low** | B4 | `strategies/*` | SL/TP off signal-bar close | Minor R:R mismatch | Anchor to fill price | High |
@@ -102,7 +102,7 @@ Most dashboard-layer silent passes are *intentional, graceful UI fallbacks* (cos
 | **Low** | P1-d | `analysis/score.py:24` | `except AttributeError: pass` (stdout) | None (benign) | Leave | High |
 
 ### What was changed in this audit
-1. **[FIXED]** Backtest data-prep gap risk → `dropna(subset=OHLCV)` (08_backtest.py, backtest/runner.py).
+1. **[FIXED]** Backtest data-prep gap risk → `dropna(subset=OHLCV)` (14_backtest.py, backtest/runner.py).
 2. **[FIXED]** `trade_store.load_by_account` + `portfolio_manager` parallel-score → structured `logging.warning`.
 3. **[ADDED]** `tests/test_production_audit.py` — anti-look-ahead + paper-trade + cost + NaN-invariant tests.
 

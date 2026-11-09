@@ -27,7 +27,7 @@ Sign of 5-day cumulative net cash-market:
 | 0 / mixed-zero | any | Mixed | 1.0 |
 | − | − | Distribution — usually precedes weakness | 0.0 |
 
-These are the four regime labels the app already surfaces on Analyze Stock's market-context strip (see `dashboard/pages/04_analyze_stock.py:135–192`). Score reads the sign the app was already showing; no new data path.
+These are the four regime labels the app already surfaces on Analyze Stock's market-context strip (see `dashboard/pages/13_analyze_stock.py:135–192`). Score reads the sign the app was already showing; no new data path.
 
 ## Where the flows come from
 

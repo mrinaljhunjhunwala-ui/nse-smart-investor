@@ -26,7 +26,7 @@ The full page-smoke suite is at `tests/test_pages_smoke.py`. It stubs network I/
 py -m pytest tests/test_pages_smoke.py -k "<page_stem>" -q
 ```
 
-Where `<page_stem>` is the page filename without extension, e.g. `04_analyze_stock` when the edit touched `dashboard/pages/04_analyze_stock.py`.
+Where `<page_stem>` is the page filename without extension, e.g. `13_analyze_stock` when the edit touched `dashboard/pages/13_analyze_stock.py`.
 
 **Full** — after editing anything in `dashboard/shared/` (shared code touches every page):
 

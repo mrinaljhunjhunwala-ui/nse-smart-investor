@@ -16,7 +16,7 @@ slow); CI-equivalent (`-m "not slow"`) is the green bar.
 | `tools/validate_valuation.py` | captures `ValuationInputs` per ticker for offline replay |
 | `data/valuation_golden_snapshot.json` | regenerated with captured inputs |
 | `analysis/fundamentals/valuation_decision.py` | minimal refactor: `build_valuation_inputs()` split out (testability) |
-| `dashboard/pages/02_command_centre.py` | **bug fix** — restored 2 module imports the P3 transform dropped |
+| `dashboard/pages/01_command_centre.py` | **bug fix** — restored 2 module imports the P3 transform dropped |
 | `data/angel_fetcher.py` | logger + 17 swallows tagged |
 | `dashboard/shared/cache.py` | logger + 13 swallows tagged |
 | `dashboard/shared/trade_utils.py` | logger + 5 swallows tagged (persistence read → warning) |
@@ -28,7 +28,7 @@ slow); CI-equivalent (`-m "not slow"`) is the green bar.
 - **Cyclical-split (Part 1):** 6 tests (POWERGRID before/after, commodity still trough-refused, peak still fires on commodity, regulated utility at peak not refused, low-growth utility → Reasonable, detection).
 - **Backtest smoke (Part 4):** 1 `slow` test — full path on one ticker, validates engine import → runner executes → output schema. **Runtime ≈ 15 s**, excluded from CI.
 
-> **The page smoke immediately earned its keep:** it caught a real **P3 regression** — `02_command_centre.py` referenced `get_universe` and `_ao_is_configured`, two module-level imports that sat *inside* the old `globals().update()` block and were dropped by the P3 transform (they aren't shared-module names, so the AST pass didn't re-add them). Both restored.
+> **The page smoke immediately earned its keep:** it caught a real **P3 regression** — `01_command_centre.py` referenced `get_universe` and `_ao_is_configured`, two module-level imports that sat *inside* the old `globals().update()` block and were dropped by the P3 transform (they aren't shared-module names, so the AST pass didn't re-add them). Both restored.
 
 ## 3. CI additions
 - `.github/workflows/ci.yml`: checkout → Python 3.11 (pip cache) → `pip install -r requirements.txt` → **`pytest -m "not slow"`** on every push/PR to `main`. Covers the offline unit/analytics tests, the 17-page smoke (network-blocked), and the valuation replay regression. The slow backtest and the live valuation diagnostic are excluded.

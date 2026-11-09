@@ -791,7 +791,7 @@ def check_vcp(df: pd.DataFrame) -> Optional[Dict]:
 
 _DASHBOARD_SINGLE_SCREEN_FNS = {
     # FIX SR1: explicit single-screen routing for the dashboard's screen-type
-    # dropdown (06_smart_screener.py). Previously ANY strategy string other
+    # dropdown (10_smart_screener.py). Previously ANY strategy string other
     # than the two legacy CLI values ("rsi_macd", "momentum") fell through to
     # the "run all 5 screens, take first match" branch below — so selecting
     # "Oversold Bounce" silently ran Oversold+Fib+Pullback20+Pullback50+

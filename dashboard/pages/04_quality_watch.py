@@ -77,7 +77,7 @@ st.caption(
     "week\" — see Command Centre or Smart Screener for that."
 )
 
-# FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
+# FIX ANL-XREF — see the matching note in 13_analyze_stock.py.
 with st.expander("↔️ Also see: Analyze Stock · Deep Dive", expanded=False):
     st.markdown(
         "Quality Watch answers \"is this a good name to sit in\". For \"how "

@@ -37,7 +37,7 @@ if _ROOT not in sys.path:
 
 # sys.path bootstrap above must happen before dashboard/alerts imports — same
 # pattern as every other page in dashboard/pages/. Silencing E402 here rather
-# than restructuring imports so this page stays consistent with 14_my_watchlist etc.
+# than restructuring imports so this page stays consistent with 08_my_watchlist etc.
 import streamlit as st  # noqa: E402
 import pandas as pd  # noqa: E402
 

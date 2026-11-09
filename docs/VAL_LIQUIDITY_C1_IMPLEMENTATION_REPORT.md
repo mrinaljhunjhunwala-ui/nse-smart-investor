@@ -15,7 +15,7 @@ sections, **28 new tests → 166 passing**, three docs.
 | EV/EBITDA mapping | ✅ | `RatioSnapshot.ev_ebitda` + Yahoo `enterpriseToEbitda` |
 | Thesis integration | ✅ | liquidity bull/risk factors in `analysis/thesis` |
 | Portfolio-fit integration | ✅ | liquidity tier → position guidance |
-| UI sections | ✅ | `dashboard/pages/04_analyze_stock.py` |
+| UI sections | ✅ | `dashboard/pages/13_analyze_stock.py` |
 | Tests (20+) | ✅ **28** | `tests/test_valuation_liquidity.py` |
 | Methodology + report + coverage | ✅ | this + `VAL_LIQUIDITY_METHODOLOGY.md` + `VAL_LIQUIDITY_C1_TEST_COVERAGE.md` |
 

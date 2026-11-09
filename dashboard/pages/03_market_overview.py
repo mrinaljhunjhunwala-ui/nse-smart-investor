@@ -1,7 +1,7 @@
 """Overview - NSE Smart Investor (merged: former Market Overview + Market Internals).
 
 MERGE NOTE: this page replaces the two separate pages "Market Overview"
-(pages/05_market_overview.py) and "Market Internals" (pages/09_market_internals.py).
+(pages/03_market_overview.py) and "Market Internals" (pages/09_market_internals.py).
 All logic is unchanged from those two pages — just reorganized as tabs under
 one page so related market-context views live in one place. After deploying
 this file, delete dashboard/pages/09_market_internals.py (its content now
@@ -262,7 +262,7 @@ with _tab_snapshot:
                                 use_container_width=True):
                     # FIX NAV1: use the canonical analyze_ticker handoff key
                     # (same as Command Centre / My Portfolio's "Analyze"
-                    # buttons — see 04_analyze_stock.py FIX A8) rather than
+                    # buttons — see 13_analyze_stock.py FIX A8) rather than
                     # writing manual_ticker_input + last_analyzed directly.
                     # The latter happened to also auto-trigger in practice,
                     # but it's a second, untested parallel path doing the

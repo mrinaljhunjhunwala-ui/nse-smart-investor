@@ -36,7 +36,7 @@ All 17 `dashboard/pages/*.py` (01–17). Each: the 3-line inject block replaced 
 block. No page-body logic changed.
 
 ## Edge cases handled
-- `01_market_live.py` reuses `_ch` as a **local variable** (`_ch = _row["chg_pct"]`) — unaffected (it is self-assigned before use; the removed alias was unrelated).
+- `02_market_live.py` reuses `_ch` as a **local variable** (`_ch = _row["chg_pct"]`) — unaffected (it is self-assigned before use; the removed alias was unrelated).
 - A few pages keep a redundant `import streamlit as st` / `apply_design` (they imported it explicitly already) — harmless duplicates, behaviour-identical.
 
 ## Result

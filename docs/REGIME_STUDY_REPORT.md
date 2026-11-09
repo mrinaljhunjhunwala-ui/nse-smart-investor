@@ -144,7 +144,7 @@ three buckets (+3.07%, the rebound the score can't identify who'll lead).
 1. **The score is a trend-quality instrument (+0.40) with marginal return
    predictivity (+0.02 to +0.03).** Present it as "trend health", not
    expected outperformance — the UI language now reflects this (see
-   `dashboard/shared/disclosures.py`, `dashboard/pages/15_investor_guide.py`).
+   `dashboard/shared/disclosures.py`, `dashboard/pages/19_investor_guide.py`).
 2. **It is regime-conditional in a coherent, now precisely-quantified way:**
    works in bull (71% of history, and beats naive momentum there); inverts
    in bear (15% of history); near-flat in sideways (14%). The 1-year
@@ -171,7 +171,7 @@ three buckets (+3.07%, the rebound the score can't identify who'll lead).
 Per this study's own mandate, **no model changes were made.** The evidence
 now supports:
 1. ✅ **Done** — relabel the score in the UI as trend quality, with the
-   precise current numbers (`disclosures.py`, `15_investor_guide.py`).
+   precise current numbers (`disclosures.py`, `19_investor_guide.py`).
 2. ✅ **Done** — regime-gated advisory text using existing VIX plumbing
    (`render_regime_reliability_note()`), corrected to not overstate
    reliability during "normal" VIX (see that function's docstring for why).

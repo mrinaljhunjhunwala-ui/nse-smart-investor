@@ -39,7 +39,7 @@ data-loss event (all sources exhausted) logs at `warning`.
 | Category | Count | Files | Rule / rationale |
 |---|---|---|---|
 | **Broker (optional)** | 13 | `data/angel_fetcher.py` | data → log. Failures already surface as `None`/`is_configured()` (the integration is optional); a module-logger pass is a low-risk follow-up. 1,200-line broker file — deferred from this pass to avoid unreviewed churn. |
-| **UI display fallbacks** | ~23 | `chart_helpers.py` (10), pages (8), `nav.py` (7 remaining), `01_market_live.py` (3) | UI → caption. Cosmetic render fallbacks; most already render a caption/placeholder. |
+| **UI display fallbacks** | ~23 | `chart_helpers.py` (10), pages (8), `nav.py` (7 remaining), `02_market_live.py` (3) | UI → caption. Cosmetic render fallbacks; most already render a caption/placeholder. |
 | **Cache wrappers** | 6 | `dashboard/shared/cache.py` | data → log. `st.cache_*` wrappers around fetches. |
 | **Benign parsers** | ~11 | `portfolio_risk` (2 date parsers), `events`, `valuation._clean`, `score`, `sector_strength`, `service`, `yahoo_fundamentals` (2), `portfolio_fit`, `macro` | analytics → traceability **already preserved**: these return `None`/`AnalyticResult(available=False, reason=…)` by contract — `None` is the correct, documented result of a bad parse, not a masked failure. |
 | **Misc / scripts** | ~15 | `alerts/check_alerts` (3), `trading/*` (4), `strategies`, `optimizer`, `main` | offline/CLI paths; lower risk. |

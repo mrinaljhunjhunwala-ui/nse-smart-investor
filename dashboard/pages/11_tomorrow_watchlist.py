@@ -916,7 +916,7 @@ try:
 except Exception as _mom_e:
     st.caption(f"Momentum leaders unavailable ({type(_mom_e).__name__}).")
 
-# FIX SCR-XREF — see the matching note in 06_smart_screener.py.
+# FIX SCR-XREF — see the matching note in 10_smart_screener.py.
 with st.expander("↔️ Also see: Smart Screener · TQS Scanner", expanded=False):
     st.markdown(
         "- **Smart Screener** — run the same 4-screen scan interactively with your "

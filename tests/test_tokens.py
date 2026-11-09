@@ -48,7 +48,7 @@ def test_design_root_is_built_from_tokens():
 
 
 def test_tqs_page_has_no_raw_hex():
-    src = open(os.path.join(_ROOT, "dashboard", "pages", "18_tqs_scanner.py"), encoding="utf-8").read()
+    src = open(os.path.join(_ROOT, "dashboard", "pages", "12_tqs_scanner.py"), encoding="utf-8").read()
     assert re.search(r"#[0-9a-fA-F]{6}\b", src) is None
 
 
@@ -94,7 +94,7 @@ def test_ordinal_ramp_distinct_and_anchored():
 def _load_tqs_ramps():
     """Pull SIGNAL_COLOUR / GRADE_COLOUR out of the page without running Streamlit."""
     import ast
-    path = os.path.join(_ROOT, "dashboard", "pages", "18_tqs_scanner.py")
+    path = os.path.join(_ROOT, "dashboard", "pages", "12_tqs_scanner.py")
     tree = ast.parse(open(path, encoding="utf-8").read())
     wanted = {"_SIGNAL_ORDER", "_GRADE_ORDER", "SIGNAL_COLOUR", "GRADE_COLOUR"}
     body = [n for n in tree.body

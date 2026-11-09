@@ -31,7 +31,7 @@ Latest run: `20 passed, 2 skipped in 2.42s`.
 
 | Page | Wired? | Where |
 |---|---|---|
-| Analyze Stock | ✅ | `dashboard/pages/04_analyze_stock.py:529` (near top, above verdict card) and `:2341` (near bottom). Two call sites; worth confirming this is intentional vs a duplicate render. |
+| Analyze Stock | ✅ | `dashboard/pages/13_analyze_stock.py:529` (near top, above verdict card) and `:2341` (near bottom). Two call sites; worth confirming this is intentional vs a duplicate render. |
 | Command Centre | ❌ | not wired |
 | Watchlist | ❌ | not wired |
 | every other page (18 total) | ❌ | not wired |
@@ -168,7 +168,7 @@ Grouped by task-list bucket:
 - `.claude/skills/ai-copilot-context/SKILL.md` - the contract this doc maps against
 - `dashboard/shared/ai/*.py` - the current implementation
 - `tests/test_ai_copilot.py` - 22 tests (20 pass, 2 env-skipped)
-- `dashboard/pages/04_analyze_stock.py:529` and `:2341` - current live-wiring sites
+- `dashboard/pages/13_analyze_stock.py:529` and `:2341` - current live-wiring sites
 - `tasks/todo.md:437-524` - Phase 5 acceptance criteria for Tasks 5.1-5.5
 
 Written under `nse-app-guardrails` house style §21 - no em-dashes.

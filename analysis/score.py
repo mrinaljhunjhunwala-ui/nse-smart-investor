@@ -133,7 +133,7 @@ def _num(row: "pd.Series", key: str, default: float) -> float:
 # pass different windows ("2y" default, "1y" from peer scans). Sentinel
 # _MISS distinguishes "not tried yet" from "tried and failed" so a failed
 # fetch on ticker 1 doesn't get retried for tickers 2..N (the actual bug
-# 02_command_centre's 120s smoke timeout on 3.11 was pointing at).
+# 01_command_centre's 120s smoke timeout on 3.11 was pointing at).
 #
 # FIX CACHE-TTL (2026-09-24) — the cache used to live for the whole process
 # (Streamlit Cloud processes run for days), so a Nifty series fetched on
@@ -1986,7 +1986,7 @@ def score_stock(
         # every score_stock() call. Command Centre scans N tickers -> N
         # ^NSEI fetches. On network-blocked runs (CI page-smoke) each fetch
         # walks Angel/Stooq/Yahoo with per-provider timeouts -> the smoke
-        # test for 02_command_centre hit its 120s ceiling. Cache the
+        # test for 01_command_centre hit its 120s ceiling. Cache the
         # per-(period) result at module level so we pay at most one fetch
         # per process per period; a failed fetch is remembered as None so
         # subsequent tickers short-circuit instead of retrying.
@@ -2025,7 +2025,7 @@ def score_stock(
     # opt-in flag is off (the default). Command Centre scans many tickers
     # per render; without this gate we did 3-4 SQL SELECTs per ticker even
     # though _score_dataframe would then throw the results away. That was
-    # part of what pushed 02_command_centre's smoke past the 120s ceiling
+    # part of what pushed 01_command_centre's smoke past the 120s ceiling
     # on the slower CI runner.
     positioning_info: Optional[Dict] = None
     try:

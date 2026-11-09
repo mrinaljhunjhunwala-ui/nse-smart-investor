@@ -21,7 +21,7 @@ analysis/fundamentals/
   providers/
     yahoo_fundamentals.py   YahooFundamentalProvider — the ONLY module importing yfinance
 tests/test_fundamentals_phase0.py   31 tests
-dashboard/pages/04_analyze_stock.py  + minimal "📊 Fundamentals (beta)" section
+dashboard/pages/13_analyze_stock.py  + minimal "📊 Fundamentals (beta)" section
 ```
 
 ## Requirement-by-requirement

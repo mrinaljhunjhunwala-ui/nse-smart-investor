@@ -1,7 +1,7 @@
 """tests/test_quality_watch_scoring.py — regression coverage for the Quality
 Watch score (FIX QW1 rescaling of missing ratios).
 
-The formula moved from dashboard/pages/19_quality_watch.py into the pure
+The formula moved from dashboard/pages/04_quality_watch.py into the pure
 analysis/quality_watch.py (audit 2026-09-24), so it is imported directly —
 no AST extraction from the Streamlit page needed any more.
 """

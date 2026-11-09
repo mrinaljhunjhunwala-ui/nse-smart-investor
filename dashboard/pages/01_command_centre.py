@@ -1240,7 +1240,7 @@ def _render_open_positions_section():
 _render_open_positions_section()
 
 # FIX CC-TRIM — the bottom "Watchlist — What to Do Today" section was removed
-# from this page on request. It duplicated 14_my_watchlist.py, which is where
+# from this page on request. It duplicated 08_my_watchlist.py, which is where
 # per-name scoring lives exclusively. Home page below is Top Picks + Open
 # Positions + Background Alerts.
 

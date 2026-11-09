@@ -10,7 +10,7 @@ Dussehra, and Guru Nanak Jayanti outright. Every year it wasn't manually
 extended it would also silently stop detecting ANY holiday at all.
 
 This module is still imported directly by 5 files (dashboard/pages/
-01_market_live.py, 04_analyze_stock.py, dashboard/shared/chart_helpers.py,
+02_market_live.py, 13_analyze_stock.py, dashboard/shared/chart_helpers.py,
 dashboard/shared/nav.py, dashboard/shared/trade_utils.py) — including
 trade_utils.py's _is_market_open(), which is the primary gate for the
 auto square-off / SL-TP auto-close logic. Rather than update all 5 call
