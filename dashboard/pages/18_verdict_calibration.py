@@ -55,6 +55,8 @@ from dashboard.shared.nav import render_sidebar    # noqa: E402
 from dashboard.shared.chart_helpers import render_top_bar  # noqa: E402
 from dashboard.shared.tokens import COLORS as _TK  # noqa: E402
 from dashboard.shared.ui_components import section_header  # noqa: E402
+from analysis.action_labels import (                       # noqa: E402
+    action_display_label as _act_label, verdict_display_label as _vd_label)
 
 
 # FIX: this page previously called st.set_page_config, violating the
@@ -138,6 +140,10 @@ _PAGE_CHANGES = [
     ("2026-10-05", "A failed ledger read (busy database right after a restart) looked like an empty "
                    "ledger: the evidence test showed “0 verdicts over 0 days”.",
      "A failed read is retried once, then shown as “couldn't read the ledger” — never as zero."),
+    ("2026-11-09", "Every list's picks were pooled, so a weak list could hide behind a strong one and "
+                   "down-setups were scored as if they were up-calls.",
+     "“Results by list” grades each list on its own, after costs, with down-setups as down-calls, "
+     "plus a separate pre-registered Tomorrow's Watchlist test."),
 ]
 
 with st.expander("🛠 What this page was meant to do — and what it does now", expanded=False):
@@ -236,6 +242,72 @@ if _NEW_API and hasattr(_vl, "plain_summary"):
             f"The test: {_ps_h} sessions (~1 month) after each bullish read, did that day's picks "
             "beat the Nifty? It answers only once both bars are full. The tables further down are "
             "the detail behind this card."
+        )
+
+# ── Results by list ───────────────────────────────────────────────────────────
+# The card above pools every surface. Here each list is graded on its own —
+# Top Picks, Momentum Leaders, each Tomorrow's Watchlist bucket — with
+# down-setups judged as down-calls, a round-trip cost taken off, and a separate
+# pre-registered Watchlist test. Uses every source, before the filter below.
+if hasattr(_vl, "results_by_list"):
+    st.markdown(section_header("Results by list", "each list on its own · after costs"),
+                unsafe_allow_html=True)
+    _rbl_rows = _vl.with_list_buckets(_ledger)
+    _rbl_h = st.radio("Window", [5, 20], index=0, horizontal=True, key="_rbl_h",
+                      format_func=lambda h: f"{h} sessions" + (" (~1 week)" if h == 5 else " (~1 month)"))
+    _rbl = _vl.results_by_list(_rbl_rows, horizons=(_rbl_h,))
+    _cost = _rbl.attrs.get("cost_pct", _vl.ROUND_TRIP_COST_PCT)
+    if _rbl.empty:
+        st.info("No list picks logged yet.")
+    else:
+        def _rate(r, col):
+            if r[f"status_{_rbl_h}"] == "no data":
+                return "waiting"
+            if r[f"status_{_rbl_h}"] == "too early":
+                return f"too early ({int(r[f'days_{_rbl_h}'])} of {_vl.LIST_MIN_DAYS} days)"
+            return f"{r[col]:.0f}%"
+
+        def _pts(v):
+            return "—" if pd.isna(v) else f"{v:+.2f}%"
+
+        _rbl_show = pd.DataFrame({
+            "List": _rbl["list"],
+            "What counts as a hit": _rbl["hit_means"],
+            "Picks": _rbl[f"picks_{_rbl_h}"],
+            "Days": _rbl[f"days_{_rbl_h}"],
+            f"Hit vs Nifty ({_rbl_h} days)": [_rate(r, f"hit_pct_{_rbl_h}") for _, r in _rbl.iterrows()],
+            "Cautious estimate": [_rate(r, f"hit_lower_pct_{_rbl_h}") for _, r in _rbl.iterrows()],
+            "Avg vs Nifty after costs": _rbl[f"avg_vs_nifty_net_{_rbl_h}"].map(_pts),
+            "Avg vs Nifty before costs": _rbl[f"avg_vs_nifty_{_rbl_h}"].map(_pts),
+        })
+        st.dataframe(_rbl_show, hide_index=True, width="stretch")
+        _waiting = int((_rbl["picks_logged"] - _rbl[f"picks_{_rbl_h}"]).sum())
+        st.caption(
+            f"**Hit** = on a given day, that list's picks went the flagged way against the Nifty over "
+            f"the next {_rbl_h} sessions by more than a {_cost:.2f}% round-trip cost: up-lists (Top "
+            "Picks, Momentum Leaders, breakouts, bullish reversals) by beating the Nifty, down-lists "
+            "(breakdown risk, bearish reversals) by lagging it. Each **day** counts once, since "
+            "same-day picks share one market move; a name repeated in a list on one day is one pick. "
+            "**Cautious estimate** is the 95% lower bound of the hit rate given how few days there "
+            f"are; below 50% means no better than a coin flip yet. Rates show once a list has "
+            f"{_vl.LIST_MIN_DAYS} scored days. Returns run **close to close** from the close of the "
+            "day each pick was logged (the ledger doesn't store next-day opens, so a Tomorrow's "
+            f"Watchlist pick isn't priced at the next open). {_waiting:,} logged pick(s) are still "
+            "inside their window. Past model output only, not investment advice."
+        )
+    if hasattr(_vl, "evaluate_watchlist_rule"):
+        _wr = _vl.evaluate_watchlist_rule(_rbl_rows)
+        _wrule = _wr["rule"]
+        _wtone = {"pass": "success", "fail": "warning"}.get(_wr["status"], "info")
+        getattr(st, _wtone)(
+            f"**Tomorrow's Watchlist test** (registered {_wrule['registered_on']}): {_wr['summary']}",
+            icon={"success": "✅", "warning": "⚠️", "info": "⏳"}[_wtone],
+        )
+        st.caption(
+            f"Fixed in advance: every Watchlist bucket pooled, picks logged from "
+            f"{_wrule['logged_from']}, {_wrule['horizon_days']} sessions, at least "
+            f"{_wrule['min_verdicts']} scored picks over {_wrule['min_days']} separate days. "
+            "Separate from the test in the card above, which it doesn't change."
         )
 
 # ── Source filter ─────────────────────────────────────────────────────────────
@@ -343,9 +415,10 @@ if _NEW_API:
         _rule = _rule_res["rule"]
         _scope = (f" logged on days when NIFTY was **{_rule['regime'].lower()}** over the prior "
                   f"{_vl.REGIME_LOOKBACK_SESSIONS} sessions" if _rule.get("regime") else "")
+        _reads = " + ".join(_vd_label(v).rstrip(" ▲") for v in _rule["verdicts"])
         _rule_txt = (
             f"**{_rule_name}.** At **{_rule['horizon_days']} sessions**, pooling "
-            f"**{' + '.join(_rule['verdicts'])}**{_scope}, with at least **{_rule['min_verdicts']} "
+            f"**{_reads}** reads{_scope}, with at least **{_rule['min_verdicts']} "
             f"verdicts** across **{_rule['min_days']} separate days**: the day-clustered Wilson lower "
             f"bound on *the day's picks beat NIFTY* must be above **{_rule['threshold_pct']:.0f}%**. "
             f"Registered {_rule['registered_on']}; changing it after seeing results would defeat "
@@ -456,10 +529,10 @@ else:
         "median_ret": f"Median {_horizon_choice}-session %",
         **_WIN_COLS,
     })
-    st.dataframe(_cal, hide_index=True, width="stretch")
-
     # A brief interpretation line so the user doesn't have to squint.
     _buy_row = _cal[_cal["verdict"].isin(["BUY", "STRONG BUY"])]
+    # Internal verdict keys stay as-is; the reader sees descriptive labels.
+    st.dataframe(_cal.assign(verdict=_cal["verdict"].map(_vd_label)), hide_index=True, width="stretch")
     if not _buy_row.empty:
         _bw = _buy_row["Wilson lower % (raw)"].max()
         _bwn = _buy_row["Wilson lower vs NIFTY %"].max()
@@ -471,7 +544,7 @@ else:
         _bwn_txt = "unavailable" if pd.isna(_bwn) else f"{_bwn:.1f}%"
         _bd_txt = "unavailable" if pd.isna(_bd) else f"{_bd:.1f}%"
         st.caption(
-            f"👀 BUY/STRONG BUY at {_horizon_choice} sessions: Wilson-lower raw win "
+            f"👀 Uptrend / Strong Trend reads at {_horizon_choice} sessions: Wilson-lower raw win "
             f"rate **{_bw:.1f}%**, Wilson-lower win vs NIFTY **{_bwn_txt}** (rows), "
             f"**{_bd_txt}** counting each of the **{_bdays}** day(s) once; best mean α "
             f"**{_ba_txt}**. Below 50% means not yet reliably better than a coin flip."
@@ -484,7 +557,7 @@ if _NEW_API:
         unsafe_allow_html=True,
     )
     st.caption(
-        f"BUY/STRONG BUY calls split by whether NIFTY was rising or falling over the "
+        f"Uptrend / Strong Trend reads split by whether NIFTY was rising or falling over the "
         f"{_vl.REGIME_LOOKBACK_SESSIONS} sessions **before** each call (no look-ahead). A model "
         "that only looks good in one regime has learned the market, not the stocks."
     )
@@ -494,7 +567,7 @@ if _NEW_API:
     if _ledger_read_error(_reg):
         _ledger_unavailable(_ledger_read_error(_reg), "the regime split")
     elif _reg.empty:
-        st.info(f"No BUY/STRONG BUY calls have played out at {_horizon_choice} sessions yet.")
+        st.info(f"No Uptrend / Strong Trend reads have played out at {_horizon_choice} sessions yet.")
     else:
         _reg = _reg.rename(columns={
             "regime": "NIFTY regime",
@@ -562,7 +635,7 @@ st.markdown(
 )
 st.caption(
     "The composite verdict is a decision tree over subsystems. If Technical "
-    "BUY has a great hit rate but Thesis Positive has a poor one, that tells "
+    "Uptrend has a great hit rate but Thesis Positive has a poor one, that tells "
     "you where to lean — and where to improve."
 )
 
@@ -591,6 +664,8 @@ else:
         "median_ret":       f"Median {_horizon_choice}-session %",
         **_WIN_COLS,
     })
+    if _sub_choice == "composite_action":
+        _sub_tbl[_sub_choice] = _sub_tbl[_sub_choice].map(_act_label)
     st.dataframe(_sub_tbl, hide_index=True, width="stretch")
 
 # ── Section C-bis — Per-signal-tag hit rate (Tier 1 #3) ──────────────────────
@@ -637,7 +712,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "Every STRONG BUY / BUY the model surfaced (whether or not you paper-"
+    "Every Strong Trend / Uptrend read the model surfaced (whether or not you paper-"
     "traded it), with the actual return had you held to the horizon."
     + (" Always the auto-logged shadow source; the source filter above doesn't apply."
        if _src_choice else "")
@@ -656,7 +731,7 @@ elif _sh.empty:
     st.info(
         "No shadow trades have played out for this horizon yet. Once you "
         "visit **🎯 Command Centre** or **⭐ My Watchlist** a few times, "
-        "every BUY / STRONG BUY card will start showing up here."
+        "every Uptrend / Strong Trend card will start showing up here."
     )
 else:
     _c1, _c2, _c3, _c4 = st.columns(4)
@@ -683,6 +758,8 @@ else:
         if v < 0:
             return f"color: {_TK['bear']}; font-weight: 600;"
         return ""
+    if "verdict" in _sh.columns:
+        _sh = _sh.assign(verdict=_sh["verdict"].map(_vd_label))
     # Styler.map (pandas >= 2.1) replaced applymap, which pandas 3 removed.
     _style_map = getattr(_sh.style, "map", None) or _sh.style.applymap
     _sty = _style_map(
@@ -711,7 +788,11 @@ with st.expander("🗄 Full verdict ledger — last 200 entries", expanded=False
              "thesis_verdict", "quality_flags", "source",
              "ret_1d", "ret_5d", "ret_20d", "ret_60d", "ret_250d"]
     _keep = [c for c in _keep if c in _ledger.columns]
-    st.dataframe(_ledger[_keep].head(200), hide_index=True, width="stretch")
+    _drill = _ledger[_keep].head(200).copy()
+    for _c, _fn in (("verdict", _vd_label), ("composite_action", _act_label)):
+        if _c in _drill.columns:
+            _drill[_c] = _drill[_c].map(_fn)
+    st.dataframe(_drill, hide_index=True, width="stretch")
 
 st.caption(
     "**Sampling caveat:** this ledger reflects tickers you *actually looked at* "

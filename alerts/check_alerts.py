@@ -1620,9 +1620,11 @@ def tomorrow_watchlist_lines(data: dict, gen_at, *, top_n: int = 5) -> list:
 
 
 def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | None = None) -> int:
-    """Friday after the close: how this week's BUY / STRONG BUY reads moved
-    since they were logged, against the Nifty over the same span. Once per ISO
-    week. Descriptive only — a record of past calls, not advice."""
+    """Friday after the close: how this week's Top Picks and Tomorrow's
+    Watchlist names moved since they were logged, against the Nifty over the
+    same span, one section per list (watchlist down-setups judged as
+    down-calls). Once per ISO week. Descriptive only — a record of past calls,
+    not advice."""
     now = (now or datetime.datetime.now(_IST)).astimezone(_IST)
     if now.weekday() != 4:
         print(f"[scorecard] not Friday (weekday={now.weekday()}) — skipping")
@@ -1643,14 +1645,15 @@ def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | Non
     monday = (now - datetime.timedelta(days=now.weekday())).date().isoformat()
     week = ledger[(ledger["logged_date"].astype(str) >= monday)
                   & (ledger["logged_date"].astype(str) <= today)
-                  & ledger["verdict"].isin(vl.BULLISH_VERDICTS)]
+                  & ledger["source"].isin(("shadow_auto", "tomorrow_watchlist"))]
     if week.empty:
-        print("[scorecard] no bullish reads logged this week")
+        print("[scorecard] no Top Picks or Tomorrow's Watchlist names logged this week")
         return 0
+    week = vl.with_list_buckets(week)
     prices = {}
     for tk in week["ticker"].unique():
         q = _quote(_base_symbol(tk))
-        if q:
+        if q and q.get("price"):
             prices[tk] = float(q["price"])
     nifty_close, nifty_now = None, None
     try:
@@ -1659,33 +1662,57 @@ def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | Non
         nifty_now = float(nifty_close.dropna().iloc[-1])
     except Exception as e:
         print(f"[scorecard] Nifty history unavailable: {e}")
-    card = vl.week_scorecard(week, prices, nifty_close, nifty_now)
-    if not card:
-        print("[scorecard] no prices for this week's reads — nothing to send")
+    cards = vl.week_scorecard_by_list(week, prices, nifty_close, nifty_now)
+    if not cards:
+        print("[scorecard] no prices for this week's names — nothing to send")
         return 0
-    lines = weekly_scorecard_lines(card, monday, today)
+    lines = weekly_scorecard_lines(cards, monday, today)
     if dispatch("\n".join(lines), subject="Weekly report card — NSE Smart Investor"):
         _mark_fired(state, key, today)
         return 1
     return 0
 
 
-def weekly_scorecard_lines(card: dict, monday: str, today: str) -> list:
-    """Message body for check_weekly_scorecard."""
+def _names_line(rows: list) -> str:
+    return " · ".join(f"{_h(_base_symbol(r['ticker']))} {r['move']:+.1f}%" for r in rows)
+
+
+def _n_names(n: int) -> str:
+    return f"{n} name{'' if n == 1 else 's'}"
+
+
+def weekly_scorecard_lines(cards: dict, monday: str, today: str) -> list:
+    """Message body for check_weekly_scorecard: a Top Picks section and a
+    Tomorrow's Watchlist section (up-setups and down-setups kept apart)."""
     lines = [f"🧾 <b>Weekly report card</b> ({monday} → {today})",
-             f"<i>This week's bullish reads: {card['n']} names, measured from the "
-             "price when each was logged to today.</i>", "",
-             f"Average move: <b>{card['mean_move']:+.1f}%</b> · {card['up']} up / "
-             f"{card['n'] - card['up']} down or flat"]
-    if card.get("mean_edge") is not None:
-        lines.append(f"Versus the Nifty over the same days: <b>{card['mean_edge']:+.1f} pts</b> · "
-                     f"{card['ahead']} of {card['n_edge']} ahead")
-    for title, rows in (("Biggest moves up", card["best"]), ("Biggest moves down", card["worst"])):
-        if rows:
-            lines += ["", f"<b>{title}</b>"]
-            lines += [f"• {_h(_base_symbol(r['ticker']))} {r['move']:+.1f}%" for r in rows]
-    lines += ["", "<i>One week is noise; the Verdict Calibration page runs the proper 20-session "
-              "test. A record of past model output, not investment advice.</i>"]
+             "<i>Each name from the price when it was first logged this week to today, "
+             "against the Nifty over the same days.</i>"]
+    tp = cards.get("top_picks")
+    if tp:
+        lines += ["", f"⭐ <b>Top Picks</b> · {_n_names(tp['n'])}",
+                  f"Average move <b>{tp['mean_move']:+.1f}%</b> · {tp['up']} up / "
+                  f"{tp['n'] - tp['up']} down or flat"]
+        if tp.get("mean_edge") is not None:
+            lines.append(f"Vs the Nifty: <b>{tp['mean_edge']:+.1f} pts</b> · "
+                         f"{tp['hits']} of {tp['n_edge']} ahead")
+        if tp["best"]:
+            lines.append(f"{'Most up' if tp['worst'] else 'Moves'}: {_names_line(tp['best'])}")
+        if tp["worst"]:
+            lines.append(f"Most down: {_names_line(tp['worst'])}")
+    up, down = cards.get("watchlist_up"), cards.get("watchlist_down")
+    if up or down:
+        lines += ["", "🌙 <b>Tomorrow's Watchlist</b>"]
+        for card, title, hit_word in ((up, "📈 Bullish setups (breakout, bullish reversal)", "ahead of"),
+                                      (down, "📉 Bearish setups (breakdown, bearish reversal)", "lagged")):
+            if not card:
+                continue
+            row = f"{title} · {_n_names(card['n'])} · average move {card['mean_move']:+.1f}%"
+            if card.get("mean_edge") is not None:
+                row += (f" · vs Nifty {card['mean_edge']:+.1f} pts · {card['hits']} of "
+                        f"{card['n_edge']} {hit_word} the Nifty")
+            lines += [row, f"   Moved most as flagged: {_names_line(card['best'])}"]
+    lines += ["", "<i>One week is noise; the Verdict Calibration page keeps the longer record per "
+              "list. A record of past model output, not investment advice.</i>"]
     return lines
 
 
