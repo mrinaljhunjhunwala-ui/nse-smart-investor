@@ -2059,8 +2059,15 @@ if analyze_btn or _prefill_active or (
                 st.markdown(section_header("Fundamentals", "audited statements"),
                             unsafe_allow_html=True)
                 try:
+                    from dashboard.shared.fund_source_ui import render_fund_source_picker
+                    from analysis.fundamentals.service import service_for_source
+                    _f_src = render_fund_source_picker(ticker)
+                except Exception as _src_e:          # picker must never take the tab down
+                    st.caption(f"Fundamentals source picker unavailable: {_src_e}")
+                    _f_src = "auto"
+                try:
                     import datetime as _f_dt
-                    _f_cf  = _fund_service().get_fundamentals(ticker)
+                    _f_cf  = service_for_source(_f_src).get_fundamentals(ticker)
                     _f_res = _fund_analytics.compute_all(_f_cf, cagr_years=5)
                     _f_fresh = "—"
                     if _f_cf.last_updated:

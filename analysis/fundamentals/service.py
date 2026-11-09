@@ -207,3 +207,31 @@ def default_service() -> FundamentalsService:
     if _DEFAULT is None:
         _DEFAULT = FundamentalsService()
     return _DEFAULT
+
+
+# ── Official-filing sources (Analyze Stock "Fundamentals source" picker) ───────
+_BY_SOURCE: dict = {}
+
+
+def service_for_source(source: Optional[str]) -> FundamentalsService:
+    """Service whose PRIMARY provider is a stored official filing ("roc" = MCA
+    upload, "exchange" = NSE XBRL); Yahoo then Screener fill only the fields the
+    filing lacks (price ratios, older years). None / "auto" = the default service."""
+    if source in (None, "", "auto"):
+        return default_service()
+    if source not in _BY_SOURCE:
+        from .providers.filing_fundamentals import FilingFundamentalProvider
+        from .providers.yahoo_fundamentals import YahooFundamentalProvider
+        from .providers.screener_fundamentals import ScreenerFundamentalProvider
+        _BY_SOURCE[source] = FundamentalsService(providers=[
+            FilingFundamentalProvider(source), YahooFundamentalProvider(),
+            ScreenerFundamentalProvider()])
+    return _BY_SOURCE[source]
+
+
+def forget_source(source: Optional[str] = None) -> None:
+    """Drop cached filing-backed services (after a new filing is saved)."""
+    if source is None:
+        _BY_SOURCE.clear()
+    else:
+        _BY_SOURCE.pop(source, None)
