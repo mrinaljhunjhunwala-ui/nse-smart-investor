@@ -633,6 +633,10 @@ def check_pick_moves(state: dict, today: str) -> int:
 _VERDICT_ALERT_TIERS = ("STRONG BUY", "BUY")
 _VERDICT_MAX_SNAPSHOT_AGE_H = 2      # the warmer refreshes every 45 min in market hours
 _VERDICT_MAX_PER_RUN = 8
+# Per-day ceiling across all runs. In a rising market the full scan held 70-84
+# BUY / STRONG BUY names (9 Nov), and 8 per 15-min run became ~40 messages by
+# 10:30 IST. Strongest names go first, so the cap keeps the best reads.
+_VERDICT_MAX_PER_DAY = 10
 _TOMORROW_MAX_SNAPSHOT_AGE_H = 3             # caps a burst now that the whole scan is read
 
 
@@ -747,6 +751,10 @@ def check_verdict_alerts(state: dict, today: str) -> int:
             continue
         if sent >= _VERDICT_MAX_PER_RUN:
             print(f"[verdicts] per-run cap {_VERDICT_MAX_PER_RUN} reached; the rest go next run")
+            break
+        sent_today = sum(1 for k, v in state.items() if k.startswith("verdict_") and v == today)
+        if sent_today >= _VERDICT_MAX_PER_DAY:
+            print(f"[verdicts] daily cap {_VERDICT_MAX_PER_DAY} reached; the rest are on Top Picks")
             break
         lines = _format_verdict_alert(verdict, b, fv, regime, gen_at)
         if dispatch("\n".join(lines)):
