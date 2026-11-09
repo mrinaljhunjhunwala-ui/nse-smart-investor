@@ -205,4 +205,14 @@ def test_per_run_cap_then_rest_next_run(monkeypatch):
     _setup_full(monkeypatch, [], rest, {p["ticker"]: "BUY" for p in rest})
     state = {}
     assert ca.check_verdict_alerts(state, "2026-10-02") == ca._VERDICT_MAX_PER_RUN
-    assert ca.check_verdict_alerts(state, "2026-10-02") == 3
+    assert ca.check_verdict_alerts(state, "2026-10-02") == min(3, ca._VERDICT_MAX_PER_DAY - ca._VERDICT_MAX_PER_RUN)
+
+
+def test_daily_cap_across_runs(monkeypatch):
+    rest = [_pick(f"Y{i}.NS", 60 + i, "BUY") for i in range(30)]
+    _setup_full(monkeypatch, [], rest, {p["ticker"]: "BUY" for p in rest})
+    state = {}
+    assert ca.check_verdict_alerts(state, "2026-11-09") == ca._VERDICT_MAX_PER_RUN
+    assert ca.check_verdict_alerts(state, "2026-11-09") == ca._VERDICT_MAX_PER_DAY - ca._VERDICT_MAX_PER_RUN
+    assert ca.check_verdict_alerts(state, "2026-11-09") == 0
+    assert ca.check_verdict_alerts(state, "2026-11-10") == ca._VERDICT_MAX_PER_RUN   # new day
