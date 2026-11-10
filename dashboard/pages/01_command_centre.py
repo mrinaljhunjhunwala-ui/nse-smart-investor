@@ -60,7 +60,9 @@ render_top_bar()
 import datetime as _mb_dt
 import html as _html
 
-from analysis.score import _regime_weights_enabled as _cc_rw_enabled, _BEAR_REGIMES as _cc_bear
+from analysis.score import (
+    _regime_weights_enabled as _cc_rw_enabled, _BEAR_REGIMES as _cc_bear, grade_label as _grade_label,
+)
 from dashboard.shared.cache import (
     get_regime_snapshot, get_fii_dii_recent, get_recent_posture_changes,
     _nifty50_gainers_ticker, get_display_name,
@@ -424,6 +426,16 @@ from dashboard.shared.pick_freshness import (
 )
 
 
+_CARD_GRADES = ("A+", "A", "B")  # pick cards badge only the top three grades
+
+
+def _card_grade_tag(score: float) -> str:
+    """Grade badge for a Top Picks card: analysis.score's grade, shown only
+    for A+/A/B (lower grades get no badge)."""
+    g = _grade_label(score)
+    return g if g in _CARD_GRADES else ""
+
+
 # FIX CC-FRAG — this decorator used to live above the old inline
 # _reanchor_levels() helper (before it was extracted to pick_freshness).
 # The extraction left the decorator dangling above the import block, which
@@ -632,6 +644,16 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             unsafe_allow_html=True,
         )
 
+    # Universe staleness: one caption when the constituent CSV hasn't been
+    # checked against NSE's lists in 45+ days (Sunday refresh job stopped).
+    # No meta file / any error → nothing shown.
+    try:
+        from data.universe import stale_universe_warning
+        _uni_warn = stale_universe_warning()
+    except Exception:
+        _uni_warn = None
+    if _uni_warn:
+        st.caption(f"⚠ {_uni_warn}")
     # Price source for the scan: nightly Angel One store (data/price_store.py)
     # or Yahoo. Silent if the status read itself fails.
     try:
@@ -773,8 +795,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         for _b in _picks["buys"]:
             _bl = _b["ticker"].replace(".NS", "")
             _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
-            _grade_tag = ("A+" if _b["score"] >= 88 else "A" if _b["score"] >= 75
-                          else "B" if _b["score"] >= 62 else "")
+            _grade_tag = _card_grade_tag(_b["score"])
             _grade_html = (f'<span style="background:{_tt_col}22;color:{_tt_col};border:1px solid {_tt_col};'
                            f'border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">'
                            f'GRADE {_grade_tag}</span>') if _grade_tag else ""
@@ -889,7 +910,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_b["headline"]}</div>'
                 + (f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
-                   f'Entry ₹{_b_lvl["entry"]:,.2f} · SL ₹{_b_lvl["sl"]:,.2f} · TP ₹{_b_lvl["tp"]:,.2f} '
+                   f'Ref ₹{_b_lvl["entry"]:,.2f} · Invalidation ₹{_b_lvl["sl"]:,.2f} · '
+                   f'Measured move ₹{_b_lvl["tp"]:,.2f} '
                    f'{_b_live_span}</div>'
                    if _b_lvl["entry"] else "")
                 + (f'<div style="font-size:11px;color:var(--azure);margin-top:2px">'

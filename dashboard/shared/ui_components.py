@@ -556,10 +556,10 @@ def verdict_card(cs, portfolio_ctx: Optional[dict] = None,
     trade = (
         '<div style="display:grid;grid-template-columns:repeat(5, minmax(90px,1fr));'
         'gap:14px 22px;flex:1">'
-        + stat("Entry",  _fmt_rs(entry), tone="neutral")
-        + stat("Stop",   _fmt_rs(sl),
+        + stat("Ref",  _fmt_rs(entry), tone="neutral")
+        + stat("Invalidation",   _fmt_rs(sl),
                sub=f"{sl_pct:+.1f}%", tone="bear")
-        + stat("Target", _fmt_rs(tp),
+        + stat("Measured move", _fmt_rs(tp),
                sub=f"{tp_pct:+.1f}%", tone="bull")
         + stat("R:R",    f"{rr:.1f}x", tone="accent")
         + stat("Suggested size", f"{shares} sh"

@@ -74,8 +74,10 @@ C_VEDANTA  Vedanta Ltd completed a four-way demerger effective 15-Jun-2026:
 
 from __future__ import annotations
 import csv
+import datetime
+import json
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from data.fetcher import NIFTY50_TICKERS
 
@@ -538,3 +540,49 @@ def get_tickers_by_sector(sector: str) -> List[str]:
 
 def list_sectors() -> List[str]:
     return sorted(set(SECTOR_MAP.values()))
+
+
+# ── Staleness guard (2026-11-10) ─────────────────────────────────────────────
+# tools/refresh_universe.py stamps data/nse_index_constituents.meta.json
+# ({"refreshed", "checked", "count"}) on every write; the Sunday
+# refresh_universe.yml job re-stamps "checked" at least every 28 days even when
+# nothing changed. If neither date is recent the weekly job has stopped, and
+# scans silently miss new entrants / trip on renamed or delisted symbols.
+_CONSTITUENTS_META = os.path.splitext(_CONSTITUENTS_CSV)[0] + ".meta.json"
+STALE_AFTER_DAYS = 45
+
+
+def universe_refresh_date(meta_path: str = _CONSTITUENTS_META) -> Optional[datetime.date]:
+    """Most recent of the meta file's ``checked`` / ``refreshed`` dates, or
+    None when the file is missing or unreadable."""
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    dates = []
+    for key in ("checked", "refreshed"):
+        try:
+            dates.append(datetime.date.fromisoformat(str(meta.get(key) or "")))
+        except ValueError:
+            continue
+    return max(dates) if dates else None
+
+
+def stale_universe_warning(max_age_days: int = STALE_AFTER_DAYS,
+                           today: Optional[datetime.date] = None,
+                           meta_path: str = _CONSTITUENTS_META) -> Optional[str]:
+    """One-line warning when the constituent list is older than
+    ``max_age_days``; None when it is fresh or its date is unknown (no meta
+    file: degrade quietly rather than nag)."""
+    last = universe_refresh_date(meta_path)
+    if last is None:
+        return None
+    age = ((today or datetime.date.today()) - last).days
+    if age <= max_age_days:
+        return None
+    return (f"Stock universe last checked against NSE's index lists on {last:%d %b %Y} "
+            f"({age} days ago), so new index entrants may be missing and renamed or delisted "
+            f"symbols may fail. Check the Sunday 'Refresh universe' job.")

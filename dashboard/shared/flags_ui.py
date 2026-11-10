@@ -46,6 +46,7 @@ from analysis.qualitative_flags import (
     FlagCategory,
     FlagSentiment,
     QualitativeFlag,
+    _flags_key,
     describe_rss_gaps,
     get_rss_feed_gaps,
     load_flags,
@@ -105,6 +106,23 @@ def get_cached_flags(ticker: str, company_name: Optional[str] = None) -> list[di
         # break the page that's actually trying to show the score/chart.
         flags = load_flags(ticker, _store.kv_get)
     return [f.to_dict() for f in flags]
+
+
+def peek_stored_flags(ticker: str) -> Optional[list[dict]]:
+    """Flags already stored for ``ticker`` by an earlier refresh — a KV read
+    only, no NSE / news / RSS request, so it is safe on a cold first render.
+    Returns ``None`` when no refresh has ever been stored (flags unchecked),
+    ``[]`` when one was stored and found nothing active."""
+    try:
+        raw = _store.kv_get(_flags_key(ticker), None, "default")
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        return [f.to_dict() for f in load_flags(ticker, _store.kv_get)]
+    except Exception:
+        return None
 
 
 def _to_objects(raw: list[dict]) -> list[QualitativeFlag]:
