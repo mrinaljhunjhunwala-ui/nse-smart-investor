@@ -77,6 +77,15 @@ This section is the running memory between sessions; older sections below are hi
   the ledger stores no next-day opens, so next-open entry for the after-close list isn't measured.
   The calibration page now shows "Uptrend / Strong trend" labels instead of BUY/STRONG BUY.
 
+- **VIX fail-closed + weekly provider canary (10 Nov, `feat/data-reliability-vix-canaries`):**
+  `utils/vix.py` tries NSE `allIndices` (INDIA VIX row, `nse_corp_info` session) then Yahoo ^INDIAVIX
+  and records `source`; Angel is skipped (EQ-only token map, `^` skips Angel by design). All down →
+  regime "unknown", `allow_buy=False`, `reason="VIX unavailable from NSE / Yahoo"`, shown as a caption
+  on Command Centre / sidebar / top bar / checklist / My Portfolio and a once-a-day Telegram notice;
+  `trading.signals` now delegates here. `scripts/provider_canary.py` + `provider_canary.yml` probe 8
+  providers with the slow tests' shared `check_*` functions; exit 1 only if Yahoo / bhavcopy / VIX
+  FAILED. Not yet run live (written offline, all mocked).
+
 - **Sunday universe refresh (10 Nov, `feat/universe-sunday-refresh`):** `refresh_universe.yml`
   (dispatch-only) runs `tools/refresh_universe.py --ci`: it fetches NSE's index CSVs and diffs them
   against `data/nse_index_constituents.csv` (added / removed / renamed = same normalised company name
@@ -89,12 +98,15 @@ This section is the running memory between sessions; older sections below are hi
   Not yet run live: the sandbox had no network.
 
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
-- [ ] **Universe refresh (job #9, new):** URL
+- [x] **Universe refresh (job #9, new):** URL
   `https://api.github.com/repos/mrinaljhunjhunwala-ui/nse-smart-investor/actions/workflows/refresh_universe.yml/dispatches`,
   POST, the usual four headers, body `{"ref":"main"}`, crontab `0 10 * * 0` (Asia/Kolkata, Sunday
   10:00). For the auto PR to get CI + automerge, the `AUTOMERGE_TOKEN` secret must be set (PRs opened
   with `GITHUB_TOKEN` trigger no workflows). Also enable Settings → Actions → "Allow GitHub Actions to
   create and approve pull requests". Do one manual "Run workflow" first and check the log.
+- [x] **Provider canary (job #10):** `provider_canary.yml`, body `{"ref":"main"}`, crontab
+  `0 9 * * 0` IST (Sunday 09:00), same four headers. First run: check the table in the Actions log
+  and the 🟢/🔴 Telegram line; a red job means Yahoo, bhavcopy or VIX FAILED.
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
   **204**. "Treat 3xx as success" must stay OFF. This job also carries the 15:15 picks recap and the

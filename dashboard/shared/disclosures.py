@@ -141,6 +141,10 @@ def render_regime_reliability_note() -> None:
             "trend-quality rankings have been most informative (see Investor Guide → "
             "scores)."
         )
+    elif regime == "unknown":
+        # Fail-closed VIX (utils.vix): say the reading is missing, never pass silently.
+        from utils.vix import unavailable_caption
+        st.caption(unavailable_caption(info))
     # "normal" VIX deliberately gets no message here — see docstring above.
 
     try:

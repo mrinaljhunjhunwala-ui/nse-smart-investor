@@ -299,9 +299,10 @@ class PortfolioManager:
             from utils.vix import get_india_vix_regime
             vix_info = get_india_vix_regime()
         except Exception as e:
-            _log.debug("portfolio VIX fetch failed, defaulting to 'normal' regime: %s", e)
-            vix_info = {"vix": None, "regime": "normal",
-                        "allow_buy": True, "vix_pct_chg": 0.0}
+            # Fail closed (utils.vix contract): no reading is "unknown", not "normal".
+            _log.debug("portfolio VIX fetch failed, regime unknown: %s", e)
+            vix_info = {"vix": None, "regime": "unknown", "allow_buy": False,
+                        "vix_pct_chg": 0.0, "reason": "VIX unavailable from NSE / Yahoo"}
 
         vix_regime = vix_info.get("regime", "normal")
         holdings: List[HoldingResult] = []

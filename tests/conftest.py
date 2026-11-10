@@ -240,3 +240,23 @@ def _no_auto_filing_fetch(request, monkeypatch):
         return
     monkeypatch.setenv("NSE_AUTO_FILING_FETCH", "0")
     yield
+
+
+# ── Offline India VIX NSE tier ───────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _offline_vix_nse_tier(request, monkeypatch):
+    """utils.vix tries NSE allIndices before Yahoo. Keep that tier off the
+    network in offline tests (CI has network), so tests that mock only the
+    Yahoo payload still exercise Yahoo. tests/test_vix_sources.py patches the
+    tiers itself."""
+    if request.node.get_closest_marker("slow") is not None:
+        yield
+        return
+    import utils.vix as _vix
+
+    def _offline(timeout=10):
+        raise ConnectionError("NSE allIndices disabled in offline tests")
+
+    monkeypatch.setattr(_vix, "_nse_all_indices_payload", _offline)
+    yield

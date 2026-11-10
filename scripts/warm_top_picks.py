@@ -100,6 +100,8 @@ def main() -> int:
     threading.Thread(target=_heartbeat, name="warm-heartbeat", daemon=True).start()
     try:
         _vix = get_vix_info()
+        _log.info("warm_top_picks: VIX %s regime=%s source=%s %s", _vix.get("vix"),
+                  _vix.get("regime"), _vix.get("source"), _vix.get("reason") or "")
         _sectors = _sector_ranks_tuple()
         result = _home_top_picks(
             vix_regime=_vix.get("regime", "normal"),
