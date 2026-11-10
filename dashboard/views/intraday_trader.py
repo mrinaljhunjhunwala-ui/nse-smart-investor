@@ -734,8 +734,8 @@ def render() -> None:
                     st.markdown(
                         f'<div class="{_clr}">'
                         f'<span class="signal-big">{_icon} {_t} — {_display_label(_act)} ({_sig.get("screen","")})</span><br>'
-                        f'<b>Entry</b> ₹{_p:,.2f} &nbsp;|&nbsp; <b>SL</b> ₹{_sl:,.2f} &nbsp;|&nbsp; '
-                        f'<b>TP</b> ₹{_tp:,.2f} &nbsp;|&nbsp; <b>R:R</b> {_rr:.1f}x<br>'
+                        f'<b>Ref</b> ₹{_p:,.2f} &nbsp;|&nbsp; <b>Invalidation</b> ₹{_sl:,.2f} &nbsp;|&nbsp; '
+                        f'<b>Measured move</b> ₹{_tp:,.2f} &nbsp;|&nbsp; <b>R:R</b> {_rr:.1f}x<br>'
                         f'<small>{_sig.get("reason","")}</small></div>',
                         unsafe_allow_html=True,
                     )

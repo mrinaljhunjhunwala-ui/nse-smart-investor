@@ -937,7 +937,7 @@ else:
                 _ntp = _ne2.number_input(
                     "New Target (₹)", min_value=0.01, value=float(_tp),
                     step=0.05, format="%.2f", key=f"etp_{_tid}",
-                    help="Price at which you'll book profit.",
+                    help="Upper price level that closes this paper trade.",
                 )
                 _new_rr = ((_ntp - _ep) / (_ep - _nsl)) if (_ep - _nsl) > 0.01 else 0
                 st.caption(

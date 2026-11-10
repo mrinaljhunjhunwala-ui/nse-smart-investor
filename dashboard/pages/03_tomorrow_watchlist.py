@@ -486,7 +486,7 @@ def _render_follow_through() -> None:
             continue
         _act = _r.get("composite_action")
         _sc = _num(_r.get("composite_score"))
-        _rows = [("Entry", _px(_r.get("entry_price")))]
+        _rows = [("Ref", _px(_r.get("entry_price")))]
         if _basis == "now":
             _now = (_live.get(str(_r.get("ticker"))) or {}).get("price")
             _rows.append(("Now", f"{_px(_now)} {chip_delta(_move)}"))
@@ -554,7 +554,7 @@ def _render_past_results() -> None:
         + (f" · hit rate {_counts['Hit'] / _decided * 100:.0f}%" if _decided else "")
     )
     st.markdown(signal_table(
-        [("#", "r"), ("Ticker", "l"), ("Setup", "l"), ("Score", "r"), ("Entry", "r"),
+        [("#", "r"), ("Ticker", "l"), ("Setup", "l"), ("Score", "r"), ("Ref", "r"),
          ("Now", "r"), ("1D", "r"), ("5D", "r"), ("20D", "r"), ("Result", "l")],
         _rows_html), unsafe_allow_html=True)
     st.caption(
@@ -651,7 +651,7 @@ def _card_bg(tok: str) -> str:
 
 _BG = {"breakout": _card_bg("bull"), "breakdown": _card_bg("bear"), "reversal": _card_bg("violet")}
 
-_TABLE_COLS = [("#", "l"), ("Ticker", "l"), ("Entry", "r"), ("Stop", "r"), ("Target", "r"),
+_TABLE_COLS = [("#", "l"), ("Ticker", "l"), ("Ref", "r"), ("Invalidation", "r"), ("Measured move", "r"),
                ("R:R", "r"), ("Score", "r"), ("Conviction", "l"), ("Setup", "l")]
 
 
@@ -723,7 +723,7 @@ def _render_detail(it: dict, rank: int, kind: str, key_prefix: str) -> None:
         )
         + (
             f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
-            f'Entry ₹{_entry:,.2f} · SL ₹{_sl:,.2f} · TP ₹{_tp:,.2f}</div>'
+            f'Ref ₹{_entry:,.2f} · Invalidation ₹{_sl:,.2f} · Measured move ₹{_tp:,.2f}</div>'
             if _show_levels else ""
         )
         + "</div>",

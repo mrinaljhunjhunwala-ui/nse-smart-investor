@@ -291,9 +291,9 @@ def render() -> None:
             )
             _rr_tone = ("bull" if rr >= 2 else "amber") if rr else "dim"
             st.markdown(gate_strip([
-                ("Entry", _px(price), "last close"),
-                ("Stop", _px(sl), str(sig.get("stop_type", "atr")).upper() + " stop"),
-                ("Target", _px(tp) if tp else "Trail SMA20", "scenario, not a call"),
+                ("Ref", _px(price), "last close"),
+                ("Invalidation", _px(sl), str(sig.get("stop_type", "atr")).upper() + " stop"),
+                ("Measured move", _px(tp) if tp else "Trail SMA20", "scenario, not a call"),
                 ("R:R", f'<span style="color:var(--{_rr_tone})">{rr:.1f}x</span>' if rr else "–",
                  "reward per unit of risk"),
                 ("Rev growth (YoY)", f"{rg:+.1f}%" if rg is not None else "–", "latest FY vs prior FY"),

@@ -83,7 +83,8 @@ def test_digest_shows_sl_tp_and_escapes_html(monkeypatch):
     monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
     assert "J&amp;KBANK" in sent[0] and "J&KBANK" not in sent[0]
-    assert "Stop 95.0" in sent[0] and "Target 110.0" in sent[0]
+    assert "Invalidation 95.0" in sent[0] and "Measured move 110.0" in sent[0]
+    assert "Entry" not in sent[0] and "Stop " not in sent[0] and "Target" not in sent[0]
 
 
 def test_test_digest_ignores_staleness_and_saves_nothing(monkeypatch):
@@ -141,6 +142,7 @@ def test_under_70_gets_levels_to_watch_not_a_trade_plan(monkeypatch):
     _assert_descriptive(msg)
     assert "Levels to watch: 95.0 below · 110.0 above" in msg
     assert "Entry" not in msg and "Stop " not in msg and "Target" not in msg
+    assert "Ref " not in msg and "Invalidation" not in msg
     head = next(ln for ln in msg.splitlines() if "LO.NS" in ln)
     assert "— <i>Watch only</i> · Score 58/90" in head and "Watch ·" not in head
 

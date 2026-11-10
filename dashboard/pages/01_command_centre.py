@@ -880,7 +880,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_b["headline"]}</div>'
                 + (f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
-                   f'Entry ₹{_b_lvl["entry"]:,.2f} · SL ₹{_b_lvl["sl"]:,.2f} · TP ₹{_b_lvl["tp"]:,.2f} '
+                   f'Ref ₹{_b_lvl["entry"]:,.2f} · Invalidation ₹{_b_lvl["sl"]:,.2f} · '
+                   f'Measured move ₹{_b_lvl["tp"]:,.2f} '
                    f'{_b_live_span}</div>'
                    if _b_lvl["entry"] else "")
                 + (f'<div style="font-size:11px;color:var(--azure);margin-top:2px">'
