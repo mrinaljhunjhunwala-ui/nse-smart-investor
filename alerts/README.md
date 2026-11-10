@@ -144,6 +144,7 @@ needs an external trigger. All share the same settings:
 | 6 *(optional — holdings)* | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"portfolio-posture","force":"false"}}` | `0 14 * * 1-5` | 14:00 | Angel One holdings posture |
 | 7 | `warm_tomorrow_watchlist.yml` | `{"ref":"main"}` | `50 15 * * 1-5` | 15:50 | Tomorrow's Watchlist after close |
 | 8 | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"weekly-digest","force":"false"}}` | `0 9 * * 0` | Sunday 09:00 | Week-ahead summary |
+| 11 | `warm_price_store.yml` | `{"ref":"main"}` | `30 18 * * 1-5` | 18:30 | Angel One daily candles → `daily_bars` price store (first run backfills ~2000 days; later runs add the day); one-line Telegram summary |
 
 Fastest way to add jobs 2–8: open a working job's ⋯ menu → **Clone**, then
 change the title, URL, body and crontab. Clones start **Inactive** — flip

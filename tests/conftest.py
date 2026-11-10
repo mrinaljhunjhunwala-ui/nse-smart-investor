@@ -240,3 +240,17 @@ def _no_auto_filing_fetch(request, monkeypatch):
         return
     monkeypatch.setenv("NSE_AUTO_FILING_FETCH", "0")
     yield
+
+
+# ── Price-store read tier off by default ─────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _no_price_store_tier(request, monkeypatch):
+    """fetch_single's Tier 0.5 (data/price_store.py) reads the daily_bars table
+    before Yahoo. Keep it off so fetcher tests see the tiers they mock; tests
+    of the store turn it on with NSE_PRICE_STORE=1."""
+    if request.node.get_closest_marker("slow") is not None:
+        yield
+        return
+    monkeypatch.setenv("NSE_PRICE_STORE", "0")
+    yield

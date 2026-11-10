@@ -632,6 +632,15 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             unsafe_allow_html=True,
         )
 
+    # Price source for the scan: nightly Angel One store (data/price_store.py)
+    # or Yahoo. Silent if the status read itself fails.
+    try:
+        from dashboard.shared.cache import get_price_store_status, price_source_caption
+        st.caption(price_source_caption(get_price_store_status()))
+    except Exception as _ps_e:
+        import logging
+        logging.getLogger("dashboard.command_centre").debug("price-store caption skipped: %s", _ps_e)
+
     # ── FIX TP-VIX1: warn on regime mismatch ──
     # If VIX has flipped between when the snapshot was scored and now, the
     # picks (esp. their allow_buy gating and any regime-sensitive scoring)

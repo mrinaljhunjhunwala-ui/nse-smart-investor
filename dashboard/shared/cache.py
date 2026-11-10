@@ -1949,3 +1949,24 @@ def warm_caches() -> dict:
 
     _log.info("cache.warm_caches complete: %s", results)
     return results
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_price_store_status() -> dict:
+    """data.price_store.price_store_status(), cached 10 min; {} on any failure
+    (table missing, DB unreachable) so callers can degrade silently."""
+    try:
+        from data.price_store import price_store_status
+        return price_store_status()
+    except Exception as _e:
+        _log.debug("cache.get_price_store_status unavailable: %s", _e)
+        return {}
+
+
+def price_source_caption(status: dict | None) -> str:
+    """One-line price-source note for Command Centre, from get_price_store_status()."""
+    status = status or {}
+    if status.get("rows") and status.get("latest_date"):
+        return (f"Prices: store (as of {status['latest_date']}, {int(status.get('symbols') or 0)} names)"
+                " · Yahoo fallback")
+    return "Prices: Yahoo (store empty)"

@@ -5,6 +5,10 @@ Fetches OHLCV data for NSE/BSE stocks — no yfinance library anywhere.
 Source priority (fastest / most reliable first):
   Tier 0 : Angel One SmartAPI   — real-time, no rate limits, official exchange data.
             Only active when [angel_one] credentials are set in Streamlit secrets.
+  Tier 0.5: PriceStore          — daily bars the nightly Angel One job wrote to
+            the daily_bars table (data/price_store.py). Daily interval only;
+            used when it reaches the period's start and is <= 1 session old.
+            NSE_PRICE_STORE=0 turns it off.
   Tier 1 : Stooq CSV            — free, no API key, cloud-safe (daily bars only).
   Tier 2 : Yahoo Finance v8 API — direct urllib + cookie+crumb auth (since mid-2024).
 
@@ -72,12 +76,14 @@ _FETCH_CACHE_LOCK = threading.Lock()
 # tier so dashboard/shared/data_health.py's Command Centre panel can surface
 # actual Yahoo / Stooq / Angel liveness without launching probes. Written on
 # every fetch_single call - success or failure per tier.
-_LAST_DIAG_BY_PROVIDER: dict = {"AngelOne": {}, "Stooq": {}, "Yahoo": {}, "NSE-bhavcopy": {}}
+_LAST_DIAG_BY_PROVIDER: dict = {"AngelOne": {}, "PriceStore": {}, "Stooq": {}, "Yahoo": {},
+                                 "NSE-bhavcopy": {}}
 
 
 def get_last_diagnostic(provider: str) -> dict:
     """Return the diagnostic recorded on the most recent fetch attempt for
-    the given provider tier ('AngelOne' / 'Stooq' / 'Yahoo').
+    the given provider tier ('AngelOne' / 'PriceStore' / 'Stooq' / 'Yahoo' /
+    'NSE-bhavcopy').
 
     Shape: {"ok": bool, "at": iso, "reason": str, "symbol": str, "warnings": int}.
     Empty dict if that provider has not been exercised this process.
@@ -719,6 +725,17 @@ def fetch_data(
     return combined
 
 
+def _price_store_split_check(ticker: str, df: pd.DataFrame) -> None:
+    """Yahoo (split-adjusted) just served a daily frame: let the price store
+    drop this symbol if its unadjusted Angel bars disagree by >30%."""
+    try:
+        from data import price_store as _ps
+        if _ps.enabled() and df is not None and not df.empty:
+            _ps.price_store_split_check(ticker, normalize_ohlcv_frame(df))
+    except Exception as e:
+        _log.debug("price store split check skipped for %s: %s", ticker, e)
+
+
 class _SkipAngel(Exception):
     """Internal: Angel tier skipped (busy), not failed."""
 
@@ -726,8 +743,9 @@ class _SkipAngel(Exception):
 def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     """
     Fetch OHLCV for one ticker.
-    Priority: Angel One (Tier 0) → Stooq (Tier 1) → Yahoo Finance (Tier 2)
-    → NSE bhavcopy (Tier 3, daily only, last ~60 sessions, NOT split-adjusted).
+    Priority: Angel One (Tier 0) → PriceStore (Tier 0.5, daily only) → Stooq
+    (Tier 1) → Yahoo Finance (Tier 2) → NSE bhavcopy (Tier 3, daily only, last
+    ~60 sessions, NOT split-adjusted).
     Results are cached in-process with TTL expiry (5 minutes) — repeated calls
     within the TTL window return the cached copy; expired entries trigger a re-fetch.
     """
@@ -785,6 +803,25 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         _record_provider_diagnostic("AngelOne", ok=False, symbol=ticker,
                                     reason=f"{type(e).__name__}: {e}")
 
+    # ── Tier 0.5: PriceStore (nightly Angel One fill, daily bars only) ───────
+    if (df is None or df.empty) and interval == "1d":
+        try:
+            from data import price_store as _ps
+            if _ps.enabled():
+                df = _ps.serve(ticker, period)
+                if df is not None and not df.empty:
+                    served = "PriceStore"
+                    _record_provider_diagnostic("PriceStore", ok=True, symbol=ticker)
+                else:
+                    df = None
+                    _record_provider_diagnostic("PriceStore", ok=False, symbol=ticker,
+                                                reason="missing, short or stale")
+        except Exception as e:
+            df = None
+            _fail("PriceStore", e)
+            _record_provider_diagnostic("PriceStore", ok=False, symbol=ticker,
+                                        reason=f"{type(e).__name__}: {e}")
+
     # ── Tier 1: Stooq CSV (daily bars only — no intraday support) ────────────
     if (df is None or df.empty) and interval == "1d" and _stooq_enabled():
         if _stooq_breaker_is_tripped():
@@ -810,6 +847,8 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
             df = _fetch_yahoo_direct(ticker, period=period, interval=interval)
             served = "Yahoo"
             _record_provider_diagnostic("Yahoo", ok=True, symbol=ticker)
+            if interval == "1d":
+                _price_store_split_check(ticker, df)
         except Exception as e:
             df = None
             _fail("Yahoo", e)
