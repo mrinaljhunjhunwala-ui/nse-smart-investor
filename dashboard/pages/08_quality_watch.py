@@ -65,22 +65,22 @@ from dashboard.shared.trade_utils import _live_quote_price
 from analysis.qualitative_flags import QualitativeFlag, summarize_flags
 
 apply_design()
-render_sidebar(current="Quality Watch")
+render_sidebar(current="Long-Term Quality")
 render_top_bar()
 
-st.markdown('<h1 class="page-title-serif">Quality <em>Watch</em></h1><p class="page-subtitle">Long-term holds.</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="page-title-serif">Long-Term <em>Quality</em></h1><p class="page-subtitle">Long-term holds.</p>', unsafe_allow_html=True)
 
 st.caption(
     "Ranked by a 0-100 Quality Score (valuation + governance safety + "
     "quality ratios) — not price momentum. This is the page for \"should "
     "I hold this for the long run\", not \"what's setting up to trade this "
-    "week\" — see Command Centre or Smart Screener for that."
+    "week\" — see Command Centre or Find Ideas for that."
 )
 
-# FIX ANL-XREF — see the matching note in 13_analyze_stock.py.
+# FIX ANL-XREF — see the matching note in 04_analyze_stock.py.
 with st.expander("↔️ Also see: Analyze Stock · Deep Dive", expanded=False):
     st.markdown(
-        "Quality Watch answers \"is this a good name to sit in\". For \"how "
+        "Long-Term Quality answers \"is this a good name to sit in\". For \"how "
         "does the setup look right now\" go to **Analyze Stock**; for the full "
         "structural + valuation + thesis breakdown go to **Deep Dive**. "
         "The 8-factor swing-trade go/no-go now lives as an expander inside "

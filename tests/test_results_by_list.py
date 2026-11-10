@@ -232,7 +232,7 @@ def test_calibration_page_shows_results_by_list(monkeypatch):
                     con.execute("INSERT INTO verdict_signal_tags (verdict_log_id, tag) VALUES (?,?)",
                                 (cur.lastrowid, tag))
     page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "dashboard", "pages", "18_verdict_calibration.py")
+                        "dashboard", "pages", "09_verdict_calibration.py")
     at = AppTest.from_file(page, default_timeout=120).run()
     assert not at.exception, at.exception
     tbl = next(d.value for d in at.dataframe if "List" in d.value.columns)

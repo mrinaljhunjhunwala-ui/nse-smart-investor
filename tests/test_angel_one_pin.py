@@ -15,7 +15,7 @@ import data.angel_fetcher as angel
 from dashboard.shared import pin_gate as G
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "17_angel_one.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "11_angel_one.py")
 
 
 @pytest.fixture(autouse=True)

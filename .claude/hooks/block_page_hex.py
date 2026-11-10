@@ -44,7 +44,7 @@ def _norm(p: str) -> str:
 
 def _is_page_file(path: str) -> bool:
     n = _norm(str(path))
-    return n.endswith(".py") and "/dashboard/pages/" in ("/" + n)
+    return n.endswith(".py") and ("/dashboard/pages/" in ("/" + n) or "/dashboard/views/" in ("/" + n))
 
 
 def _find_hex_violations(path: Path) -> list[tuple[int, str, str]]:

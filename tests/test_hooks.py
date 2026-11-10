@@ -77,7 +77,7 @@ BLOCKED_PATHS = [
 ]
 
 ALLOWED_PATHS = [
-    "dashboard/pages/13_analyze_stock.py",
+    "dashboard/pages/04_analyze_stock.py",
     "dashboard/app.py",
     "analysis/score.py",
     "utils/telegram.py",

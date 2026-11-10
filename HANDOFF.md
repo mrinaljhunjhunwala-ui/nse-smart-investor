@@ -44,10 +44,19 @@ This section is the running memory between sessions; older sections below are hi
   no statements at all) and there is no quality score; not logged to the verdict ledger. BSE skipped
   (no XBRL list endpoint could be pinned offline).
 
-- **Pages renumbered (9 Nov):** `dashboard/pages/` files now run 01–19 in sidebar order
-  (`01_command_centre.py` … `19_investor_guide.py`, e.g. Analyze Stock is `13_analyze_stock.py`).
-  Name parts are unchanged, so page URLs are unchanged. `test_page_numbers_follow_sidebar_order`
-  fails if `nav._NAV_GROUPS` and the file numbers drift apart.
+- **Pages simplified, 19 → 14 (10 Nov, owner-approved):** sidebar is Home (01 Command Centre ·
+  02 Markets · 03 Tomorrow's Watchlist · 04 Analyze Stock) · Portfolio (05 My Portfolio · 06 Paper
+  Trades · 07 Watchlist & Journal · 08 Long-Term Quality) · Advanced, collapsed (09 Verdict Calibration ·
+  10 Backtest · 11 Angel One) · Tools (12 Trading Tools · 13 Find Ideas · 14 Investor Guide).
+  Merged pages render the old page bodies from `dashboard/views/*.py` (`render()`): Markets = Live
+  Ticker / Breadth & Macro / FII-DII (view switch), Find Ideas = Smart Screener / TQS (switch),
+  Trading Tools = Intraday / Position Sizer (switch), Watchlist & Journal = tabs. Old names resolve via
+  `nav._LEGACY_PAGES` (`_goto_page`, command bar); `nav.request_view(page, label)` opens a view.
+  URLs changed only for merged pages (`markets`, `find_ideas`, `watchlist_journal`, `trading_tools`);
+  Quality Watch kept its file slug. Command Centre now shows a one-line breadth/sector summary + "Open
+  Markets" (full bhavcopy breadth panel moved to Markets → Breadth & Macro → Breadth). Verdict
+  Calibration + Backtest merge is still to come. `test_page_numbers_follow_sidebar_order` still guards
+  file numbers vs `nav._NAV_GROUPS`.
 
 - **Watchlist study (9 Nov):** `verdict_ledger.results_by_list` grades each list on its own (Top
   Picks, Momentum Leaders, each Tomorrow's Watchlist bucket; Analyze Stock ad-hoc views last):

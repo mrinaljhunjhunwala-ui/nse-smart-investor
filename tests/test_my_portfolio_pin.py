@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-_PAGE = str(Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "06_my_portfolio.py")
+_PAGE = str(Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "05_my_portfolio.py")
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ def test_sidebar_quick_view_hides_holdings_until_unlocked(monkeypatch):
     reads = []
     monkeypatch.setattr(tu, "load_manual_holdings", lambda: reads.append(1) or [])
     monkeypatch.setattr(pg, "holdings_unlocked", lambda: False)
-    page = str(Path(_PAGE).with_name("19_investor_guide.py"))
+    page = str(Path(_PAGE).with_name("14_investor_guide.py"))
     at = AppTest.from_file(page, default_timeout=180).run()
     assert not at.exception, at.exception
     assert reads == []

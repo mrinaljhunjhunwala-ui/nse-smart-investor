@@ -11,7 +11,14 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "03_market_overview.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "02_markets.py")
+
+
+def _app(timeout):
+    """The merged page with the view under test preselected."""
+    at = AppTest.from_file(_PAGE, default_timeout=timeout)
+    at.session_state["mk_view"] = "📊 Breadth & Macro"
+    return at
 
 _BREADTH = {
     "advance": 34, "decline": 16, "total": 50, "ad_ratio": 2.12,
@@ -45,7 +52,7 @@ def _html(at) -> str:
 def test_breadth_panels_render(_stubs):
     mp, fd = _stubs
     mp.setattr(fd, "load_history", lambda days=90: _flows())
-    at = AppTest.from_file(_PAGE, default_timeout=180)
+    at = _app(180)
     at.session_state["ov_breadth"] = dict(_BREADTH)
     at.run()
     assert not at.exception, at.exception
@@ -61,7 +68,7 @@ def test_breadth_panels_render(_stubs):
 def test_breadth_empty_states(_stubs):
     mp, fd = _stubs
     mp.setattr(fd, "load_history", lambda days=90: pd.DataFrame())
-    at = AppTest.from_file(_PAGE, default_timeout=180).run()
+    at = _app(180).run()
     assert not at.exception, at.exception
     html = _html(at)
     assert "No breadth scan yet" in html
