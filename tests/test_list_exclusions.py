@@ -127,6 +127,21 @@ def test_top_picks_drop_excluded_but_keep_their_scores(scan_env):
     assert set(out["all_scored"]) == {"OK.NS", "LOCKED.NS", "NEWCO.NS"}
 
 
+def test_scan_now_force_live_clears_cache_and_rescans(scan_env):
+    """Command Centre "Scan Now" -> get_top_picks(force_live=True) calls
+    _home_top_picks.clear(); #292 left _home_top_picks undecorated, so that
+    raised AttributeError and the button crashed."""
+    cache_mod = scan_env
+    assert callable(getattr(cache_mod._home_top_picks, "clear", None))
+    cache_mod._home_top_picks.clear()
+    try:
+        out = cache_mod.get_top_picks(force_live=True)
+    finally:
+        cache_mod._home_top_picks.clear()
+    assert out["source"] == "live_scan"
+    assert [b["ticker"] for b in out["buys"]] == ["OK.NS"]
+
+
 def test_scan_peek_key_matches_score_stock_fetch(monkeypatch):
     """_list_exclusion peeks (ticker, "2y", "1d"); score_stock must fetch with that
     exact key, or the circuit check silently loses its bars."""
