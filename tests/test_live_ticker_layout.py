@@ -16,7 +16,14 @@ from dashboard.shared.ui_components import fmt_volume, sparkline, ticker_table
 from utils.live_price import _normalise, _vwap_from_bars
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "02_market_live.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "02_markets.py")
+
+
+def _app(timeout):
+    """The merged page with the view under test preselected."""
+    at = AppTest.from_file(_PAGE, default_timeout=timeout)
+    at.session_state["mk_view"] = "📡 Live Ticker"
+    return at
 
 _PRICES = {"bump": 0.0}
 
@@ -66,7 +73,7 @@ def _html(at) -> str:
 
 
 def test_live_ticker_layout(_stubs):
-    at = AppTest.from_file(_PAGE, default_timeout=180).run()
+    at = _app(180).run()
     assert not at.exception, at.exception
     html = _html(at)
     table = next(str(m.value) for m in at.markdown if 'class="ticker-table"' in str(m.value))
@@ -83,7 +90,7 @@ def test_live_ticker_layout(_stubs):
 
 def test_row_flashes_only_when_price_ticks(_stubs):
     import streamlit as st
-    at = AppTest.from_file(_PAGE, default_timeout=180).run()
+    at = _app(180).run()
     _PRICES["bump"] = 3.0
     st.cache_data.clear()
     at.run()

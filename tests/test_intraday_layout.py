@@ -15,7 +15,14 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "15_intraday_trader.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "12_trading_tools.py")
+
+
+def _app(timeout):
+    """The merged page with the view under test preselected."""
+    at = AppTest.from_file(_PAGE, default_timeout=timeout)
+    at.session_state["tt_view"] = "⚡ Intraday Trader"
+    return at
 
 
 def _bars(interval="5m", days=3):
@@ -54,7 +61,7 @@ def _stubs(monkeypatch):
 
 
 def _run(depth):
-    at = AppTest.from_file(_PAGE, default_timeout=180)
+    at = _app(180)
     at.session_state["ic_last"] = "RELIANCE"
     return at.run()
 

@@ -270,7 +270,7 @@ with tab_g3, st.container(key="guide_ch_3"):
         "**Formula:** shares = (capital × risk %) ÷ (entry price − stop-loss price)  \n\n"
         "**Example:** ₹5,00,000 × 2% = ₹10,000 maximum loss. Entry ₹1,000 and stop ₹950 means "
         "₹50 risk per share, so 10,000 ÷ 50 = **200 shares** (₹2,00,000 invested, maximum loss "
-        "₹10,000). The **Position Sizer** page does this arithmetic."
+        "₹10,000). The **Position Sizer** (on the Trading Tools page) does this arithmetic."
     )
 
     _h3(3, 4, "Common mistakes")

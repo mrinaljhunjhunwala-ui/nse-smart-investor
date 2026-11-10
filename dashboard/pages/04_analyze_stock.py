@@ -1073,7 +1073,7 @@ if analyze_btn or _prefill_active or (
                         st.session_state["ps_entry"] = round(float(cs.entry), 2)
                         st.session_state["ps_sl"] = round(float(cs.stop_loss), 2)
                         st.session_state["ps_tp"] = round(float(cs.target), 2)
-                        st.switch_page("pages/16_position_sizer.py")
+                        st.switch_page("pages/12_trading_tools.py")
                     if _ac4.button("↻", key=f"as_re_{ticker}", width="stretch",
                                    help="Re-score: reload this ticker's price history"):
                         # FIX MKT3: clear only the price loader, not every

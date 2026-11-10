@@ -3,7 +3,8 @@ dashboard/app.py — NSE Smart Investor Platform (multipage entry point)
 
 This file is intentionally thin. The UI lives in:
     dashboard/shared/   design.py · nav.py · cache.py · trade_utils.py · chart_helpers.py
-    dashboard/pages/    01_command_centre.py … 19_investor_guide.py (sidebar order)
+    dashboard/pages/    01_command_centre.py … 14_investor_guide.py (sidebar order)
+    dashboard/views/    bodies of merged pages (Markets, Find Ideas, Watchlist & Journal, Trading Tools)
 
 app.py only:
     1. calls st.set_page_config (ONCE per session — must not appear in any page)

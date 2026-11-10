@@ -15,120 +15,143 @@ if _ROOT not in sys.path:
 import trade_store as _store
 
 
-# ── SLICE 1 · UI/UX 2026-09 · sidebar IA restructure ───────────────────────
-# Design doc: docs/UI_UX_DESIGN_2026-09.md §2 · reference mockup:
-# https://claude.ai/code/artifact/d630c73b-5365-4061-83f4-d4bb1cf136b5
-#
-# Changes vs pre-Slice-1:
-#   - Trading group merged into "Tools & Ops"; Intraday moves there
-#   - New "Scanners & Signals" group (Screener + Tomorrow's WL + TQS)
-#   - Tomorrow's Watchlist moves Portfolio -> Scanners & Signals
-#   - TQS moves Analysis -> Scanners & Signals
-#   - Verdict Calibration moves Analysis -> Tools & Ops
-#   - Deep Dive removed from sidebar AND folded into Analyze Stock as
-#     the "🔬 Deep Dive" tab (Slice 2 landed). The old pages/20_deep_dive.py
-#     is deleted; xrefs (picks_ui full-analysis button, staleness prompt
-#     on Analyze Stock's PortfolioFit tab) now route to Analyze Stock.
-#   - "Market Live" -> "Live Ticker"; "Overview" -> "Market Breadth"
-#   - TQS emoji retagged 📊 -> 📈 to resolve the emoji collision with
-#     the old "Overview" (now "Market Breadth")
-# Palette shift (saffron accent, Instrument Serif type) is a later slice;
-# this slice ships IA + sidebar chrome only.
+
+# ── 2026-11-09 · page simplification (19 pages → 14) ──────────────────────
+# Owner-approved layout. Merged pages render their old pages as views from
+# dashboard/views/ (a view switch for heavy parts, tabs for light ones):
+#   Markets             = Live Ticker + Breadth & Macro + FII / DII Flows (switch)
+#   Find Ideas          = Smart Screener + Trend Quality Score         (switch)
+#   Watchlist & Journal = My Watchlist + Stock Journal                 (tabs)
+#   Trading Tools       = Intraday Trader + Position Sizer             (switch)
+# Quality Watch is shown as "Long-Term Quality" (file name kept, so its URL
+# is unchanged). The Advanced group stays collapsed unless you are on one of
+# its pages. Old page names still resolve through _LEGACY_PAGES (programmatic
+# _goto_page jumps and the command bar), opening the right view.
+# Earlier history (Slice 1 IA restructure, Deep Dive fold-in): see
+# docs/UI_UX_DESIGN_2026-09.md §2.
 _NAV_GROUPS: dict = {
-    "Home":                ["Command Centre"],
-    "Markets":             ["Live Ticker", "Market Breadth", "Quality Watch", "FII / DII Flows"],
-    "Portfolio":           ["My Portfolio", "Paper Trades", "My Watchlist", "Stock Journal"],
-    "Scanners & Signals":  ["Smart Screener", "Tomorrow's Watchlist", "Trend Quality Score"],
-    "Analysis":            ["Analyze Stock", "Backtest"],
-    "Tools & Ops":         ["Intraday Trader", "Position Sizer", "Angel One",
-                            "Verdict Calibration", "Investor Guide"],
+    "Home":      ["Command Centre", "Markets", "Tomorrow's Watchlist", "Analyze Stock"],
+    "Portfolio": ["My Portfolio", "Paper Trades", "Watchlist & Journal", "Long-Term Quality"],
+    "Advanced":  ["Verdict Calibration", "Backtest", "Angel One"],
+    "Tools":     ["Trading Tools", "Find Ideas", "Investor Guide"],
 }
+
+# Groups that stay collapsed in the sidebar unless the current page is in them.
+_COLLAPSED_GROUPS: frozenset = frozenset({"Advanced"})
 
 _PAGE_EMOJI: dict = {
-    "Command Centre":  "🎯",
-    "Live Ticker":     "📡",
-    "Market Breadth":  "📊",
-    "Quality Watch":   "🏆",
-    "Intraday Trader": "⚡",
-    "Smart Screener":  "🔎",
-    "My Portfolio":    "🏠",
-    "Paper Trades":    "📂",
-    "My Watchlist":    "⭐",
-    "Stock Journal":   "📓",
+    "Command Centre":       "🎯",
+    "Markets":              "📊",
     "Tomorrow's Watchlist": "📅",
-    "Analyze Stock":   "🔍",
-    "Backtest":        "🧪",
-    "Position Sizer":  "📐",
-    "Angel One":       "🔗",
-    "Investor Guide":  "📖",
-    "Trend Quality Score": "📈",  # retagged from 📊 (collision with Market Breadth)
-    "Verdict Calibration": "📏",
-    "FII / DII Flows":     "🏦",
+    "Find Ideas":           "🔎",
+    "Analyze Stock":        "🔍",
+    "My Portfolio":         "🏠",
+    "Paper Trades":         "📂",
+    "Watchlist & Journal":  "⭐",
+    "Long-Term Quality":    "🏆",
+    "Trading Tools":        "⚡",
+    "Investor Guide":       "📖",
+    "Verdict Calibration":  "📏",
+    "Backtest":             "🧪",
+    "Angel One":            "🔗",
 }
 
-_PAGE_FULL_NAME: dict = {
-    "Command Centre":  "🎯 Command Centre",
-    "Live Ticker":     "📡 Live Ticker",
-    "Market Breadth":  "📊 Market Breadth",
-    "Quality Watch":   "🏆 Quality Watch",
-    "Intraday Trader": "⚡ Intraday Trader",
-    "Smart Screener":  "🔎 Smart Screener",
-    "My Portfolio":    "🏠 My Portfolio",
-    "Paper Trades":    "📂 Paper Trades",
-    "My Watchlist":    "⭐ My Watchlist",
-    "Stock Journal":   "📓 Stock Journal",
-    "Tomorrow's Watchlist": "📅 Tomorrow's Watchlist",
-    "Analyze Stock":   "🔍 Analyze Stock",
-    "Backtest":        "🧪 Backtest",
-    "Position Sizer":  "📐 Position Sizer",
-    "Angel One":       "🔗 Angel One",
-    "Investor Guide":  "📖 Investor Guide",
-    "Trend Quality Score": "📈 Trend Quality Score",
-    "Verdict Calibration": "📏 Verdict Calibration",
-    "FII / DII Flows":     "🏦 FII / DII Flows",
-}
+_PAGE_FULL_NAME: dict = {p: f"{e} {p}" for p, e in _PAGE_EMOJI.items()}
 
 _group_icons: dict = {
-    "Home": "🎯", "Markets": "📊", "Portfolio": "💼",
-    "Scanners & Signals": "🔎", "Analysis": "🔍", "Tools & Ops": "🛠",
+    "Home": "🎯", "Portfolio": "💼", "Tools": "🛠", "Advanced": "⚙️",
 }
 
+# Merged pages that switch between views: page -> (session_state key of the
+# view switch, view labels in display order). The page file passes the same
+# key/labels to dashboard.views.view_switch().
+_PAGE_VIEWS: dict = {
+    "Markets":       ("mk_view", ["📡 Live Ticker", "📊 Breadth & Macro", "🏦 FII / DII Flows"]),
+    "Find Ideas":    ("fi_view", ["🔎 Smart Screener", "📈 Trend Quality Score"]),
+    "Trading Tools": ("tt_view", ["⚡ Intraday Trader", "📐 Position Sizer"]),
+}
+
+# Pages that no longer exist on their own: old name -> (page that now holds
+# it, view label to open there, or None for a tab / plain rename).
+_LEGACY_PAGES: dict = {
+    "Live Ticker":         ("Markets", "📡 Live Ticker"),
+    "Market Breadth":      ("Markets", "📊 Breadth & Macro"),
+    "FII / DII Flows":     ("Markets", "🏦 FII / DII Flows"),
+    "Smart Screener":      ("Find Ideas", "🔎 Smart Screener"),
+    "Trend Quality Score": ("Find Ideas", "📈 Trend Quality Score"),
+    "My Watchlist":        ("Watchlist & Journal", None),
+    "Stock Journal":       ("Watchlist & Journal", None),
+    "Quality Watch":       ("Long-Term Quality", None),
+    "Intraday Trader":     ("Trading Tools", "⚡ Intraday Trader"),
+    "Position Sizer":      ("Trading Tools", "📐 Position Sizer"),
+}
+# Old "<emoji> <name>" spellings, still used as _goto_page values.
+_LEGACY_FULL_NAME: dict = {
+    "📡 Live Ticker": "Live Ticker", "📊 Market Breadth": "Market Breadth",
+    "🏦 FII / DII Flows": "FII / DII Flows", "🔎 Smart Screener": "Smart Screener",
+    "📈 Trend Quality Score": "Trend Quality Score", "⭐ My Watchlist": "My Watchlist",
+    "📓 Stock Journal": "Stock Journal", "🏆 Quality Watch": "Quality Watch",
+    "⚡ Intraday Trader": "Intraday Trader", "📐 Position Sizer": "Position Sizer",
+}
 
 
 _PAGE_FILE = {
     # File numbers follow the sidebar order in _NAV_GROUPS (renumbered
-    # 2026-11-09). Streamlit's URL slug drops the numeric prefix, so a
-    # renumber never changes a page's URL.
+    # 2026-11-09, then again for the 14-page layout). Streamlit's URL slug
+    # drops the numeric prefix, so a renumber never changes a page's URL;
+    # merged pages got new slugs.
     # Home
-    "Command Centre":  "pages/01_command_centre.py",
-    # Markets
-    "Live Ticker":     "pages/02_market_live.py",   # renamed from "Market Live" — file name kept
-    "Market Breadth":  "pages/03_market_overview.py",  # renamed from "Overview" — file name kept
-    "Quality Watch":   "pages/04_quality_watch.py",
-    "FII / DII Flows": "pages/05_fii_dii_flows.py",
+    "Command Centre":       "pages/01_command_centre.py",
+    "Markets":              "pages/02_markets.py",
+    "Tomorrow's Watchlist": "pages/03_tomorrow_watchlist.py",
+    "Analyze Stock":        "pages/04_analyze_stock.py",
     # Portfolio
-    "My Portfolio":    "pages/06_my_portfolio.py",
-    "Paper Trades":    "pages/07_paper_trades.py",
-    "My Watchlist":    "pages/08_my_watchlist.py",
-    "Stock Journal":   "pages/09_stock_journal.py",
-    # Scanners & Signals
-    "Smart Screener":  "pages/10_smart_screener.py",
-    "Tomorrow's Watchlist": "pages/11_tomorrow_watchlist.py",
-    "Trend Quality Score":  "pages/12_tqs_scanner.py",
-    # Analysis
-    "Analyze Stock":   "pages/13_analyze_stock.py",
-    "Backtest":        "pages/14_backtest.py",
-    # Tools & Ops
-    "Intraday Trader": "pages/15_intraday_trader.py",
-    "Position Sizer":  "pages/16_position_sizer.py",
-    "Angel One":       "pages/17_angel_one.py",
-    "Verdict Calibration": "pages/18_verdict_calibration.py",
-    "Investor Guide":  "pages/19_investor_guide.py",
-    # Removed pages (merged elsewhere): Market Internals → Market Breadth's
-    # Macro / Breadth tabs; OI & Options → Intraday Trader tabs (FIX MERGE1);
-    # Deep Dive → Analyze Stock's "🔬 Deep Dive" tab (Slice 2).
+    "My Portfolio":         "pages/05_my_portfolio.py",
+    "Paper Trades":         "pages/06_paper_trades.py",
+    "Watchlist & Journal":  "pages/07_watchlist_journal.py",
+    "Long-Term Quality":    "pages/08_quality_watch.py",   # renamed from "Quality Watch"; slug kept
+    # Advanced (collapsed unless current)
+    "Verdict Calibration":  "pages/09_verdict_calibration.py",
+    "Backtest":             "pages/10_backtest.py",
+    "Angel One":            "pages/11_angel_one.py",
+    # Tools
+    "Trading Tools":        "pages/12_trading_tools.py",
+    "Find Ideas":           "pages/13_find_ideas.py",
+    "Investor Guide":       "pages/14_investor_guide.py",
 }
+# Old names route to the page that now holds them (see nav_to for the view).
+_PAGE_FILE.update({_old: _PAGE_FILE[_new] for _old, (_new, _v) in _LEGACY_PAGES.items()})
 
+
+def resolve_page(name: str):
+    """(page, view label or None) for a current or legacy page name, or a
+    full "<emoji> <name>" spelling. (None, None) when unknown."""
+    if not name:
+        return None, None
+    name = _LEGACY_FULL_NAME.get(name, name)
+    for _p, _full in _PAGE_FULL_NAME.items():
+        if name == _full:
+            return _p, None
+    if name in _LEGACY_PAGES:
+        return _LEGACY_PAGES[name]
+    if name in _PAGE_EMOJI:
+        return name, None
+    return None, None
+
+
+def request_view(page: str, view) -> None:
+    """Ask a merged page to open `view` on its next render (one-shot flag)."""
+    if view and page in _PAGE_VIEWS:
+        st.session_state[f"_open_{_PAGE_VIEWS[page][0]}"] = view
+
+
+def nav_to(name: str) -> None:
+    """Switch to a page by current or legacy name, opening the right view."""
+    page, view = resolve_page(name)
+    if page is None:
+        return
+    request_view(page, view)
+    st.switch_page(_PAGE_FILE[page])
 
 import logging as _logging
 _log = _logging.getLogger("dashboard.nav")
@@ -328,6 +351,15 @@ def _cmdbar_match(query: str) -> list[tuple[str, str, str]]:
                     break
         if len(matches) >= 4:
             break
+    # Old page names (merged or renamed 2026-11-09) still find their new home,
+    # e.g. "screener" -> "🔎 Find Ideas › Smart Screener".
+    _seen = {m[2] for m in matches}
+    for _old, (_new, _view) in _LEGACY_PAGES.items():
+        if len(matches) >= 4:
+            break
+        if q in _old.lower() and _old not in _seen and _new not in _seen:
+            matches.append((f"{_PAGE_EMOJI.get(_new, '·')} {_new} › {_old}", "page", _old))
+            _seen.add(_old)
 
     try:
         from dashboard.shared.cache import STOCK_SEARCH_MAP as _SSM
@@ -357,9 +389,7 @@ def _cmdbar_navigate(kind: str, target: str, q_state_key: str) -> None:
     """
     st.session_state[q_state_key] = ""
     if kind == "page":
-        _t = _PAGE_FILE.get(target)
-        if _t:
-            st.switch_page(_t)
+        nav_to(target)
     elif kind == "ticker":
         st.session_state["analyze_ticker"] = f"{target}.NS"
         st.session_state["_goto_page"] = _PAGE_FULL_NAME.get(
@@ -388,7 +418,7 @@ def _render_command_bar() -> None:
 
     # When the box is empty and the user has previously analyzed some
     # tickers this session, surface them as quick-jump buttons. Writing
-    # side lives on Analyze Stock (13_analyze_stock.py) — see
+    # side lives on Analyze Stock (04_analyze_stock.py) — see
     # st.session_state['__recent_tickers'].
     if not hits and not (q or "").strip():
         _recent = st.session_state.get("__recent_tickers", [])
@@ -578,25 +608,26 @@ def render_sidebar(current: str = None) -> None:
     # sidebar. The _goto_page programmatic hook (used by buttons all over the
     # app to jump pages) and _nav_target deep-link resolution both still work
     # exactly as before.
+    current = resolve_page(current)[0] or current
     _cur_grp = next((_g for _g, _ps in _NAV_GROUPS.items() if current in _ps), None)
 
-    def _nav_to(_name):
-        _t = _PAGE_FILE.get(_name)
-        if _t:
-            st.switch_page(_t)
+    _nav_to = nav_to
 
-    # Programmatic nav: a button elsewhere set _goto_page to a full page name.
+    # Programmatic nav: a button elsewhere set _goto_page to a full page name
+    # (old names such as "📐 Position Sizer" open the matching view).
     if st.session_state.get('_goto_page'):
         _goto = st.session_state.pop('_goto_page')
-        _match = next((p for _g, _ps in _NAV_GROUPS.items() for p in _ps
-                       if _goto in (f'{_PAGE_EMOJI[p]} {p}', _PAGE_FULL_NAME.get(p, p))), None)
-        if _match and _match != current:
-            _nav_to(_match)
+        _match, _view = resolve_page(_goto)
+        if _match:
+            request_view(_match, _view)
+            if _match != current:
+                _nav_to(_match)
 
     for _grp, _pages in _NAV_GROUPS.items():
         _is_cur_grp = (_grp == _cur_grp)
         with st.sidebar.expander(
-            f"{_group_icons[_grp]} {_grp}", expanded=_is_cur_grp,
+            f"{_group_icons[_grp]} {_grp}",
+            expanded=_is_cur_grp or _grp not in _COLLAPSED_GROUPS,
         ):
             for _p in _pages:
                 _is_cur_page = _is_cur_grp and (_p == current)

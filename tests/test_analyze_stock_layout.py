@@ -17,7 +17,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "13_analyze_stock.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "04_analyze_stock.py")
 
 _TABS = ["Overview", "Fundamentals", "Chart", "Thesis",
          "News & Flags", "Corp Actions", "Portfolio Fit"]
