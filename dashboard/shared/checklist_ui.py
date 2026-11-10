@@ -52,7 +52,7 @@ def compute_checklist(sym: str,
     try:
         from analysis.mtf import check_daily_weekly_alignment
         from strategies.sector_rotation import SECTORS, compute_sector_scores
-        from trading.signals import get_india_vix_regime
+        from utils.vix import get_india_vix_regime, unavailable_caption
 
         cur = df_daily.iloc[-1]
         price = float(cur["Close"])
@@ -68,7 +68,7 @@ def compute_checklist(sym: str,
         vol_r  = float(_vol_reading(df_daily).get("ratio") or 1.0)
 
         vix_r  = get_india_vix_regime()
-        vix_ok = vix_r["allow_buy"]
+        vix_ok = bool(vix_r.get("allow_buy", False))
         vix_val = vix_r.get("vix") or 0
 
         # Sector check
@@ -94,7 +94,9 @@ def compute_checklist(sym: str,
 
         checks: List[Dict[str, Any]] = [
             {"name": "1️⃣ VIX Regime", "pass": vix_ok,
-             "detail": f"India VIX = {vix_val:.1f} | Regime: {vix_r.get('regime','?').upper()}",
+             # Fail-closed: no reading = not a pass, and the row says why.
+             "detail": (unavailable_caption(vix_r) or
+                        f"India VIX = {vix_val:.1f} | Regime: {vix_r.get('regime','?').upper()}"),
              "tip": "VIX must be ≤ 28. High VIX = panic = avoid new longs."},
             {"name": "2️⃣ Long-Term Trend (SMA200)", "pass": price > sma200 > 0,
              "detail": f"Price ₹{price:.1f} {'>' if price > sma200 else '<'} SMA200 ₹{sma200:.1f}",

@@ -131,7 +131,8 @@ def _pulse_cells() -> list:
     cells = [_index_cell("NIFTY 50", "Nifty 50"), _index_cell("BANK NIFTY", "Bank Nifty")]
     cells.append(("India VIX",
                   f"{_cc_vix_v:.2f}" if isinstance(_cc_vix_v, (int, float)) else "–",
-                  _tinted(_cc_vix_r.title() + " zone", _cc_vix_r)))
+                  _tinted(_cc_vix_r.title() + " zone", _cc_vix_r)
+                  if _cc_vix_r != "unknown" else _tinted("Unavailable", "unknown")))
     cells.append(("Breadth",
                   f"{_cc_breadth_pct:.0f}%" if isinstance(_cc_breadth_pct, (int, float)) else "–",
                   _tinted(_cc_breadth.title(), _cc_breadth) + " · Nifty 500 above SMA50"))
@@ -147,6 +148,10 @@ def _pulse_cells() -> list:
 
 
 st.markdown(gate_strip(_pulse_cells()), unsafe_allow_html=True)
+if _cc_vix_r == "unknown":
+    # Fail-closed VIX (utils.vix): no reading means the fear filter is closed.
+    from utils.vix import unavailable_caption as _vix_unavail
+    st.caption(_vix_unavail(_cc_vix_info))
 
 
 # ── Descriptive posture hero ─────────────────────────────────────────────────

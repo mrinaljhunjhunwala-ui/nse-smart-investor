@@ -570,6 +570,15 @@ def _live_top_bar():
                     f'<div style="font-size:14px;font-weight:700;color:{_vcol}">{_vv:.1f} '
                     f'<span style="font-size:10px;color:#8899bb">{_vinfo.get("regime","").title()}</span></div></div>'
                 )
+            else:
+                # Fail-closed VIX: an explicit "unavailable" chip, not a missing one.
+                _chips += (
+                    '<div title="VIX unavailable from NSE / Yahoo — fear filter treated as closed" '
+                    'style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                    'border-left:3px solid #8899bb;border-radius:8px;padding:6px 12px;min-width:96px">'
+                    '<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
+                    '<div style="font-size:12px;font-weight:700;color:#8899bb">Unavailable</div></div>'
+                )
         except Exception as _e:
             _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
             pass

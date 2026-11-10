@@ -14,7 +14,6 @@ Fixes applied:
 
 from __future__ import annotations
 
-import time
 import logging
 import warnings
 import numpy as np
@@ -89,61 +88,14 @@ _TICKER_SECTOR: Dict[str, str] = {
 # India VIX — market sentiment regime
 # ─────────────────────────────────────────────────────────────────────────────
 
-_VIX_CACHE:    Optional[Dict] = None
-_VIX_CACHE_TS: float          = 0.0
-_VIX_TTL:      float          = 600.0   # 10 minutes — prevents stale panic-mode blocking
-
-
 def get_india_vix_regime() -> Dict:
+    """India VIX regime — delegates to utils.vix (tiered NSE -> Yahoo, fail-closed).
+
+    This module used to carry its own Yahoo-only copy that returned
+    allow_buy=True on an outage; one implementation now serves every caller.
     """
-    Fetch India VIX and return regime info.
-    Cached for 10 minutes (was cached forever — caused stale panic-mode blocking in Streamlit).
-    """
-    global _VIX_CACHE, _VIX_CACHE_TS
-
-    if _VIX_CACHE is not None and (time.time() - _VIX_CACHE_TS) < _VIX_TTL:
-        return _VIX_CACHE
-
-    try:
-        import json, urllib.request, urllib.parse as _up
-        from data.fetcher import _get_yf_crumb
-        _opener, _crumb = _get_yf_crumb()
-        _cqs = f"&crumb={_up.quote(_crumb)}" if _crumb else ""
-        _url = (f"https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
-                f"?interval=1d&range=5d&includePrePost=false{_cqs}")
-        _req = urllib.request.Request(
-            _url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-        with _opener.open(_req, timeout=8) as _r:
-            _d = json.loads(_r.read())
-        _closes = _d["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-        _valid  = [v for v in _closes if v is not None]
-        if len(_valid) < 2:
-            raise ValueError("No VIX data")
-
-        curr    = float(_valid[-1])
-        prev    = float(_valid[-2])
-        pct_chg = (curr / prev - 1) * 100
-
-        if curr < 12:   regime = "complacency"
-        elif curr < 16: regime = "normal"
-        elif curr < 22: regime = "elevated"
-        elif curr < 28: regime = "fear"
-        else:           regime = "panic"
-
-        _VIX_CACHE = {
-            "vix":          round(curr, 2),
-            "regime":       regime,
-            "allow_buy":    curr <= 28,
-            "vix_pct_chg":  round(pct_chg, 2),
-        }
-        _VIX_CACHE_TS = time.time()
-
-    except Exception as e:
-        _log.warning("India VIX fetch failed, defaulting to 'unknown' regime: %s", e)
-        _VIX_CACHE    = {"vix": None, "regime": "unknown", "allow_buy": True, "vix_pct_chg": 0.0}
-        _VIX_CACHE_TS = time.time()
-
-    return _VIX_CACHE
+    from utils.vix import get_india_vix_regime as _vix
+    return _vix()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -833,7 +785,7 @@ def scan_tickers(
     params  = params or {}
     signals = []
 
-    vix_info = {"allow_buy": True, "vix": None, "regime": "unknown"}
+    vix_info = {"allow_buy": True, "vix": None, "regime": "unknown"}   # use_vix=False: filter off
     if use_vix:
         try:
             vix_info = get_india_vix_regime()
@@ -845,7 +797,10 @@ def scan_tickers(
     print(f"\n  Scanning {len(tickers)} tickers  |  strategy={strategy}")
     print(f"{vix_str}")
     if not vix_info["allow_buy"]:
-        print(f"  VIX > 28 — BUY signals suppressed (panic regime)")
+        if vix_info.get("vix") is None:
+            print(f"  {vix_info.get('reason') or 'VIX unavailable'} — BUY signals suppressed (fail-closed)")
+        else:
+            print("  VIX > 28 — BUY signals suppressed (panic regime)")
     print(f"  {'─'*56}")
 
     allowed_sectors: Optional[set] = None

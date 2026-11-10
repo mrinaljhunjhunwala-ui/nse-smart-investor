@@ -948,8 +948,12 @@ def render_sidebar(current: str = None) -> None:
         pass
     try:
         from utils.vix import get_india_vix_regime as _nb_vix
-        _nvr = _nb_vix().get("regime", "normal")
-        if _nvr in ("fear", "panic"):
+        _nvi = _nb_vix() or {}
+        _nvr = _nvi.get("regime", "normal")
+        if _nvr == "unknown":
+            # Fail-closed VIX (utils.vix): surface the outage, don't read it as calm.
+            _notifs.append(("⚪", _nvi.get("reason") or "India VIX unavailable", "#8899bb"))
+        elif _nvr in ("fear", "panic"):
             # CC-COPY: descriptive only, no instruction (CLAUDE.md rule 1).
             _notifs.append(("🔴", f"India VIX in the {_nvr} zone", "#ff4757"))
         elif _nvr == "complacency":

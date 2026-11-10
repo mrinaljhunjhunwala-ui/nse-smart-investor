@@ -492,8 +492,9 @@ if _csv_source is not None:
                 f'<div style="{_tile_common}">'
                 f'<div style="{_k_lbl}">VIX regime</div>'
                 f'<div style="{_k_txt};color:{_vix_col}">'
-                f'{_vix_reg.title()}</div>'
-                f'<div style="{_k_d};color:var(--dim)">market conditions</div>'
+                f'{"Unavailable" if _vix_reg == "unknown" else _vix_reg.title()}</div>'
+                f'<div style="{_k_d};color:var(--dim)">'
+                f'{"NSE / Yahoo unreachable" if _vix_reg == "unknown" else "market conditions"}</div>'
                 f'</div>'
                 f'</div>',
                 unsafe_allow_html=True,
