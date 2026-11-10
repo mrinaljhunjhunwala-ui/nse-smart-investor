@@ -70,11 +70,15 @@ INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 NO_LONG_READ_TEXT = "Not enough fundamental data for a long-term read"
 
 # Valuation guards meaning "data found, the method does not apply" (see
-# valuation_decision.explain_refusal kind "not_applicable").
-_NOT_APPLICABLE_GUARDS = frozenset({
+# valuation_decision.explain_refusal kind "not_applicable"). Any other refusal
+# guard (H3-missing-metric) means a needed figure was not found.
+# growth-lens-off: the figures were found but growth is outside the band the
+# PEG lens can read (or unmeasurable) and quality is not high enough to stand in.
+NOT_APPLICABLE_GUARDS = frozenset({
     "H1-negative-earnings", "H2-negative-equity", "H4-insurance", "H5-newly-listed",
-    "H6-implausible", "G1-cyclical-peak", "TR-cyclical-trough",
+    "H6-implausible", "G1-cyclical-peak", "TR-cyclical-trough", "growth-lens-off",
 })
+_NOT_APPLICABLE_GUARDS = NOT_APPLICABLE_GUARDS  # backward-compatible private name
 
 # ── Horizons (FIX FV-HORIZON) ─────────────────────────────────────────────────
 # "Should I buy this?" is a different question depending on holding period.

@@ -669,6 +669,7 @@ if analyze_btn or _prefill_active or (
             _fv_th = None
             _fv_tqs = None
             _fv_tqs_res = None
+            _biz_gate = None
             _hz_verdicts = {}
             _fv_horizon = st.session_state.get("_fv_horizon", "medium")
             if _fv_horizon not in ("short", "medium", "long"):
@@ -700,6 +701,9 @@ if analyze_btn or _prefill_active or (
                 _fv_thesis_score   = None
                 _fv_quality_score  = None
                 _fv_quality_flags  = None
+                _fv_flag_sev = "unchecked"
+                _fv_flag_top = ""
+                _fv_an = None
                 _fv_th = None
                 _fv_cf = None
                 # SPEED FIX: route through page-level cached helpers so the
@@ -744,36 +748,30 @@ if analyze_btn or _prefill_active or (
                         "FinalVerdict thesis fetch failed for %s: %s", ticker, _fv_th_e)
                 try:
                     # SPEED FIX: qualitative-flags fetch does a live NSE + Google
-                    # News + RSS scrape on cache miss (~2–3s wall-clock) — that
-                    # is the biggest single cold-render cost the FV enrichment
-                    # introduced. The flag strip further down the page fires the
-                    # SAME get_cached_flags call anyway, so on a cold ticker we
-                    # skip it in the banner (banner renders with flags-gate
-                    # unknown → confidence downgrades from high to medium, which
-                    # is honest) and only include it once the strip has warmed
-                    # the 6h cache; the next rerun of the same ticker (period
-                    # change, popover open) then gets the full 5-gate verdict
-                    # essentially for free.
+                    # News + RSS scrape on cache miss (~2–3s wall-clock) — the
+                    # biggest single cold-render cost. The News & Flags tab fires
+                    # the SAME get_cached_flags call further down and sets the
+                    # warm marker, so on a cold ticker the banner does NOT scrape.
+                    # Instead it reads whatever an earlier refresh stored (KV only,
+                    # no network). If nothing was ever stored, the flags gate is
+                    # explicitly "unchecked" (the Business read says so) rather
+                    # than silently passing. Next rerun of the same ticker gets
+                    # the live 6h-cached flags for free.
                     _flags_warm_key = f"_as_flags_warm::{ticker}"
-                    from dashboard.shared.flags_ui import get_cached_flags as _gcf
-                    _fv_flag_dicts = (
-                        _gcf(ticker, company_name=getattr(cs, "company_name", None)) or []
-                        if st.session_state.get(_flags_warm_key)
-                        else []
-                    )
-                    if _fv_flag_dicts:
-                        _sevs = {str(f.get("sentiment", "")).lower() for f in _fv_flag_dicts}
-                        # QualitativeFlag.FlagSentiment uses "negative"/"positive"/"neutral";
-                        # map to the {red, amber, green} shape _gate_quality expects.
-                        if "negative" in _sevs:
-                            _sev_final = "red"
-                        elif "neutral" in _sevs:
-                            _sev_final = "amber"
-                        else:
-                            _sev_final = "green"
-                        _top = str((_fv_flag_dicts[0].get("message") or
-                                    _fv_flag_dicts[0].get("headline") or ""))[:80]
-                        _fv_quality_flags = {"severity": _sev_final, "top_flag": _top}
+                    from dashboard.shared.flags_ui import (
+                        get_cached_flags as _gcf, peek_stored_flags as _psf)
+                    from analysis.business_gate import flag_severity as _bg_flag_sev
+                    if st.session_state.get(_flags_warm_key):
+                        _fv_flag_dicts = _gcf(
+                            ticker, company_name=getattr(cs, "company_name", None)) or []
+                    else:
+                        _fv_flag_dicts = _psf(ticker)   # None → never checked
+                    # Flag dicts carry sentiment red / amber / green (the old
+                    # "negative"/"neutral" mapping never matched, so every flag
+                    # read as green). flag_severity accepts both spellings.
+                    _fv_flag_sev, _fv_flag_top = _bg_flag_sev(_fv_flag_dicts)
+                    if _fv_flag_sev in ("red", "amber", "green"):
+                        _fv_quality_flags = {"severity": _fv_flag_sev, "top_flag": _fv_flag_top}
                 except Exception as _fv_qf_e:
                     import logging
                     logging.getLogger("dashboard.analyze_stock").debug(
@@ -802,7 +800,9 @@ if analyze_btn or _prefill_active or (
                                 _fv_metrics[_k_dst] = float(_r.value)
                         if _fv_metrics:
                             _fv_qs = _cqs(_fv_metrics)
-                            if _fv_qs and _fv_qs > 0:
+                            # 0 is a real (worst) score — keep it so the <30
+                            # quality veto can fire; only None means "not computed".
+                            if _fv_qs is not None:
                                 _fv_quality_score = float(_fv_qs)
                 except Exception as _fv_qs_e:
                     import logging
@@ -826,6 +826,27 @@ if analyze_btn or _prefill_active or (
                     horizon=_fv_horizon,
                     fundamentals_missing=_fv_fund_missing,
                 )
+                # Business gate — SAME inputs as combine() above, plus the sector
+                # profile (lender routing) and the raw figures, so the headline's
+                # Business read and the FinalVerdict cannot disagree on facts.
+                try:
+                    from analysis.business_gate import (
+                        assess_business as _bg_assess,
+                        metrics_from_fundamentals as _bg_metrics)
+                    from analysis.sector_classification import classify_sector as _bg_cls
+                    _bg_sp = (_bg_cls(cs.sector, name=getattr(cs, "company_name", None))
+                              if getattr(cs, "sector", None) else None)
+                    _biz_gate = _bg_assess(
+                        quality_score=_fv_quality_score,
+                        valuation_posture=_fv_valuation,
+                        valuation_guard=_fv_val_guard,
+                        flags_severity=_fv_flag_sev,
+                        fundamentals_missing=_fv_fund_missing,
+                        sector_profile=_bg_sp,
+                        metrics=_bg_metrics(_fv_cf, _fv_an),
+                    )
+                except Exception as _bg_e:
+                    _log.debug("business gate failed for %s: %s", ticker, _bg_e)
                 for _hz in ("short", "medium", "long"):
                     _hz_verdicts[_hz] = _fv_combine(
                         composite_score=cs.score,
@@ -1146,13 +1167,42 @@ if analyze_btn or _prefill_active or (
                     _hv_why = _hv_why[:_cut + 1] if _cut > 80 else _hv_why[:277].rstrip() + "…"
                 if _hv_why:
                     _hv_why += " Descriptive read, not a recommendation."
+                # Two-part headline: Business (analysis.business_gate) FIRST, then
+                # Trend (the score band above). Tone follows the worse of the two;
+                # a failed business check demotes the trend to a timing note.
+                _hv_posture, _hv_qual, _hv_kicker = _posture, _qual, "Posture · " + _company
+                if _biz_gate is not None:
+                    import html as _hv_html
+                    _bg_status = getattr(_biz_gate, "status", "")
+                    _bg_first = _hv_html.escape(str(getattr(_biz_gate, "headline_reason", "") or ""))
+                    _bg_label, _bg_tone = {
+                        "PASS":    ("Business sound", "good"),
+                        "CAUTION": ("Business mixed", "warn"),
+                        "FAIL":    ("Business check failed", "bad"),
+                        "INSUFFICIENT_DATA": ("No long-term read", "neutral"),
+                    }.get(_bg_status, ("Business unclear", "neutral"))
+                    if _bg_status == "INSUFFICIENT_DATA":
+                        _bg_first = ("fundamentals not available for this name; "
+                                     "trend read only")
+                    if _bg_status == "FAIL":
+                        _trend_line = (f"<b>Trend: {_posture}</b> — timing only; "
+                                       "business check failed.")
+                    else:
+                        _trend_line = f"<b>Trend: {_posture}</b> — {_qual}."
+                    _tone_rank = {"good": 0, "accent": 1, "neutral": 2, "warn": 3, "bad": 4}
+                    if _tone_rank.get(_bg_tone, 2) > _tone_rank.get(_tone, 2):
+                        _tone = _bg_tone
+                    _hv_posture, _hv_qual = _bg_label, _bg_first
+                    _hv_kicker = "Business · Trend · " + _company
+                    _hv_why = _trend_line + (" " + _hv_why if _hv_why else
+                                             " Descriptive read, not a recommendation.")
                 st.markdown(
                     hero_verdict(
-                        posture=_posture,
-                        posture_qualifier=_qual,
+                        posture=_hv_posture,
+                        posture_qualifier=_hv_qual,
                         composite=_score,
                         max_score=90,
-                        kicker="Posture · " + _company,
+                        kicker=_hv_kicker,
                         why=_hv_why,
                         tone=_tone,
                         pillars=[
@@ -1164,8 +1214,16 @@ if analyze_btn or _prefill_active or (
                     ),
                     unsafe_allow_html=True,
                 )
+                if _biz_gate is not None:
+                    _bg_bits = []
+                    if len(_biz_gate.reasons) > 1:
+                        _bg_bits.append("also: " + "; ".join(_biz_gate.reasons[1:4]))
+                    if _biz_gate.unavailable:
+                        _bg_bits.append("not available: " + ", ".join(_biz_gate.unavailable))
+                    if _bg_bits:
+                        st.caption("Business checks · " + " · ".join(_bg_bits))
 
-                # One headline: the composite posture above. Confidence and the market-
+                # One headline: Business then Trend, above. Confidence and the market-
                 # regime caveat sit directly under it; every other lens is collapsed under
                 # "Other lenses" below (audit Y4: eight verdicts on one page disagreed).
                 _conf_bits = []
@@ -1873,9 +1931,9 @@ if analyze_btn or _prefill_active or (
                     _sev_counts = {"red": 0, "amber": 0, "green": 0}
                     for _f in _flag_dicts:
                         _s = str(_f.get("sentiment", "")).lower()
-                        if _s == "negative": _sev_counts["red"]   += 1
-                        elif _s == "neutral":  _sev_counts["amber"] += 1
-                        elif _s == "positive": _sev_counts["green"] += 1
+                        if _s in ("red", "negative"): _sev_counts["red"]   += 1
+                        elif _s in ("amber", "neutral"): _sev_counts["amber"] += 1
+                        elif _s in ("green", "positive"): _sev_counts["green"] += 1
                     _top_color = ("var(--bear)" if _sev_counts["red"]
                                   else "var(--amber)" if _sev_counts["amber"] else "var(--bull)")
                     st.markdown(
@@ -1893,8 +1951,8 @@ if analyze_btn or _prefill_active or (
                     with st.expander("See flag detail", expanded=False):
                         for _f in _flag_dicts[:10]:
                             _s = str(_f.get("sentiment", "")).lower()
-                            _dot = ("🔴" if _s == "negative"
-                                    else "🟡" if _s == "neutral" else "🟢")
+                            _dot = ("🔴" if _s in ("red", "negative")
+                                    else "🟡" if _s in ("amber", "neutral") else "🟢")
                             _msg = str(_f.get("headline") or _f.get("message") or "")[:220]
                             _cat = str(_f.get("category") or "")
                             _src = str(_f.get("source") or "")

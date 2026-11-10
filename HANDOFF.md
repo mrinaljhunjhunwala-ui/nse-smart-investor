@@ -3,6 +3,13 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Business gate on the Analyze Stock headline (10 Nov, `feat/business-gate-headline`):** the hero now
+  reads **Business** first (`analysis/business_gate.py: assess_business` → PASS / CAUTION / FAIL /
+  INSUFFICIENT_DATA, rule table in its docstring, lender routing via `sector_classification`), then
+  **Trend** (score band); tone = worse of the two, FAIL demotes trend to "timing only". Same inputs as
+  `final_verdict.combine`. Fixed: quality score 0 was dropped; flag sentiment mapping (`negative`/`neutral`
+  never matched `red`/`amber`, so every flag read green); cold render now reads stored flags (KV, no
+  scrape) or says "not yet checked"; `growth-lens-off` is a not-applicable guard with its own explanation.
 - **9 Oct → 3 Nov:** every scheduled job failed in ~3 s with no runner (GitHub Actions minutes /
   billing lock). The owner made the repo public (free Actions minutes); jobs run again since 4 Nov.
   The verdict ledger has a **~3½-week logging gap** (no warm Top Picks runs in that window).
@@ -15,6 +22,7 @@ This section is the running memory between sessions; older sections below are hi
   (Playwright visit every 4 h; app made public 7 Nov; first run green).
 - Two tests had fixed dates that aged out (`test_edge_flags` renderer, `test_momentum_leaders`
   frames); both now build frames ending today. Watch for more date-pinned fixtures.
+  **DECISION_RULE sample cutover (2026-11-10):** only Analyze Stock rows (`source="analyze_page"`) carry quality score + flags into `combine()`; from this merge those rows can drop a tier or be vetoed (quality 0, red/amber flag) where before they could not. DECISION_RULE / DECISION_RULE_RISING pool every source and are NOT changed; treat this date as a declared process change when reading the December verdict (Top Picks / Tomorrow's Watchlist logging is unaffected, so WATCHLIST_RULE is clean).
 
 - **Added 7 Nov:** a plain-language "Is the model working?" card with two progress bars at the top of
   Verdict Calibration (`verdict_ledger.plain_summary`), and a Friday 🧾 weekly report card on
