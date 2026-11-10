@@ -60,6 +60,22 @@ VERDICTS = ["AVOID", "HOLD", "WATCH", "BUY", "STRONG BUY"]
 
 CONFIDENCE = ("low", "medium", "high")
 
+# Distinct, non-directional state for the LONG lens only: the company's
+# fundamentals were not found (valuation refused for a missing metric, or no
+# statements at all) AND no quality score could be computed. A long-term read
+# built from the chart alone would be a technical read wearing a long-term
+# label, so the lens says so instead. Deliberately NOT in VERDICTS (it is not a
+# point on the AVOID..STRONG BUY scale) and never logged to the verdict ledger.
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+NO_LONG_READ_TEXT = "Not enough fundamental data for a long-term read"
+
+# Valuation guards meaning "data found, the method does not apply" (see
+# valuation_decision.explain_refusal kind "not_applicable").
+_NOT_APPLICABLE_GUARDS = frozenset({
+    "H1-negative-earnings", "H2-negative-equity", "H4-insurance", "H5-newly-listed",
+    "H6-implausible", "G1-cyclical-peak", "TR-cyclical-trough",
+})
+
 # ── Horizons (FIX FV-HORIZON) ─────────────────────────────────────────────────
 # "Should I buy this?" is a different question depending on holding period.
 #   * SHORT  (days–weeks)   — swing trade. Technical setup dominates; a bad
@@ -514,6 +530,7 @@ def combine(*,
             thesis_verdict:       Optional[str]   = None,
             thesis_score:         Optional[int]   = None,
             horizon:              str             = "medium",
+            fundamentals_missing: Optional[bool]  = None,
             ) -> FinalVerdict:
     """
     Combine every subsystem's output into ONE verdict.
@@ -527,6 +544,13 @@ def combine(*,
     a big damp long-term but nearly zero short-term; a technical EXIT
     is a veto short-term but only a damp long-term. See _HORIZON_WEIGHTS
     and _HORIZON_BASE_WEIGHTS for the exact rules.
+
+    `fundamentals_missing` — True when the caller looked for the company's
+    fundamentals and found none (no statements from any source). That, or a
+    valuation refused for a missing metric (guard H3), marks the fundamentals
+    as genuinely missing; if the quality score is also absent, the LONG lens
+    returns INSUFFICIENT_DATA instead of a technical-only read. None / False
+    (callers that never fetch fundamentals) changes nothing.
     """
     horizon = horizon if horizon in HORIZONS else "medium"
 
@@ -538,6 +562,24 @@ def combine(*,
     thes = _gate_thesis(thesis_verdict, thesis_score)
     trnd = _gate_trend_quality(tqs)
     gates = [tech, qual, valu, thes, trnd]
+
+    labels = _subsystem_labels(composite_action, tqs, valuation_posture,
+                               thesis_verdict, quality_score, quality_flags)
+
+    data_missing = bool(fundamentals_missing) or valuation_guard == "H3-missing-metric"
+    if (horizon == "long" and data_missing and quality_score is None
+            and qual.effect != "veto"):
+        what = ("no company financials were found in any source"
+                if fundamentals_missing else
+                "the core valuation figures (P/E, or P/B and ROE for lenders) were not found")
+        return FinalVerdict(
+            verdict=INSUFFICIENT_DATA, confidence="low", conviction=0,
+            primary_reason=(f"{NO_LONG_READ_TEXT}: {what}, and the fundamental quality "
+                            "score could not be computed. The short- and medium-term "
+                            "lenses still read the chart."),
+            horizon=horizon, gates=gates, limiting_gate="valuation",
+            subsystem_labels=labels,
+        )
 
     base = _base_conviction(horizon, composite_score, tqs, quality_score)
 
@@ -557,6 +599,24 @@ def combine(*,
     else:
         primary = tech.message
 
+    # Long lens, data found but the valuation method does not apply (negative
+    # equity, losses, cyclical extreme...): the read stands, and says why
+    # valuation was left out of it.
+    if (horizon == "long" and valuation_posture == "INSUFFICIENT_EVIDENCE"
+            and valuation_guard in _NOT_APPLICABLE_GUARDS and primary != valu.message):
+        primary = f"{primary} {valu.message}"
+
+    return FinalVerdict(
+        verdict=verdict, confidence=confidence,
+        conviction=conviction, primary_reason=primary,
+        horizon=horizon,
+        gates=gates, limiting_gate=limiting,
+        subsystem_labels=labels,
+    )
+
+
+def _subsystem_labels(composite_action, tqs, valuation_posture, thesis_verdict,
+                      quality_score, quality_flags) -> Dict[str, str]:
     labels: Dict[str, str] = {}
     if composite_action:      labels["composite"] = composite_action
     if tqs is not None:       labels["tqs"] = f"{tqs:.0f}/90"
@@ -566,11 +626,4 @@ def combine(*,
         labels["quality"] = f"{quality_score:.0f}/100"
     if quality_flags and quality_flags.get("severity"):
         labels["flags"] = str(quality_flags.get("severity"))
-
-    return FinalVerdict(
-        verdict=verdict, confidence=confidence,
-        conviction=conviction, primary_reason=primary,
-        horizon=horizon,
-        gates=gates, limiting_gate=limiting,
-        subsystem_labels=labels,
-    )
+    return labels

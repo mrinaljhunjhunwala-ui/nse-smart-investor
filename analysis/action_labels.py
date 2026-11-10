@@ -31,6 +31,7 @@ VERDICT_DISPLAY_LABELS = {
     "WATCH":      "Mixed signals",
     "HOLD":       "Neutral",
     "AVOID":      "Weak / broken trend ▼",
+    "INSUFFICIENT_DATA": "Not enough fundamental data",   # long lens only; non-directional
 }
 
 

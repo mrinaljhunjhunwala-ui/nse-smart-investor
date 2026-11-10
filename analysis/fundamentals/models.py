@@ -119,3 +119,72 @@ class CompanyFundamentals:
     def has_any_data(self) -> bool:
         return bool(self.income_statements or self.balance_sheets
                     or self.cash_flows or self.ratios)
+
+    def field_sources(self) -> Dict[str, Optional[str]]:
+        """Which provider supplied each core field, in display order.
+
+        Keys are the provenance paths in SOURCE_FIELDS; the value is the
+        provider name, or None when the merged result has no value for that
+        field (not found in any source)."""
+        li, lb, r = self.latest_income(), self.latest_balance(), self.ratios
+        present = {
+            "income.revenue":       bool(li and li.revenue is not None),
+            "income.net_income":    bool(li and li.net_income is not None),
+            "income.eps":           bool(li and (li.eps_diluted is not None
+                                                 or li.eps_basic is not None)),
+            "balance.total_equity": bool(lb and lb.total_equity is not None),
+            "balance.total_debt":   bool(lb and lb.total_debt is not None),
+            "ratios.pe":            bool(r and r.pe is not None),
+            "ratios.pb":            bool(r and r.pb is not None),
+        }
+        return {k: (self.provenance.get(k) or self.provider_name) if present[k] else None
+                for k in SOURCE_FIELDS}
+
+
+# Core fields whose provider is shown to the user ("Sources: revenue — Yahoo · …").
+SOURCE_FIELDS = {
+    "income.revenue":       "revenue",
+    "income.net_income":    "net profit",
+    "income.eps":           "EPS",
+    "balance.total_equity": "equity",
+    "balance.total_debt":   "debt",
+    "ratios.pe":            "P/E",
+    "ratios.pb":            "P/B",
+}
+
+# The minimum a long-term read needs. When any is absent after every provider
+# has been merged, the service tries the official exchange filing once a day.
+CORE_FIELDS = ("income.revenue", "income.net_income", "balance.total_equity")
+
+
+def missing_core_fields(cf: Optional["CompanyFundamentals"]) -> List[str]:
+    """Plain names of the core fields (latest revenue, net income, total
+    equity) that `cf` lacks. Empty list = all present."""
+    if cf is None:
+        return [SOURCE_FIELDS[k] for k in CORE_FIELDS]
+    src = cf.field_sources()
+    return [SOURCE_FIELDS[k] for k in CORE_FIELDS if src.get(k) is None]
+
+
+_SHORT_SOURCE = {
+    "YahooFinance": "Yahoo",
+    "Screener.in": "Screener",
+    "Exchange filing (NSE XBRL)": "NSE filing",
+    "ROC filing (MCA upload)": "ROC filing",
+}
+
+
+def source_label(provider: Optional[str]) -> str:
+    """Short display name for a provider name (unknown names pass through)."""
+    if not provider:
+        return "—"
+    return " + ".join(_SHORT_SOURCE.get(p.strip(), p.strip()) for p in provider.split(" + "))
+
+
+def sources_caption(cf: Optional["CompanyFundamentals"]) -> str:
+    """One line: "Sources: revenue — Yahoo · equity — NSE filing · P/B — not found in any source"."""
+    if cf is None:
+        return "Sources: no fundamentals found in any source."
+    parts = [f"{SOURCE_FIELDS[k]} — {source_label(v) if v else 'not found in any source'}"
+             for k, v in cf.field_sources().items()]
+    return "Sources: " + " · ".join(parts)

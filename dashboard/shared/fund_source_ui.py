@@ -1,6 +1,7 @@
 """Fundamentals source picker for Analyze Stock.
 
-Default ("Auto") keeps Yahoo → Screener. The two official-filing sources make a
+Default ("Auto") is Yahoo → Screener → any stored filing (exchange, then ROC).
+The two official-filing sources make a
 stored XBRL filing the primary provider, with Yahoo/Screener only filling the
 fields a filing lacks (price ratios, older years):
   * Exchange filing (NSE XBRL) — fetched on demand from NSE.
@@ -12,7 +13,7 @@ from __future__ import annotations
 import streamlit as st
 
 _LABELS = {
-    "auto": "Auto (Yahoo + Screener)",
+    "auto": "Auto (Yahoo + Screener + stored filings)",
     "exchange": "Exchange filing (NSE XBRL)",
     "roc": "ROC filing (MCA upload)",
 }

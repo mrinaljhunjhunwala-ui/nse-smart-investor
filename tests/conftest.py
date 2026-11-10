@@ -226,3 +226,17 @@ def _offline_bse_client(request, monkeypatch):
     import data.bse_corp_info as _bci
     monkeypatch.setattr(_bci, "_get_client", lambda: None)
     yield
+
+
+# ── Offline fundamentals auto-fetch ──────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _no_auto_filing_fetch(request, monkeypatch):
+    """The Auto fundamentals cascade fetches the NSE filing XBRL once a day when
+    core fields are missing. Keep that off in offline tests (CI has network);
+    tests of the auto-fetch turn it back on with NSE_AUTO_FILING_FETCH=1."""
+    if request.node.get_closest_marker("slow") is not None:
+        yield
+        return
+    monkeypatch.setenv("NSE_AUTO_FILING_FETCH", "0")
+    yield

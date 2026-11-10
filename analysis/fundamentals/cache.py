@@ -54,6 +54,14 @@ class TTLCache:
         with self._lock:
             self._store[key] = (time.time() + ttl, value)
 
+    def drop_where(self, pred) -> int:
+        """Evict every key for which pred(key) is true; returns how many."""
+        with self._lock:
+            keys = [k for k in self._store if pred(k)]
+            for k in keys:
+                del self._store[k]
+        return len(keys)
+
     def clear(self) -> None:
         with self._lock:
             self._store.clear()

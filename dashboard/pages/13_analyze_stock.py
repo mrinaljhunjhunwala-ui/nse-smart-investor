@@ -64,6 +64,7 @@ if _ROOT not in sys.path:
 import streamlit as st
 
 from analysis.fundamentals.service import default_service as _fund_service
+from analysis.fundamentals.service import sources_caption as _fund_sources_caption
 from analysis.fundamentals import analytics as _fund_analytics
 
 from dashboard.shared.design import apply_design
@@ -808,6 +809,9 @@ if analyze_btn or _prefill_active or (
                     logging.getLogger("dashboard.analyze_stock").debug(
                         "FinalVerdict quality-score fetch failed for %s: %s", ticker, _fv_qs_e)
 
+                # Searched every source and found no statements at all → the
+                # long lens says "not enough fundamental data" (final_verdict).
+                _fv_fund_missing = _fv_cf is not None and not _fv_cf.has_any_data()
                 _fv = _fv_combine(
                     composite_score=cs.score,
                     composite_action=cs.action,
@@ -820,6 +824,7 @@ if analyze_btn or _prefill_active or (
                     thesis_verdict=_fv_thesis_verdict,
                     thesis_score=_fv_thesis_score,
                     horizon=_fv_horizon,
+                    fundamentals_missing=_fv_fund_missing,
                 )
                 for _hz in ("short", "medium", "long"):
                     _hz_verdicts[_hz] = _fv_combine(
@@ -834,6 +839,7 @@ if analyze_btn or _prefill_active or (
                         thesis_verdict=_fv_thesis_verdict,
                         thesis_score=_fv_thesis_score,
                         horizon=_hz,
+                        fundamentals_missing=_fv_fund_missing,
                     )
 
                 # ── VERDICT LEDGER — silent auto-log (Tier 1 #1/#2) ─────────
@@ -1402,6 +1408,8 @@ if analyze_btn or _prefill_active or (
                     def _posture_for(_hzv):
                         _v = _hzv.verdict
                         _c = int(getattr(_hzv, "conviction", 50) or 50)
+                        if _v == "INSUFFICIENT_DATA":
+                            return ("Not enough fundamental data", "var(--dim)")
                         if _v == "STRONG BUY" or (_v == "BUY" and _c >= 75):
                             return ("Strong Positive", "var(--bull)")
                         if _v == "BUY":
@@ -1451,13 +1459,18 @@ if analyze_btn or _prefill_active or (
                                 continue
                             _hp, _hc = _posture_for(_hzv)
                             _cells.append((_hz_title, f'<span style="color:{_hc}">{_hp}</span>',
-                                           f"conviction {_hzv.conviction}/100"))
+                                           "no long-term read" if _hzv.verdict == "INSUFFICIENT_DATA"
+                                           else f"conviction {_hzv.conviction}/100"))
                         _cells.append((
                             "Trend quality · TQS",
                             f"{_fv_tqs:.0f} / 90" if _fv_tqs is not None else "—",
                             _tqs_band(_fv_tqs) if _fv_tqs is not None else "unavailable",
                         ))
                         st.markdown(gate_strip(_cells), unsafe_allow_html=True)
+                        _hz_long = _hz_verdicts.get("long")
+                        if (_hz_long is not None and _hz_long.verdict == "INSUFFICIENT_DATA"
+                                and _fv.horizon != "long"):
+                            st.caption("Long-term · " + _hz_long.primary_reason)
                         st.caption(
                             f"{_fv.primary_reason} · Same subsystem inputs re-weighted per horizon; "
                             "independent of the chart window."
@@ -2100,6 +2113,7 @@ if analyze_btn or _prefill_active or (
                         f"Statement date: **{_f_cf.statement_date or '—'}**  ·  "
                         f"Data freshness: **{_f_fresh}**"
                     )
+                    st.caption(_fund_sources_caption(_f_cf))
                     if _f_cf.is_partial:
                         st.warning(
                             f"⚠️ **Partial data** — some fundamentals are unavailable for this stock "
@@ -2200,7 +2214,8 @@ if analyze_btn or _prefill_active or (
                             _rc2.metric("Free Cash Flow", "N/A")
                             _rc2.caption(f"⚠️ {_rr.reason}")
                     st.caption(
-                        "Phase 0/D1: Yahoo Finance data only (~4-yr depth), no paid provider. "
+                        "Auto sources: Yahoo → Screener → any stored NSE / ROC filing (the NSE filing is "
+                        "fetched once a day when revenue, profit or equity is still missing). "
                         "ROCE/FCF shown only where economically meaningful. Not investment advice."
                     )
                 except Exception as _f_e:
@@ -2294,6 +2309,7 @@ if analyze_btn or _prefill_active or (
                             f'</div>',
                             unsafe_allow_html=True,
                         )
+                        st.caption(_fund_sources_caption(_val_cf))
                         # Not assessed: say WHY in plain words, and whether the
                         # data was found (method does not apply) or was missing.
                         if _va_kind is not None:

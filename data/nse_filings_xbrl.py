@@ -57,14 +57,15 @@ def pick_latest_annual(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 def fetch_exchange_filing(symbol: str) -> Dict[str, Any]:
     """Fetch, parse and store the latest annual results XBRL for `symbol`.
 
-    Returns {"ok": bool, "message": str, "record": dict | None}."""
+    Returns {"ok": bool, "message": str, "record": dict | None, "reason": str}.
+    reason: "saved" | "transport" (NSE unreachable / blocked) | "no_filing" | "parse"."""
     from analysis.fundamentals.providers.filing_fundamentals import save_filing
     from analysis.fundamentals.xbrl_filing import parse_xbrl
     from data.nse_corp_info import _ensure_session
 
     sym = str(symbol).upper().replace(".NS", "").replace(".BO", "").strip()
-    session = _ensure_session()
     try:
+        session = _ensure_session()
         session.get(_BASE, timeout=10)                       # cookie warm-up
         resp = session.get(f"{_BASE}/api/corporates-financial-results",
                            params={"index": "equities", "symbol": sym, "period": "Annual"},
@@ -75,11 +76,12 @@ def fetch_exchange_filing(symbol: str) -> Dict[str, Any]:
         _log.warning("NSE results list failed for %s: %s", sym, e)
         return {"ok": False, "message": f"NSE did not return the filings list ({type(e).__name__}). "
                                         "NSE often blocks cloud servers; try again later or upload "
-                                        "the filing instead.", "record": None}
+                                        "the filing instead.", "record": None, "reason": "transport"}
     rows = rows.get("data", rows) if isinstance(rows, dict) else rows
     row = pick_latest_annual(rows if isinstance(rows, list) else [])
     if row is None:
-        return {"ok": False, "message": f"No annual results XBRL listed on NSE for {sym}.", "record": None}
+        return {"ok": False, "message": f"No annual results XBRL listed on NSE for {sym}.", "record": None,
+                "reason": "no_filing"}
     url = _xbrl_url(row)
     try:
         x = session.get(url, timeout=30)
@@ -89,8 +91,8 @@ def fetch_exchange_filing(symbol: str) -> Dict[str, Any]:
     except Exception as e:
         _log.warning("NSE XBRL fetch/parse failed for %s (%s): %s", sym, url, e)
         return {"ok": False, "message": f"Could not read the NSE filing ({type(e).__name__}: {e}).",
-                "record": None}
+                "record": None, "reason": "parse"}
     latest = rec["periods"][0]["period_end"]
-    return {"ok": True, "record": rec,
+    return {"ok": True, "record": rec, "reason": "saved",
             "message": f"Saved NSE annual filing for {sym} (year ending {latest}, "
                        f"{len(rec['periods'])} year(s) on record)."}

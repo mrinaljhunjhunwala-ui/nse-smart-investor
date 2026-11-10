@@ -317,6 +317,10 @@ def log_verdict(*,
         fv = final_verdict
         if fv is None:
             return None
+        from analysis.final_verdict import VERDICTS as _VERDICTS
+        if getattr(fv, "verdict", None) not in _VERDICTS:
+            # e.g. the long lens's INSUFFICIENT_DATA — no directional read to grade
+            return None
         now = _now_ist()
         labels = getattr(fv, "subsystem_labels", {}) or {}
 
