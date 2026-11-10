@@ -57,6 +57,7 @@ _BALANCE_MAP = {
                             "Cash Cash Equivalents And Short Term Investments"],
     "total_equity":        ["Stockholders Equity", "Common Stock Equity",
                             "Total Equity Gross Minority Interest"],
+    "retained_earnings":   ["Retained Earnings"],
 }
 _CASHFLOW_MAP = {
     "operating_cash_flow":  ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities",
@@ -217,6 +218,7 @@ class YahooFundamentalProvider(FundamentalProvider):
             pb=_f(info.get("priceToBook")),
             # already present in the Yahoo `info` we fetch — just surfaced now (Phase C1)
             ev_ebitda=_f(info.get("enterpriseToEbitda")),
+            market_cap=_f(info.get("marketCap")),
         )
 
     def company_info(self, symbol: str) -> dict:

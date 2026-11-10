@@ -57,6 +57,7 @@ class BalanceSheet:
     total_debt: Optional[float] = None
     cash_and_equivalents: Optional[float] = None
     total_equity: Optional[float] = None       # shareholders' equity (ex-minority)
+    retained_earnings: Optional[float] = None  # Altman Z input (analysis.fundamental_score)
 
 
 @dataclass
@@ -84,6 +85,7 @@ class RatioSnapshot:
     pe: Optional[float] = None
     pb: Optional[float] = None
     ev_ebitda: Optional[float] = None           # EV/EBITDA (x)
+    market_cap: Optional[float] = None          # absolute INR; Altman Z market value of equity
 
 
 @dataclass

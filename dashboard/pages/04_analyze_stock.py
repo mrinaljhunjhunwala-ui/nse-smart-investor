@@ -670,6 +670,7 @@ if analyze_btn or _prefill_active or (
             _fv_tqs = None
             _fv_tqs_res = None
             _biz_gate = None
+            _fund_score = None   # analysis.fundamental_score result (hero + gate)
             _hz_verdicts = {}
             _fv_horizon = st.session_state.get("_fv_horizon", "medium")
             if _fv_horizon not in ("short", "medium", "long"):
@@ -809,6 +810,20 @@ if analyze_btn or _prefill_active or (
                     logging.getLogger("dashboard.analyze_stock").debug(
                         "FinalVerdict quality-score fetch failed for %s: %s", ticker, _fv_qs_e)
 
+                # Fundamental score (Piotroski F + growth + valuation, Altman Z cap)
+                # from the SAME cached fundamentals — no extra fetch. It feeds the
+                # Business gate only; combine() keeps the quality score, so the
+                # verdict ledger rules are unchanged.
+                try:
+                    from analysis.fundamental_score import compute_fundamental_score as _fs_calc
+                    from analysis.sector_classification import classify_sector as _fs_cls
+                    if _fv_cf is not None:
+                        _fs_sp = (_fs_cls(cs.sector, name=getattr(cs, "company_name", None))
+                                  if getattr(cs, "sector", None) else None)
+                        _fund_score = _fs_calc(_fv_cf, sector_profile=_fs_sp, analytics=_fv_an)
+                except Exception as _fs_e:
+                    _log.debug("fundamental score failed for %s: %s", ticker, _fs_e)
+
                 # Searched every source and found no statements at all → the
                 # long lens says "not enough fundamental data" (final_verdict).
                 _fv_fund_missing = _fv_cf is not None and not _fv_cf.has_any_data()
@@ -844,6 +859,8 @@ if analyze_btn or _prefill_active or (
                         fundamentals_missing=_fv_fund_missing,
                         sector_profile=_bg_sp,
                         metrics=_bg_metrics(_fv_cf, _fv_an),
+                        fundamental_score=(getattr(_fund_score, "score", None)
+                                           if _fund_score is not None else None),
                     )
                 except Exception as _bg_e:
                     _log.debug("business gate failed for %s: %s", ticker, _bg_e)
@@ -1196,6 +1213,16 @@ if analyze_btn or _prefill_active or (
                     _hv_kicker = "Business · Trend · " + _company
                     _hv_why = _trend_line + (" " + _hv_why if _hv_why else
                                              " Descriptive read, not a recommendation.")
+                # Second score next to the Trend score: Fundamentals NN/100 ·
+                # F-score 7/9 · Z safe (analysis.fundamental_score).
+                if _fund_score is not None and _fund_score.score is not None:
+                    _hv_fund_second = {
+                        "label": "Fundamentals", "value": _fund_score.score, "max": 100,
+                        "note": f"{_fund_score.f_label} · {_fund_score.z_label}"}
+                else:
+                    _hv_fund_second = {
+                        "label": "Fundamentals", "value": None,
+                        "note": "not enough data (needs two annual statements)"}
                 st.markdown(
                     hero_verdict(
                         posture=_hv_posture,
@@ -1205,6 +1232,8 @@ if analyze_btn or _prefill_active or (
                         kicker=_hv_kicker,
                         why=_hv_why,
                         tone=_tone,
+                        score_label="Trend score",
+                        second_score=_hv_fund_second,
                         pillars=[
                             ("Technical", getattr(cs, "technical_score", 0), 40),
                             ("Momentum",  getattr(cs, "momentum_score", 0), 25),
@@ -2271,6 +2300,27 @@ if analyze_btn or _prefill_active or (
                         else:
                             _rc2.metric("Free Cash Flow", "N/A")
                             _rc2.caption(f"⚠️ {_rr.reason}")
+                    # ── Fundamental score: nine F-checks + growth + valuation ──
+                    try:
+                        from analysis.fundamental_score import (
+                            compute_fundamental_score as _fs_tab_calc, f_check_rows as _fs_rows)
+                        _fs_tab = _fs_tab_calc(_f_cf, sector_profile=_sp, analytics=_f_res)
+                        st.markdown(f"**{_fs_tab.summary}**"
+                                    + (f" · latest annual {_fs_tab.as_of}" if _fs_tab.as_of else ""))
+                        if _fs_tab.f_checks:
+                            import pandas as _fs_pd
+                            st.dataframe(_fs_pd.DataFrame(_fs_rows(_fs_tab)),
+                                         hide_index=True, use_container_width=True)
+                        if _fs_tab.reasons:
+                            st.caption("Facts · " + " · ".join(_fs_tab.reasons[:6]))
+                        if _fs_tab.missing:
+                            st.caption("Not available · " + "; ".join(_fs_tab.missing[:6]))
+                        st.caption(
+                            "Piotroski F-score (60 pts) + growth recency (20) + valuation sanity (20); "
+                            "Altman Z with the original 1968 coefficients (distress caps the score at "
+                            "35, skipped for lenders). Descriptive, not a recommendation.")
+                    except Exception as _fs_tab_e:
+                        st.caption(f"Fundamental score unavailable: {_fs_tab_e}")
                     st.caption(
                         "Auto sources: Yahoo → Screener → any stored NSE / ROC filing (the NSE filing is "
                         "fetched once a day when revenue, profit or equity is still missing). "
