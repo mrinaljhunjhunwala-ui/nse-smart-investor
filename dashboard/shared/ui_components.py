@@ -865,6 +865,30 @@ def _hero_pillars(pillars: Optional[list]) -> str:
     return f'<div class="hv-pillars">{"".join(rows)}</div>' if rows else ""
 
 
+def _hero_second_score(second: Optional[dict]) -> str:
+    """A compact second score under the hero's pillars (see hero_verdict)."""
+    if not second:
+        return ""
+    import html as _html
+    label = _html.escape(str(second.get("label", "")))
+    note = _html.escape(str(second.get("note", "") or ""))
+    val = second.get("value")
+    mx = second.get("max", 100)
+    num = ""
+    if val is not None:
+        num = (f'<span style="font-size:22px;font-weight:500;color:var(--ink)">{float(val):.0f}</span>'
+               f'<span style="font-size:12px;color:var(--dim)"> / {float(mx):.0f}</span>')
+    return (
+        '<div style="width:100%;margin-top:10px;padding-top:10px;'
+        'border-top:1px solid var(--hairline)">'
+        '<div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;'
+        f'color:var(--dim);font-weight:600">{label}</div>'
+        f'<div style="font-family:var(--font-mono);margin-top:2px">{num}</div>'
+        f'<div style="font-size:11.5px;color:var(--ink-mid);margin-top:2px">{note}</div>'
+        '</div>'
+    )
+
+
 def hero_verdict(posture: str,
                  posture_qualifier: str = "",
                  composite: Optional[float] = None,
@@ -872,7 +896,9 @@ def hero_verdict(posture: str,
                  kicker: str = "Posture · this session",
                  why: str = "",
                  tone: str = "accent",
-                 pillars: Optional[list] = None) -> str:
+                 pillars: Optional[list] = None,
+                 second_score: Optional[dict] = None,
+                 score_label: str = "Composite") -> str:
     """Editorial verdict hero card (mockup Variant A -- serif italic posture).
 
     Two-column card. LEFT: kicker, serif italic posture noun, muted
@@ -882,6 +908,10 @@ def hero_verdict(posture: str,
     pillars: optional (name, value, max) tuples drawn as bars under the
     score (artboard 02). A bar under half its max turns amber, under 30%
     bear red, so a weak pillar stands out without reading the numbers.
+
+    second_score: optional {"label", "value" (number or None), "max", "note"}
+    drawn under the pillars (e.g. Fundamentals 72/100 · F-score 7/9 · Z safe).
+    value None shows the note alone (e.g. "not enough data").
     """
     tone_color = {
         "accent": "var(--accent)",
@@ -906,7 +936,7 @@ def hero_verdict(posture: str,
             f'gap:8px">'
             f'<div style="font-size:10px;letter-spacing:.14em;'
             f'text-transform:uppercase;color:var(--dim);font-weight:600">'
-            f'Composite</div>'
+            f'{score_label}</div>'
             f'<div style="display:flex;align-items:baseline;gap:8px;'
             f'font-family:var(--font-mono)">'
             f'<span style="font-size:44px;font-weight:500;letter-spacing:-.02em;'
@@ -918,6 +948,7 @@ def hero_verdict(posture: str,
             f'<div style="height:100%;width:{pct*100:.1f}%;background:{tone_color}"></div>'
             f'</div>'
             f'{_hero_pillars(pillars)}'
+            f'{_hero_second_score(second_score)}'
             f'</div>'
         )
 

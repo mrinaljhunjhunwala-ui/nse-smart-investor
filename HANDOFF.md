@@ -3,6 +3,16 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Fundamental score (10 Nov, `feat/fundamental-score`):** `analysis/fundamental_score.py`
+  (pure) — Piotroski F-score 60 pts (scaled to tests that ran; ≥ ⅔ of applicable tests needed) +
+  growth recency 20 + valuation sanity 20 (PEG/PE; lenders P/B × ROE), Altman Z with original
+  1968 coefficients (distress caps at 35; lenders skip Z and LT-debt / current-ratio / gross-margin
+  tests via `sector_classification`). Feeds `business_gate.assess_business(fundamental_score=...)`
+  in place of the quality score (None → old path). Analyze Stock hero shows "Fundamentals NN/100 ·
+  F-score · Z" beside the Trend score; Fundamentals tab has the check table. `combine()` / verdict
+  ledger still get the old quality score (unchanged); Quality Watch keeps `compute_quality_score`.
+  New schema fields `BalanceSheet.retained_earnings` + `RatioSnapshot.market_cap` are mapped from
+  Yahoo only — Screener / filing providers don't fill them, so Z is "n/a" on those sources.
 - **Business gate on the Analyze Stock headline (10 Nov, `feat/business-gate-headline`):** the hero now
   reads **Business** first (`analysis/business_gate.py: assess_business` → PASS / CAUTION / FAIL /
   INSUFFICIENT_DATA, rule table in its docstring, lender routing via `sector_classification`), then

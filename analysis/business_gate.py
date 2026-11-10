@@ -21,7 +21,9 @@ Statuses
 Status             Fires when (first matching group wins: FAIL > INSUFFICIENT
                    > CAUTION > PASS)
 =================  ==========================================================
-FAIL               quality score < 30 (0 counts) · total equity < 0 ·
+FAIL               quality score < 30 (0 counts; ``fundamental_score``
+                   replaces it in this and the CAUTION band when given) ·
+                   total equity < 0 ·
                    valuation refused with guard
                    ``H2-negative-equity`` (method does not apply because net
                    worth is not positive)
@@ -160,12 +162,15 @@ def assess_business(*,
                     flags_severity: Optional[str] = "unchecked",
                     fundamentals_missing: Optional[bool] = None,
                     sector_profile: Any = None,
-                    metrics: Optional[Dict[str, float]] = None) -> BusinessGate:
+                    metrics: Optional[Dict[str, float]] = None,
+                    fundamental_score: Optional[float] = None) -> BusinessGate:
     """Classify the business as PASS / CAUTION / FAIL / INSUFFICIENT_DATA.
 
     Inputs mirror what ``final_verdict.combine`` receives (quality score,
     valuation posture + guard, flag severity, fundamentals_missing) plus the
     sector profile and the raw metric dict from ``metrics_from_fundamentals``.
+    ``fundamental_score`` (0–100, ``analysis.fundamental_score``) takes the
+    quality score's place in the FAIL (< 30) / CAUTION (30–50) bands when given.
     """
     m = dict(metrics or {})
     fails: List[str] = []
@@ -196,16 +201,22 @@ def assess_business(*,
         elif sev == "amber":
             cautions.append("amber governance / news flag (see News & Flags)")
 
-    # Fundamental quality score (0 is a real, worst-case score)
-    if quality_score is None:
+    # Fundamental score (analysis.fundamental_score) replaces the old quality
+    # score in the same FAIL / CAUTION bands when present; otherwise the old
+    # quality-score path runs unchanged. 0 is a real, worst-case score.
+    if fundamental_score is not None:
+        score_val, score_label = fundamental_score, "fundamental score"
+    else:
+        score_val, score_label = quality_score, "quality score"
+    if score_val is None:
         unavailable.append("fundamental quality score")
     else:
         checked.append("fundamental quality score")
-        q = float(quality_score)
+        q = float(score_val)
         if q < QUALITY_FAIL_BELOW:
-            fails.append(f"quality score {q:.0f}/100")
+            fails.append(f"{score_label} {q:.0f}/100")
         elif q <= QUALITY_CAUTION_MAX:
-            cautions.append(f"quality score {q:.0f}/100")
+            cautions.append(f"{score_label} {q:.0f}/100")
 
     # Net worth
     eq = m.get("total_equity")
@@ -276,7 +287,7 @@ def assess_business(*,
                           "return on equity", "leverage", "cash flow", "valuation"}
     nothing_fundamental = not (fundamental_checks & set(checked))
     data_missing = bool(fundamentals_missing) or nothing_fundamental or (
-        quality_score is None and posture == INSUFFICIENT_EVIDENCE
+        score_val is None and posture == INSUFFICIENT_EVIDENCE
         and is_data_missing_guard(valuation_guard))
     if fails:
         return BusinessGate(FAIL, fails + cautions, checked, unavailable)
