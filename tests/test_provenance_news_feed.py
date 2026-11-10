@@ -21,6 +21,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from scripts.provider_canary import check_news_items  # noqa: E402  (shared with the weekly canary)
+
 
 @pytest.mark.slow
 def test_google_news_rss_live_canary_returns_items() -> None:
@@ -30,21 +32,5 @@ def test_google_news_rss_live_canary_returns_items() -> None:
 
     items = fetch_news("RELIANCE", company_name="Reliance Industries", max_items=5)
 
-    assert isinstance(items, list), (
-        f"expected list, got {type(items).__name__}"
-    )
-    assert items, (
-        "Google News RSS returned zero items for a common-name query - "
-        "endpoint drift or geo-block."
-    )
-
-    first = items[0]
-    # fetch_news returns dicts; each must carry the fields the qualitative-
-    # flags aggregator reads.
-    assert isinstance(first, dict), (
-        f"expected item to be dict, got {type(first).__name__}"
-    )
-    for field in ("title", "link"):
-        assert first.get(field), (
-            f"item missing/empty {field!r}: {first!r}"
-        )
+    failure = check_news_items(items)
+    assert failure is None, f"Google News RSS: {failure}"
