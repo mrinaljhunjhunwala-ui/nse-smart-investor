@@ -11,6 +11,7 @@ period_end (newest upload wins for a period), so years of AOC-4s build a history
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import logging
 from typing import Any, Dict, List, Optional
@@ -65,6 +66,11 @@ def save_filing(source: str, symbol: str, parsed: Dict[str, Any], file_name: str
     import trade_store as store
     if not store.kv_set(_key(source, symbol), rec, user_id=_KV_USER):
         raise RuntimeError("could not save the filing (storage unavailable)")
+    try:                                   # the Auto cascade reads stored filings too
+        from ..service import forget_symbol
+        forget_symbol(symbol)
+    except Exception as e:
+        _log.debug("cache refresh after saving %s/%s failed: %s", source, symbol, e)
     return rec
 
 
@@ -82,15 +88,32 @@ class FilingFundamentalProvider(FundamentalProvider):
         self.source = source
         self.name = SOURCES[source]
         self._loader = loader
+        self._held: Optional[tuple] = None     # (symbol, record) during batch()
+
+    @contextlib.contextmanager
+    def batch(self, symbol: str):
+        """Read the stored record once for a whole statement assembly (the
+        service calls five getters per provider; the Auto cascade runs this for
+        every ticker, so one KV read instead of seven)."""
+        self._held = (symbol, self._loader(self.source, symbol))
+        try:
+            yield self
+        finally:
+            self._held = None
+
+    def _record(self, symbol: str) -> Optional[Dict[str, Any]]:
+        if self._held is not None and self._held[0] == symbol:
+            return self._held[1]
+        return self._loader(self.source, symbol)
 
     def _periods(self, symbol: str, period: PeriodType, limit: int) -> List[Dict[str, Any]]:
         if period != "annual":
             return []
-        rec = self._loader(self.source, symbol)
+        rec = self._record(symbol)
         return (rec or {}).get("periods", [])[:limit]
 
     def company_info(self, symbol: str) -> Dict[str, Any]:
-        rec = self._loader(self.source, symbol) or {}
+        rec = self._record(symbol) or {}
         return {"company_name": rec.get("company_name"), "currency": "INR"}
 
     def get_income_statement(self, symbol, period="annual", limit=10):
