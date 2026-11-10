@@ -64,7 +64,7 @@ if _ROOT not in sys.path:
 import streamlit as st
 
 from analysis.fundamentals.service import default_service as _fund_service
-from analysis.fundamentals.service import sources_caption as _fund_sources_caption
+from analysis.fundamentals.service import sources_caption as _fund_sources_caption  # noqa: E402
 from analysis.fundamentals import analytics as _fund_analytics
 
 from dashboard.shared.design import apply_design

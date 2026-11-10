@@ -32,6 +32,18 @@ This section is the running memory between sessions; older sections below are hi
   `filing_fund:<source>:<SYM>`, served by `providers/filing_fundamentals.py` as the primary provider
   with Yahoo/Screener filling gaps. Only that tab uses the picker; scoring/valuation stay on Auto.
 
+- **Fundamentals cascade + long-lens data gate (10 Nov, `feat/fundamentals-cascade`):** Auto
+  (`default_service`) is now Yahoo → Screener → stored exchange filing → stored ROC filing, later
+  ones filling only gaps, so a fetched/uploaded filing helps Valuation and Final Verdict too. If latest
+  revenue / net income / total equity are still missing (`missing_core_fields`), the NSE XBRL is
+  fetched once per symbol per day (KV `filing_autofetch:<SYM>`, 15 s cap, 30-min breaker when NSE is
+  unreachable, never raises); `NSE_AUTO_FILING_FETCH=0` turns it off (tests run with it off). Analyze
+  Stock shows "Sources: revenue — Yahoo · equity — NSE filing · P/B — not found in any source" on the
+  Fundamentals tab and under the Valuation card. The LONG lens returns `INSUFFICIENT_DATA` ("Not
+  enough fundamental data for a long-term read") when fundamentals are missing (valuation guard H3 or
+  no statements at all) and there is no quality score; not logged to the verdict ledger. BSE skipped
+  (no XBRL list endpoint could be pinned offline).
+
 - **Pages renumbered (9 Nov):** `dashboard/pages/` files now run 01–19 in sidebar order
   (`01_command_centre.py` … `19_investor_guide.py`, e.g. Analyze Stock is `13_analyze_stock.py`).
   Name parts are unchanged, so page URLs are unchanged. `test_page_numbers_follow_sidebar_order`
