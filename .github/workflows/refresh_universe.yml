@@ -1,0 +1,74 @@
+name: Refresh universe
+
+# Weekly check of data/nse_index_constituents.csv (the scan universe behind
+# Top Picks, Tomorrow's Watchlist and the alerts) against NSE's official index
+# constituent CSVs. Runs `tools/refresh_universe.py --ci`, which:
+#   - fetches every tier (Nifty 50 ... Nifty Total Market);
+#   - exits non-zero WITHOUT writing if a fetch fails or the new list is
+#     < 90% of the committed size (NSE outage / HTML error page / partial file);
+#   - "universe unchanged" → exit 0, nothing committed (except a meta-only
+#     re-stamp PR at most every 28 days, so the dashboard's 45-day staleness
+#     caption only fires when this job has actually stopped running);
+#   - otherwise writes the CSV + data/nse_index_constituents.meta.json, pushes
+#     branch auto/universe-YYYY-MM-DD and opens a PR labelled `automerge`
+#     with the added / removed / renamed / re-tiered table in its body;
+#   - sends a Telegram summary (never fails the job if Telegram is down).
+#
+# Intended cadence: Sunday 10:00 IST (market closed; NSE publishes rebalance
+# files well ahead of their effective date).
+#
+# Token: PRs and pushes made with the default GITHUB_TOKEN do NOT trigger
+# other workflows, so CI would never run on the auto PR and automerge.yml
+# (which waits for CI's `test` + `real-postgres`) would never merge it. Set the
+# same AUTOMERGE_TOKEN secret automerge.yml uses (fine-grained PAT: Contents +
+# Pull requests read/write) and this job pushes/opens the PR with it, so CI +
+# automerge run as for any other PR. Without it the PR still opens (needs
+# Settings → Actions → General → "Allow GitHub Actions to create and approve
+# pull requests") but has to be merged by hand.
+
+on:
+  # No GitHub schedule: cron-job.org triggers this via workflow_dispatch
+  # (alerts/README.md, job #9: crontab `0 10 * * 0` Asia/Kolkata, body
+  # {"ref":"main"}). GitHub's cron fired hours late for this repo.
+  workflow_dispatch:           # allow manual "Run workflow" from the Actions tab
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-universe
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          token: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # The tool itself is stdlib-only; requests is for utils/telegram.py.
+      - name: Install dependencies
+        run: pip install --quiet requests
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Refresh universe (--ci)
+        env:
+          GH_TOKEN:           ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUTF8: "1"
+        run: python tools/refresh_universe.py --ci

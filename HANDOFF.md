@@ -77,7 +77,24 @@ This section is the running memory between sessions; older sections below are hi
   the ledger stores no next-day opens, so next-open entry for the after-close list isn't measured.
   The calibration page now shows "Uptrend / Strong trend" labels instead of BUY/STRONG BUY.
 
+- **Sunday universe refresh (10 Nov, `feat/universe-sunday-refresh`):** `refresh_universe.yml`
+  (dispatch-only) runs `tools/refresh_universe.py --ci`: it fetches NSE's index CSVs and diffs them
+  against `data/nse_index_constituents.csv` (added / removed / renamed = same normalised company name
+  with a new symbol / re-tiered). If anything changed, it opens an `automerge` PR on
+  `auto/universe-YYYY-MM-DD` and sends a Telegram summary. If a fetch fails or the list is under 90%
+  of the current size, the job exits non-zero and writes nothing. The sidecar
+  `nse_index_constituents.meta.json` holds `refreshed`/`checked` dates. Command Centre shows a
+  caption under the Top Picks chip when the list is >45 days old (`universe.stale_universe_warning`).
+  If nothing changes for 28 days, a PR that only updates the meta file keeps that caption quiet.
+  Not yet run live: the sandbox had no network.
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
+- [ ] **Universe refresh (job #9, new):** URL
+  `https://api.github.com/repos/mrinaljhunjhunwala-ui/nse-smart-investor/actions/workflows/refresh_universe.yml/dispatches`,
+  POST, the usual four headers, body `{"ref":"main"}`, crontab `0 10 * * 0` (Asia/Kolkata, Sunday
+  10:00). For the auto PR to get CI + automerge, the `AUTOMERGE_TOKEN` secret must be set (PRs opened
+  with `GITHUB_TOKEN` trigger no workflows). Also enable Settings → Actions → "Allow GitHub Actions to
+  create and approve pull requests". Do one manual "Run workflow" first and check the log.
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
   **204**. "Treat 3xx as success" must stay OFF. This job also carries the 15:15 picks recap and the
