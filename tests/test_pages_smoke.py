@@ -298,3 +298,56 @@ def test_command_centre_hero_says_no_read_when_feeds_are_down():
     assert "cc-market-line" in html and "NSE breadth unavailable" in html
     assert 'class="heat-grid"' not in html and "Sector heatmap" not in html
     assert any(b.label == "📊 Open Markets" for b in at.button)
+
+
+def test_analyze_headline_business_gate_leads(monkeypatch):
+    """2026-11-10: with network blocked the 04 smoke run stops before the hero,
+    so the headline is exercised here with a synthetic chart and a company whose
+    latest filing shows negative net worth. Business must read FIRST and the
+    trend must be demoted to a timing note."""
+    from datetime import date
+
+    import numpy as np
+    import pandas as pd
+    import streamlit as st
+
+    import analysis.fundamentals.service as _svc
+    import analysis.score as _score
+    import data.fetcher as _fetcher
+    from analysis.fundamentals.models import (
+        BalanceSheet, CompanyFundamentals, FiscalPeriod, IncomeStatement,
+    )
+
+    def _frame(ticker, period="2y", interval="1d"):
+        n = 520
+        idx = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=n)
+        close = 100 * np.exp(np.cumsum(np.full(n, 0.002)))
+        return pd.DataFrame({"Open": close * 0.995, "High": close * 1.01,
+                             "Low": close * 0.99, "Close": close,
+                             "Volume": np.full(n, 1_000_000.0)}, index=idx)
+
+    class _Svc:
+        def get_fundamentals(self, ticker):
+            p = FiscalPeriod(period_end=date(2026, 3, 31), fiscal_year=2026)
+            return CompanyFundamentals(
+                symbol=ticker, company_name="Test Co",
+                income_statements=[IncomeStatement(period=p, revenue=1e10, net_income=-5e8)],
+                balance_sheets=[BalanceSheet(period=p, total_equity=-2e9)])
+
+    _score._load_deps()
+    monkeypatch.setattr(_fetcher, "fetch_single", _frame)
+    monkeypatch.setattr(_score, "_fetch_single", _frame)
+    monkeypatch.setattr(_svc, "default_service", lambda: _Svc())
+    st.cache_data.clear()
+    try:
+        at = AppTest.from_file(os.path.join(_PAGES_DIR, "04_analyze_stock.py"),
+                               default_timeout=240)
+        at.query_params["ticker"] = "ITC"
+        at.run()
+    finally:
+        st.cache_data.clear()
+    assert not at.exception, at.exception
+    hero = next((str(m.value) for m in at.markdown if "Business · Trend" in str(m.value)), "")
+    assert "Business check failed." in hero and "negative net worth" in hero
+    assert "timing only; business check failed" in hero
+    assert hero.index("Business check failed") < hero.index("Trend:")

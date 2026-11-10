@@ -116,7 +116,7 @@ def test_overview_layout_non_financial(_stubs):
     assert [t.label for t in at.tabs][:len(_TABS)] == _TABS
     assert any(b.label == "Size Position" for b in at.button)
 
-    assert "Posture · Test Energy Ltd" in html
+    assert "Business · Trend · Test Energy Ltd" in html and "<b>Trend: " in html
     assert html.count('class="hv-pillar"') == 4 and "30 / 40" in html
     assert "Combined read" in html and "Trend quality · TQS" in html and "64 / 90" in html
 
@@ -130,7 +130,7 @@ def test_overview_layout_non_financial(_stubs):
 
     # Audit Y4: one headline, then every other lens collapsed under "Other lenses".
     blobs = [str(m.value) for m in at.markdown]
-    i_hero = next(i for i, b in enumerate(blobs) if "Posture ·" in b)
+    i_hero = next(i for i, b in enumerate(blobs) if "Business · Trend ·" in b)
     i_lens = next(i for i, b in enumerate(blobs) if "Other lenses" in b)
     i_comb = next(i for i, b in enumerate(blobs) if "Combined read" in b)
     assert i_hero < i_lens < i_comb
@@ -142,7 +142,7 @@ def test_overview_layout_non_financial(_stubs):
     assert any(t.label == "Build the Deep Dive research prompt" for t in at.toggle)
 
     # Rule 1: the head and hero never print the engine's action string.
-    hero = next(str(m.value) for m in at.markdown if "Posture ·" in str(m.value))
+    hero = next(str(m.value) for m in at.markdown if "Business · Trend ·" in str(m.value))
     head = next(str(m.value) for m in at.markdown if 'class="stock-hd"' in str(m.value))
     for blob in (hero, head):
         assert "BUY" not in blob and "SELL" not in blob
@@ -239,7 +239,7 @@ def test_data_unavailable_score_is_not_rendered(_stubs):
     assert not at.exception, at.exception
     assert any("was not scored — insufficient data" in str(w.value) for w in at.warning)
     html = _html(at)
-    assert "Posture ·" not in html and 'class="hv-pillar"' not in html
+    assert "Posture ·" not in html and "Business · Trend" not in html and 'class="hv-pillar"' not in html
 
 
 def test_coverage_note_lists_neutral_parts(_stubs):

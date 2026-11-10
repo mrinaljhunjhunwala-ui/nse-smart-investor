@@ -3,6 +3,13 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Business gate on the Analyze Stock headline (10 Nov, `feat/business-gate-headline`):** the hero now
+  reads **Business** first (`analysis/business_gate.py: assess_business` → PASS / CAUTION / FAIL /
+  INSUFFICIENT_DATA, rule table in its docstring, lender routing via `sector_classification`), then
+  **Trend** (score band); tone = worse of the two, FAIL demotes trend to "timing only". Same inputs as
+  `final_verdict.combine`. Fixed: quality score 0 was dropped; flag sentiment mapping (`negative`/`neutral`
+  never matched `red`/`amber`, so every flag read green); cold render now reads stored flags (KV, no
+  scrape) or says "not yet checked"; `growth-lens-off` is a not-applicable guard with its own explanation.
 - **9 Oct → 3 Nov:** every scheduled job failed in ~3 s with no runner (GitHub Actions minutes /
   billing lock). The owner made the repo public (free Actions minutes); jobs run again since 4 Nov.
   The verdict ledger has a **~3½-week logging gap** (no warm Top Picks runs in that window).

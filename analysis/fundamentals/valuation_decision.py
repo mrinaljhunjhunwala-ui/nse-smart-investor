@@ -657,6 +657,16 @@ def explain_refusal(assessment: ValuationAssessment,
         return REFUSAL_NOT_APPLICABLE, (
             "Data found: the figures look like a cyclical trough (depressed earnings "
             "distort the multiple), so a multiple-based valuation would be misleading.")
+    if guard == "growth-lens-off":
+        if inp is not None and inp.eps_cagr is not None:
+            fig = (f" (EPS growth {inp.eps_cagr:.1f}% a year, outside the "
+                   f"{GROWTH_MIN:.0f}–{GROWTH_MAX:.0f}% range a P/E-to-growth comparison can read)")
+        else:
+            fig = " (earnings growth could not be measured from the reported history)"
+        return REFUSAL_NOT_APPLICABLE, (
+            f"Data found: the P/E is available, but growth cannot be compared against it{fig}, "
+            "and return on capital is not high enough to read the multiple on quality alone, "
+            "so a growth-based valuation does not apply.")
     if guard == "H3-missing-metric":
         missing: List[str] = []
         if inp is not None:
