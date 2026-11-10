@@ -21,8 +21,8 @@ Statuses
 Status             Fires when (first matching group wins: FAIL > INSUFFICIENT
                    > CAUTION > PASS)
 =================  ==========================================================
-FAIL               red qualitative flag · quality score < 30 (0 counts) ·
-                   total equity < 0 · valuation refused with guard
+FAIL               quality score < 30 (0 counts) · total equity < 0 ·
+                   valuation refused with guard
                    ``H2-negative-equity`` (method does not apply because net
                    worth is not positive)
 INSUFFICIENT_DATA  ``fundamentals_missing`` (no statements from any source) ·
@@ -30,7 +30,9 @@ INSUFFICIENT_DATA  ``fundamentals_missing`` (no statements from any source) ·
                    *data-missing* guard (any refusal guard NOT in
                    ``final_verdict.NOT_APPLICABLE_GUARDS``, e.g. H3) ·
                    OR no fundamental check had any data at all
-CAUTION            DEMANDING valuation posture · quality 30–50 · amber flag ·
+CAUTION            red or amber qualitative flag (keyword-matched news is a
+                   prompt to read, not proof) · DEMANDING valuation posture ·
+                   quality 30–50 ·
                    flags not yet checked · trailing net income < 0 with
                    positive equity · lenders (via sector_classification):
                    ROE < 0 · non-lenders where leverage applies: debt/equity
@@ -185,8 +187,12 @@ def assess_business(*,
         checked.append("governance & news flags")
         # The flag's own headline is third-party text, so it stays on the
         # News & Flags tab; the reason names only the severity.
+        # Red flags come from a short keyword match on NSE announcements /
+        # news ("pledge", "resignation", "penalty" ...). That is a prompt to
+        # read the item, not proof the business is broken, so it is CAUTION;
+        # FAIL is reserved for hard balance-sheet facts.
         if sev == "red":
-            fails.append("red governance / news flag (see News & Flags)")
+            cautions.insert(0, "red governance / news flag (see News & Flags)")
         elif sev == "amber":
             cautions.append("amber governance / news flag (see News & Flags)")
 

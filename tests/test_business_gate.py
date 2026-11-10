@@ -34,7 +34,7 @@ def _with(**over):
 
 CASES = [
     ("healthy", {}, PASS, "no adverse finding"),
-    ("red flag", {"flags_severity": "red"}, FAIL, "red governance"),
+    ("red flag", {"flags_severity": "red"}, CAUTION, "red governance"),
     ("quality zero", {"quality_score": 0.0}, FAIL, "quality score 0/100"),
     ("quality 22", {"quality_score": 22.0}, FAIL, "quality score 22/100"),
     ("negative equity", {"metrics": {"total_equity": -120 * CR}}, FAIL, "negative net worth"),
@@ -57,8 +57,9 @@ CASES = [
     ("nothing fundamental at all",
      {"quality_score": None, "valuation_posture": None, "metrics": None},
      INSUFFICIENT_DATA, "no fundamental figures"),
-    ("red flag beats missing data",
-     {"fundamentals_missing": True, "quality_score": None, "flags_severity": "red"}, FAIL, "red"),
+    ("missing data beats red flag",
+     {"fundamentals_missing": True, "quality_score": None, "flags_severity": "red"},
+     INSUFFICIENT_DATA, "no company financials"),
 ]
 
 
