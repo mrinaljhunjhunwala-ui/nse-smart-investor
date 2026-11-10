@@ -22,6 +22,7 @@ This section is the running memory between sessions; older sections below are hi
   (Playwright visit every 4 h; app made public 7 Nov; first run green).
 - Two tests had fixed dates that aged out (`test_edge_flags` renderer, `test_momentum_leaders`
   frames); both now build frames ending today. Watch for more date-pinned fixtures.
+  **DECISION_RULE sample cutover (2026-11-10):** only Analyze Stock rows (`source="analyze_page"`) carry quality score + flags into `combine()`; from this merge those rows can drop a tier or be vetoed (quality 0, red/amber flag) where before they could not. DECISION_RULE / DECISION_RULE_RISING pool every source and are NOT changed; treat this date as a declared process change when reading the December verdict (Top Picks / Tomorrow's Watchlist logging is unaffected, so WATCHLIST_RULE is clean).
 
 - **Added 7 Nov:** a plain-language "Is the model working?" card with two progress bars at the top of
   Verdict Calibration (`verdict_ledger.plain_summary`), and a Friday 🧾 weekly report card on
