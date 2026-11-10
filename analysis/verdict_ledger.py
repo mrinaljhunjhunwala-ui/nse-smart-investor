@@ -1555,17 +1555,23 @@ def plain_summary(res: Dict[str, Any], *, pending_days: int = 0) -> Dict[str, An
 
 
 def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
-                   nifty_close: pd.Series, nifty_now: Optional[float]) -> Optional[Dict[str, Any]]:
-    """How this week's bullish reads moved since they were logged.
+                   nifty_close: pd.Series, nifty_now: Optional[float], *,
+                   verdicts: Optional[tuple] = BULLISH_VERDICTS,
+                   direction: int = 1) -> Optional[Dict[str, Any]]:
+    """How this week's reads moved since they were logged.
 
     rows: ledger rows (ticker, logged_date, entry_price, verdict) for the week.
-    One row per ticker (its first bullish log of the week). The Nifty leg is
-    its close on the log date (or the last session before) to nifty_now.
-    Returns None when nothing can be scored. Descriptive only.
+    `verdicts` keeps only those verdicts (None keeps every row: a list's own
+    membership is the call). One row per ticker (its first log of the week).
+    The Nifty leg is its close on the log date (or the last session before) to
+    nifty_now. `direction` is +1 for an up-call, -1 for a down-call: `hits`
+    counts names that beat (up) or lagged (down) the Nifty, and best/worst rank
+    by the move in the flagged direction. Returns None when nothing can be
+    scored. Descriptive only.
     """
     if rows is None or rows.empty:
         return None
-    df = rows[rows["verdict"].isin(BULLISH_VERDICTS)].copy()
+    df = rows[rows["verdict"].isin(verdicts)].copy() if verdicts else rows.copy()
     df = df.sort_values("logged_date").drop_duplicates("ticker", keep="first")
     nifty_close = nifty_close.dropna().sort_index() if nifty_close is not None else pd.Series(dtype=float)
     out_rows = []
@@ -1587,14 +1593,260 @@ def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
         return None
     moves = [x["move"] for x in out_rows]
     edges = [x["move"] - x["nifty_move"] for x in out_rows if x["nifty_move"] is not None]
-    ranked = sorted(out_rows, key=lambda x: -x["move"])
+    sign = -1 if direction < 0 else 1
+    ranked = sorted(out_rows, key=lambda x: -sign * x["move"])
     return {
         "n": len(out_rows),
+        "direction": sign,
         "mean_move": float(np.mean(moves)),
         "up": sum(m > 0 for m in moves),
         "mean_edge": float(np.mean(edges)) if edges else None,
         "ahead": sum(e > 0 for e in edges),
+        "hits": sum(sign * e > 0 for e in edges),
         "n_edge": len(edges),
         "best": ranked[:3],
         "worst": ranked[-3:][::-1] if len(ranked) > 3 else [],
     }
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Results by list (2026-11-09): each surface judged on its own
+# ─────────────────────────────────────────────────────────────────────────────
+# The registered DECISION_RULE pools bullish reads from every surface. These
+# helpers grade each LIST separately — Top Picks, Momentum Leaders and each
+# Tomorrow's Watchlist bucket — so one list can't hide behind another. They are
+# descriptive and never feed DECISION_RULE / DECISION_RULE_RISING.
+
+ROUND_TRIP_COST_PCT = 0.25      # brokerage + taxes + slippage, entry and exit, in %
+LIST_MIN_DAYS = 10              # below this many scored days a rate reads "too early"
+
+# Tomorrow's Watchlist bucket (its "tw:<bucket>" tag) -> (label, direction).
+# Direction +1: a hit is the stock beating the Nifty. Direction -1 (breakdown,
+# bearish reversal): a hit is the stock LAGGING the Nifty over the window.
+TW_BUCKETS: Dict[str, Tuple[str, int]] = {
+    "breakout":      ("Breakout setups", 1),
+    "reversal_bull": ("Bullish reversals", 1),
+    "breakdown":     ("Breakdown risk", -1),
+    "reversal_bear": ("Bearish reversals", -1),
+}
+
+# (list_key, label, direction) in display order. Direction None = taken from
+# each row's verdict (_VERDICT_DIRECTION); HOLD and unknown verdicts drop out.
+_LISTS: Tuple[Tuple[str, str, Optional[int]], ...] = (
+    ("shadow_auto", "Top Picks", 1),
+    ("momentum_leaders", "Momentum Leaders", 1),
+    *((f"tomorrow_watchlist:{b}", f"Tomorrow's Watchlist · {lab}", d) for b, (lab, d) in TW_BUCKETS.items()),
+    ("tomorrow_watchlist:", "Tomorrow's Watchlist · bucket not recorded", None),
+    ("analyze_page", "Analyze Stock views (ad hoc)", None),
+)
+_HIT_TEXT = {1: "Beat the Nifty", -1: "Lagged the Nifty", None: "By each read's direction"}
+
+
+def with_list_buckets(df: pd.DataFrame) -> pd.DataFrame:
+    """`df` plus a `bucket` column: the Tomorrow's Watchlist bucket of each
+    tomorrow_watchlist row (from its 'tw:' tag; NaN for other sources and for
+    picks logged before buckets were tagged). Never raises."""
+    if df is None or df.empty or "id" not in df.columns or "source" not in df.columns:
+        return df
+    out = df.copy()
+    tw = out["source"] == "tomorrow_watchlist"
+    out["bucket"] = out["id"].map(tw_buckets(out.loc[tw, "id"].tolist())) if tw.any() else np.nan
+    return out
+
+
+def _list_key(source: Any, bucket: Any) -> str:
+    if source == "tomorrow_watchlist":
+        return f"tomorrow_watchlist:{bucket if isinstance(bucket, str) and bucket else ''}"
+    return str(source)
+
+
+def _list_frame(rows: pd.DataFrame) -> pd.DataFrame:
+    """Rows tagged with list_key / list / direction, deduped to one row per
+    (list, session, ticker) — a name repeated in one list on one day is one pick."""
+    d = rows.copy()
+    bucket = d["bucket"] if "bucket" in d.columns else pd.Series(np.nan, index=d.index)
+    d["list_key"] = [_list_key(s, b) for s, b in zip(d["source"], bucket)]
+    meta = {k: (lab, dr) for k, lab, dr in _LISTS}
+    d["list"] = d["list_key"].map(lambda k: meta.get(k, (str(k).replace("_", " ").title(), None))[0])
+    fixed = pd.to_numeric(d["list_key"].map(lambda k: meta.get(k, (None, None))[1]), errors="coerce")
+    verdict = d["verdict"] if "verdict" in d.columns else pd.Series(None, index=d.index)
+    d["direction"] = fixed.fillna(pd.to_numeric(verdict.map(_VERDICT_DIRECTION), errors="coerce"))
+    d = d[d["direction"].notna()]
+    order = "logged_at" if "logged_at" in d.columns else "logged_date"
+    return d.sort_values(order).drop_duplicates(["list_key", "logged_date", "ticker"], keep="first")
+
+
+def results_by_list(rows: pd.DataFrame, horizons: Tuple[int, ...] = (5, 20), *,
+                    cost_pct: float = ROUND_TRIP_COST_PCT, entry: str = "close",
+                    min_days: int = LIST_MIN_DAYS) -> pd.DataFrame:
+    """One row per list (Top Picks, Momentum Leaders, each Tomorrow's Watchlist
+    bucket; Analyze Stock ad-hoc views last) with, per horizon h:
+
+      picks_{h}            settled picks (deduped per list, day and ticker)
+      days_{h}             distinct logging days among them
+      hit_pct_{h}          share of DAYS whose picks, on average, went the
+                           flagged way vs the Nifty by more than `cost_pct`
+                           (day-clustered: same-day picks share one market move)
+      hit_lower_pct_{h}    Wilson 95% lower bound of that share, over days
+      avg_vs_nifty_{h}     mean direction x (return - Nifty return), gross, in %
+      avg_vs_nifty_net_{h} the same after one round trip of `cost_pct`
+      status_{h}           'too early' (days < min_days; rates left blank),
+                           'scored', or 'no data'
+
+    Direction: up-lists (Top Picks, Momentum Leaders, breakout, bullish
+    reversal) score a hit when the stock beat the Nifty; down-lists (breakdown,
+    bearish reversal) when it lagged the Nifty. Rows without a direction
+    (HOLD, unknown verdicts) are left out.
+
+    `rows` are ledger rows (source, logged_date, ticker, verdict, ret_{h}d,
+    nifty_ret_{h}d, optional bucket from with_list_buckets). Returns are
+    close-to-close from the close of the logging session — the only basis the
+    ledger stores. entry='next_open' is accepted but falls back to 'close'
+    until next-session opens are recorded; df.attrs['entry_basis'] says which
+    basis was used. Pure: no I/O. Descriptive only, never advice.
+    """
+    if entry not in ("close", "next_open"):
+        raise ValueError(f"entry must be 'close' or 'next_open', not {entry!r}")
+    cols = ["list", "list_key", "hit_means", "picks_logged", "days_logged"]
+    for h in horizons:
+        cols += [f"picks_{h}", f"days_{h}", f"hit_pct_{h}", f"hit_lower_pct_{h}",
+                 f"avg_vs_nifty_{h}", f"avg_vs_nifty_net_{h}", f"status_{h}"]
+    attrs = {"entry_basis": "close", "entry_requested": entry, "cost_pct": cost_pct}
+    empty = pd.DataFrame(columns=cols)
+    empty.attrs.update(attrs)
+    if rows is None or rows.empty or not {"source", "logged_date", "ticker"} <= set(rows.columns):
+        return empty
+    d = _list_frame(rows)
+    if d.empty:
+        return empty
+    order = {k: i for i, (k, _, _) in enumerate(_LISTS)}
+    out = []
+    for key, g in sorted(d.groupby("list_key"), key=lambda kv: (order.get(kv[0], len(order) - 1.5), kv[0])):
+        dirs = {int(x) for x in g["direction"].unique()}
+        row: Dict[str, Any] = {"list": g["list"].iloc[0], "list_key": key,
+                               "hit_means": _HIT_TEXT[dirs.pop()] if len(dirs) == 1 else _HIT_TEXT[None],
+                               "picks_logged": int(len(g)), "days_logged": int(g["logged_date"].nunique())}
+        for h in horizons:
+            ret = pd.to_numeric(g.get(f"ret_{h}d"), errors="coerce")
+            nif = pd.to_numeric(g.get(f"nifty_ret_{h}d"), errors="coerce")
+            s = g.assign(edge=g["direction"] * (ret - nif))
+            s = s[s["edge"].notna()].assign(grp=key)
+            s = s.assign(net=s["edge"] - cost_pct)
+            n_days = int(s["logged_date"].nunique())
+            row.update({f"picks_{h}": int(len(s)), f"days_{h}": n_days,
+                        f"hit_pct_{h}": np.nan, f"hit_lower_pct_{h}": np.nan,
+                        f"avg_vs_nifty_{h}": round(float(s["edge"].mean()), 2) if len(s) else np.nan,
+                        f"avg_vs_nifty_net_{h}": round(float(s["net"].mean()), 2) if len(s) else np.nan,
+                        f"status_{h}": "no data" if s.empty else
+                        ("too early" if n_days < min_days else "scored")})
+            if row[f"status_{h}"] == "scored":
+                ds = _day_stats(s, "grp", alpha_col="net").iloc[0]
+                row[f"hit_pct_{h}"] = round(float(ds["day_win_vs_nifty"]) * 100, 1)
+                row[f"hit_lower_pct_{h}"] = round(float(ds["wilson_lower_days_vs_nifty"]) * 100, 1)
+        out.append(row)
+    res = pd.DataFrame(out, columns=cols)
+    res.attrs.update(attrs)
+    return res
+
+
+# Pre-registered Tomorrow's Watchlist test, registered 2026-11-09 BEFORE any
+# watchlist pick logged since the Actions outage ended (4 Nov) had a 5-session
+# outcome reviewed. Separate from DECISION_RULE / DECISION_RULE_RISING, which
+# it neither reads nor changes. Frozen by test_watchlist_rule_is_frozen; changing
+# it means a new registered_on and a reason in the commit — never quietly.
+WATCHLIST_RULE: Dict[str, Any] = {
+    "registered_on": "2026-11-09",
+    "source": "tomorrow_watchlist",
+    "buckets": tuple(TW_BUCKETS),         # every bucket, pooled, direction-aware
+    "logged_from": "2026-11-04",          # first session after the logging gap
+    "horizon_days": 5,
+    "min_verdicts": 100,
+    "min_days": 30,
+    "cost_pct": ROUND_TRIP_COST_PCT,      # one round trip, deducted from every pick
+    # day-clustered Wilson lower bound on "the day's picks went the flagged way
+    # vs the Nifty by more than the cost", in %
+    "threshold_pct": 50.0,
+    "entry": "close",                     # close of the logging session (after-close list)
+}
+
+
+def evaluate_watchlist_rule(rows: pd.DataFrame,
+                            rule: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Evaluate WATCHLIST_RULE on ledger rows carrying a `bucket` column
+    (with_list_buckets). Pure. Picks without a recorded bucket are left out —
+    their direction is unknown. A name in two buckets on one day counts once.
+
+    status: 'too_early' (picks / days below the floors), 'pass' (day-clustered
+    Wilson lower bound above the threshold), 'fail' otherwise. `summary` is one
+    plain-language sentence. Descriptive only — a check on past model output.
+    """
+    rule = rule or WATCHLIST_RULE
+    h = int(rule["horizon_days"])
+    res: Dict[str, Any] = {"status": "too_early", "rule": rule, "picks": 0, "days": 0,
+                           "hit_pct": None, "hit_lower_pct": None, "avg_vs_nifty_net": None,
+                           "pending_days": 0}
+    d = pd.DataFrame() if rows is None else rows
+    if not d.empty and {"source", "logged_date", "ticker"} <= set(d.columns):
+        if "bucket" not in d.columns:
+            d = d.assign(bucket=np.nan)
+        d = d[(d["source"] == rule["source"]) & d["bucket"].isin(rule["buckets"])
+              & (d["logged_date"].astype(str) >= str(rule["logged_from"]))]
+    else:
+        d = pd.DataFrame()
+    if not d.empty:
+        d = _list_frame(d).assign(list_key="watchlist")      # pool every bucket
+        d = d.drop_duplicates(["logged_date", "ticker"], keep="first")
+        ret = pd.to_numeric(d.get(f"ret_{h}d"), errors="coerce")
+        nif = pd.to_numeric(d.get(f"nifty_ret_{h}d"), errors="coerce")
+        d = d.assign(net=d["direction"] * (ret - nif) - float(rule["cost_pct"]))
+        s = d[d["net"].notna()]
+        res["pending_days"] = int(d.loc[d["net"].isna(), "logged_date"].nunique())
+        res.update(picks=int(len(s)), days=int(s["logged_date"].nunique()))
+        if not s.empty:
+            ds = _day_stats(s, "list_key", alpha_col="net").iloc[0]
+            res.update(hit_pct=round(float(ds["day_win_vs_nifty"]) * 100, 1),
+                       hit_lower_pct=round(float(ds["wilson_lower_days_vs_nifty"]) * 100, 1),
+                       avg_vs_nifty_net=round(float(s["net"].mean()), 2))
+    need_v, need_d = int(rule["min_verdicts"]), int(rule["min_days"])
+    if res["picks"] >= need_v and res["days"] >= need_d:
+        res["status"] = "pass" if (res["hit_lower_pct"] or 0) > rule["threshold_pct"] else "fail"
+    bar = (f"over {h} sessions, after a {rule['cost_pct']:.2f}% round-trip cost, the cautious "
+           f"estimate of days the list went the flagged way vs the Nifty must be above "
+           f"{rule['threshold_pct']:.0f}%")
+    if res["status"] == "too_early":
+        res["summary"] = (f"Too early to tell: {res['picks']} of {need_v} scored picks over "
+                          f"{res['days']} of {need_d} days. The bar: {bar}.")
+    elif res["status"] == "pass":
+        res["summary"] = (f"Passing: the cautious estimate is {res['hit_lower_pct']:.0f}% of days, "
+                          f"above {rule['threshold_pct']:.0f}%. Past picks only; not a forecast.")
+    else:
+        res["summary"] = (f"Not passing: the cautious estimate is {res['hit_lower_pct']:.0f}% of days, "
+                          f"not above {rule['threshold_pct']:.0f}%. Past picks only.")
+    return res
+
+
+_BULLISH_TW = tuple(b for b, (_, dr) in TW_BUCKETS.items() if dr > 0)
+_BEARISH_TW = tuple(b for b, (_, dr) in TW_BUCKETS.items() if dr < 0)
+
+
+def week_scorecard_by_list(rows: pd.DataFrame, price_now: Dict[str, float],
+                           nifty_close: pd.Series, nifty_now: Optional[float]) -> Optional[Dict[str, Any]]:
+    """The Friday report card split by list: 'top_picks' (source shadow_auto,
+    every card), 'watchlist_up' (breakout + bullish reversal) and
+    'watchlist_down' (breakdown + bearish reversal, judged as down-calls).
+    `rows` need a `bucket` column for watchlist rows (with_list_buckets).
+    Each value is a week_scorecard() dict or None; returns None when all are."""
+    if rows is None or rows.empty or "source" not in rows.columns:
+        return None
+    bucket = rows["bucket"] if "bucket" in rows.columns else pd.Series(np.nan, index=rows.index)
+    tw = rows["source"] == "tomorrow_watchlist"
+    out = {
+        "top_picks": week_scorecard(rows[rows["source"] == "shadow_auto"], price_now,
+                                    nifty_close, nifty_now, verdicts=None),
+        "watchlist_up": week_scorecard(rows[tw & bucket.isin(_BULLISH_TW)], price_now,
+                                       nifty_close, nifty_now, verdicts=None),
+        "watchlist_down": week_scorecard(rows[tw & bucket.isin(_BEARISH_TW)], price_now,
+                                         nifty_close, nifty_now, verdicts=None, direction=-1),
+    }
+    return out if any(out.values()) else None

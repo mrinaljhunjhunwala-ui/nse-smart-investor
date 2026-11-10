@@ -49,6 +49,17 @@ This section is the running memory between sessions; older sections below are hi
   Name parts are unchanged, so page URLs are unchanged. `test_page_numbers_follow_sidebar_order`
   fails if `nav._NAV_GROUPS` and the file numbers drift apart.
 
+- **Watchlist study (9 Nov):** `verdict_ledger.results_by_list` grades each list on its own (Top
+  Picks, Momentum Leaders, each Tomorrow's Watchlist bucket; Analyze Stock ad-hoc views last):
+  day-clustered hit rate vs the Nifty with its Wilson bound, average vs Nifty before/after a 0.25%
+  round trip, breakdown / bearish-reversal judged as down-calls, "too early" under 10 scored days.
+  Shown as "Results by list" under the "Is the model working?" card on Verdict Calibration, with the
+  new pre-registered **`WATCHLIST_RULE`** (registered 2026-11-09; separate from DECISION_RULE, which is
+  unchanged). The Friday report card now has a Top Picks section and a Tomorrow's Watchlist section
+  (up-setups and down-setups apart). Returns stay close-to-close from the logging session's close:
+  the ledger stores no next-day opens, so next-open entry for the after-close list isn't measured.
+  The calibration page now shows "Uptrend / Strong trend" labels instead of BUY/STRONG BUY.
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
@@ -69,6 +80,11 @@ This section is the running memory between sessions; older sections below are hi
 - **Verdict Calibration decision rule** (registered 2026-09-29: 20 sessions, ≥150 bullish verdicts
   over ≥30 days, day-clustered Wilson lower bound vs NIFTY > 50%, plus a Rising-NIFTY-only copy):
   earliest verdict ~mid-December 2026 because of the logging gap. Do not retune it.
+- **Tomorrow's Watchlist rule** (`WATCHLIST_RULE`, registered 2026-11-09: picks logged from 4 Nov, all
+  buckets pooled direction-aware, 5 sessions, ≥100 picks over ≥30 days, 0.25% round-trip cost,
+  day-clustered Wilson lower bound > 50%): the 30th session from 4 Nov is 17 Dec, so the earliest
+  verdict is **~24 Dec 2026** (after the nightly backfill), later for every session with no list.
+  Do not retune it.
 - Shadow breadth label re-test ~April 2027; range-regime sector-neutral reversal re-test late 2027;
   point-in-time index membership would remove survivorship bias from every study.
 

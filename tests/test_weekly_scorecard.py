@@ -26,10 +26,14 @@ def test_plain_summary_states():
 
 def _rows():
     return pd.DataFrame([
-        {"ticker": "AAA.NS", "logged_date": "2026-11-02", "entry_price": 100.0, "verdict": "BUY"},
-        {"ticker": "AAA.NS", "logged_date": "2026-11-04", "entry_price": 120.0, "verdict": "BUY"},
-        {"ticker": "BBB.NS", "logged_date": "2026-11-03", "entry_price": 200.0, "verdict": "STRONG BUY"},
-        {"ticker": "CCC.NS", "logged_date": "2026-11-03", "entry_price": 50.0, "verdict": "WATCH"},
+        {"ticker": "AAA.NS", "logged_date": "2026-11-02", "entry_price": 100.0, "verdict": "BUY",
+         "source": "shadow_auto"},
+        {"ticker": "AAA.NS", "logged_date": "2026-11-04", "entry_price": 120.0, "verdict": "BUY",
+         "source": "shadow_auto"},
+        {"ticker": "BBB.NS", "logged_date": "2026-11-03", "entry_price": 200.0, "verdict": "STRONG BUY",
+         "source": "shadow_auto"},
+        {"ticker": "CCC.NS", "logged_date": "2026-11-03", "entry_price": 50.0, "verdict": "WATCH",
+         "source": "analyze_page"},
     ])
 
 
