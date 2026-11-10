@@ -4,7 +4,7 @@ name: Warm Price Store
 # (~750 names) used to read Yahoo only, because Angel One's candle API answers
 # 403 "exceeding access rate" above ~90 calls/min when the app hits it from 16
 # scan threads. This job asks Angel once per symbol after the close, at a hard
-# throttle (ANGEL_BULK_RPS, default 2 req/s), and stores the bars in the
+# throttle (ANGEL_BULK_RPS, default 1.4 req/s), and stores the bars in the
 # daily_bars table; data.fetcher.fetch_single serves daily history from there
 # (Tier 0.5) before Yahoo when it is fresh. Requires DATABASE_URL to point at
 # the SAME Postgres the Streamlit Cloud app uses — see dashboard/DB_SETUP.md.
@@ -15,8 +15,9 @@ name: Warm Price Store
 # well after the 15:30 close so Angel's ONE_DAY candle for the day is final.
 # First run backfills ANGEL_BACKFILL_DAYS (default 2000 = one request per
 # symbol); later runs fetch only the new session. A second run the same
-# evening is a no-op. ~750 names at 2 req/s is ~6-7 min when Angel doesn't
-# throttle; each rate-limit hit costs a 65 s pause, hence the 45-min timeout.
+# evening is a no-op. ~750 names at 1.4 req/s is ~9 min; each rate-limit hit
+# costs a 65 s pause, hence the 45-min timeout. The app reads the store only
+# while the market is closed (data/price_store.py).
 
 on:
   # No GitHub schedule: cron-job.org triggers this via workflow_dispatch

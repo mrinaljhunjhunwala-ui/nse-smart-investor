@@ -251,9 +251,12 @@ def _yahoo_frame(dates, start=100.0):
     return _frame(dates, start=start)
 
 
-def _no_angel(monkeypatch):
+def _no_angel(monkeypatch, market_open=False):
+    """Angel off, and pin the market-hours gate so fetch_single (real clock)
+    behaves the same whenever CI runs."""
     from data import angel_fetcher as af
     monkeypatch.setattr(af, "is_configured", lambda: False)
+    monkeypatch.setattr(ps, "market_open", lambda now=None: market_open)
 
 
 def test_fetcher_serves_fresh_store(monkeypatch):
@@ -273,13 +276,15 @@ def test_fetcher_serves_fresh_store(monkeypatch):
     assert fetcher.get_last_diagnostic("PriceStore")["ok"] is True
 
 
-@pytest.mark.parametrize("case", ["stale", "short"])
+@pytest.mark.parametrize("case", ["stale", "one_behind", "short"])
 def test_fetcher_falls_through_when_stale_or_short(monkeypatch, case):
     monkeypatch.setenv("NSE_PRICE_STORE", "1")
     _no_angel(monkeypatch)
     last = _last_session()
     if case == "stale":
         dates = _sessions_ending(last - datetime.timedelta(days=10), 300)
+    elif case == "one_behind":                      # last session not filled yet
+        dates = _sessions_ending(last - datetime.timedelta(days=1), 300)
     else:
         dates = _sessions_ending(last, 40)          # 1y requested, ~2 months stored
     ps.upsert_daily_bars("ABC.NS", _frame(dates), "AngelOne")
@@ -295,6 +300,64 @@ def test_fetcher_falls_through_when_stale_or_short(monkeypatch, case):
     assert hits == ["ABC.NS"]
     assert df.index[-1].date() == ydates[-1]
     assert fetcher.get_last_diagnostic("PriceStore")["ok"] is False
+
+
+# ── Market-hours gate ────────────────────────────────────────────────────────
+
+_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+
+def _store_ending_mon_9_nov():
+    ps.upsert_daily_bars("ABC.NS", _frame(_sessions_ending(datetime.date(2026, 11, 9), 300)), "AngelOne")
+
+
+def test_gate_market_open_never_serves(monkeypatch):
+    monkeypatch.setenv("NSE_PRICE_STORE", "1")
+    _store_ending_mon_9_nov()
+    # Wed 11 Nov 2026 12:00 / 09:15 IST: market open -> Yahoo, although the
+    # store holds every completed session (Mon 9; Tue 10 is a holiday).
+    for now in (datetime.datetime(2026, 11, 11, 12, 0, tzinfo=_IST),
+                datetime.datetime(2026, 11, 11, 9, 15, tzinfo=_IST)):
+        assert ps.market_open(now) is True
+        assert ps.serve("ABC.NS", "1y", now=now) is None
+
+
+def test_gate_market_closed_serves_when_current(monkeypatch):
+    monkeypatch.setenv("NSE_PRICE_STORE", "1")
+    _store_ending_mon_9_nov()
+    # Mon 9 Nov 18:45 (after the fill) and Tue 10 Nov (Diwali holiday): closed, current.
+    for now in (datetime.datetime(2026, 11, 9, 18, 45, tzinfo=_IST),
+                datetime.datetime(2026, 11, 10, 12, 0, tzinfo=_IST),
+                datetime.datetime(2026, 11, 11, 8, 0, tzinfo=_IST)):       # pre-open Wed
+        assert ps.market_open(now) is False
+        df = ps.serve("ABC.NS", "1y", now=now)
+        assert df is not None and df.index[-1].date() == datetime.date(2026, 11, 9)
+    # Wed 11 Nov 16:00: closed, but Wed's bar isn't in the store yet -> Yahoo.
+    assert ps.serve("ABC.NS", "1y", now=datetime.datetime(2026, 11, 11, 16, 0, tzinfo=_IST)) is None
+
+
+def test_fetcher_uses_yahoo_while_market_open(monkeypatch):
+    monkeypatch.setenv("NSE_PRICE_STORE", "1")
+    _no_angel(monkeypatch, market_open=True)
+    dates = _sessions_ending(_last_session(), 300)
+    ps.upsert_daily_bars("ABC.NS", _frame(dates), "AngelOne")
+    hits = []
+
+    def _yahoo(t, period="1y", interval="1d"):
+        hits.append(t)
+        return _yahoo_frame(dates)
+
+    monkeypatch.setattr(fetcher, "_fetch_yahoo_direct", _yahoo)
+    fetcher.fetch_single("ABC.NS", period="1y", interval="1d")
+    assert hits == ["ABC.NS"]
+
+
+def test_default_bulk_rps_is_1_4(monkeypatch):
+    monkeypatch.delenv("ANGEL_BULK_RPS", raising=False)
+    assert wps.DEFAULT_RPS == 1.4
+    assert wps._env_float("ANGEL_BULK_RPS", wps.DEFAULT_RPS) == 1.4
+    monkeypatch.setenv("ANGEL_BULK_RPS", "2")
+    assert wps._env_float("ANGEL_BULK_RPS", wps.DEFAULT_RPS) == 2.0
 
 
 def test_fetcher_tier_disabled_by_env(monkeypatch):

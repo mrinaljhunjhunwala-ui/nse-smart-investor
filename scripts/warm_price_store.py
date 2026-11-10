@@ -9,7 +9,8 @@ stored date to today, at a hard throttle, and upserts them into the
 ``daily_bars`` table (data/price_store.py). data.fetcher.fetch_single then
 serves daily history from that table (Tier 0.5) before trying Yahoo.
 
-* Throttle: ``ANGEL_BULK_RPS`` requests per second (default 2).
+* Throttle: ``ANGEL_BULK_RPS`` requests per second (default 1.4 = ~84/min,
+  under the ~90/min level where Angel starts answering 403).
 * First run per symbol backfills ``ANGEL_BACKFILL_DAYS`` (default 2000 — the
   most one ONE_DAY getCandleData request returns, so one call per symbol).
 * Incremental and resume-safe: a symbol already holding the last completed
@@ -43,6 +44,7 @@ if _ROOT not in sys.path:
 _log = logging.getLogger("scripts.warm_price_store")
 
 INDEX_SYMBOLS = ("^NSEI", "^INDIAVIX")
+DEFAULT_RPS = 1.4
 RATE_LIMIT_SLEEP_S = 65
 MAX_CONSECUTIVE_RATE_LIMITED = 3
 
@@ -119,7 +121,7 @@ def run(symbols: Optional[Iterable[str]] = None, *,
             from data import angel_fetcher as af
             af.use_hist_api_key(True)
             fetch = af.fetch_daily_candles
-        rps = _env_float("ANGEL_BULK_RPS", 2.0)
+        rps = _env_float("ANGEL_BULK_RPS", DEFAULT_RPS)
         backfill = _env_int("ANGEL_BACKFILL_DAYS", 2000)
         throttle = Throttle(rps, clock=clock, sleep=sleep)
         syms = list(symbols) if symbols is not None else _symbols()

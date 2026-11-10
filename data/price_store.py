@@ -30,6 +30,12 @@ split-adjusted. Two guards keep a split from poisoning a 200-day SMA:
   the oldest date they share; a >30% mismatch drops the symbol's rows, the
   next nightly run backfills it again and the trim above applies.
 
+WHEN IT SERVES: only while the NSE market is closed, and only once it holds
+the last completed session — so in practice from the 18:30 IST fill until the
+next 09:15 open (and all weekend/holiday). During market hours, and between
+the close and the fill, fetch_single falls through to Yahoo exactly as before,
+so intraday scores (in-progress bar, volume projection) are unchanged.
+
 Bonus/split ratios under 1.3 (e.g. 5:4) are not caught by either guard.
 Dividends are not adjusted by either source's close column.
 
@@ -347,20 +353,38 @@ def _has_rows() -> bool:
     return ok
 
 
+# The store serves only when the market is closed AND it already holds the
+# last completed session. During 09:15-15:30 IST Yahoo carries the in-progress
+# bar that intraday alerts, Top Picks and score.py's volume projection use;
+# between the 15:30 close and the 18:30 fill Yahoo already has today's final
+# bar while the store still ends yesterday (the 15:50 Tomorrow's Watchlist run
+# and the ledger backfill would otherwise score one session late). A store a
+# session behind therefore falls through to Yahoo.
+SERVE_MAX_LAG_SESSIONS = 0
+
+
+def market_open(now: Optional[datetime.datetime] = None) -> bool:
+    """NSE cash market open at ``now`` (dashboard.shared.market_hours — pure,
+    no Streamlit — with the utils.nse_holidays calendar)."""
+    from dashboard.shared.market_hours import is_market_open
+    return is_market_open(_ist_naive(now))
+
+
 def serve(symbol: str, period: str, now: Optional[datetime.datetime] = None) -> Optional[pd.DataFrame]:
     """Stored frame for fetch_single, or None when the store can't serve it:
-    disabled, empty/unreachable, not reaching back to the period's start
-    (7-day grace for weekends/holidays), or more than one session stale."""
-    if not enabled() or not _has_rows():
-        return None
+    disabled, the market is open, empty/unreachable, not reaching back to the
+    period's start (7-day grace for weekends/holidays), or missing the last
+    completed session (SERVE_MAX_LAG_SESSIONS)."""
     now = _ist_naive(now)
+    if not enabled() or market_open(now) or not _has_rows():
+        return None
     start = period_start(period, now.date())
     df = load_daily_bars(symbol, None)
     if df is None or df.empty:
         return None
     if df.index[0].date() > start + datetime.timedelta(days=7):
         return None
-    if not is_fresh(df.index[-1].date(), now):
+    if not is_fresh(df.index[-1].date(), now, max_lag=SERVE_MAX_LAG_SESSIONS):
         return None
     return df[df.index >= pd.Timestamp(start)]
 

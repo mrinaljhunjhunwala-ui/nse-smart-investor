@@ -7,7 +7,8 @@ Source priority (fastest / most reliable first):
             Only active when [angel_one] credentials are set in Streamlit secrets.
   Tier 0.5: PriceStore          — daily bars the nightly Angel One job wrote to
             the daily_bars table (data/price_store.py). Daily interval only;
-            used when it reaches the period's start and is <= 1 session old.
+            Serves only when the market is closed and the store holds the last
+            completed session and reaches the period's start; otherwise Yahoo.
             NSE_PRICE_STORE=0 turns it off.
   Tier 1 : Stooq CSV            — free, no API key, cloud-safe (daily bars only).
   Tier 2 : Yahoo Finance v8 API — direct urllib + cookie+crumb auth (since mid-2024).
