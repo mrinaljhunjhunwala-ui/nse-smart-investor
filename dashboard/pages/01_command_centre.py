@@ -632,6 +632,17 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             unsafe_allow_html=True,
         )
 
+    # Universe staleness: one caption when the constituent CSV hasn't been
+    # checked against NSE's lists in 45+ days (Sunday refresh job stopped).
+    # No meta file / any error → nothing shown.
+    try:
+        from data.universe import stale_universe_warning
+        _uni_warn = stale_universe_warning()
+    except Exception:
+        _uni_warn = None
+    if _uni_warn:
+        st.caption(f"⚠ {_uni_warn}")
+
     # ── FIX TP-VIX1: warn on regime mismatch ──
     # If VIX has flipped between when the snapshot was scored and now, the
     # picks (esp. their allow_buy gating and any regime-sensitive scoring)
