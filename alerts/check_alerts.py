@@ -1063,11 +1063,11 @@ def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = Non
         else:
             detail = []
             if entry:
-                detail.append(f"Entry {entry}")
+                detail.append(f"Ref {entry}")
             if stop:
-                detail.append(f"Stop {stop}")
+                detail.append(f"Invalidation {stop}")
             if tgt:
-                detail.append(f"Target {tgt}")
+                detail.append(f"Measured move {tgt}")
             if detail:
                 lines.append("   " + " · ".join(str(x) for x in detail))
 

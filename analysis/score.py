@@ -1414,13 +1414,19 @@ def _pick_horizon(tech_pts: float, mom_pts: float,
 # Grade + Action
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Letter-grade cut-offs on the 0-90 composite, highest first. Single source
+# of truth: pages import GRADE_BANDS / grade_label rather than re-typing them.
+GRADE_BANDS: tuple = ((88, "A+"), (75, "A"), (62, "B"), (48, "C"), (32, "D"))
+
+
 def _grade(score: float) -> str:
-    if score >= 88: return "A+"
-    if score >= 75: return "A"
-    if score >= 62: return "B"
-    if score >= 48: return "C"
-    if score >= 32: return "D"
+    for cut, label in GRADE_BANDS:
+        if score >= cut:
+            return label
     return "F"
+
+
+grade_label = _grade
 
 def _action(score: float) -> str:
     if score >= 80: return "STRONG BUY"

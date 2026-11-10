@@ -3,6 +3,13 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Business gate on the Analyze Stock headline (10 Nov, `feat/business-gate-headline`):** the hero now
+  reads **Business** first (`analysis/business_gate.py: assess_business` → PASS / CAUTION / FAIL /
+  INSUFFICIENT_DATA, rule table in its docstring, lender routing via `sector_classification`), then
+  **Trend** (score band); tone = worse of the two, FAIL demotes trend to "timing only". Same inputs as
+  `final_verdict.combine`. Fixed: quality score 0 was dropped; flag sentiment mapping (`negative`/`neutral`
+  never matched `red`/`amber`, so every flag read green); cold render now reads stored flags (KV, no
+  scrape) or says "not yet checked"; `growth-lens-off` is a not-applicable guard with its own explanation.
 - **9 Oct → 3 Nov:** every scheduled job failed in ~3 s with no runner (GitHub Actions minutes /
   billing lock). The owner made the repo public (free Actions minutes); jobs run again since 4 Nov.
   The verdict ledger has a **~3½-week logging gap** (no warm Top Picks runs in that window).
@@ -15,6 +22,7 @@ This section is the running memory between sessions; older sections below are hi
   (Playwright visit every 4 h; app made public 7 Nov; first run green).
 - Two tests had fixed dates that aged out (`test_edge_flags` renderer, `test_momentum_leaders`
   frames); both now build frames ending today. Watch for more date-pinned fixtures.
+  **DECISION_RULE sample cutover (2026-11-10):** only Analyze Stock rows (`source="analyze_page"`) carry quality score + flags into `combine()`; from this merge those rows can drop a tier or be vetoed (quality 0, red/amber flag) where before they could not. DECISION_RULE / DECISION_RULE_RISING pool every source and are NOT changed; treat this date as a declared process change when reading the December verdict (Top Picks / Tomorrow's Watchlist logging is unaffected, so WATCHLIST_RULE is clean).
 
 - **Added 7 Nov:** a plain-language "Is the model working?" card with two progress bars at the top of
   Verdict Calibration (`verdict_ledger.plain_summary`), and a Friday 🧾 weekly report card on
@@ -78,8 +86,25 @@ This section is the running memory between sessions; older sections below are hi
   providers with the slow tests' shared `check_*` functions; exit 1 only if Yahoo / bhavcopy / VIX
   FAILED. Not yet run live (written offline, all mocked).
 
+- **Sunday universe refresh (10 Nov, `feat/universe-sunday-refresh`):** `refresh_universe.yml`
+  (dispatch-only) runs `tools/refresh_universe.py --ci`: it fetches NSE's index CSVs and diffs them
+  against `data/nse_index_constituents.csv` (added / removed / renamed = same normalised company name
+  with a new symbol / re-tiered). If anything changed, it opens an `automerge` PR on
+  `auto/universe-YYYY-MM-DD` and sends a Telegram summary. If a fetch fails or the list is under 90%
+  of the current size, the job exits non-zero and writes nothing. The sidecar
+  `nse_index_constituents.meta.json` holds `refreshed`/`checked` dates. Command Centre shows a
+  caption under the Top Picks chip when the list is >45 days old (`universe.stale_universe_warning`).
+  If nothing changes for 28 days, a PR that only updates the meta file keeps that caption quiet.
+  Not yet run live: the sandbox had no network.
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
-- [ ] **Provider canary (job #9, new):** `provider_canary.yml`, body `{"ref":"main"}`, crontab
+- [x] **Universe refresh (job #9, new):** URL
+  `https://api.github.com/repos/mrinaljhunjhunwala-ui/nse-smart-investor/actions/workflows/refresh_universe.yml/dispatches`,
+  POST, the usual four headers, body `{"ref":"main"}`, crontab `0 10 * * 0` (Asia/Kolkata, Sunday
+  10:00). For the auto PR to get CI + automerge, the `AUTOMERGE_TOKEN` secret must be set (PRs opened
+  with `GITHUB_TOKEN` trigger no workflows). Also enable Settings → Actions → "Allow GitHub Actions to
+  create and approve pull requests". Do one manual "Run workflow" first and check the log.
+- [x] **Provider canary (job #10):** `provider_canary.yml`, body `{"ref":"main"}`, crontab
   `0 9 * * 0` IST (Sunday 09:00), same four headers. First run: check the table in the Actions log
   and the 🟢/🔴 Telegram line; a red job means Yahoo, bhavcopy or VIX FAILED.
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings

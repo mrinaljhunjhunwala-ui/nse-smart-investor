@@ -835,11 +835,7 @@ def _sector_df_from_tuple(sector_ranks: tuple):
         return None
 
 
-# PATCH 3c: TTL reduced from 1800 → 300 (5 min) so Top Picks auto-refresh
-# every 5 min during market hours without needing a manual "Scan Now" click.
-# First scan still takes ~2 min; every reload within 5 min is instant from cache.
-# FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
-# the cached result to be wrapped in an extra layer and never properly invalidated).
+# Per-ticker list exclusion, cached 5 min alongside the scans that call it.
 @st.cache_data(ttl=300, show_spinner=False)
 def _list_exclusion(tk: str, period: str = "2y") -> "str | None":
     """Why tk is kept off Top Picks / Tomorrow's Watchlist (locked circuit,
@@ -856,6 +852,15 @@ def _list_exclusion(tk: str, period: str = "2y") -> "str | None":
         return None
 
 
+# PATCH 3c: TTL reduced from 1800 → 300 (5 min) so Top Picks auto-refresh
+# every 5 min during market hours without needing a manual "Scan Now" click.
+# First scan still takes ~2 min; every reload within 5 min is instant from cache.
+# FIX 1: Removed duplicate @st.cache_data decorator (was stacked twice — caused
+# the cached result to be wrapped in an extra layer and never properly invalidated).
+# FIX SCAN-NOW: #292 inserted _list_exclusion between this decorator and this
+# function, so the decorator moved onto _list_exclusion and get_top_picks'
+# force_live _home_top_picks.clear() raised AttributeError. Restored here.
+@st.cache_data(ttl=300, show_spinner=False)
 def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple = ()) -> dict:
     """
     Scan the FULL NSE universe (~745 liquid large/mid/small/micro-caps) and
