@@ -134,7 +134,15 @@ def test_all_pages_present():
     #   * 20_deep_dive.py removed — its indicators / candlestick / mini-
     #     report views were folded into 04_analyze_stock.py as an 8th tab
     #     via dashboard/shared/deep_dive_tab.py. See PR #115.
-    assert len(_PAGES) == 19, f"expected 19 pages, found {len(_PAGES)}: {_IDS}"
+    #
+    # 2026-11-09 (page simplification, owner-approved layout): 19 -> 14 pages.
+    #   * Markets (02) = Live Ticker + Market Breadth + FII / DII Flows (view switch)
+    #   * Find Ideas (13) = Smart Screener + Trend Quality Score (view switch)
+    #   * Watchlist & Journal (07) = My Watchlist + Stock Journal (tabs)
+    #   * Trading Tools (12) = Intraday Trader + Position Sizer (view switch)
+    #   The merged pages' bodies live in dashboard/views/; each view gets its
+    #   own smoke run in test_merged_page_view_loads below.
+    assert len(_PAGES) == 14, f"expected 14 pages, found {len(_PAGES)}: {_IDS}"
 
 
 def test_page_numbers_follow_sidebar_order():
@@ -188,6 +196,93 @@ def test_page_loads_without_exception(page):
     assert rendered > 0, f"{name} rendered no main-area elements — page body did not run"
 
 
+def _merged_views():
+    from dashboard.shared import nav
+    out = []
+    for page, (key, labels) in nav._PAGE_VIEWS.items():
+        fname = os.path.basename(nav._PAGE_FILE[page])
+        out += [(fname, key, label) for label in labels]
+    return out
+
+
+_MERGED_VIEWS = _merged_views()
+
+
+def test_every_merged_page_has_views():
+    pages = {f for f, _, _ in _MERGED_VIEWS}
+    assert pages == {"02_markets.py", "12_trading_tools.py", "13_find_ideas.py"}, pages
+    assert len(_MERGED_VIEWS) == 7
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize("fname,key,label", _MERGED_VIEWS,
+                         ids=[f"{f}::{lbl}" for f, _, lbl in _MERGED_VIEWS])
+def test_merged_page_view_loads(fname, key, label):
+    """Each view of a merged page renders with the network blocked, and the
+    switch really shows the requested view."""
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, fname), default_timeout=240)
+    at.session_state[key] = label
+    at.run()
+    assert not at.exception, (
+        f"{fname} [{label}] raised: " + "; ".join(str(e.value) for e in at.exception))
+    assert at.session_state[key] == label
+    assert len(at.main.children) > 0
+
+
+@pytest.mark.smoke
+def test_watchlist_journal_renders_both_tabs():
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "07_watchlist_journal.py"),
+                           default_timeout=240).run()
+    assert not at.exception, at.exception
+    assert [t.label for t in at.tabs][:2] == ["⭐ My Watchlist", "📓 Stock Journal"]
+
+
+@pytest.mark.smoke
+def test_open_view_flag_selects_view():
+    """nav.request_view's one-shot flag (used by legacy _goto_page names and
+    the command bar) opens the requested view and is consumed."""
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "02_markets.py"), default_timeout=240)
+    at.session_state["_open_mk_view"] = "🏦 FII / DII Flows"
+    at.run()
+    assert not at.exception, at.exception
+    assert at.session_state["mk_view"] == "🏦 FII / DII Flows"
+    assert "_open_mk_view" not in at.session_state
+
+
+@pytest.mark.smoke
+def test_sizer_prefill_opens_position_sizer():
+    """Analyze Stock's "Size Position" button sets ps_entry/ps_sl/ps_tp and
+    switches to Trading Tools; new prefill values open the Position Sizer."""
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "12_trading_tools.py"), default_timeout=240)
+    at.session_state["ps_entry"] = 101.5
+    at.session_state["ps_sl"] = 97.0
+    at.session_state["ps_tp"] = 110.0
+    at.run()
+    assert not at.exception, at.exception
+    assert at.session_state["tt_view"] == "📐 Position Sizer"
+    # Without a prefill the page opens on the first view.
+    at2 = AppTest.from_file(os.path.join(_PAGES_DIR, "12_trading_tools.py"), default_timeout=240).run()
+    assert not at2.exception, at2.exception
+    assert at2.session_state["tt_view"] == "⚡ Intraday Trader"
+
+
+def test_legacy_page_names_resolve():
+    from dashboard.shared import nav
+    assert nav.resolve_page("📐 Position Sizer") == ("Trading Tools", "📐 Position Sizer")
+    assert nav.resolve_page("Market Breadth") == ("Markets", "📊 Breadth & Macro")
+    assert nav.resolve_page("🔍 Analyze Stock") == ("Analyze Stock", None)
+    assert nav.resolve_page("Quality Watch") == ("Long-Term Quality", None)
+    assert nav.resolve_page("nope") == (None, None)
+    for old, (new, view) in nav._LEGACY_PAGES.items():
+        assert new in nav._PAGE_FILE and nav._PAGE_FILE[old] == nav._PAGE_FILE[new]
+        if view:
+            assert view in nav._PAGE_VIEWS[new][1], (old, view)
+    # Slugs the owner asked to keep (URL = file name minus the number prefix).
+    slugs = {os.path.basename(f)[3:-3] for f in nav._PAGE_FILE.values()}
+    for keep in ("command_centre", "analyze_stock", "tomorrow_watchlist", "my_portfolio", "paper_trades"):
+        assert keep in slugs, keep
+
+
 def test_command_centre_hero_says_no_read_when_feeds_are_down():
     """replica-test S3 (2026-10-04): with every feed blocked the hero used to
     read "Mixed · no clear trend" under a "range regime" kicker — a market call
@@ -198,3 +293,8 @@ def test_command_centre_hero_says_no_read_when_feeds_are_down():
     html = "\n".join(str(m.value) for m in at.markdown)
     assert "No read" in html and "market feeds unavailable" in html
     assert "range regime" not in html and "regime unavailable" in html
+    # 2026-11-09: the full breadth panel and sector heatmap moved to Markets;
+    # Command Centre keeps one summary line plus a link.
+    assert "cc-market-line" in html and "NSE breadth unavailable" in html
+    assert 'class="heat-grid"' not in html and "Sector heatmap" not in html
+    assert any(b.label == "📊 Open Markets" for b in at.button)

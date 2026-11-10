@@ -13,16 +13,14 @@ intraday tools, and optional live broker integration via Angel One SmartAPI.
 
 ## ✨ Features
 
-An 18-page platform, grouped into six workspaces:
+A 14-page platform, grouped into four sidebar sections (Advanced starts collapsed):
 
-| Workspace | Pages |
+| Section | Pages |
 |---|---|
-| **Markets** | Market Live · Market Overview (incl. breadth + macro) |
-| **Trading** | Intraday Trader (CPR / ORB / Supertrend / VWAP / OI & options) · Smart Screener |
-| **Portfolio** | My Portfolio · Paper Trades · My Watchlist · Tomorrow's Watchlist |
-| **Analysis** | Analyze Stock · Deep Dive · Backtest · Swing Checklist |
-| **Scanners** | TQS Scanner (Trend Quality Score) · Quality Watch (long-term holds) |
-| **Tools** | Position Sizer · Angel One · Investor Guide · Command Centre (home) |
+| **Home** | Command Centre (landing) · Markets (Live Ticker / Breadth & Macro / FII-DII Flows) · Tomorrow's Watchlist · Analyze Stock (incl. Deep Dive tab and swing checklist) |
+| **Portfolio** | My Portfolio · Paper Trades · Watchlist & Journal · Long-Term Quality (long-term holds) |
+| **Advanced** | Verdict Calibration · Backtest · Angel One |
+| **Tools** | Trading Tools (Intraday Trader: CPR / ORB / Supertrend / VWAP / OI & options · Position Sizer) · Find Ideas (Smart Screener · TQS Scanner) · Investor Guide |
 
 **Highlights**
 - **Composite Score (0–90):** technical (40) · momentum (25) · volume (15) · sentiment (10),
@@ -33,7 +31,7 @@ An 18-page platform, grouped into six workspaces:
   candlestick pattern · news sentiment", describing a scoring model that no longer exists.
 - **Trend Quality Score (TQS):** a 90-point, four-pillar scanner across Nifty 50/100/500/Total Market.
 - **Qualitative flags:** governance/regulatory red-amber-green flags from NSE corporate actions,
-  Google News, and NSE RSS feeds — surfaced on Quality Watch and Analyze Stock.
+  Google News, and NSE RSS feeds — surfaced on Long-Term Quality and Analyze Stock.
 - **Sector-aware fundamentals:** banks/NBFCs/insurers are assessed on the right metrics (P/B + ROE),
   not penalised for "leverage" that is really deposits.
 - **Valuation Decision Layer (E1-v2):** regime-neutral, guard-first engine that outputs a *descriptive
@@ -84,8 +82,10 @@ SQLite for storage.
 ```
 dashboard/
   app.py                 thin entry point (page config + theme + redirect to Command Centre)
-  pages/01..19_*.py      one file per page, numbered in sidebar order (explicit imports), incl.
-                         12_tqs_scanner.py and 04_quality_watch.py
+  pages/01..14_*.py      one file per page, numbered in sidebar order (explicit imports)
+  views/                 bodies of merged pages (render()): market_live · market_breadth · fii_dii_flows ·
+                         smart_screener · tqs_scanner · my_watchlist · stock_journal · intraday_trader ·
+                         position_sizer — rendered by Markets / Find Ideas / Watchlist & Journal / Trading Tools
   shared/                design.py (NSE Pro theme) · nav.py · cache.py · chart_helpers.py · trade_utils.py
 analysis/                PURE engine, no Streamlit — heavily unit-tested
   score.py · hedging.py · portfolio_risk.py · portfolio_manager.py · liquidity.py
@@ -114,7 +114,7 @@ py -m pytest -m "not slow" -q      # default suite (what CI runs)
 py -m pytest -m slow -q            # gated end-to-end backtest smoke (needs network)
 ```
 
-- **Page smoke** (`tests/test_pages_smoke.py`) loads all 18 pages headlessly with network blocked,
+- **Page smoke** (`tests/test_pages_smoke.py`) loads all 14 pages (and each view of the merged pages) headlessly with network blocked,
   so they take the graceful degraded path → deterministic.
 - **Valuation regression** (`tests/test_valuation_golden_snapshot.py`) replays captured inputs through
   the pure engine and fails on posture/confidence drift.

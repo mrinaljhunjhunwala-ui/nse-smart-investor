@@ -11,7 +11,7 @@ from analysis.fundamentals import analytics
 from analysis.fundamentals.analytics import AnalyticResult
 from analysis.portfolio_fundamentals import compute_quality_score
 
-PAGE = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "13_analyze_stock.py"
+PAGE = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "04_analyze_stock.py"
 KEY_MAP = {"roe": "roe", "roce": "roce", "revenue_cagr": "revenue_cagr_5y", "eps_cagr": "eps_cagr_5y"}
 
 

@@ -48,7 +48,8 @@ ANALYSIS = ROOT.parent / "analysis"
 
 
 def _files():
-    return list((ROOT / "pages").glob("*.py")) + list((ROOT / "shared").glob("*.py"))
+    return (list((ROOT / "pages").glob("*.py")) + list((ROOT / "views").glob("*.py"))
+            + list((ROOT / "shared").glob("*.py")))
 
 
 def test_no_instruction_copy_in_analysis_narratives():

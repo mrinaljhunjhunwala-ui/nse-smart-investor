@@ -46,7 +46,8 @@ render_top_bar()
 # ───────────────────────── page body ─────────────────────────
 # LAYOUT (mockup artboard 01, 2026-09-12 "proposed layout" artifact)
 # Title + meta line → five-cell market pulse → descriptive posture hero →
-# sector heatmap → top gainers + recent posture changes → data-health strip.
+# one-line breadth/sector summary (full panels on Markets) → top gainers +
+# recent posture changes → data-health strip.
 # Top Picks, paper trades and open positions below keep their behaviour.
 #
 # CC-COPY: the blocks this replaced (morning card, VIX/Nifty cards, "market
@@ -66,7 +67,7 @@ from dashboard.shared.cache import (
 )
 from dashboard.shared.chart_helpers import _index_strip_data
 from dashboard.shared.ui_components import (
-    gate_strip, section_header, signal_table, chip_delta, chip_tag, fmt_inr, rank_chip,
+    gate_strip, signal_table, chip_delta, chip_tag, fmt_inr, rank_chip,
 )
 
 _v2_flag = _cc_rw_enabled()   # default ON since 2026-09-24; NSE_USE_REGIME_WEIGHTS=0 disables
@@ -210,97 +211,31 @@ except Exception as _hv_err:
     logging.getLogger("dashboard.command_centre").debug("hero_verdict render failed: %s", _hv_err)
 
 
-# ── NSE-wide breadth (bhavcopy) next to the regime label ─────────────────────
-def _fmt_pct(v) -> str:
-    return f"{v:.0f}%" if isinstance(v, (int, float)) else "–"
-
-
-def _breadth_provenance(b: dict) -> str:
-    """'as of 08 Oct · niftytotalmarket, 825 stocks' (escaped, small header text)."""
-    try:
-        asof = _mb_dt.date.fromisoformat(str(b.get("date"))[:10]).strftime("%d %b")
-    except Exception:
-        asof = str(b.get("date") or "?")
-    uni = b.get("universe") or ("all EQ" if b.get("source") == "bhavcopy" else "?")
-    size = b.get("universe_size")
-    tail = f", {int(size):,} stocks" if isinstance(size, (int, float)) else ""
-    src = "bhavcopy" if b.get("source") == "bhavcopy" else "scan"
-    return _html.escape(f"as of {asof} · {uni}{tail} · {src}")
-
-
-def _render_breadth_panel() -> None:
-    from analysis.market_breadth import breadth_agreement
-    from dashboard.shared.cache import get_market_breadth
-    from dashboard.shared.ui_components import chip_pill
-    try:
-        b = get_market_breadth()
-    except Exception:
-        b = None
-    if not b:
-        st.markdown(section_header("NSE breadth", "all EQ stocks · bhavcopy"), unsafe_allow_html=True)
-        st.caption("Breadth unavailable: not enough bhavcopy sessions cached yet.")
-        return
-    st.markdown(section_header("NSE breadth", _breadth_provenance(b)), unsafe_allow_html=True)
-    _ad = b.get("ad_ratio")
-    _hi, _lo = b.get("new_52w_highs"), b.get("new_52w_lows")
-    cells = [
-        ("Adv / Dec", f"{b['advances']:,} / {b['declines']:,}",
-         f"A/D {_ad:.2f}" if isinstance(_ad, (int, float)) else "A/D –"),
-        ("Above 20DMA", _fmt_pct(b.get("pct_above_20dma")), "share of stocks"),
-        ("Above 50DMA", _fmt_pct(b.get("pct_above_50dma")), "share of stocks"),
-        ("Above 200DMA", _fmt_pct(b.get("pct_above_200dma")), "share of stocks"),
-        ("52W highs / lows",
-         f"{int(_hi)} / {int(_lo)}" if isinstance(_hi, (int, float)) and isinstance(_lo, (int, float)) else "–",
-         "close-based"),
-    ]
-    st.markdown(gate_strip(cells), unsafe_allow_html=True)
-    agree = breadth_agreement(_cc_label, b.get("breadth_label"), b.get("pct_above_50dma"))
-    tone = {"MATCH": "good", "MISMATCH": "warn"}.get(agree["status"], "neutral")
-    st.markdown(
-        f'<div style="font-size:12px;color:var(--dim);margin:4px 0 12px">'
-        f'{chip_pill(agree["status"], tone=tone)} {_html.escape(agree["text"])}'
-        f' · breadth reads <b>{_html.escape(str(b.get("breadth_label", "unknown")))}</b></div>',
+# ── Compact breadth + sector line (full panels live on Markets) ─────────────
+# 2026-11-09: the full NSE breadth panel and the sectoral-index heatmap used to
+# render here as well as on Markets. Command Centre now shows one line and a
+# link; the full breadth panel is on Markets → Breadth & Macro → Breadth and
+# the sector heatmap on Markets → Live Ticker.
+def _render_market_summary() -> None:
+    from dashboard.shared.breadth_panel import load_breadth, summary_line
+    from dashboard.shared.nav import nav_to
+    _ms1, _ms2 = st.columns([5, 1], vertical_alignment="center")
+    _ms1.markdown(
+        f'<div class="cc-market-line" style="font-size:13px;color:var(--dim)">'
+        f'<b>Market breadth</b> · {summary_line(load_breadth(), _cc_idx)}</div>',
         unsafe_allow_html=True,
     )
+    if _ms2.button("📊 Open Markets", key="cc_open_markets", width="stretch",
+                   help="Full breadth panel, sector heatmap and FII / DII flows"):
+        nav_to("Market Breadth")
 
 
 try:
-    _render_breadth_panel()
-except Exception as _bp_err:
+    _render_market_summary()
+except Exception as _ms_err:
     import logging
-    logging.getLogger("dashboard.command_centre").debug("breadth panel failed: %s", _bp_err)
-    st.caption("Breadth unavailable.")
-
-
-# ── Sector heatmap (Nifty sectoral indices, 1-day change) ────────────────────
-_SECTOR_IDX = [("BANK NIFTY", "Bank"), ("NIFTY IT", "IT"), ("NIFTY AUTO", "Auto"),
-               ("NIFTY FMCG", "FMCG"), ("NIFTY PHARMA", "Pharma"), ("NIFTY METAL", "Metal"),
-               ("NIFTY ENERGY", "Energy")]
-
-
-def _render_sector_heatmap() -> None:
-    rows = [(name, *_cc_idx[lbl]) for lbl, name in _SECTOR_IDX if lbl in _cc_idx]
-    st.markdown(section_header("Sector heatmap", "1-day change · nifty sectoral indices · sorted"),
-                unsafe_allow_html=True)
-    if not rows:
-        st.caption("Sector index quotes are unavailable right now.")
-        return
-    rows.sort(key=lambda r: -r[2])
-    peak = max(max(abs(r[2]) for r in rows), 1.0)
-    cells = []
-    for name, px, chg in rows:
-        hue = "bull" if chg >= 0 else "bear"
-        alpha = 4 + round(min(abs(chg) / peak, 1.0) * 22)      # hue = sign, strength = size
-        cells.append(
-            f'<div class="heat-cell" style="background:color-mix(in srgb, var(--{hue}) {alpha}%, var(--surface))">'
-            f'<span class="heat-name">{name}</span>'
-            f'<div><div class="heat-val" style="color:var(--{hue})">{chg:+.2f}%</div>'
-            f'<div class="heat-sub">{fmt_inr(px, 0)}</div></div></div>'
-        )
-    st.markdown(f'<div class="heat-grid">{"".join(cells)}</div>', unsafe_allow_html=True)
-
-
-_render_sector_heatmap()
+    logging.getLogger("dashboard.command_centre").debug("market summary failed: %s", _ms_err)
+    st.caption("Market breadth summary unavailable.")
 
 
 # ── Two columns: today's gainers + recent posture changes ────────────────────

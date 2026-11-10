@@ -13,7 +13,14 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "10_smart_screener.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "13_find_ideas.py")
+
+
+def _app(timeout):
+    """The merged page with the view under test preselected."""
+    at = AppTest.from_file(_PAGE, default_timeout=timeout)
+    at.session_state["fi_view"] = "🔎 Smart Screener"
+    return at
 
 _FAKE_SIGNALS = [
     {"ticker": "AAA.NS", "price": 100.0, "sl": 95.0, "tp": 112.0, "screen": "Breakout",
@@ -56,7 +63,7 @@ def _run_button(at):
 
 
 def test_scan_renders_ranked_results_and_detail():
-    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    at = _app(120).run()
     assert not at.exception
     assert "scr_run" not in at.session_state
 
@@ -71,7 +78,7 @@ def test_scan_renders_ranked_results_and_detail():
 
 
 def test_results_survive_later_interaction():
-    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    at = _app(120).run()
     _run_button(at).click().run()
     detail = next(s for s in at.selectbox if "Setup detail" in s.label)
     detail.select(2).run()                                  # any widget change = rerun

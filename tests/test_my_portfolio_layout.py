@@ -11,7 +11,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "06_my_portfolio.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "05_my_portfolio.py")
 
 _HOLDINGS = [
     {"ticker": "AAA", "quantity": 10, "avg_buy_price": 100.0, "date_bought": "2026-01-02"},

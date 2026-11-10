@@ -1744,8 +1744,11 @@ if _csv_source is not None:
             _pf_logging.getLogger("dashboard.my_portfolio").error(
                 "Portfolio analysis failed: %s", e, exc_info=True)
             st.error(f"Portfolio analysis failed: {type(e).__name__}: {e}")
-            with st.expander("Show technical details (for debugging)"):
-                st.code(_pf_tb.format_exc())
+            # The traceback is always in the app log; it only shows on the page
+            # when NSE_DEBUG=1 (local development).
+            if os.environ.get("NSE_DEBUG", "").lower() in ("1", "true", "yes"):
+                with st.expander("Diagnostics", expanded=False):
+                    st.code(_pf_tb.format_exc())
         finally:
             # FIX MH4 — always clean up the temp CSV, success or failure.
             if _pm_tmp_csv_path:

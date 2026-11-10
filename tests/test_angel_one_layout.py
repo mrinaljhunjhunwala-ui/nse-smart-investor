@@ -16,7 +16,7 @@ from streamlit.testing.v1 import AppTest
 import data.angel_fetcher as angel
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "17_angel_one.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "11_angel_one.py")
 
 _SECRET_KEY = "sk_live_abcdefgh7f2c"
 _SECRET_PW = "hunter2-password"

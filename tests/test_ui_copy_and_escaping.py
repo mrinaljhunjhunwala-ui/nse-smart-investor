@@ -29,12 +29,13 @@ _FORBIDDEN = [
 
 @pytest.mark.parametrize("phrase", _FORBIDDEN)
 def test_no_instruction_copy_on_pages(phrase):
-    hits = [p.name for p in _PAGES.glob("*.py") if phrase in p.read_text(encoding="utf-8")]
+    files = list(_PAGES.glob("*.py")) + list((_PAGES.parent / "views").glob("*.py"))
+    hits = [p.name for p in files if phrase in p.read_text(encoding="utf-8")]
     assert not hits, f"{phrase!r} reappeared in {hits}"
 
 
 def test_analyze_stock_does_not_render_tracebacks():
-    src = (_PAGES / "13_analyze_stock.py").read_text(encoding="utf-8")
+    src = (_PAGES / "04_analyze_stock.py").read_text(encoding="utf-8")
     assert "st.code(traceback.format_exc())" not in src
 
 

@@ -42,3 +42,6 @@ ignore = ["E203"]
 [tool.ruff.lint.per-file-ignores]
 # Test files often have long parametrize strings; give them slack.
 "tests/*.py" = ["E501"]
+# Page bodies moved verbatim into render() functions (2026-11-09); the extra
+# indent level pushed some long f-strings / HTML lines past 120.
+"dashboard/views/*.py" = ["E501"]

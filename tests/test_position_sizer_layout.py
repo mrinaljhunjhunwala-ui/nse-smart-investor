@@ -9,7 +9,14 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "16_position_sizer.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "12_trading_tools.py")
+
+
+def _app(timeout):
+    """The merged page with the view under test preselected."""
+    at = AppTest.from_file(_PAGE, default_timeout=timeout)
+    at.session_state["tt_view"] = "📐 Position Sizer"
+    return at
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +32,7 @@ def _html(at) -> str:
 
 
 def test_fixed_risk_output_panel():
-    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    at = _app(120).run()
     assert not at.exception, at.exception
     html = _html(at)
     # Defaults: 5,00,000 capital, 1% risk, entry 500, stop 480 -> 250 shares.
@@ -37,7 +44,7 @@ def test_fixed_risk_output_panel():
 
 
 def test_inputs_recompute_and_lots():
-    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    at = _app(120).run()
     at.number_input(key="ps_lot").set_value(100).run()
     assert not at.exception, at.exception
     html = _html(at)
@@ -45,13 +52,13 @@ def test_inputs_recompute_and_lots():
 
 
 def test_stop_above_entry_warns():
-    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    at = _app(120).run()
     at.number_input(key="ps_sl").set_value(600.0).run()
     assert not at.exception, at.exception
     assert any("greater than stop-loss" in w.value for w in at.warning)
 
 
 def test_kelly_panel_renders():
-    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    at = _app(120).run()
     html = _html(at)
     assert "Kelly-implied size" in html and "Raw Kelly" in html

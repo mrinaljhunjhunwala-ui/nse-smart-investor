@@ -13,7 +13,9 @@ import pathlib as _pl
 
 # Absolute: AppTest resolves relative paths against the calling test file on
 # some Streamlit versions (CI), not the repo root.
-PAGE22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "05_fii_dii_flows.py")
+PAGE22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "02_markets.py")
+# The FII / DII view body (source checks read this file).
+VIEW22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "views" / "fii_dii_flows.py")
 
 
 def _fd_frame(nets):
@@ -28,7 +30,9 @@ def _fd_frame(nets):
 def _run22(monkeypatch, df):
     import analysis.fii_dii as fd
     monkeypatch.setattr(fd, "load_history", lambda days=60: df.copy())
-    return AppTest.from_file(PAGE22, default_timeout=120).run()
+    at = AppTest.from_file(PAGE22, default_timeout=120)
+    at.session_state["mk_view"] = "🏦 FII / DII Flows"
+    return at.run()
 
 
 def test_page22_all_null_nets_does_not_crash(monkeypatch):
@@ -49,7 +53,7 @@ def test_page22_fii_dii_share_y_scale(monkeypatch):
 
 
 def test_page22_no_advice_copy():
-    with open(PAGE22, encoding="utf-8") as fh:
+    with open(VIEW22, encoding="utf-8") as fh:
         assert "keep stops tight" not in fh.read().lower()
 
 

@@ -11,6 +11,7 @@ user-invocable: false
 Automatically, at the end of any turn that edited or created files matching:
 
 - `dashboard/pages/*.py`
+- `dashboard/views/*.py` (bodies of merged pages)
 - `dashboard/shared/*.py`
 - `dashboard/app.py`
 
@@ -26,7 +27,7 @@ The full page-smoke suite is at `tests/test_pages_smoke.py`. It stubs network I/
 py -m pytest tests/test_pages_smoke.py -k "<page_stem>" -q
 ```
 
-Where `<page_stem>` is the page filename without extension, e.g. `13_analyze_stock` when the edit touched `dashboard/pages/13_analyze_stock.py`.
+Where `<page_stem>` is the page filename without extension, e.g. `04_analyze_stock` when the edit touched `dashboard/pages/04_analyze_stock.py`. For a `dashboard/views/<name>.py` edit, use the merged page's stem (`02_markets`, `07_watchlist_journal`, `12_trading_tools`, `13_find_ideas`); `-k` then also picks that page's per-view cases in `test_merged_page_view_loads`.
 
 **Full** — after editing anything in `dashboard/shared/` (shared code touches every page):
 
@@ -46,4 +47,4 @@ The offline page-smoke suite is the cheapest possible regression test for this a
 
 ## When to update the smoke test itself
 
-If the smoke suite doesn't cover a page you're editing (rare — it currently covers all 18), add a smoke case *before* the feature work, not after. Follow the pattern in existing cases (`test_pages_smoke.py` — pick any working case as the template).
+If the smoke suite doesn't cover a page you're editing (rare — it currently covers all 14 pages plus every view of the merged pages), add a smoke case *before* the feature work, not after. Follow the pattern in existing cases (`test_pages_smoke.py` — pick any working case as the template).

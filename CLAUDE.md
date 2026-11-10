@@ -4,14 +4,15 @@ Read this before doing anything in the repo, then the **"Latest" section at the 
 
 ## What this is
 
-An 18-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Educational only — never a SEBI-registered advice product.**
+A 14-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Educational only — never a SEBI-registered advice product.**
 
 ## Architecture at a glance
 
 ```
 dashboard/                       Streamlit UI — the "view" layer
 ├── app.py                       thin entry: page config + theme + redirect
-├── pages/*.py                   19 pages (01–19, numbered in sidebar order), one per screen
+├── pages/*.py                   14 pages (01–14, numbered in sidebar order), one per screen
+├── views/*.py                   bodies of merged pages as render() (Markets, Find Ideas, Watchlist & Journal, Trading Tools)
 └── shared/                      cross-page utilities (design/theme, nav, cache, chart helpers)
 analysis/                        PURE engine — NO Streamlit imports here
 ├── score.py                     composite score (technical 40 + momentum 25 + volume 15 + sentiment 10)
@@ -47,6 +48,8 @@ trade_store.py                   persistence: SQLite by default, Postgres when D
 | Looking for... | Look in... |
 |---|---|
 | A specific dashboard page | `dashboard/pages/NN_*.py` (numbered by nav order) |
+| A view inside a merged page (Live Ticker, Smart Screener, Position Sizer, ...) | `dashboard/views/<name>.py`; the page picks it via `nav._PAGE_VIEWS` |
+| Old page names → new page/view | `nav._LEGACY_PAGES` (used by `_goto_page` and the command bar) |
 | Composite scoring math | `analysis/score.py` |
 | TQS scanner math | `analysis/trend_quality_score.py` |
 | Valuation posture (E1-v2) | `analysis/fundamentals/` + `analysis/thesis/` |
@@ -68,10 +71,10 @@ py -m streamlit run dashboard/app.py --server.port 8501 --server.headless true
 py -m pytest -m "not slow" -q
 
 # One page's smoke test only (fast during dashboard/pages/ edits)
-py -m pytest tests/test_pages_smoke.py -k "13_analyze_stock" -q
+py -m pytest tests/test_pages_smoke.py -k "04_analyze_stock" -q
 
 # Lint a single file (config: pyproject.toml → [tool.ruff], max-line 120)
-py -m ruff check dashboard/pages/13_analyze_stock.py
+py -m ruff check dashboard/pages/04_analyze_stock.py
 
 # Slow end-to-end backtest (needs network — gated out of CI)
 py -m pytest -m slow -q
@@ -79,7 +82,7 @@ py -m pytest -m slow -q
 
 ## Editing discipline
 
-- **Dashboard edits** — after touching `dashboard/pages/*.py` or `dashboard/shared/*.py`, run the matching page-smoke test. The `page-smoke-check` skill enforces this automatically.
+- **Dashboard edits** — after touching `dashboard/pages/*.py`, `dashboard/views/*.py` or `dashboard/shared/*.py`, run the matching page-smoke test (a view is covered by its merged page's `test_merged_page_view_loads` case). The `page-smoke-check` skill enforces this automatically.
 - **Sensitive files are hook-blocked.** `portfolio.csv`, `trades.db` / `*.db` / `*.sqlite`, `.streamlit/secrets.toml`, `.env*`, `.credentials*` cannot be Edit/Written by an agent. See `.claude/hooks/block_sensitive.py`. If a legitimate edit needs to pass, temporarily disable the PreToolUse hook in `.claude/settings.json` — never loosen the deny list.
 - **Auto-lint after Python edits.** `.claude/hooks/lint_python.py` runs ruff in the background and surfaces violations to stderr. Fix same-turn. Ruff replaced flake8 on 2026-09-02 (~100× faster, bundles pyflakes + pycodestyle + isort).
 - **Scoring/valuation edits** — the E1-v2 layer has a golden-snapshot regression (`tests/test_final_verdict.py`, `tests/test_audit_transparency.py`). After touching scoring/valuation/strategies, spawn the `verdict-regression-reviewer` subagent to classify every posture/confidence delta.
