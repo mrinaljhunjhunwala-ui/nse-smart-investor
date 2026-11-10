@@ -862,7 +862,7 @@ def render_sidebar(current: str = None) -> None:
     # widget ... is instantiated" because the text_input has already been
     # created earlier in this same script run. The fix (same deferred-flag
     # + st.rerun() pattern already used for the search boxes in
-    # dashboard/pages/13_analyze_stock.py's "_as_clear_pending" flag): set
+    # dashboard/pages/04_analyze_stock.py's "_as_clear_pending" flag): set
     # a plain flag when "＋" is clicked, then consume it up here, before the
     # widget is instantiated on the *next* run.
     if st.session_state.pop("_wl_add_clear_pending", False):

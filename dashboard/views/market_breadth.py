@@ -6,7 +6,7 @@ unchanged apart from being wrapped in render() and st.stop() becoming return.
 Overview - NSE Smart Investor (merged: former Market Overview + Market Internals).
 
 MERGE NOTE: this page replaces the two separate pages "Market Overview"
-(pages/03_market_overview.py) and "Market Internals" (pages/09_market_internals.py).
+(formerly pages/03_market_overview.py) and "Market Internals" (pages/09_market_internals.py).
 All logic is unchanged from those two pages — just reorganized as tabs under
 one page so related market-context views live in one place. After deploying
 this file, delete dashboard/pages/09_market_internals.py (its content now
