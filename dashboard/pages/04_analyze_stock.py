@@ -1383,9 +1383,9 @@ if analyze_btn or _prefill_active or (
                     _sl_pct = (cs.stop_loss / cs.price - 1) * 100 if cs.price else 0.0
                     _tp_pct = (cs.target / cs.price - 1) * 100 if cs.price else 0.0
                     _l_rows = [
-                        ("Entry (last close)", _rs(float(cs.entry))),
-                        ("Stop", _rs(float(cs.stop_loss)) + " " + chip_delta(_sl_pct)),
-                        ("Target", _rs(float(cs.target)) + " " + chip_delta(_tp_pct)),
+                        ("Ref (last close)", _rs(float(cs.entry))),
+                        ("Invalidation", _rs(float(cs.stop_loss)) + " " + chip_delta(_sl_pct)),
+                        ("Measured move", _rs(float(cs.target)) + " " + chip_delta(_tp_pct)),
                         ("Risk : reward", f"1 : {float(cs.risk_reward):.1f}"),
                     ]
                     # UX-FIX (stale-date): reassess date computed live from today.
