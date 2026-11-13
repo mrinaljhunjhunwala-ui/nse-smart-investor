@@ -312,6 +312,8 @@ def main():
         _vix_val = vix_info.get("vix")
         _vix_str = f"{_vix_val:.2f}" if _vix_val is not None else "N/A"
         print(f"\n  India VIX: {_vix_str}  [{vix_info.get('regime', '?')}]")
+        if vix_info.get("reason"):
+            print(f"  {vix_info['reason']} — VIX fear filter treated as closed")
         print(f"  Scoring {len(tickers)} stock(s)…\n")
         results = []
         for t in tickers:

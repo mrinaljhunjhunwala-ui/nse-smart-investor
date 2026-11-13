@@ -641,7 +641,9 @@ def get_vix_info():
         return get_india_vix_regime()
     except Exception as _e:
         _log.debug("cache.%s degraded: %s", "get_vix_info", _e)
-        return {"vix": 18.0, "regime": "normal", "allow_buy": True, "vix_pct_chg": 0.0}
+        # Fail closed (utils.vix contract) instead of inventing a calm 18.0.
+        return {"vix": None, "regime": "unknown", "allow_buy": False, "vix_pct_chg": 0.0,
+                "source": None, "reason": "VIX unavailable from NSE / Yahoo"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -715,7 +717,7 @@ def _score_for_cc(ticker: str, vix_regime: str = "normal") -> dict:
         from analysis.score import score_stock
         _vix_info = {
             "regime": vix_regime, "vix": None,
-            "allow_buy": vix_regime not in ("fear", "panic"),
+            "allow_buy": vix_regime not in ("fear", "panic", "unknown"),
         }
         s = score_stock(ticker, vix_info=_vix_info)
         # FIX C6: route through the shared mapper
@@ -742,7 +744,7 @@ def _score_watchlist(tickers: tuple, vix_regime: str = "normal", sector_ranks: t
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
     _vix = {"regime": vix_regime, "vix": None,
-            "allow_buy": vix_regime not in ("fear", "panic")}
+            "allow_buy": vix_regime not in ("fear", "panic", "unknown")}
     _sec_df = _sector_df_from_tuple(sector_ranks)
 
     def _one(tk):
@@ -896,7 +898,7 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
     buys, sells = [], []
 
     _vix = {"regime": vix_regime, "vix": None,
-            "allow_buy": vix_regime not in ("fear", "panic")}
+            "allow_buy": vix_regime not in ("fear", "panic", "unknown")}
     _sec_df = _sector_df_from_tuple(sector_ranks)
 
     def _one(tk):

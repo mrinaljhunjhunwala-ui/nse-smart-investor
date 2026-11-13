@@ -3,6 +3,16 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Fundamental score (10 Nov, `feat/fundamental-score`):** `analysis/fundamental_score.py`
+  (pure) — Piotroski F-score 60 pts (scaled to tests that ran; ≥ ⅔ of applicable tests needed) +
+  growth recency 20 + valuation sanity 20 (PEG/PE; lenders P/B × ROE), Altman Z with original
+  1968 coefficients (distress caps at 35; lenders skip Z and LT-debt / current-ratio / gross-margin
+  tests via `sector_classification`). Feeds `business_gate.assess_business(fundamental_score=...)`
+  in place of the quality score (None → old path). Analyze Stock hero shows "Fundamentals NN/100 ·
+  F-score · Z" beside the Trend score; Fundamentals tab has the check table. `combine()` / verdict
+  ledger still get the old quality score (unchanged); Quality Watch keeps `compute_quality_score`.
+  New schema fields `BalanceSheet.retained_earnings` + `RatioSnapshot.market_cap` are mapped from
+  Yahoo only — Screener / filing providers don't fill them, so Z is "n/a" on those sources.
 - **Business gate on the Analyze Stock headline (10 Nov, `feat/business-gate-headline`):** the hero now
   reads **Business** first (`analysis/business_gate.py: assess_business` → PASS / CAUTION / FAIL /
   INSUFFICIENT_DATA, rule table in its docstring, lender routing via `sector_classification`), then
@@ -77,6 +87,15 @@ This section is the running memory between sessions; older sections below are hi
   the ledger stores no next-day opens, so next-open entry for the after-close list isn't measured.
   The calibration page now shows "Uptrend / Strong trend" labels instead of BUY/STRONG BUY.
 
+- **VIX fail-closed + weekly provider canary (10 Nov, `feat/data-reliability-vix-canaries`):**
+  `utils/vix.py` tries NSE `allIndices` (INDIA VIX row, `nse_corp_info` session) then Yahoo ^INDIAVIX
+  and records `source`; Angel is skipped (EQ-only token map, `^` skips Angel by design). All down →
+  regime "unknown", `allow_buy=False`, `reason="VIX unavailable from NSE / Yahoo"`, shown as a caption
+  on Command Centre / sidebar / top bar / checklist / My Portfolio and a once-a-day Telegram notice;
+  `trading.signals` now delegates here. `scripts/provider_canary.py` + `provider_canary.yml` probe 8
+  providers with the slow tests' shared `check_*` functions; exit 1 only if Yahoo / bhavcopy / VIX
+  FAILED. Not yet run live (written offline, all mocked).
+
 - **Sunday universe refresh (10 Nov, `feat/universe-sunday-refresh`):** `refresh_universe.yml`
   (dispatch-only) runs `tools/refresh_universe.py --ci`: it fetches NSE's index CSVs and diffs them
   against `data/nse_index_constituents.csv` (added / removed / renamed = same normalised company name
@@ -112,6 +131,9 @@ This section is the running memory between sessions; older sections below are hi
   10:00). For the auto PR to get CI + automerge, the `AUTOMERGE_TOKEN` secret must be set (PRs opened
   with `GITHUB_TOKEN` trigger no workflows). Also enable Settings → Actions → "Allow GitHub Actions to
   create and approve pull requests". Do one manual "Run workflow" first and check the log.
+- [x] **Provider canary (job #10):** `provider_canary.yml`, body `{"ref":"main"}`, crontab
+  `0 9 * * 0` IST (Sunday 09:00), same four headers. First run: check the table in the Actions log
+  and the 🟢/🔴 Telegram line; a red job means Yahoo, bhavcopy or VIX FAILED.
 - [ ] **Price store (job #11):** add GitHub secret `ANGEL_HIST_API_KEY` (optional, a second SmartAPI
   app key) and the cron-job.org job: `warm_price_store.yml`, body `{"ref":"main"}`, crontab
   `30 18 * * 1-5` IST. Dispatch once by hand first and read the final `price_store: N ok, M skipped,

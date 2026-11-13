@@ -25,17 +25,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from data.nse_corp_info import get_corp_info, get_last_diagnostic  # noqa: E402
+from scripts.provider_canary import check_corp_info  # noqa: E402  (shared with the weekly canary)
 
-
-# Keys the qualitative-flags pipeline reads (per analysis/qualitative_flags.py).
-# Presence of AT LEAST ONE means the endpoint is still shape-compatible.
-_EXPECTED_KEYS = {
-    "latest_announcements",
-    "corporate_actions",
-    "shareholdings_patterns",
-    "financial_results",
-    "borad_meeting",
-}
 
 
 @pytest.mark.slow
@@ -67,13 +58,5 @@ def test_nse_corp_info_live_canary_returns_expected_shape() -> None:
             f"Endpoint may have moved again - see docs/DATA_PROVENANCE_2026-09.md finding #4."
         )
 
-    assert isinstance(result, dict), (
-        f"expected dict response, got {type(result).__name__}"
-    )
-
-    present = _EXPECTED_KEYS & set(result.keys())
-    assert present, (
-        f"none of the expected qualitative-flags keys ({sorted(_EXPECTED_KEYS)}) "
-        f"present in response. Got keys: {sorted(result.keys())}. "
-        f"Response schema likely drifted."
-    )
+    failure = check_corp_info(result)
+    assert failure is None, f"{failure}. Response schema likely drifted."

@@ -155,3 +155,28 @@ def test_metrics_from_fundamentals_duck_typed():
     assert metrics_from_fundamentals(cf, an) == {"net_income": -5.0, "total_equity": 10.0,
                                                  "debt_to_equity": 1.5}
     assert metrics_from_fundamentals(None, None) == {}
+
+
+# ── fundamental_score input (analysis.fundamental_score) ──────────────────────
+@pytest.mark.parametrize("fund, quality, status, needle", [
+    (20, 72.0, FAIL, "fundamental score 20/100"),        # replaces a passing quality score
+    (0, 72.0, FAIL, "fundamental score 0/100"),          # 0 is a real score
+    (45, 72.0, CAUTION, "fundamental score 45/100"),
+    (35, 72.0, CAUTION, "fundamental score 35/100"),     # distress cap lands in CAUTION
+    (80, 22.0, PASS, "no adverse finding"),              # old quality FAIL no longer applies
+    (None, 22.0, FAIL, "quality score 22/100"),          # None → old path unchanged
+    (None, 40.0, CAUTION, "quality score 40/100"),
+])
+def test_fundamental_score_replaces_quality_bands(fund, quality, status, needle):
+    g = assess_business(**_with(quality_score=quality), fundamental_score=fund)
+    assert g.status == status
+    assert any(needle in r for r in g.reasons), g.reasons
+    if fund is not None:
+        assert not any(r.startswith("quality score") for r in g.reasons)
+
+
+def test_fundamental_score_counts_as_data_for_insufficient_check():
+    base = {"quality_score": None, "valuation_posture": "INSUFFICIENT_EVIDENCE",
+            "valuation_guard": "H3-missing-metric"}
+    assert assess_business(**_with(**base)).status == INSUFFICIENT_DATA
+    assert assess_business(**_with(**base), fundamental_score=70).status != INSUFFICIENT_DATA

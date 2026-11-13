@@ -1,0 +1,54 @@
+name: Provider Canary
+
+# Weekly live canary for every external data provider (Yahoo chart, NSE
+# allIndices, NSE top-corp-info, Google News RSS, NSE RSS, Screener.in top
+# ratios, NSE bhavcopy, India VIX tiered fetch). The slow tests/test_provenance_*
+# canaries never run in CI, the last manual run was 2026-09-06, and three
+# provider drifts since were found by hand — this runs the same schema checks
+# (the slow tests import its check_* functions) once a week
+# and posts the table to Telegram: a 🟢 one-liner when all ok, 🔴 with the
+# failing rows otherwise.
+#
+# The job fails (exit 1) only when a provider a SCORING path depends on
+# (Yahoo prices, NSE bhavcopy, India VIX) FAILED, so a red run in the Actions
+# tab means scores are running on degraded inputs. The Telegram step runs
+# inside the same script and never raises.
+#
+# Intended cadence: Sunday 09:00 IST (cron-job.org job, see HANDOFF owner
+# to-dos / alerts/README.md). Sunday so a weekend drift is caught before
+# Monday's open.
+
+on:
+  # No GitHub schedule: cron-job.org triggers this via workflow_dispatch
+  # (alerts/README.md). GitHub's cron fired hours late and only cost Actions
+  # minutes.
+  workflow_dispatch:           # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: provider-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # Full requirements: the Screener probe needs bs4/lxml and the fetcher
+      # imports pandas; same install as the other jobs.
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Run provider canary
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUTF8: "1"
+        run: python scripts/provider_canary.py --telegram

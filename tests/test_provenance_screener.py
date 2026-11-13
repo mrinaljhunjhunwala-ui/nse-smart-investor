@@ -26,6 +26,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from scripts.provider_canary import check_screener_top  # noqa: E402  (shared with the weekly canary)
+
 
 @pytest.mark.slow
 def test_screener_top_ratios_live_canary_pb_inputs_not_none() -> None:
@@ -56,20 +58,5 @@ def test_screener_top_ratios_live_canary_pb_inputs_not_none() -> None:
             "network / HTML structure change / URL retirement."
         )
 
-    top = raw.get("top") or {}
-    assert isinstance(top, dict) and top, "top-ratios block missing from parsed page"
-
-    for field in ("Market Cap", "Current Price", "Book Value"):
-        assert field in top, (
-            f"{field!r} missing from top-ratios - Screener HTML may have changed"
-        )
-        assert top[field] is not None, (
-            f"{field!r} parsed to None - regression against FIX PROV-2026-09-06. "
-            f"Currency prefix / suffix stripping likely broken."
-        )
-        assert isinstance(top[field], (int, float)), (
-            f"{field!r} parsed to {type(top[field]).__name__}, expected number"
-        )
-        assert top[field] > 0, (
-            f"{field!r} parsed to {top[field]} - suspiciously non-positive"
-        )
+    failure = check_screener_top(raw.get("top"))
+    assert failure is None, f"{failure} - see docs/DATA_PROVENANCE_2026-09.md #7"

@@ -865,6 +865,19 @@ def check_vix_regime(state: dict, today: str) -> int:
 
     regime = str(info.get("regime", "unknown")).lower()
     vix    = info.get("vix")
+    if regime == "unknown":
+        # Fail-closed VIX (utils.vix): an outage is reported once a day,
+        # not read as a calm market.
+        key = "vix_unavailable"
+        if _already_fired(state, key, today):
+            return 0
+        msg = ("⚪ <b>India VIX unavailable</b>\n"
+               f"{info.get('reason') or 'VIX unavailable from NSE / Yahoo'} — the VIX fear "
+               "filter is treated as closed until a reading returns.")
+        if dispatch(msg):
+            _mark_fired(state, key, today)
+            return 1
+        return 0
     if regime not in ("fear", "panic"):
         return 0
 

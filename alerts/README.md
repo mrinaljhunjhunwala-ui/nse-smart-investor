@@ -145,9 +145,10 @@ needs an external trigger. All share the same settings:
 | 7 | `warm_tomorrow_watchlist.yml` | `{"ref":"main"}` | `50 15 * * 1-5` | 15:50 | Tomorrow's Watchlist after close |
 | 8 | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"weekly-digest","force":"false"}}` | `0 9 * * 0` | Sunday 09:00 | Week-ahead summary |
 | 9 | `refresh_universe.yml` | `{"ref":"main"}` | `0 10 * * 0` | Sunday 10:00 | Checks the scan universe against NSE's index lists; opens an `automerge` PR when names were added / removed / renamed; Telegram summary |
+| 10 | `provider_canary.yml` | `{"ref":"main"}` | `0 9 * * 0` | Sunday 09:00 | Live check of every data provider; 🟢/🔴 table on Telegram |
 | 11 | `warm_price_store.yml` | `{"ref":"main"}` | `30 18 * * 1-5` | 18:30 | Angel One daily candles → `daily_bars` price store (first run backfills ~2000 days; later runs add the day); one-line Telegram summary |
 
-Fastest way to add jobs 2–8: open a working job's ⋯ menu → **Clone**, then
+Fastest way to add jobs 2–9: open a working job's ⋯ menu → **Clone**, then
 change the title, URL, body and crontab. Clones start **Inactive** — flip
 "Enable job" before saving.
 
