@@ -259,6 +259,7 @@ def _offline_vix_nse_tier(request, monkeypatch):
         raise ConnectionError("NSE allIndices disabled in offline tests")
 
     monkeypatch.setattr(_vix, "_nse_all_indices_payload", _offline)
+    yield
 
 
 # ── Price-store read tier off by default ─────────────────────────────────────
