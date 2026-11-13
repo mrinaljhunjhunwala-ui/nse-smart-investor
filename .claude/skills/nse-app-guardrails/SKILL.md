@@ -9,8 +9,8 @@ Every edit runs against these. They're not style preferences — they're the com
 
 ## The compliance bar (SEBI + user-safety)
 
-1. **No buy / sell / hold instruction, ever.** The Valuation Decision Layer emits a *descriptive posture* (Bullish / Neutral / Bearish / etc.). UI copy that reads as advice is a bug — "this looks strong", "I would trim", "worth accumulating" are all forbidden. The AI co-pilot has an additional regex post-filter ([safety.py](../../../dashboard/shared/ai/safety.py)) but the primary defence is the wording you choose in the code you write.
-2. **No price-target-as-recommendation.** Targets are computed and displayed — they are *scenarios*, never *calls*. "Suggested entry / stop / target" wording is fine; "buy at X, sell at Y" is not.
+1. **Direct BUY / SELL / HOLD wording is allowed (owner decision, 2026-11-13 — CLAUDE.md rule 1).** Picks, alerts and verdict labels use plain BUY / SELL / HOLD via `analysis/action_labels.py`, with a stop on every BUY. Never promise an outcome ("sure shot", "guaranteed"). The AI co-pilot keeps its own safety filter ([safety.py](../../../dashboard/shared/ai/safety.py)) until the owner asks to change it. Revisit before the app is promoted to other people.
+2. **Targets and stops are model levels, not promises.** Show how they were computed; never present a target as certain.
 3. **The educational disclaimer must survive.** Do not strip "Educational analysis only — not SEBI-registered investment advice" or its variants from any user-facing output. The AI co-pilot ends every reply with it; the app README carries the same line.
 4. **No insider-info / manipulation / front-run helpers.** The co-pilot refuses these prompts and so should any new feature. If someone asks the app to signal news moves *before* the market has priced them, that's not a feature request — it's a red flag.
 
@@ -58,7 +58,7 @@ Violating any of the above is a **release-blocking bug**, not a warning.
 
 ## Review checklist before declaring a change done
 
-- [ ] No new buy/sell/hold language anywhere in user-facing output
+- [ ] No outcome promises ("sure shot", "guaranteed") anywhere in user-facing output; every BUY carries a stop
 - [ ] Composite-score shape unchanged: 4 components 40+25+15+10 cap 90 (non-F&O or Positioning flag OFF), or 4 components + 10 pt Positioning overlay cap 100 (F&O + flag ON + real positioning data, design 6b)
 - [ ] Sector-aware code paths go through `analysis/sector_classification.py`
 - [ ] No `import streamlit` in `analysis/` or `strategies/` or `dashboard/shared/ai/{persona,safety,client,context_builder}.py`
