@@ -107,6 +107,23 @@ This section is the running memory between sessions; older sections below are hi
   If nothing changes for 28 days, a PR that only updates the meta file keeps that caption quiet.
   Not yet run live: the sandbox had no network.
 
+- **Angel One price store (10 Nov, `feat/angel-price-store`, not run live):** new `daily_bars`
+  table (`data/price_store.py`, same DB as trade_store, SQLite/Postgres DDL) filled nightly by
+  `scripts/warm_price_store.py` via `warm_price_store.yml` (cron-job.org job #11, 18:30 IST): every
+  `niftytotalmarket` name + ^NSEI/^INDIAVIX, Angel `getCandleData` ONE_DAY at `ANGEL_BULK_RPS` (default
+  1.4/s), first run backfills `ANGEL_BACKFILL_DAYS` (2000 = one call), then only last stored date+1 →
+  today; "exceeding access rate" → sleep 65 s, retry once, skip (3 in a row stop the run); optional
+  `ANGEL_HIST_API_KEY` for this job only; one-line Telegram summary. `fetch_single` tier order is now
+  AngelOne → **PriceStore** (daily; the store serves only when the market is closed, and only once
+  it holds the last completed session and reaches the period start) → Stooq (off) → Yahoo
+  → NSE-bhavcopy; `NSE_PRICE_STORE=0` turns it off (tests run with it off). Angel candles are assumed
+  UNADJUSTED: the job trims rows before any >30% close-to-close jump and a Yahoo fallthrough drops the
+  symbol on a >30% close mismatch. Command Centre shows "Prices: store (as of …, N names) · Yahoo
+  fallback" under the Top Picks chip. Market hours (09:15–15:30 IST) and the 15:30→18:30 gap before
+  the fill stay on Yahoo, so intraday alerts, Top Picks, score.py's volume projection and the 15:50
+  Tomorrow's Watchlist see the same bars as before. `ANGEL_BULK_RPS` defaults to 1.4 (~84/min,
+  under the ~90/min ceiling).
+
 ## Owner to-dos (cron-job.org; every scheduled workflow is dispatched from there)
 - [x] **Universe refresh (job #9, new):** URL
   `https://api.github.com/repos/mrinaljhunjhunwala-ui/nse-smart-investor/actions/workflows/refresh_universe.yml/dispatches`,
@@ -117,6 +134,11 @@ This section is the running memory between sessions; older sections below are hi
 - [x] **Provider canary (job #10):** `provider_canary.yml`, body `{"ref":"main"}`, crontab
   `0 9 * * 0` IST (Sunday 09:00), same four headers. First run: check the table in the Actions log
   and the 🟢/🔴 Telegram line; a red job means Yahoo, bhavcopy or VIX FAILED.
+- [ ] **Price store (job #11):** add GitHub secret `ANGEL_HIST_API_KEY` (optional, a second SmartAPI
+  app key) and the cron-job.org job: `warm_price_store.yml`, body `{"ref":"main"}`, crontab
+  `30 18 * * 1-5` IST. Dispatch once by hand first and read the final `price_store: N ok, M skipped,
+  K new rows` line: check the index symbols were served (Angel index tokens are unverified) and how
+  many 403 pauses the backfill hit; if any, lower `ANGEL_BULK_RPS` (default 1.4) in the workflow.
 - [ ] **Market Alerts (job #3):** showed "Successful" but no GitHub run from 4–6 Nov. Settings
   checked on 7 Nov (URL ok). Confirm a run appears **Mon 9 Nov 09:00 IST**; a real dispatch answers
   **204**. "Treat 3xx as success" must stay OFF. This job also carries the 15:15 picks recap and the

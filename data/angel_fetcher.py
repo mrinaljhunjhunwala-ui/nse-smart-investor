@@ -330,7 +330,22 @@ def _get_credentials() -> Dict[str, str]:
     ):
         if not creds.get(key):
             creds[key] = os.environ.get(env, "")
+    # The nightly price-store job (scripts/warm_price_store.py) may run on a
+    # separate SmartAPI app key so its candle quota is not shared with the
+    # live app. Only that script switches this on; login/TOTP are unchanged.
+    if _USE_HIST_KEY[0] and os.environ.get("ANGEL_HIST_API_KEY"):
+        creds["api_key"] = os.environ["ANGEL_HIST_API_KEY"]
     return creds
+
+
+_USE_HIST_KEY = [False]
+
+
+def use_hist_api_key(on: bool = True) -> None:
+    """Prefer env ANGEL_HIST_API_KEY over ANGEL_API_KEY in this process
+    (scripts/warm_price_store.py only). Drops any cached session."""
+    _USE_HIST_KEY[0] = bool(on)
+    _SESSION["jwt"] = None
 
 
 def is_configured() -> bool:
@@ -647,6 +662,78 @@ def _fetch_candles_window(
     df = df.apply(pd.to_numeric, errors="coerce")
     df.dropna(subset=["Close"], inplace=True)
     return df if not df.empty else None
+
+
+# Angel One NSE index tokens (instrument master, exch_seg NSE, instrumenttype
+# AMXIDX). NOT verified against a live getCandleData call: the price-store job
+# tries them and counts a failure as a skip; fetch_single still sends "^"
+# symbols to Yahoo whenever the store has nothing fresh for them.
+INDEX_TOKENS: Dict[str, str] = {"^NSEI": "99926000", "^INDIAVIX": "99926017"}
+
+
+def _is_rate_limited(resp, parsed) -> bool:
+    text = ""
+    if isinstance(parsed, dict):
+        text = str(parsed.get("message", "")) + " " + str(parsed.get("errorcode", ""))
+    if not text.strip():
+        text = str(getattr(resp, "text", "") or "")
+    return "access rate" in text.lower()
+
+
+def fetch_daily_candles(
+    ticker: str, fromdate: datetime.date, todate: datetime.date,
+) -> Tuple[Optional[pd.DataFrame], str]:
+    """One ONE_DAY getCandleData call for the nightly price store.
+
+    Bypasses the app's 1 req/s limiter, single-flight slot and per-minute
+    budget (the caller owns the throttle) and does not touch the app's circuit
+    breaker. Returns (frame | None, status); status is one of "ok", "empty",
+    "rate_limited", "http_<code>", "no_session", "no_token", "error:<Exc>".
+    Never raises.
+    """
+    try:
+        session = _get_session()
+        if session is None:
+            return None, "no_session"
+        token = INDEX_TOKENS.get(ticker)
+        if token is None:
+            symbol = ticker.replace(".NS", "").replace(".BO", "").upper()
+            token = _get_token(symbol, session)
+        if token is None:
+            return None, "no_token"
+        fmt = "%Y-%m-%d %H:%M"
+        resp = _http.post(
+            f"{_BASE}/rest/secure/angelbroking/historical/v1/getCandleData",
+            json={
+                "exchange": "NSE",
+                "symboltoken": token,
+                "interval": "ONE_DAY",
+                "fromdate": datetime.datetime.combine(fromdate, datetime.time(9, 15)).strftime(fmt),
+                "todate": datetime.datetime.combine(todate, datetime.time(15, 30)).strftime(fmt),
+            },
+            headers=_auth_headers(session["jwt"], session["api_key"]),
+            timeout=20,
+        )
+        status = getattr(resp, "status_code", None) or 200
+        parsed = _safe_parse_json_response(resp)
+        if status == 429 or _is_rate_limited(resp, parsed):
+            return None, "rate_limited"
+        if status >= 400:
+            return None, f"http_{status}"
+        candles = (parsed.get("data") if isinstance(parsed, dict) else None) or []
+        if not candles:
+            return None, "empty"
+        df = pd.DataFrame(candles, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+        df["Date"] = pd.to_datetime(df["Date"])
+        if getattr(df["Date"].dt, "tz", None) is not None:
+            df["Date"] = df["Date"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+        df = df.set_index("Date").sort_index()
+        df.index = df.index.normalize()
+        df = df.apply(pd.to_numeric, errors="coerce").dropna(subset=["Close"])
+        return (df, "ok") if not df.empty else (None, "empty")
+    except Exception as e:
+        _log.warning("angel_fetcher.fetch_daily_candles(%s) failed: %s", ticker, e)
+        return None, f"error:{type(e).__name__}"
 
 
 def get_full_quote(ticker: str) -> Optional[Dict]:

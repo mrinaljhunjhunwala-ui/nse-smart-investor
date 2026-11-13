@@ -1,0 +1,60 @@
+name: Warm Price Store
+
+# Nightly Angel One -> daily_bars fill (scripts/warm_price_store.py). Bulk scans
+# (~750 names) used to read Yahoo only, because Angel One's candle API answers
+# 403 "exceeding access rate" above ~90 calls/min when the app hits it from 16
+# scan threads. This job asks Angel once per symbol after the close, at a hard
+# throttle (ANGEL_BULK_RPS, default 1.4 req/s), and stores the bars in the
+# daily_bars table; data.fetcher.fetch_single serves daily history from there
+# (Tier 0.5) before Yahoo when it is fresh. Requires DATABASE_URL to point at
+# the SAME Postgres the Streamlit Cloud app uses — see dashboard/DB_SETUP.md.
+# Without it trade_store falls back to a SQLite file only this ephemeral runner
+# sees, which makes the job a no-op for the deployed app (it still won't fail).
+#
+# Intended time: 18:30 IST Mon–Fri (cron-job.org job #11, alerts/README.md),
+# well after the 15:30 close so Angel's ONE_DAY candle for the day is final.
+# First run backfills ANGEL_BACKFILL_DAYS (default 2000 = one request per
+# symbol); later runs fetch only the new session. A second run the same
+# evening is a no-op. ~750 names at 1.4 req/s is ~9 min; each rate-limit hit
+# costs a 65 s pause, hence the 45-min timeout. The app reads the store only
+# while the market is closed (data/price_store.py).
+
+on:
+  # No GitHub schedule: cron-job.org triggers this via workflow_dispatch
+  # (alerts/README.md). GitHub's cron fired hours late and only cost Actions
+  # minutes.
+  workflow_dispatch:           # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: warm-price-store
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Fill the price store from Angel One
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          # Optional: a second SmartAPI app key used only by this job, so its
+          # candle quota is not shared with the live app.
+          ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/warm_price_store.py --telegram
