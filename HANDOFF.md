@@ -3,6 +3,21 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Week of 9–13 Nov review (13 Nov, `claude/festive-fermi-150awb`):** Friday card: Top Picks 86
+  names, average +1.1% / +1.1 pts vs Nifty but only 44 of 86 ahead; watchlist bullish 53 of 111
+  ahead; bearish setups rose +0.5% on average (20 of 45 lagged). Averages were carried by a few
+  bank / jewellery names. Shipped: (1) **AO-PARTIAL** — `angel_fetcher._fetch_historical_windows`
+  returned only the windows that answered, so "older window 403 + recent 200" gave ~27 bars of a 2y
+  request as if complete (Yahoo never tried; scans dropped the stock as DATA_UNAVAILABLE; Portfolio
+  Posture said "very recent listing" for PFC / VEDL / XCHANGING). An HTTP error on any window now
+  fails the fetch, and the breaker count is no longer reset by the later 200. (2) Friday card: Top
+  Picks gets a median line and a "By sector, vs the Nifty" split (`week_scorecard(sector_of=...)`,
+  sectors with ≥3 names). Still open: `get_full_quote` has no breaker / failure count, so every
+  scored stock pays one failing Angel quote call from GitHub runners; `provider_canary.yml` and
+  `refresh_universe.yml` have **zero runs** although the cron-job.org to-dos below are ticked;
+  `market-digest.yml` only ever ran `intraday-watchlist` this week (no weekly-digest / momentum).
+  `tests/test_angel_one_layout.py::test_posture_codes_render_as_descriptive_labels` fails offline
+  on `main` too (3-min network wait) — not caused by this change.
 - **Fundamental score (10 Nov, `feat/fundamental-score`):** `analysis/fundamental_score.py`
   (pure) — Piotroski F-score 60 pts (scaled to tests that ran; ≥ ⅔ of applicable tests needed) +
   growth recency 20 + valuation sanity 20 (PEG/PE; lenders P/B × ROE), Altman Z with original

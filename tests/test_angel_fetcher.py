@@ -297,3 +297,50 @@ def test_candle_budget_spent_raises_busy(monkeypatch):
         af.fetch_historical("TWO.NS", period="2y")
     assert not af._breaker_tripped()
     af._HIST_SENT.clear()
+
+
+# ── FIX AO-PARTIAL: a failed window is a failed fetch, not a short history ──
+class _PartialSession(_CandleSession):
+    """Candle endpoint answers each call from `statuses` in turn (last one repeats)."""
+    def __init__(self, statuses, data):
+        super().__init__(status=200, data=data)
+        self.statuses = list(statuses)
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        if "getCandleData" in url:
+            self.status = self.statuses[min(self.candle_calls, len(self.statuses) - 1)]
+        return super().post(url, json=json, headers=headers, timeout=timeout)
+
+
+_ONE_BAR = [["2026-09-25T00:00:00+05:30", 1, 2, 0.5, 1.5, 100]]
+
+
+def test_older_window_403_fails_the_whole_fetch(monkeypatch):
+    """2y = two windows. Older 403 + recent 200 used to return ~27 bars as if
+    they were the full history; now the fetch fails so Yahoo can serve it."""
+    sess = _PartialSession([403, 200], _ONE_BAR)
+    _candle_setup(monkeypatch, sess)
+    assert af.fetch_historical("OLD.NS", period="2y") is None
+    assert sess.candle_calls == 1                      # the recent window is not requested
+    assert af._BREAKER_FAILS[0] == 1                   # and no later 200 wipes the failure
+    af._BREAKER_FAILS[0] = 0
+
+
+def test_recent_window_403_fails_the_whole_fetch(monkeypatch):
+    sess = _PartialSession([200, 403], _ONE_BAR)
+    _candle_setup(monkeypatch, sess)
+    assert af.fetch_historical("OLD.NS", period="2y") is None
+    af._BREAKER_FAILS[0] = 0
+
+
+def test_empty_older_window_still_returns_recent_bars(monkeypatch):
+    """A real new listing: the older window is an empty 200, not an error."""
+    class _NewListing(_CandleSession):
+        def post(self, url, json=None, headers=None, timeout=None):
+            if "getCandleData" in url:
+                self.data = [] if self.candle_calls == 0 else _ONE_BAR
+            return super().post(url, json=json, headers=headers, timeout=timeout)
+    sess = _NewListing(status=200)
+    _candle_setup(monkeypatch, sess)
+    df = af.fetch_historical("NEW.NS", period="2y")
+    assert df is not None and len(df) == 1

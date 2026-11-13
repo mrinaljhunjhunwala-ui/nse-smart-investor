@@ -367,7 +367,8 @@ def analyse_holdings(
                 reason = "price history could not be fetched"
             else:
                 reason = (f"only {len(df)} trading days of history "
-                          f"(needs at least {need} even for the limited-history read) — very recent listing")
+                          f"(needs at least {need} even for the limited-history read) — a very recent "
+                          f"listing, or the price source returned a short history")
             skipped.append({"symbol": sym, "reason": reason})
     return out
 

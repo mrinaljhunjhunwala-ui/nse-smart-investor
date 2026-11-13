@@ -1675,7 +1675,12 @@ def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | Non
         nifty_now = float(nifty_close.dropna().iloc[-1])
     except Exception as e:
         print(f"[scorecard] Nifty history unavailable: {e}")
-    cards = vl.week_scorecard_by_list(week, prices, nifty_close, nifty_now)
+    sector_of = None
+    try:
+        from data.universe import get_sector as sector_of
+    except Exception as e:
+        print(f"[scorecard] sector map unavailable: {e}")
+    cards = vl.week_scorecard_by_list(week, prices, nifty_close, nifty_now, sector_of=sector_of)
     if not cards:
         print("[scorecard] no prices for this week's names — nothing to send")
         return 0
@@ -1694,6 +1699,24 @@ def _n_names(n: int) -> str:
     return f"{n} name{'' if n == 1 else 's'}"
 
 
+def _sector_lines(sectors: list) -> list:
+    """'By sector' rows for the report card: the sectors whose names ran furthest
+    ahead of the Nifty and those furthest behind (week_scorecard `sectors`,
+    already ordered best first). Empty when fewer than two sectors qualify."""
+    if len(sectors) < 2:
+        return []
+
+    def _fmt(rows: list) -> str:
+        return " · ".join(f"{_h(r['sector'])} {r['mean_edge']:+.1f} pts ({r['n']})" for r in rows)
+
+    top = sectors[:3]
+    bottom = [r for r in sectors[::-1][:3] if r not in top]
+    out = [f"By sector, vs the Nifty (names): {_fmt(top)}"]
+    if bottom:
+        out.append(f"Furthest behind: {_fmt(bottom)}")
+    return out
+
+
 def weekly_scorecard_lines(cards: dict, monday: str, today: str) -> list:
     """Message body for check_weekly_scorecard: a Top Picks section and a
     Tomorrow's Watchlist section (up-setups and down-setups kept apart)."""
@@ -1708,10 +1731,14 @@ def weekly_scorecard_lines(cards: dict, monday: str, today: str) -> list:
         if tp.get("mean_edge") is not None:
             lines.append(f"Vs the Nifty: <b>{tp['mean_edge']:+.1f} pts</b> · "
                          f"{tp['hits']} of {tp['n_edge']} ahead")
+        if tp.get("median_move") is not None and tp["n"] >= 5:
+            lines.append(f"Middle name (median): {tp['median_move']:+.1f}% — the average can be "
+                         "carried by a few large moves")
         if tp["best"]:
             lines.append(f"{'Most up' if tp['worst'] else 'Moves'}: {_names_line(tp['best'])}")
         if tp["worst"]:
             lines.append(f"Most down: {_names_line(tp['worst'])}")
+        lines += _sector_lines(tp.get("sectors") or [])
     up, down = cards.get("watchlist_up"), cards.get("watchlist_down")
     if up or down:
         lines += ["", "🌙 <b>Tomorrow's Watchlist</b>"]

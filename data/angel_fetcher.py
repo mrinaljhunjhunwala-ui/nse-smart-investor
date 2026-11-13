@@ -579,13 +579,24 @@ def _fetch_historical_windows(
         else:
             # Chunked path: slice into ~700-day windows, fetch each, concat.
             frames: List[pd.DataFrame] = []
+            errors: List[int] = []
             fmt = "%Y-%m-%d %H:%M"
             cur_start = start_date
             while cur_start <= today:
                 cur_end = min(today, cur_start + datetime.timedelta(days=_CANDLE_CHUNK_DAYS))
                 fd = datetime.datetime.combine(cur_start, datetime.time(9, 15)).strftime(fmt)
                 td = datetime.datetime.combine(cur_end,   datetime.time(15, 30)).strftime(fmt)
-                chunk = _fetch_candles_window(session, token, ao_interval, fd, td)
+                chunk = _fetch_candles_window(session, token, ao_interval, fd, td, errors=errors)
+                if errors:
+                    # FIX AO-PARTIAL (2026-11-13): a window that failed with an
+                    # HTTP error makes the whole fetch a failure. Stitching the
+                    # windows that did answer returned only the last ~27 bars of
+                    # a 2y request (older window 403, recent one 200); callers
+                    # took that as full history, so Yahoo was never tried, scans
+                    # dropped the stock and Portfolio Posture called a long-listed
+                    # holding a "very recent listing". Stopping here also keeps the
+                    # later window's 200 from resetting the breaker's count.
+                    return None
                 if chunk is not None and not chunk.empty:
                     frames.append(chunk)
                 elif _breaker_tripped():
@@ -609,8 +620,12 @@ def _fetch_historical_windows(
 
 def _fetch_candles_window(
     session: Dict, token: str, ao_interval: str, fromdate: str, todate: str,
+    errors: Optional[List[int]] = None,
 ) -> Optional[pd.DataFrame]:
-    """Single Angel getCandleData round-trip. Callers own chunking + retries."""
+    """Single Angel getCandleData round-trip. Callers own chunking + retries.
+
+    None means "no candles": an HTTP error or a legitimate empty 200. Pass a
+    list as `errors` to tell them apart: the HTTP status is appended on error."""
     _hist_rate_limit()
     resp = _http.post(
         f"{_BASE}/rest/secure/angelbroking/historical/v1/getCandleData",
@@ -633,6 +648,8 @@ def _fetch_candles_window(
         # tripped once in 333 rejections and every ticker kept paying for
         # two failing calls before the Yahoo fallback.
         _breaker_record_failure()
+        if errors is not None:
+            errors.append(int(status))
         return None
 
     parsed = _safe_parse_json_response(resp)
