@@ -16,8 +16,6 @@ Usage:
 """
 
 import os
-import json
-import datetime
 import requests
 from typing import Optional
 
@@ -107,7 +105,7 @@ class TelegramAlerter:
 
         lines = [
             f"{icon} *{action.upper()} SIGNAL — {_ticker}*",
-            f"━━━━━━━━━━━━━━━━━━━━━━",
+            "━━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {now}",
             f"💰 Price    : ₹{price:,.2f}",
         ]
@@ -118,7 +116,7 @@ class TelegramAlerter:
             lines.append(f"📊 R:R       : 1 : {rr:.1f}")
         if strategy: lines.append(f"⚙️ Strategy  : {_strategy}")
         if reason:   lines.append(f"📝 Reason    : {_reason}")
-        lines.append(f"━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━")
         lines.append("_⚠️ For educational purposes only. Not investment advice._")
 
         message = "\n".join(lines)
@@ -133,13 +131,13 @@ class TelegramAlerter:
         """
         pnl_icon = "📈" if summary.get("daily_pnl", 0) >= 0 else "📉"
         lines = [
-            f"📋 *PORTFOLIO SUMMARY*",
-            f"━━━━━━━━━━━━━━━━━━━━━━",
+            "📋 *PORTFOLIO SUMMARY*",
+            "━━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {summary.get('date', '')}",
             f"💼 Value    : ₹{summary.get('portfolio_value', 0):,.0f}",
             f"{pnl_icon} Day P&L  : ₹{summary.get('daily_pnl', 0):+,.0f}",
             f"📂 Open     : {summary.get('open_trades', 0)} positions",
-            f"━━━━━━━━━━━━━━━━━━━━━━",
+            "━━━━━━━━━━━━━━━━━━━━━━",
         ]
         return self._send("\n".join(lines))
 

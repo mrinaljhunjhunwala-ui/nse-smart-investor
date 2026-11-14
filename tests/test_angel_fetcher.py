@@ -1,8 +1,5 @@
-import json
-import types
 import pytest
 import requests
-from unittest.mock import Mock
 
 import data.angel_fetcher as af
 

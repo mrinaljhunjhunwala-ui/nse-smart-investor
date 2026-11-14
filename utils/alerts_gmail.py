@@ -107,7 +107,6 @@ class GmailAlerter:
     ) -> bool:
         """Convenience mirror of TelegramAlerter.send_signal so callers
         that already speak that API can swap in a GmailAlerter."""
-        import datetime
         # Real IST: the alert jobs run on UTC runners, where now() printed UTC
         # under an "IST" label (5.5 h early).
         from utils.snapshot_time import ist_now
