@@ -294,6 +294,8 @@ def _is_market_hours() -> bool:
 _SEND_WINDOWS = {
     "morning-digest":     (datetime.time(7, 0),  datetime.time(10, 0)),
     "intraday-watchlist": (datetime.time(9, 15), datetime.time(10, 30)),
+    "catalyst-preopen":   (datetime.time(8, 0),  datetime.time(9, 20)),
+    "why-moved":          (datetime.time(15, 35), datetime.time(21, 0)),
 }
 
 
@@ -1811,6 +1813,17 @@ def check_weekly_digest(state: dict, today: str) -> int:
 # --force skips the market-hours guard for local/manual runs.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _catalyst_live(state: dict, today: str) -> int:
+    """Results / announcement-driven BUY and SELL calls during market hours.
+    Isolated so a failure here can never stop the other checks in the run."""
+    try:
+        from alerts.catalyst_alerts import check_catalyst_live
+        return int(check_catalyst_live(state, today) or 0)
+    except Exception as e:
+        print(f"[catalyst] live check failed: {type(e).__name__}: {e}")
+        return 0
+
+
 def _parse_mode(argv: list[str]) -> str:
     for a in argv:
         if a.startswith("--mode="):
@@ -1852,6 +1865,7 @@ def main() -> int:
         "morning-digest", "portfolio-posture", "test", "test-verdict", "test-digest",
         "test-posture",
         "weekly-digest", "intraday-watchlist", "tomorrow-watchlist", "weekly-scorecard",
+        "catalyst-preopen", "why-moved",
     )
     if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
@@ -1880,6 +1894,12 @@ def main() -> int:
         total += check_tomorrow_watchlist(state, today)
     elif mode == "weekly-scorecard":
         total += check_weekly_scorecard(state, today)
+    elif mode == "catalyst-preopen":
+        from alerts.catalyst_alerts import check_catalyst_preopen
+        total += check_catalyst_preopen(state, today)
+    elif mode == "why-moved":
+        from alerts.catalyst_alerts import check_why_moved
+        total += check_why_moved(state, today)
     elif mode == "test":
         total += check_test_alert(state, today)
     elif mode == "test-verdict":
@@ -1898,6 +1918,7 @@ def main() -> int:
             "verdicts":  check_verdict_alerts(state, today),
             "vix":       check_vix_regime(state, today),
             "nifty":     check_nifty_trend(state, today),
+            "catalyst":  _catalyst_live(state, today),
         }
         print("[main] per-check: " + ", ".join(f"{k}={v}" for k, v in _counts.items()))
         total += sum(_counts.values())

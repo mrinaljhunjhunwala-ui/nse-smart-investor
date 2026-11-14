@@ -14,6 +14,10 @@ slow ``tests/test_provenance_*`` canaries use (those tests import the
   screener           Screener.in top ratios for RELIANCE     no  (valuation fill-in)
   nse_bhavcopy       sec_bhavdata_full for the last session  yes (delivery %, price fallback)
   india_vix          utils.vix tiered fetch (NSE -> Yahoo)   yes (VIX regime / fear filter)
+  nse_announcements  market-wide filings, last 3 days        no  (catalyst alerts)
+  nse_results_filed  results filers, last 10 days            no  (catalyst alerts)
+  nse_quarterly      results-comparision for RELIANCE (>=4q) no  (catalyst alerts)
+  nse_preopen        market-data-pre-open?key=ALL            no  (catalyst alerts)
 
 Each row is ``ok`` / ``degraded`` / ``FAILED`` with a one-line reason and the
 schema check that failed. Prints a table; with ``--telegram`` also sends it via
@@ -295,6 +299,94 @@ def _probe_vix() -> ProbeResult:
     return ProbeResult("india_vix", OK, f"{row['vix']:.2f} {row['regime']} from {row.get('source')}")
 
 
+ANNOUNCEMENT_KEYS = ("symbol", "when", "category", "headline", "detail", "url", "source")
+RESULTS_FILED_KEYS = ("symbol", "when", "period_end", "consolidated")
+QUARTER_KEYS = ("period_end", "revenue", "net_profit", "eps", "source")
+PREOPEN_KEYS = ("iep", "prev_close", "gap_pct", "qty")
+
+
+def check_rows(rows: Any, required: Iterable[str], min_rows: int = 1) -> Optional[str]:
+    """Non-empty list of dicts, each carrying every required key."""
+    if not isinstance(rows, list):
+        return f"expected list, got {type(rows).__name__}"
+    if len(rows) < min_rows:
+        return f"only {len(rows)} rows (expected >= {min_rows})"
+    for r in rows[:20]:
+        if not isinstance(r, dict):
+            return f"row is {type(r).__name__}, expected dict"
+        missing = [k for k in required if k not in r]
+        if missing:
+            return f"row missing keys {missing}"
+    return None
+
+
+def _ann_source(rows: list) -> str:
+    srcs = sorted({str(r.get("source")) for r in rows if isinstance(r, dict)})
+    return "/".join(srcs) or "none"
+
+
+def _probe_nse_announcements() -> ProbeResult:
+    import data.nse_announcements as NA
+    now = _dt.datetime.now(NA.IST)
+    rows = NA.fetch_announcements(now - _dt.timedelta(days=3), now)
+    fail = check_rows(rows, ANNOUNCEMENT_KEYS)
+    if fail:
+        return ProbeResult("nse_announcements", FAILED, fail, "check_rows(announcements)")
+    src = _ann_source(rows)
+    status = OK if src == "nse_api" else DEGRADED
+    return ProbeResult("nse_announcements", status, f"{len(rows)} rows in 3 days from {src}",
+                       "" if status == OK else "NSE API tier answered")
+
+
+def _probe_nse_results_filed() -> ProbeResult:
+    import data.nse_announcements as NA
+    rows = NA.fetch_results_filed(_dt.datetime.now(NA.IST) - _dt.timedelta(days=10))
+    fail = check_rows(rows, RESULTS_FILED_KEYS)
+    if fail:
+        # Off-season weeks can genuinely have few filings: degraded, not dead.
+        return ProbeResult("nse_results_filed", DEGRADED if isinstance(rows, list) else FAILED, fail,
+                           "check_rows(results_filed)")
+    src = _ann_source(rows)
+    return ProbeResult("nse_results_filed", OK if src == "nse_results" else DEGRADED,
+                       f"{len(rows)} filers in 10 days from {src}")
+
+
+def _probe_nse_quarterly() -> ProbeResult:
+    import data.nse_announcements as NA
+    rows = NA.fetch_quarterly_figures(CANARY_SYMBOL)
+    fail = check_rows(rows, QUARTER_KEYS, min_rows=4)
+    if fail:
+        return ProbeResult("nse_quarterly", FAILED, f"{CANARY_SYMBOL}: {fail}", "check_rows(quarters >= 4)")
+    newest = rows[0]
+    if newest.get("net_profit") is None or newest.get("revenue") is None:
+        return ProbeResult("nse_quarterly", FAILED, "newest quarter missing revenue / profit", "numbers parsed")
+    stale = newest["period_end"] < NA.latest_reportable_quarter_end() - _dt.timedelta(days=100)
+    return ProbeResult("nse_quarterly", DEGRADED if stale or newest.get("source") != "nse_results_comparison" else OK,
+                       f"{len(rows)} quarters to {newest['period_end']} from {newest.get('source')}, "
+                       f"profit {newest['net_profit']:,.0f} cr", "newest quarter / NSE tier")
+
+
+def _probe_nse_preopen() -> ProbeResult:
+    import data.nse_announcements as NA
+    snap = NA.fetch_preopen()
+    rows = list(snap.values()) if isinstance(snap, dict) else snap
+    fail = check_rows(rows, PREOPEN_KEYS, min_rows=50)
+    if fail:
+        return ProbeResult("nse_preopen", FAILED, fail, "check_rows(preopen >= 50)")
+    return ProbeResult("nse_preopen", OK, f"{len(rows)} symbols; {CANARY_SYMBOL} "
+                                          f"{'present' if CANARY_SYMBOL in snap else 'absent'}")
+
+
+# Catalyst-engine probes (data/nse_announcements.py). Never scoring paths: they report but never
+# make the job exit 1. Kept out of PROBES so the core list (and its tests) stay unchanged.
+CATALYST_PROBES: List[tuple] = [
+    ("nse_announcements", _probe_nse_announcements, False),
+    ("nse_results_filed", _probe_nse_results_filed, False),
+    ("nse_quarterly", _probe_nse_quarterly, False),
+    ("nse_preopen", _probe_nse_preopen, False),
+]
+
+
 # (provider name, probe, scoring path depends on it)
 PROBES: List[tuple] = [
     ("yahoo_chart", _probe_yahoo, True),
@@ -379,7 +471,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    results = run_probes()
+    results = run_probes(PROBES + CATALYST_PROBES)
     print(format_table(results))
     code = exit_code(results)
     print(f"\nexit {code}: " + ("a scoring provider FAILED" if code else "no scoring provider FAILED"))

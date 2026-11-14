@@ -101,6 +101,19 @@ jobs:
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
         run: python alerts/check_alerts.py --mode=weekly-scorecard
 
+      # Why today's biggest gainers and losers moved (results, announcements,
+      # sector, volume) and whether each was on the app's lists beforehand.
+      - name: Send why the top movers moved
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+        run: python alerts/check_alerts.py --mode=why-moved
+
       # After-close portfolio posture from the Angel One holdings. Used to need
       # its own cron-job.org trigger at 14:00 (never set up); it rides this
       # post-close job instead. --always sends a one-line "all steady" note
