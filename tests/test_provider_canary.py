@@ -138,3 +138,10 @@ def test_probe_nse_all_indices(monkeypatch, payload, status):
     import utils.vix as V
     monkeypatch.setattr(V, "_nse_all_indices_payload", lambda timeout=10: payload)
     assert pc._probe_nse_all_indices().status == status
+
+
+def test_degraded_only_is_amber_not_red():
+    res = [pc.ProbeResult("yahoo_chart", pc.OK, "5 bars", ""),
+           pc.ProbeResult("nse_quarterly", pc.DEGRADED, "8 quarters from screener", "NSE tier")]
+    msg = pc.format_telegram(res)
+    assert msg.startswith("🟡") and "nothing failed" in msg and "1 of 2 sources on a backup route" in msg

@@ -440,15 +440,20 @@ def format_table(results: List[ProbeResult]) -> str:
 
 
 def format_telegram(results: List[ProbeResult], today: Optional[_dt.date] = None) -> str:
-    """🟢 one-liner when all ok; 🔴 header + the non-ok rows otherwise (Markdown)."""
+    """🟢 one-liner when all ok; 🟡 when sources are only degraded; 🔴 when any FAILED (Markdown)."""
     day = (today or _dt.date.today()).strftime("%a %d %b %Y")
     bad = [r for r in results if r.status != OK]
     if not bad:
         return f"🟢 *Provider canary* {day}: all {len(results)} providers ok."
     n_fail = sum(r.status == FAILED for r in bad)
     scoring = [r.provider for r in bad if r.scoring and r.status == FAILED]
-    head = (f"🔴 *Provider canary* {day}: {n_fail} FAILED, {len(bad) - n_fail} degraded "
-            f"of {len(results)}")
+    if n_fail:
+        head = (f"🔴 *Provider canary* {day}: {n_fail} FAILED, {len(bad) - n_fail} degraded "
+                f"of {len(results)}")
+    else:
+        # Nothing is down: these sources answered through a backup route.
+        head = (f"🟡 *Data check* {day}: nothing failed; {len(bad)} of {len(results)} sources "
+                f"on a backup route")
     if scoring:
         # Outside the code block: escape legacy-Markdown specials ("yahoo_chart").
         from utils.telegram import TelegramAlerter
