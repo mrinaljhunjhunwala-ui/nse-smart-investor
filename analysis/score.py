@@ -219,6 +219,23 @@ def _get_flows_cached() -> Optional[Dict]:
     return v
 
 
+MAX_LIVE_GAP = 0.25      # a live quote further than this from the last close is not believed
+
+
+def live_price_plausible(live_price, close_price, max_gap: float = MAX_LIVE_GAP) -> bool:
+    """True when a live quote is within `max_gap` of the last close (both positive numbers)."""
+    try:
+        lp, cp = float(live_price), float(close_price)
+    except (TypeError, ValueError):
+        return False
+    if not (lp > 0 and cp > 0):
+        return False
+    return abs(lp / cp - 1.0) <= max_gap
+
+
+_BENCH_MISS_RETRY_S = 30.0
+
+
 def _get_bench_cached(period: str):
     """Return a cached Nifty DataFrame for `period`, or None on failure.
     See FIX CACHE-TTL above for expiry rules (1h TTL, date staleness,
@@ -228,7 +245,10 @@ def _get_bench_cached(period: str):
         ts, v = ent  # type: ignore[misc]
         age = _now() - ts
         if v is _BENCH_MISS:
-            if age <= _BENCH_NEG_TTL_S:
+            # FIX BENCH-MISS (2026-11-14): a failed ^NSEI fetch used to be remembered for
+            # 5 minutes, longer than a whole 825-stock scan, so one blip scored every stock
+            # without relative strength. Retry after _BENCH_MISS_RETRY_S instead.
+            if age <= _BENCH_MISS_RETRY_S:
                 return None
         elif age <= _BENCH_TTL_S and not (age > _BENCH_NEG_TTL_S and _bench_is_stale(v)):
             return v
@@ -240,7 +260,7 @@ def _get_bench_cached(period: str):
         _BENCH_CACHE[period] = (_now(), b)
         return b
     except Exception as e:
-        _log.debug("bench cache: ^NSEI %s fetch failed, negative-caching: %s: %s",
+        _log.warning("bench cache: ^NSEI %s fetch failed, retry in 30s (scores lack relative strength): %s: %s",
                    period, type(e).__name__, e)
         _BENCH_CACHE[period] = (_now(), _BENCH_MISS)
         return None
@@ -2136,7 +2156,14 @@ def score_stock(
         from data.angel_fetcher import get_live_quote, is_configured
         if is_configured():
             live = get_live_quote(canonical)
-            if live and live["price"] > 0:
+            if live and live["price"] > 0 and not live_price_plausible(live["price"], result.entry):
+                # FIX LIVE-BOUND (2026-11-14): NSE's widest price band is 20%, so a quote
+                # more than 25% from the last close is a wrong instrument, a stale token or
+                # an unadjusted corporate action. Keep the close-based levels.
+                _log.warning("score_stock(%s): live quote %.2f is over %d%% from the close %.2f — "
+                             "not re-anchoring levels", canonical, live["price"],
+                             int(MAX_LIVE_GAP * 100), result.entry)
+            elif live and live["price"] > 0:
                 live_price = live["price"]
                 # FIX (entry/SL/TP staleness): stop_loss/target were computed
                 # by _compute_entry_levels() against the previous CLOSE price.

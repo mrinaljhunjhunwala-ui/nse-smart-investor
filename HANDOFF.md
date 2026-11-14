@@ -3,6 +3,17 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Follow-ups after #347 (14 Nov):** Friday card gains a "Results & news BUY calls" section
+  (`catalyst_alerts.week_record` grades the week's stored BUY reads with `catalysts.grade_picks`
+  on daily bars). `score._get_bench_cached` retries a failed `^NSEI` fetch after 30 s (was held for
+  5 min, longer than a whole scan, so every stock scored without relative strength). Live
+  re-anchoring of entry / stop / target is skipped when the quote is over 25% from the last close
+  (`score.live_price_plausible`). Golden-snapshot tests unchanged. Still open from the audit: Yahoo
+  live-quote age unchecked; stale Yahoo frame not patched from bhavcopy; `date.today()` in UTC in
+  `_period_to_dates`; `_get_token` first-hit fallback; page copy (My Portfolio) still descriptive.
+  **Owner, cron-job.org:** provider canary and universe refresh have only manual runs; weekly and
+  momentum digests never fired. Replay on demand: Actions → Provider Canary → Run workflow →
+  `replay_sessions` = 5 (or more).
 - **Catalyst replay, 6–13 Nov (14 Nov; `scripts/catalyst_replay.py`, run from `provider_canary.yml`
   with input `replay_sessions`, stored in KV `catalyst_replay:<date>`):** 238 universe names with
   classified filings over 5 sessions. The engine flagged CUPID (12 Nov, +8.7% that day), KALYANKJIL

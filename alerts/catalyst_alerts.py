@@ -155,6 +155,51 @@ def persist_reads(day: str, reads: Iterable[Any], mode: str, now: _dt.datetime) 
         return False
 
 
+def week_record(monday: str, today: str) -> Optional[dict]:
+    """This week's stored BUY calls (KV catalyst_picks:<day>, Monday..today) graded on daily bars
+    with catalysts.grade_picks: first call per symbol, entry when the trigger trades, -1R when the
+    stop is touched, target R when the target is, else marked at the last close. None when there
+    is nothing to grade. Never raises."""
+    try:
+        from analysis.catalysts import grade_picks
+        d0, d1 = _dt.date.fromisoformat(monday), _dt.date.fromisoformat(today)
+        picks: Dict[str, dict] = {}
+        day = d0
+        while day <= d1:
+            cur = _kv(kv_key(day.isoformat()))
+            for r in (cur.get("reads") or []) if isinstance(cur, dict) else []:
+                if isinstance(r, dict) and r.get("action") == "BUY" and r.get("symbol"):
+                    picks.setdefault(_base(r["symbol"]), {**r, "symbol": _base(r["symbol"])})
+            day += _dt.timedelta(days=1)
+        if not picks:
+            return None
+        closes = {sym: _daily(sym, period="1mo") for sym in picks}
+        res = grade_picks(list(picks.values()), {k: v for k, v in closes.items() if v is not None})
+        if not res or not res.get("picks"):
+            return None
+        ranked = sorted([g for g in res["picks"] if g.get("r") is not None], key=lambda g: -g["r"])
+        return {"summary": res["summary"], "best": ranked[:2], "worst": ranked[-1:] if len(ranked) > 2 else []}
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[catalyst] week record failed: {type(e).__name__}: {e}")
+        return None
+
+
+def week_record_lines(rec: Optional[dict], h: Callable[[Any], str]) -> List[str]:
+    """Up to three Friday-card lines for week_record(); [] when there is nothing to show."""
+    if not rec or not rec.get("summary") or not rec["summary"].get("n"):
+        return []
+    s = rec["summary"]
+    entered = s["n"] - s.get("not_triggered", 0)
+    avg = "n/a" if s.get("avg_r") is None else f"{s['avg_r']:+.1f}R"
+    lines = [f"📣 <b>Results &amp; news BUY calls</b> · {s['n']} this week",
+             f"{entered} entered · {s.get('hit', 0)} hit target · {s.get('stop', 0)} stopped · "
+             f"{s.get('open', 0)} still open · average {avg}"]
+    names = [f"{h(g['symbol'])} {g['r']:+.1f}R" for g in (rec.get("best") or []) + (rec.get("worst") or [])]
+    if names:
+        lines.append("Best / worst: " + " · ".join(names))
+    return lines
+
+
 def compose(header: str, entries: List[tuple], footer: str, max_lines: int = MAX_LINES) -> str:
     """header + one/two lines per entry + footer, trimmed to max_lines: second lines go first
     (from the bottom), then whole entries."""

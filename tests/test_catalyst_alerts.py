@@ -544,3 +544,31 @@ def test_canary_catalyst_probes(monkeypatch):
     assert res["nse_quarterly"].status == pc.FAILED and ">= 4" in res["nse_quarterly"].check
     assert res["nse_preopen"].status == pc.OK
     assert pc.exit_code(res.values()) == 0 and not any(r.scoring for r in res.values())
+
+
+def test_week_record_grades_stored_buy_calls(monkeypatch):
+    import numpy as np
+    import pandas as pd
+    idx = pd.to_datetime(["2026-11-09", "2026-11-11", "2026-11-12", "2026-11-13"])
+
+    def frame(highs, lows, closes):
+        return pd.DataFrame({"Open": closes, "High": highs, "Low": lows, "Close": closes,
+                             "Volume": np.full(4, 1e6)}, index=idx)
+    frames = {"WIN": frame([101, 103, 107, 108], [99, 100.5, 102, 105], [100, 102, 106, 107]),     # target 106
+              "LOSE": frame([101, 100.5, 99, 98], [99.5, 97, 96, 95], [100, 98, 97, 96]),         # stop 98
+              "FLAT": frame([99, 99.5, 99.8, 99.9], [98.5, 98.6, 98.7, 98.8], [99, 99, 99, 99])}  # never trades 100
+    store = {CA.kv_key("2026-11-09"): {"reads": [
+        {"symbol": s, "action": "BUY", "date": "2026-11-09", "trigger": 100.0, "stop": 98.0, "target": 106.0}
+        for s in frames] + [{"symbol": "NEG", "action": "SELL", "date": "2026-11-09", "trigger": 50.0,
+                             "stop": 51.0, "target": 48.0}]}}
+    monkeypatch.setattr(CA, "_kv", lambda k: store.get(k))
+    monkeypatch.setattr(CA, "_daily", lambda sym, period="6mo": frames.get(sym))
+    rec = CA.week_record("2026-11-09", "2026-11-13")
+    s = rec["summary"]
+    assert s["n"] == 3 and s["hit"] == 1 and s["stop"] == 1 and s["not_triggered"] == 1     # SELL not graded
+    lines = CA.week_record_lines(rec, str)
+    assert lines[0].endswith("3 this week") and "2 entered · 1 hit target · 1 stopped" in lines[1]
+    assert "WIN +3.0R" in lines[2] and len(lines) == 3
+    assert CA.week_record_lines(None, str) == []
+    monkeypatch.setattr(CA, "_kv", lambda k: None)
+    assert CA.week_record("2026-11-09", "2026-11-13") is None
