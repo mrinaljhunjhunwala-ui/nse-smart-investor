@@ -341,6 +341,15 @@ def _probe_nse_announcements() -> ProbeResult:
 def _probe_nse_results_filed() -> ProbeResult:
     import data.nse_announcements as NA
     rows = NA.fetch_results_filed(_dt.datetime.now(NA.IST) - _dt.timedelta(days=10))
+    fallback = bool(rows) and all("+category" in str(r.get("source", "")) for r in rows)
+    if fallback:
+        # NSE's results list answered empty; these rows come from the announcements feed, which
+        # carries who filed and when but not the period or the consolidated flag.
+        fail = check_rows(rows, ("symbol", "when"))
+        if not fail:
+            return ProbeResult("nse_results_filed", DEGRADED,
+                               f"{len(rows)} filers in 10 days from the announcements feed "
+                               "(NSE results list empty)", "NSE results-list tier answered")
     fail = check_rows(rows, RESULTS_FILED_KEYS)
     if fail:
         # Off-season weeks can genuinely have few filings: degraded, not dead.
