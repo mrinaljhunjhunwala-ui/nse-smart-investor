@@ -147,3 +147,29 @@ def test_warm_top_picks_persists_only_a_healthy_scan(monkeypatch, kv_writes, n_o
     assert w.main() == 0
     assert (cache_mod._TOP_PICKS_KV_KEY in kv_writes) is persisted
     assert (cache_mod._ALL_SCORES_KV_KEY in kv_writes) is persisted
+
+
+def test_live_quote_far_from_the_close_is_not_believed():
+    from analysis.score import live_price_plausible
+    assert live_price_plausible(110.0, 100.0) and live_price_plausible(80.0, 100.0)      # within a 20% band day
+    assert not live_price_plausible(130.0, 100.0) and not live_price_plausible(50.0, 100.0)
+    assert not live_price_plausible(0, 100.0) and not live_price_plausible(None, 100.0)
+    assert not live_price_plausible(100.0, 0)
+
+
+def test_failed_benchmark_fetch_is_retried_within_a_scan(monkeypatch):
+    """A ^NSEI miss used to be cached for 5 minutes, longer than a whole scan."""
+    import analysis.score as S
+    calls, clock = [], [1000.0]
+    monkeypatch.setattr(S, "_now", lambda: clock[0])
+    monkeypatch.setattr(S, "_BENCH_CACHE", {})
+
+    def fetch(sym, period="2y"):
+        calls.append(sym)
+        raise RuntimeError("blip")
+    monkeypatch.setattr(S, "_fetch_single", fetch)
+    assert S._get_bench_cached("2y") is None and len(calls) == 1
+    clock[0] += 10
+    assert S._get_bench_cached("2y") is None and len(calls) == 1            # inside the 30 s window
+    clock[0] += 31
+    assert S._get_bench_cached("2y") is None and len(calls) == 2            # retried, not held for 5 minutes

@@ -1653,6 +1653,13 @@ def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | Non
         print("[scorecard] no prices for this week's names — nothing to send")
         return 0
     lines = weekly_scorecard_lines(cards, monday, today)
+    try:    # the week's results / news BUY calls, graded; goes above the closing line
+        from alerts.catalyst_alerts import week_record, week_record_lines
+        extra = week_record_lines(week_record(monday, today), _h)
+        if extra:
+            lines[-1:-1] = [*extra, ""]
+    except Exception as e:
+        print(f"[scorecard] catalyst record skipped: {e}")
     if dispatch("\n".join(lines), subject="Weekly report card — NSE Smart Investor"):
         _mark_fired(state, key, today)
         return 1
