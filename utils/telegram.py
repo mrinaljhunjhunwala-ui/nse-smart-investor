@@ -32,8 +32,11 @@ class TelegramAlerter:
         token: Optional[str] = None,
         chat_id: Optional[str] = None,
     ):
-        self.token   = token   or os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID",   "")
+        # Strip: a secret saved with a trailing newline / space makes the URL
+        # .../bot<token>%0A/sendMessage, which Telegram answers with 404 (seen in
+        # the first provider-canary run, 2026-11-14). alerts/check_alerts.py strips too.
+        self.token   = (token   or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+        self.chat_id = str(chat_id or os.getenv("TELEGRAM_CHAT_ID", "")).strip()
 
         if not self.token or not self.chat_id:
             print(

@@ -69,3 +69,12 @@ def test_alert_timestamp_is_real_ist(monkeypatch):
     stamps = {(expected - datetime.timedelta(minutes=m)).strftime("%d %b %Y  %H:%M IST") for m in (0, 1)}
     assert any(s in sent[0] for s in stamps)
     assert st_mod.ist_now().utcoffset() == datetime.timedelta(hours=5, minutes=30)
+
+
+def test_telegram_alerter_strips_token_and_chat_id(monkeypatch):
+    """A secret saved with a trailing newline must not end up in the request URL (Telegram 404)."""
+    from utils.telegram import TelegramAlerter
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc\n")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", " 42 \n")
+    a = TelegramAlerter()
+    assert a.token == "123:abc" and a.chat_id == "42" and not a._console_only
