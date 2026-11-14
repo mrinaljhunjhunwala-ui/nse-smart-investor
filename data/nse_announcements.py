@@ -416,7 +416,11 @@ def fetch_results_filed(since: _dt.datetime) -> List[dict]:
             return items
 
         items = _guarded("nse_results", _nse)
-        if items is None:
+        if not items:
+            # None = the list endpoint failed; [] = it answered with nothing (seen live on
+            # 2026-11-14 in results season). Either way read results from the announcements feed.
+            if items is not None:
+                _log_once("nse_results", "results list returned 0 rows — using the announcements feed")
             items = [dict(a, source=a["source"] + "+category") for a in fetch_announcements(s, now)
                      if _RESULT_CAT.search(f"{a.get('category')} {a.get('headline')}")
                      and re.search(r"result", f"{a.get('category')} {a.get('headline')} {a.get('detail')}", re.I)]

@@ -3,6 +3,35 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Owner decisions (13–14 Nov):** direct BUY / SELL / HOLD wording (CLAUDE.md rule 1 rewritten;
+  labels in `analysis/action_labels.py`); shorter Telegram messages; results / news driven calls;
+  "why did the top movers move"; reliability over features.
+- **Telegram format (14 Nov):** every builder in `alerts/check_alerts.py` = title + time, then
+  `ACTION  SYMBOL  ₹price · stop · target` per stock, one footer, ≤15 lines (weekly card ≤20).
+  Portfolio Posture groups SELL → STOP HIT → TRIM → ADD → HOLD (`POSTURE_DISPLAY`), no raw tags.
+  `tests/test_alert_copy_no_advice.py` now guards THIS format (`_assert_descriptive` kept as alias).
+  Not yet aligned: page copy such as `05_my_portfolio.py` "Weakening / Broken Trend".
+- **Catalyst engine (14 Nov):** `analysis/catalysts.py` (pure; rule table in its docstring),
+  `data/nse_announcements.py` (announcements / results filed / quarterly figures / pre-open; NSE →
+  RSS → BSE; never raises), `alerts/catalyst_alerts.py`. Modes: `--mode=catalyst-preopen` (step in
+  `warm-preopen-scan.yml`), live check inside the default 15-min run (`_catalyst_live`, cap 6/day),
+  `--mode=why-moved` (step in `warm_tomorrow_watchlist.yml`). Reads go to KV `catalyst_picks:<date>`
+  (`_system`), **never** to `verdict_log` (DECISION_RULE pools every ledger source). "Surprise" is
+  this quarter vs the year-ago quarter (no consensus data). `grade_picks` exists but nothing shows
+  the catalyst record yet — next: a Friday-card section and a page view.
+- **Reliability (14 Nov):** Angel quote / batch / depth calls feed the shared breaker; `fetch_single`
+  holds a short (first bar >40% of span late) or stale (≥2 sessions) Angel/Stooq frame and lets
+  Yahoo win if better; scans log and persist `scan_health` (dropped count / reasons); warmers refuse
+  to overwrite a snapshot when <50% of the universe scored; NaN / 0 live quotes fall through;
+  Telegram / Gmail / scan timestamps are real IST. **Found, not fixed:** (1) a failed `^NSEI` fetch
+  is cached 5 min so a whole scan scores without relative strength (touches scoring); (2) live
+  re-anchor of entry / stop / target has no sanity bound and `_get_token` falls back to the first
+  `searchScrip` hit; (3) Yahoo live quote age unchecked; (4) stale Yahoo frame not patched from
+  bhavcopy; (5) `date.today()` in UTC in `_period_to_dates`. Not audited: `utils/indicators.py`
+  short-frame maths, `trade_store.py` beyond `kv_set`, option-chain / delivery / FII loaders.
+- **Why winners were missed (week of 9 Nov):** PNB was sent as STRONG BUY on 9 Nov at ₹127.29 (buried
+  in jargon); KMEW on 12 Nov; DHANBANK was flagged TRIM on 10 Nov before rising; KALYANKJIL / ANURAS
+  were on in-app lists but not found in the Telegram runs checked (daily cap of 10).
 - **Week of 9–13 Nov review (13 Nov, `claude/festive-fermi-150awb`):** Friday card: Top Picks 86
   names, average +1.1% / +1.1 pts vs Nifty but only 44 of 86 ahead; watchlist bullish 53 of 111
   ahead; bearish setups rose +0.5% on average (20 of 45 lagged). Averages were carried by a few

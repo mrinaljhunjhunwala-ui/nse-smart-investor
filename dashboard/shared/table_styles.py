@@ -108,13 +108,17 @@ def pinned_text_col(label: Optional[str] = None, **kw):
     return st.column_config.TextColumn(label, pinned=True, **kw)
 
 
+_POSTURE_GLYPH = {"STRONG BUY": "▲▲", "BUY": "▲", "WATCHLIST": "◆", "HOLD": "●",
+                  "CAUTION": "▼", "EXIT": "▼▼", "SELL": "▼▼"}
+
+
 def posture_label(action: str) -> str:
-    """Honest display label (trade_utils._display_label). Those labels
-    already carry ▲/▼ for directional postures; the neutral ones get a
-    ◆/● glyph so every row has a shape cue, not just a colour."""
+    """Display label (trade_utils._display_label: BUY / SELL / HOLD words since
+    2026-11-13) with a shape glyph in front, so every row has a shape cue, not
+    just a colour: ▲▲ / ▲ up, ◆ watch, ● hold, ▼ / ▼▼ down."""
     from dashboard.shared.trade_utils import _display_label
     a = (action or "").upper().strip()
     lbl = _display_label(a) or "—"
     if "▲" in lbl or "▼" in lbl:
         return lbl
-    return f"{'◆' if a == 'WATCHLIST' else '●'} {lbl}"
+    return f"{_POSTURE_GLYPH.get(a, '●')} {lbl}"
