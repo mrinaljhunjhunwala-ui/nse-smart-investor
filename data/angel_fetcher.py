@@ -216,6 +216,7 @@ def _breaker_tripped() -> bool:
             # cooldown passed -> reset
             _BREAKER_TRIPPED_AT[0] = 0.0
             _BREAKER_FAILS[0] = 0
+            _QUOTE_FAILS[0] = 0
         return False
 
 
@@ -237,6 +238,41 @@ def _breaker_record_success() -> None:
     with _BREAKER_LOCK:
         _BREAKER_FAILS[0] = 0
         _BREAKER_TRIPPED_AT[0] = 0.0
+        _QUOTE_FAILS[0] = 0
+
+
+# FIX AO-QUOTE-BREAKER (2026-11-13): the quote endpoints (get_full_quote,
+# get_batch_quotes, get_market_depth) never looked at the breaker and never
+# recorded a failure. From GitHub's runners every Angel call answers 403, and
+# analysis.score.score_stock asks for one live quote per scored stock, so a
+# ~825-stock scan paid ~825 failing HTTP calls (10 s each on a timeout). Quote
+# failures now count toward the same data breaker, and an open breaker skips
+# the call so the next quote tier answers. A quote success only takes back
+# the failures quotes themselves added: it must not hide a run of candle
+# 403s (rate limit) that happens while quotes still work.
+_QUOTE_FAILS = [0]
+
+
+def _quote_record_failure() -> None:
+    with _BREAKER_LOCK:
+        _QUOTE_FAILS[0] += 1
+    _breaker_record_failure()
+
+
+def _quote_record_success() -> None:
+    with _BREAKER_LOCK:
+        if not _BREAKER_TRIPPED_AT[0]:
+            _BREAKER_FAILS[0] = max(0, _BREAKER_FAILS[0] - _QUOTE_FAILS[0])
+        _QUOTE_FAILS[0] = 0
+
+
+def _quote_num(value: Any, default: float = 0.0) -> float:
+    """float(value), or `default` for None / '' / NaN / inf / garbage."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if out == out and out not in (float("inf"), float("-inf")) else default
 
 
 # -- Circuit breaker (login) — FIX AO5 ----------------------------------------
@@ -667,6 +703,10 @@ def _fetch_candles_window(
 
 
 def get_full_quote(ticker: str) -> Optional[Dict]:
+    # FIX AO-QUOTE-BREAKER: an open breaker is a quiet skip (no login, no HTTP
+    # call, no WARNING per stock) so the caller's next quote tier serves it.
+    if _breaker_tripped():
+        return None
     session = _get_session()
     if session is None:
         return None
@@ -686,6 +726,7 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
         status = getattr(resp, "status_code", None)
         if status and status >= 400:
             _log.warning("angel_fetcher.get_full_quote: quote API returned %s", status)
+            _quote_record_failure()
             return None
 
         parsed = _safe_parse_json_response(resp)
@@ -694,19 +735,24 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
             return None
 
         q = fetched[0]
-        price = float(q.get("ltp", 0))
-        prev_close = float(q.get("close", price))
+        # ltp / close arrive as null for a symbol that has not traded; float(None)
+        # used to raise and NaN passed the `<= 0` test as a "price".
+        price = _quote_num(q.get("ltp"))
         if price <= 0:
             return None
+        prev_close = _quote_num(q.get("close"))
+        if prev_close <= 0:
+            prev_close = price
+        _quote_record_success()
 
         return {
             "ticker": symbol,
             "price": price,
             "prev_close": prev_close,
             "chg_pct": (price / prev_close - 1) * 100 if prev_close > 0 else 0.0,
-            "open": float(q.get("open", 0)),
-            "high": float(q.get("high", 0)),
-            "low": float(q.get("low", 0)),
+            "open": _quote_num(q.get("open")),
+            "high": _quote_num(q.get("high")),
+            "low": _quote_num(q.get("low")),
             "volume": int(q.get("tradeVolume", 0) or 0),
             "avg_price": float(q.get("avgPrice", 0) or 0),
             "upper_circuit": float(q.get("upperCircuit", 0) or 0),
@@ -723,6 +769,7 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
 
     except Exception as e:
         _log.warning("angel_fetcher.get_full_quote(%s) failed: %s", symbol, e)
+        _quote_record_failure()
         return None
 
 
@@ -814,6 +861,8 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
     if not tickers:
         return {}
 
+    if _breaker_tripped():        # FIX AO-QUOTE-BREAKER: quiet skip, fallbacks serve
+        return {t: None for t in tickers}
     session = _get_session()
     if session is None:
         return {t: None for t in tickers}
@@ -847,26 +896,34 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
             status = getattr(resp, "status_code", None)
             if status and status >= 400:
                 _log.warning("angel_fetcher.get_batch_quotes batch %d returned HTTP %s", i // BATCH, status)
+                _quote_record_failure()
+                if _breaker_tripped():
+                    break         # the remaining batches would be refused too
                 continue
             parsed = _safe_parse_json_response(resp)
             fetched = (parsed.get("data", {}).get("fetched") if isinstance(parsed, dict) else None) or []
+            if fetched:
+                _quote_record_success()
             for q in fetched:
                 tok = str(q.get("symbolToken") or q.get("symboltoken") or "")
                 orig = token_map.get(tok)
                 if orig is None:
                     continue
-                price = float(q.get("ltp", 0))
-                prev_close = float(q.get("close", price))
+                # One null / NaN field used to raise and drop the whole batch.
+                price = _quote_num(q.get("ltp"))
                 if price <= 0:
                     continue
+                prev_close = _quote_num(q.get("close"))
+                if prev_close <= 0:
+                    prev_close = price
                 results[orig] = {
                     "ticker": orig,
                     "price": price,
                     "prev_close": prev_close,
                     "chg_pct": (price / prev_close - 1) * 100 if prev_close > 0 else 0.0,
-                    "open": float(q.get("open", 0)),
-                    "high": float(q.get("high", 0)),
-                    "low": float(q.get("low", 0)),
+                    "open": _quote_num(q.get("open")),
+                    "high": _quote_num(q.get("high")),
+                    "low": _quote_num(q.get("low")),
                     "volume": int(q.get("tradeVolume", 0) or 0),
                     # avgPrice is Angel's average traded price, i.e. session VWAP.
                     "vwap": float(q.get("avgPrice", 0) or 0),
@@ -878,12 +935,17 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
                 }
         except Exception as e:
             _log.warning("angel_fetcher.get_batch_quotes batch %d failed: %s", i // BATCH, e)
+            _quote_record_failure()
+            if _breaker_tripped():
+                break
             continue
 
     return results
 
 
 def get_market_depth(ticker: str) -> Optional[Dict]:
+    if _breaker_tripped():        # FIX AO-QUOTE-BREAKER
+        return None
     session = _get_session()
     if session is None:
         return None
