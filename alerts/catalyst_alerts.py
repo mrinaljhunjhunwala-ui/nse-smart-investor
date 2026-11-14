@@ -37,7 +37,13 @@ WHY_CANDIDATES = 15
 WHY_MAX_SNAPSHOT_AGE_H = 10
 MAX_SYMBOLS = 40
 MAX_LINES = 14
-FOOTER = "<i>Hold 2-5 sessions; out on a close below the stop. Model call, not a guarantee.</i>"
+# 2026-11-14, 20-session replay (15 Oct - 13 Nov, 1,009 names with filings, 184 positive calls):
+# same-day plan about breakeven before costs (+0.1R, entry-to-close +0.2%); held to the latest
+# close +3.1% from the open but 3.3 pts BEHIND the Nifty, and no better than the names the engine
+# only watched (+3.4%). No edge shown, so positive reads go out as WATCH (tracked, not a buy call).
+# Change CALL_WORD back to "BUY" only when the Friday-card record supports it.
+CALL_WORD = "WATCH"
+FOOTER = "<i>Tracked, not yet a buy call: a 4-week replay showed no edge. Model output, not a guarantee.</i>"
 WHY_FOOTER = "<i>Reasons come only from filings, prices and volume — nothing is guessed.</i>"
 
 
@@ -191,7 +197,7 @@ def week_record_lines(rec: Optional[dict], h: Callable[[Any], str]) -> List[str]
     s = rec["summary"]
     entered = s["n"] - s.get("not_triggered", 0)
     avg = "n/a" if s.get("avg_r") is None else f"{s['avg_r']:+.1f}R"
-    lines = [f"📣 <b>Results &amp; news BUY calls</b> · {s['n']} this week",
+    lines = [f"📣 <b>Results &amp; news calls (tracked)</b> · {s['n']} this week",
              f"{entered} entered · {s.get('hit', 0)} hit target · {s.get('stop', 0)} stopped · "
              f"{s.get('open', 0)} still open · average {avg}"]
     names = [f"{h(g['symbol'])} {g['r']:+.1f}R" for g in (rec.get("best") or []) + (rec.get("worst") or [])]
@@ -229,7 +235,7 @@ def read_lines(r: Any, h: Callable[[Any], str]) -> tuple:
     so it is information for holders and would-be buyers, not a short call."""
     d = _read_dict(r)
     if d.get("action") == "BUY":
-        line1 = (f"BUY  <b>{h(d.get('symbol'))}</b>  above {_fmt_px(d.get('trigger'))}"
+        line1 = (f"{CALL_WORD}  <b>{h(d.get('symbol'))}</b>  above {_fmt_px(d.get('trigger'))}"
                  f" · stop {_fmt_px(d.get('stop'))} · first target {_fmt_px(d.get('target'))}")
     else:
         line1 = f"AVOID  <b>{h(d.get('symbol'))}</b>  weak news — no fresh buying; holders review"
@@ -325,10 +331,10 @@ def check_catalyst_preopen(state: dict, today: str, now: Optional[_dt.datetime] 
               f"{len(buys)} BUY / {len(sells)} SELL")
         if not buys and not sells:
             return 0
-        header = (f"🌅 <b>Catalyst picks for today</b> ({n:%H:%M} IST) · "
+        header = (f"🌅 <b>Results &amp; news watch</b> ({n:%H:%M} IST) · "
                   f"filings since {since:%a %H:%M}")
         msg = compose(header, [read_lines(r, _h) for r in buys + sells], FOOTER)
-        if dispatch(msg, subject="Catalyst picks — NSE Smart Investor"):
+        if dispatch(msg, subject="Results and news watch — NSE Smart Investor"):
             _mark_fired(state, PREOPEN_KEY, today)
             return 1
         return 0

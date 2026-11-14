@@ -3,6 +3,15 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **20-session catalyst replay, 15 Oct – 13 Nov (14 Nov, run 43610018434):** 1,009 universe names
+  with classified filings; 184 positive calls. Same-day opening-range plan on 15-minute bars: 94
+  entered, 49 profitable, 3 target / 8 stop, average +0.1R, entry→close +0.2% (about breakeven
+  before the 0.25% round trip). Held from the open to the latest close: +3.1%, **3.3 pts behind the
+  Nifty**, and no better than the 403 names the engine only watched (+3.4%). Strong year-on-year
+  results +3.0% vs weak +4.2%: the results score did not predict the move. The one-week +1.3 pts
+  was noise. **Decision:** positive reads are sent as `WATCH` (`catalyst_alerts.CALL_WORD`), not
+  BUY, with a footer saying so; "why it moved" and the Friday-card record stay. Do not switch back
+  to BUY until the weekly record shows an edge over a full results season (Jan–Feb 2027).
 - **Small fixes (15 Nov; audit leftovers from #348):** replay Telegram message is valid HTML again
   (`catalyst_replay.telegram_lines` escapes the `<=` / `>=` bucket names). Replay asks for 15-minute
   bars with `period="60d"` (the widest `data/fetcher` serves for 15m), falling back to `1mo`
