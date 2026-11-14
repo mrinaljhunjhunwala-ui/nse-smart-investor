@@ -70,6 +70,63 @@ def grade_day(action: str, trigger: Optional[float], stop: Optional[float], targ
     return {"entered": True, "outcome": "close", "r": ((c - entry) if up else (entry - c)) / risk, "entry": entry}
 
 
+def grade_intraday(action: str, trigger: Optional[float], stop: Optional[float], target: Optional[float],
+                   bars: List[dict]) -> Dict[str, Any]:
+    """Outcome of one call walked through that day's 15-minute bars in order. Pure.
+
+    `bars` are the bars AFTER the opening-range bar: dicts with open / high / low /
+    close. Entry on the first bar that trades through the trigger (at its open if
+    it opens beyond it). From the next bar on: stop first (-1R), then target; a
+    bar touching both counts as the stop. Still open at the last bar -> marked at
+    its close. Returns {"entered", "outcome", "r", "entry", "exit"}."""
+    if action not in ("BUY", "SELL") or not trigger or not stop or trigger == stop or not bars:
+        return {"entered": False, "outcome": "no_plan", "r": None, "entry": None, "exit": None}
+    up = action == "BUY"
+    entry = None
+    for i, b in enumerate(bars):
+        if entry is None:
+            if (up and b["high"] >= trigger) or (not up and b["low"] <= trigger):
+                entry = max(trigger, b["open"]) if up else min(trigger, b["open"])
+                risk = (entry - stop) if up else (stop - entry)
+                if risk <= 0:
+                    return {"entered": False, "outcome": "no_plan", "r": None, "entry": entry, "exit": None}
+                # inside the entry bar only a close beyond the stop counts (order within the bar unknown)
+                if (up and b["close"] <= stop) or (not up and b["close"] >= stop):
+                    return {"entered": True, "outcome": "stop", "r": -1.0, "entry": entry, "exit": stop}
+            continue
+        if (up and b["low"] <= stop) or (not up and b["high"] >= stop):
+            return {"entered": True, "outcome": "stop", "r": -1.0, "entry": entry, "exit": stop}
+        if target and ((up and b["high"] >= target) or (not up and b["low"] <= target)):
+            return {"entered": True, "outcome": "target", "r": abs(target - entry) / risk, "entry": entry,
+                    "exit": target}
+    if entry is None:
+        return {"entered": False, "outcome": "no_entry", "r": None, "entry": None, "exit": None}
+    last = bars[-1]["close"]
+    return {"entered": True, "outcome": "close", "r": ((last - entry) if up else (entry - last)) / risk,
+            "entry": entry, "exit": last}
+
+
+def day_bars_15m(df: Any, day: _dt.date) -> List[dict]:
+    """That day's 15-minute bars in IST order from an intraday frame (tz-aware, naive IST or naive UTC)."""
+    import pandas as pd
+    if df is None or getattr(df, "empty", True):
+        return []
+    idx = pd.to_datetime(df.index)
+    if idx.tz is not None:
+        idx = idx.tz_convert("Asia/Kolkata").tz_localize(None)
+    elif len(idx) and idx[0].hour < 9 and (idx.hour.min() < 9):
+        idx = idx + pd.Timedelta(hours=5, minutes=30)           # naive UTC (03:45 = 09:15 IST)
+    out = []
+    for t, (_, r) in zip(idx, df.iterrows()):
+        if t.date() == day and _dt.time(9, 15) <= t.time() <= _dt.time(15, 30):
+            try:
+                out.append({"t": t, "open": float(r["Open"]), "high": float(r["High"]),
+                            "low": float(r["Low"]), "close": float(r["Close"])})
+            except (TypeError, ValueError, KeyError):
+                continue
+    return [b for b in sorted(out, key=lambda b: b["t"]) if b["high"] == b["high"] and b["low"] == b["low"]]
+
+
 def surprise_bucket(score: Optional[float]) -> str:
     if score is None:
         return "no figures"
@@ -97,6 +154,15 @@ def summarise(rows: List[dict]) -> Dict[str, Any]:
             "target": sum(r["outcome"] == "target" for r in ent),
             "wins": sum((r.get("r") or 0) > 0 for r in ent),
             "avg_r": avg([r.get("r") for r in ent]),
+            "intraday": (lambda it: {
+                "graded": len(it), "entered": sum(bool(r.get("i_entered")) for r in it),
+                "target": sum(r.get("i_outcome") == "target" for r in it),
+                "stop": sum(r.get("i_outcome") == "stop" for r in it),
+                "wins": sum((r.get("i_r") or 0) > 0 for r in it if r.get("i_entered")),
+                "avg_r": avg([r.get("i_r") for r in it if r.get("i_entered")]),
+                "avg_entry_to_close": avg([r.get("entry_to_close") for r in it if r.get("i_entered")]),
+                "avg_entry_to_last": avg([r.get("entry_to_last") for r in it if r.get("i_entered")]),
+            })([r for r in rs if r.get("i_outcome")]),
             "avg_open_to_close": avg([r.get("open_to_close") for r in rs]),
             "avg_open_to_last": avg([r.get("open_to_last") for r in rs]),
             "avg_vs_nifty_to_last": avg([(r["open_to_last"] - r["nifty_to_last"])
@@ -135,6 +201,15 @@ def report_lines(rows: List[dict], summ: Dict[str, Any], sessions: List[_dt.date
         line += (f" | open->close {_fmt(a['avg_open_to_close'])} | open->latest {_fmt(a['avg_open_to_last'])}"
                  f" (vs Nifty {_fmt(a['avg_vs_nifty_to_last'], ' pts')})")
         lines.append(line)
+    lines += ["", "Same calls walked through 15-minute bars (opening-range plan: enter above the first 15-minute "
+              "high, stop and 2R target from the alert; else out at the close):"]
+    for act in ("BUY", "SELL"):
+        it = summ["by_action"][act].get("intraday") or {}
+        if it.get("graded"):
+            lines.append(f"  {act:<5} {it['graded']:>3} graded | entered {it['entered']} | target {it['target']} | "
+                         f"stop {it['stop']} | profitable {it['wins']} | average {_fmt(it['avg_r'], 'R')} | "
+                         f"entry->close {_fmt(it['avg_entry_to_close'])} | held to latest close "
+                         f"{_fmt(it['avg_entry_to_last'])}")
     lines += ["", "Did the quarter's numbers line up with the price? (results filers only; day move = previous "
               "close to that day's close)"]
     for k, b in sorted(summ["by_bucket"].items()):
@@ -148,7 +223,9 @@ def report_lines(rows: List[dict], summ: Dict[str, Any], sessions: List[_dt.date
             continue
         lines.append(f"  {r['date']}  {r['action']:<5} {r['symbol']:<13} {r.get('strength') or 0:>3}  "
                      f"{_fmt(r.get('gap')):>6}  {_fmt(r.get('day_move')):>6}  {_fmt(r.get('open_to_last')):>9}   "
-                     f"{r.get('outcome', ''):<9} {_fmt(r.get('r'), 'R'):>6} {'; '.join(r.get('reasons') or [])[:90]}")
+                     f"{r.get('outcome', ''):<9} {_fmt(r.get('r'), 'R'):>6} "
+                     f"15m:{r.get('i_outcome') or '-':<8} {_fmt(r.get('i_r'), 'R'):>6} "
+                     f"{'; '.join(r.get('reasons') or [])[:80]}")
     movers = sorted([r for r in rows if r.get("day_move") is not None], key=lambda x: -abs(x["day_move"]))[:12]
     lines += ["", "Biggest day moves among names with a filing, and what the app would have said:"]
     for r in movers:
@@ -208,6 +285,7 @@ def run(n_sessions: int, cap: int) -> Dict[str, Any]:
     print(f"[replay] {len(events)} announcements in window; universe {len(universe)} names")
 
     frames: Dict[str, Any] = {}
+    intraday: Dict[str, Any] = {}
     quarters: Dict[str, list] = {}
     rows: List[dict] = []
     for s in sessions:
@@ -265,6 +343,27 @@ def run(n_sessions: int, cap: int) -> Dict[str, Any]:
                 action = read.action if read is not None else "no call"
                 g = grade_day(action, getattr(read, "trigger", None), getattr(read, "stop", None),
                               getattr(read, "target", None), o, h, lo, c)
+                intr: Dict[str, Any] = {}
+                if action in ("BUY", "SELL"):
+                    try:
+                        if sym not in intraday:
+                            intraday[sym] = fetch_single(f"{sym}.NS", period="1mo", interval="15m")
+                            time.sleep(0.3)
+                        bars = day_bars_15m(intraday[sym], s)
+                        if len(bars) >= 4:
+                            orb = {"high": bars[0]["high"], "low": bars[0]["low"]}
+                            r2 = C.catalyst_read(sym, evs, surprise, rx, preopen=pre, now=now, holidays=hol,
+                                                 opening_range=orb) or read
+                            gi = grade_intraday(action, r2.trigger, r2.stop, r2.target, bars[1:])
+                            intr = {"i_entered": gi["entered"], "i_outcome": gi["outcome"], "i_r": gi["r"],
+                                    "i_trigger": r2.trigger, "i_stop": r2.stop, "i_target": r2.target,
+                                    "entry_to_close": (_pct(c, gi["entry"]) if gi["entry"] else None),
+                                    "entry_to_last": (_pct(last_close, gi["entry"]) if gi["entry"] else None)}
+                            if action == "SELL":
+                                for k in ("entry_to_close", "entry_to_last"):
+                                    intr[k] = None if intr[k] is None else -intr[k]
+                    except Exception as e:                          # noqa: BLE001
+                        print(f"[replay] {s} {sym}: 15m bars unavailable ({type(e).__name__}: {e})")
                 day_move = _pct(c, prev_close)
                 why = C.explain_move(sym, day_move or 0.0, events=evs, surprise=surprise,
                                      reaction=C.reaction(df.iloc[:i + 1], s), sector_return_pct=None,
@@ -281,7 +380,7 @@ def run(n_sessions: int, cap: int) -> Dict[str, Any]:
                     "gap": pre["gap_pct"], "day_move": day_move, "open_to_close": _pct(c, o),
                     "open_to_last": _pct(last_close, o),
                     "nifty_to_last": _pct(float(nifty["Close"].iloc[-1]), nopen.get(s)),
-                    **g,
+                    **g, **intr,
                 })
             except Exception as e:                              # noqa: BLE001
                 print(f"[replay] {s} {sym}: skipped ({type(e).__name__}: {e})")
@@ -293,16 +392,21 @@ def telegram_lines(summ: Dict[str, Any], sessions: List[_dt.date]) -> List[str]:
     lines = [f"🧪 <b>Results / news calls replayed</b> · {sessions[0]:%d %b} → {sessions[-1]:%d %b}"]
     for act in ("BUY", "SELL"):
         a = summ["by_action"][act]
-        if a["n"]:
+        it = a.get("intraday") or {}
+        if it.get("graded"):
+            lines.append(f"{act}: {a['n']} calls · {it['entered']} entered · {it['target']} hit target · "
+                         f"{it['stop']} stopped · average {_fmt(it['avg_r'], 'R')} · held to now "
+                         f"{_fmt(it['avg_entry_to_last'])} (15-minute bars)")
+        elif a["n"]:
             lines.append(f"{act}: {a['n']} calls · {a['entered']} entered · {a['target']} hit target · "
-                         f"{a['stop']} stopped · average {_fmt(a['avg_r'], 'R')}")
+                         f"{a['stop']} stopped · average {_fmt(a['avg_r'], 'R')} (daily bars)")
     w = summ["by_action"]["WATCH"]
     if w["n"]:
         lines.append(f"WATCH: {w['n']} names · open→latest {_fmt(w['avg_open_to_last'])}")
     for k, b in sorted(summ["by_bucket"].items()):
         lines.append(f"{k}: {b['n']} names · day move {_fmt(b['avg_day_move'])} · after the open "
                      f"{_fmt(b['avg_open_to_last'])}")
-    lines.append("One week, daily bars: a behaviour check, not proof. Full table in the Actions log.")
+    lines.append("One week: a behaviour check, not proof. Full table in the Actions log.")
     return lines
 
 

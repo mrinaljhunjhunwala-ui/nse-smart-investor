@@ -95,3 +95,37 @@ def test_run_end_to_end_with_stubs(monkeypatch):
     assert row["bucket"].startswith("strong results") and row["action"] in ("BUY", "WATCH")
     assert row["gap"] is not None and row["day_move"] is not None
     assert R.report_lines(res["rows"], res["summary"], res["sessions"])
+
+
+def _b(o, h, lo, c):
+    return {"open": o, "high": h, "low": lo, "close": c}
+
+
+def test_grade_intraday_walks_bars_in_order():
+    # low BEFORE the entry does not stop the trade (the daily-bar grader could not tell)
+    bars = [_b(99, 99.5, 97, 99.4), _b(99.4, 100.5, 99.3, 100.4), _b(100.4, 104.5, 100.2, 104)]
+    g = R.grade_intraday("BUY", 100, 98, 104, bars)
+    assert g["entered"] and g["outcome"] == "target" and g["r"] == 2.0
+    g = R.grade_intraday("BUY", 100, 98, 104, [_b(99, 100.5, 99, 100.2), _b(100.2, 100.4, 97.5, 98)])
+    assert g["outcome"] == "stop" and g["r"] == -1.0
+    g = R.grade_intraday("BUY", 100, 98, 104, [_b(99, 100.5, 99, 100.2), _b(100.2, 101.5, 99.5, 101)])
+    assert g["outcome"] == "close" and round(g["r"], 2) == 0.5
+    assert R.grade_intraday("BUY", 100, 98, 104, [_b(99, 99.8, 98.5, 99)])["outcome"] == "no_entry"
+    assert R.grade_intraday("BUY", 100, 98, 104, [_b(99, 104.5, 97, 97.5)])["outcome"] == "stop"   # closes through stop
+    g = R.grade_intraday("SELL", 100, 102, 96, [_b(101, 101.2, 99.5, 99.8), _b(99.8, 100, 95.5, 96)])
+    assert g["outcome"] == "target" and g["r"] == 2.0
+    assert R.grade_intraday("WATCH", 100, 98, 104, bars)["outcome"] == "no_plan"
+
+
+def test_day_bars_15m_handles_utc_and_ist_indexes():
+    utc = pd.date_range("2026-11-12 03:45", periods=25, freq="15min")           # naive UTC = 09:15 IST
+    df = pd.DataFrame({"Open": 1.0, "High": 2.0, "Low": 0.5, "Close": 1.5}, index=utc)
+    bars = R.day_bars_15m(df, dt.date(2026, 11, 12))
+    assert len(bars) == 25 and bars[0]["t"].time() == dt.time(9, 15)
+    aware = df.copy()
+    aware.index = utc.tz_localize("UTC")
+    assert len(R.day_bars_15m(aware, dt.date(2026, 11, 12))) == 25
+    ist = df.copy()
+    ist.index = pd.date_range("2026-11-12 09:15", periods=25, freq="15min")
+    assert R.day_bars_15m(ist, dt.date(2026, 11, 12))[0]["t"].time() == dt.time(9, 15)
+    assert R.day_bars_15m(None, dt.date(2026, 11, 12)) == []
