@@ -365,8 +365,8 @@ def test_preopen_message(monkeypatch, store, sent):
     assert CA.check_catalyst_preopen(state, "2026-11-16", now=MON_PRE) == 1
     msg = sent[0]
     lines = msg.split("\n")
-    assert len(lines) <= 14 and "Catalyst picks" in lines[0] and "not a guarantee" in lines[-1]
-    assert any(ln.startswith("BUY  <b>CUPID</b>  above ₹") and "· stop ₹" in ln and "· first target ₹" in ln
+    assert len(lines) <= 14 and "news watch" in lines[0] and "not a guarantee" in lines[-1]
+    assert any(ln.startswith("WATCH  <b>CUPID</b>  above ₹") and "· stop ₹" in ln and "· first target ₹" in ln
                for ln in lines)
     assert "Q2 profit +86% YoY, revenue +38% · gap +4.2%" in msg
     assert "AVOID  <b>WEAK</b>  weak news" in msg and "SELL" not in msg
@@ -420,7 +420,7 @@ def test_live_alert_dedupe_and_cap(monkeypatch, store, sent):
     state = {f"catalyst_live_X{i}": "2026-11-16" for i in range(4)}
     assert CA.check_catalyst_live(state, "2026-11-16", now=LIVE_NOW) == 1
     msg = sent[0]
-    assert "Fresh catalyst" in msg and "BUY  <b>AAA</b>" in msg and "BUY  <b>BBB</b>" in msg and "CCC" not in msg
+    assert "Fresh catalyst" in msg and "WATCH  <b>AAA</b>" in msg and "WATCH  <b>BBB</b>" in msg and "CCC" not in msg
     assert "today +3.0%" in msg and len(msg.split("\n")) <= 14
     assert state["catalyst_live_AAA"] == "2026-11-16"
     assert CA.check_catalyst_live(state, "2026-11-16", now=LIVE_NOW) == 0          # cap 6 reached
