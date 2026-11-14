@@ -80,11 +80,42 @@ def _vwap_from_bars(result: dict) -> dict:
         return {}
 
 
+def _quote_time_fields(ts, now=None) -> dict:
+    """{"as_of": ISO time in IST[, "eod": True]} for a quote's epoch timestamp.
+
+    Yahoo keeps serving the last traded price of a suspended / halted stock, so
+    a days-old price used to read as live. A quote dated before the last
+    completed NSE session is marked "eod" (end-of-day, not live). Returns {}
+    when the timestamp is missing or unreadable; never raises."""
+    try:
+        import datetime as _dt
+        t = _dt.datetime.fromtimestamp(float(ts), tz=_dt.timezone.utc).astimezone(
+            _dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+        out = {"as_of": t.isoformat(timespec="seconds")}
+        try:
+            from data.price_store import last_completed_session
+            if t.date() < last_completed_session(now):
+                out["eod"] = True
+        except Exception as e:                                  # noqa: BLE001
+            _log.debug("quote age check skipped: %s", e)
+        return out
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
+def quote_is_live(q: Optional[dict]) -> bool:
+    """False for no quote or one flagged end-of-day ("eod"); use this before
+    showing a "live" badge. Tiers that carry no quote time count as live."""
+    return bool(q) and not q.get("eod")
+
+
 def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
     """
     Fetch live quote from Yahoo Finance JSON endpoint.
     Uses cookie+crumb session (required since mid-2024).
-    Returns dict with 'price', 'prev_close', or None on failure.
+    Returns dict with 'price', 'prev_close' (plus 'as_of', the quote time in
+    IST, and 'eod': True when that time is before the last completed NSE
+    session), or None on failure.
 
     Note: regularMarketPrice is the last traded price during market hours.
     Outside hours it reflects the closing price of the last session — this
@@ -125,6 +156,7 @@ def _yahoo_json_quote(ticker_ns: str) -> Optional[dict]:
             if _hi and _lo:
                 out["high"], out["low"] = float(_hi), float(_lo)
             out.update(_vwap_from_bars(data["chart"]["result"][0]))
+            out.update(_quote_time_fields(meta.get("regularMarketTime")))
             return out
     except Exception as e:
         _log.debug("yahoo JSON quote failed for %s: %s", ticker_ns, e)
@@ -271,6 +303,11 @@ def _normalise(q: dict) -> dict:
     for _k in ("high", "low", "vwap"):
         if q.get(_k):
             out[_k] = float(q[_k])
+    # Quote time and the end-of-day flag (Yahoo tier; see _quote_time_fields).
+    if q.get("as_of"):
+        out["as_of"] = q["as_of"]
+    if q.get("eod"):
+        out["eod"] = True
     return out
 
 

@@ -129,3 +129,73 @@ def test_day_bars_15m_handles_utc_and_ist_indexes():
     ist.index = pd.date_range("2026-11-12 09:15", periods=25, freq="15min")
     assert R.day_bars_15m(ist, dt.date(2026, 11, 12))[0]["t"].time() == dt.time(9, 15)
     assert R.day_bars_15m(None, dt.date(2026, 11, 12)) == []
+
+
+def test_telegram_lines_escape_bucket_names():
+    """Bucket names carry raw <= / >=; unescaped they made Telegram reject the HTML send."""
+    rows = [{"date": "2026-11-10", "symbol": s, "kind": "results", "action": "WATCH", "entered": False,
+             "outcome": "no_plan", "r": None, "bucket": R.surprise_bucket(sc), "day_move": 1.0}
+            for s, sc in (("AAA", 70), ("BBB", -40))]
+    tg = "\n".join(R.telegram_lines(R.summarise(rows), [dt.date(2026, 11, 10)]))
+    assert "score &gt;= +25" in tg and "score &lt;= -25" in tg
+    import re
+    assert not re.search(r"<(?!/?b>)", tg) and ">=" not in tg.replace("&gt;=", "")
+
+
+def test_grade_held_paths():
+    # no close under the stop: out at the close 5 sessions after the entry day
+    g = R.grade_held("BUY", 100.0, 95.0, [101, 102, 99, 103, 104, 110, 150])
+    assert g["h_outcome"] == "time" and g["h_days"] == 5 and round(g["h_pct"], 6) == 10.0
+    # an intraday dip is not seen; the first CLOSE below the stop ends it
+    g = R.grade_held("BUY", 100.0, 95.0, [101, 94, 120])
+    assert g["h_outcome"] == "stop_close" and g["h_days"] == 1 and round(g["h_pct"], 6) == -6.0
+    # fewer than 5 sessions of history: marked at the latest close
+    g = R.grade_held("BUY", 100.0, 95.0, [101, 103])
+    assert g["h_outcome"] == "open" and round(g["h_pct"], 6) == 3.0
+    # SELL mirrors: a close above the stop ends it, a fall is a profit
+    assert round(R.grade_held("SELL", 100.0, 105.0, [98, 96])["h_pct"], 6) == 4.0
+    assert R.grade_held("SELL", 100.0, 105.0, [106, 90])["h_outcome"] == "stop_close"
+    assert R.grade_held("WATCH", 100.0, 95.0, [101])["h_pct"] is None
+    assert R.grade_held("BUY", None, 95.0, [101])["h_pct"] is None
+
+
+def test_held_grade_in_summary_report_and_telegram():
+    base = {"date": "2026-11-10", "kind": "news", "action": "BUY", "entered": True, "outcome": "close", "r": 0.2,
+            "bucket": "no figures"}
+    rows = [{**base, "symbol": "AAA", **R.grade_held("BUY", 100.0, 95.0, [101, 102, 103, 104, 105, 108])},
+            {**base, "symbol": "BBB", **R.grade_held("BUY", 100.0, 95.0, [94])},
+            {**base, "symbol": "CCC", "entered": False, "outcome": "no_entry", "r": None}]
+    s = R.summarise(rows)
+    assert s["by_action"]["BUY"]["held"] == {"graded": 2, "wins": 1, "stopped": 1, "avg_pct": 1.0}
+    days = [dt.date(2026, 11, 10)]
+    text = "\n".join(R.report_lines(rows, s, days))
+    assert "2 held | profitable 1 | closed beyond stop 1 | average +1.0%" in text
+    assert any(ln.startswith("BUY held 5 sessions: 2 trades · 1 profitable · average +1.0%")
+               for ln in R.telegram_lines(s, days))
+
+
+def test_fetch_15m_asks_for_the_widest_range_then_falls_back():
+    asked = []
+
+    def ok(t, period, interval):
+        asked.append((period, interval))
+        return pd.DataFrame({"Close": [1.0]})
+    assert R.fetch_15m(ok, "X.NS") is not None and asked == [("60d", "15m")]
+
+    def only_month(t, period, interval):
+        asked.append((period, interval))
+        if period == "60d":
+            raise ValueError("range not served")
+        return pd.DataFrame({"Close": [1.0]})
+    asked.clear()
+    assert R.fetch_15m(only_month, "X.NS") is not None and [a[0] for a in asked] == ["60d", "1mo"]
+    assert R.fetch_15m(lambda t, period, interval: pd.DataFrame(), "X.NS") is None
+
+
+def test_fetcher_serves_60d_for_15m():
+    """The replay's widest 15-minute request must be a period data/fetcher knows."""
+    import inspect
+
+    import data.fetcher as F
+    assert '"60d"' in inspect.getsource(F._fetch_yahoo_direct)
+    assert R.INTRADAY_15M_PERIODS[0] == "60d"

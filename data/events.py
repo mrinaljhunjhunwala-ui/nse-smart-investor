@@ -36,6 +36,18 @@ import pandas as pd
 
 _log = logging.getLogger("data.events")
 
+
+def _now_ist() -> datetime:
+    """Naive current time in IST. The machine clock is UTC on GitHub runners, so
+    "today" was a day behind IST until 05:30 and event day-counts were off by one."""
+    try:
+        from utils.snapshot_time import ist_now
+        return ist_now().replace(tzinfo=None)
+    except Exception:                                           # noqa: BLE001
+        from datetime import timezone
+        return (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).replace(tzinfo=None)
+
+
 try:
     import yfinance as yf
     _YF_AVAILABLE = True
@@ -70,7 +82,7 @@ def get_earnings_date(ticker: str) -> Optional[datetime]:
     try:
         info     = yf.Ticker(ticker)
         calendar = info.calendar          # dict or DataFrame depending on version
-        today    = datetime.now().date()
+        today    = _now_ist().date()
 
         # yfinance ≥ 0.2: calendar is a dict with 'Earnings Date' key
         if isinstance(calendar, dict):
@@ -118,7 +130,7 @@ def earnings_within_days(ticker: str, days: int = 7) -> bool:
     ed = get_earnings_date(ticker)
     if ed is None:
         return False
-    today  = datetime.now()
+    today  = _now_ist()
     return 0 <= (ed - today).days <= days
 
 
@@ -134,7 +146,7 @@ def get_earnings_calendar(tickers: List[str]) -> pd.DataFrame:
         ticker, earnings_date, days_away, within_7d, within_14d
     Sorted by days_away ascending (soonest first).
     """
-    today  = datetime.now()
+    today  = _now_ist()
     rows   = []
     for tkr in tickers:
         ed = get_earnings_date(tkr)
@@ -193,7 +205,7 @@ def should_skip_entry(
             "days_away":     None,
         }
 
-    days_away = (ed - datetime.now()).days
+    days_away = (ed - _now_ist()).days
 
     if 0 <= days_away <= days_buffer:
         return {
@@ -240,7 +252,7 @@ def in_results_season() -> bool:
     When True and earnings date is unknown, the caller may choose to
     be extra cautious and reduce position size.
     """
-    month = datetime.now().month
+    month = _now_ist().month
     for start, end in _RESULTS_SEASONS_MONTH_RANGE:
         if start <= month <= end:
             return True

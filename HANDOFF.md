@@ -3,6 +3,22 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Small fixes (15 Nov; audit leftovers from #348):** replay Telegram message is valid HTML again
+  (`catalyst_replay.telegram_lines` escapes the `<=` / `>=` bucket names). Replay asks for 15-minute
+  bars with `period="60d"` (the widest `data/fetcher` serves for 15m), falling back to `1mo`
+  (`fetch_15m`), and adds a **held** grade for the swing plan (`grade_held`: from the entry, out on
+  the first daily close beyond the stop, else at the close 5 sessions later or the latest close;
+  average % and number profitable in `summarise` / `report_lines` / `telegram_lines`). My Portfolio
+  copy says BUY / HOLD / REDUCE / SELL via `_display_label`. "Pattern" score bar removed
+  (`picks_ui.SCORE_BARS`). Yahoo live quote carries `as_of`, and `eod: True` when it is older than
+  the last completed NSE session (`live_price.quote_is_live`; Analyze Stock no longer shows such a
+  quote as live). `_period_to_dates` (both fetchers) and `data/events.py` use the IST date.
+  `angel_fetcher._get_token` accepts only an exact symbol (`SYM` / `SYM-EQ` / `SYM-BE`) from
+  `searchScrip`, else None (next price tier) with one warning per symbol. Tests:
+  `tests/test_small_fixes_nov14.py`, `tests/test_catalyst_replay.py`. **Not verified (no network
+  here):** whether Yahoo serves 15m for the `60d` request (`_RANGE_MAP` sends it as `3mo`); if it
+  refuses, the replay falls back to one month, as before. Still open: stale Yahoo frame not patched
+  from bhavcopy; other callers of the live quote (Live Ticker, Paper Trades) do not read `eod` yet.
 - **Follow-ups after #347 (14 Nov):** Friday card gains a "Results & news BUY calls" section
   (`catalyst_alerts.week_record` grades the week's stored BUY reads with `catalysts.grade_picks`
   on daily bars). `score._get_bench_cached` retries a failed `^NSEI` fetch after 30 s (was held for
