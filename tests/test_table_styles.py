@@ -44,9 +44,9 @@ def test_pnl_styler_renders():
     assert "font-weight: 700" in html.replace("font-weight:700", "font-weight: 700")
 
 
-def test_posture_label_is_honest_and_shaped():
+def test_posture_label_is_direct_and_shaped():
+    """Owner decision 2026-11-13: labels say BUY / SELL / HOLD; each keeps a shape cue."""
     for raw in ("STRONG BUY", "BUY", "WATCHLIST", "HOLD", "CAUTION", "EXIT"):
-        lbl = posture_label(raw)
-        assert "BUY" not in lbl.upper() and "SELL" not in lbl.upper()
-        assert any(g in lbl for g in "▲▼◆●")
-    assert posture_label("BUY").count("▲") == 1
+        assert any(g in posture_label(raw) for g in "▲▼◆●")
+    assert posture_label("BUY") == "▲ BUY" and posture_label("STRONG BUY") == "▲▲ STRONG BUY"
+    assert posture_label("EXIT") == "▼▼ SELL" and posture_label("HOLD") == "● HOLD"

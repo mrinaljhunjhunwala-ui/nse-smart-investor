@@ -117,23 +117,23 @@ class PortfolioSummary:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _traffic_light(action: str, pnl_pct: float) -> str:
-    """Return 🟢 / 🟡 / 🔴 plus a short DESCRIPTIVE trend-state label.
+    """Return 🟢 / 🟡 / 🔴 plus the direct action word for the holding.
 
-    CLAUDE.md rule 1: describes the holding's trend, never tells the user to
-    add, trim or sell. Colour prefixes are kept for the CSV G/Y/R export.
+    Owner decision 13 Nov 2026: direct BUY / SELL / HOLD wording (personal
+    tool). Colour prefixes are kept for the CSV G/Y/R export.
     """
     if action in ("STRONG BUY", "BUY"):
-        return "🟢 Strong trend"
+        return "🟢 BUY"
     elif action in ("WATCHLIST",):
-        return "🟡 Mixed signals"
+        return "🟡 WATCH"
     elif action in ("HOLD",):
-        return "🟡 Neutral trend"
+        return "🟡 HOLD"
     elif action in ("CAUTION",):
         if pnl_pct > 15:
-            return "🟡 Weakening (position in profit)"
-        return "🔴 Weakening"
+            return "🟡 REDUCE (in profit)"
+        return "🔴 REDUCE"
     else:  # EXIT
-        return "🔴 Broken trend"
+        return "🔴 SELL"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

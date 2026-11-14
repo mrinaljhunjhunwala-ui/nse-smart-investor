@@ -99,6 +99,19 @@ jobs:
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
         run: python alerts/check_alerts.py --mode=morning-digest
 
+      # Results / announcements filed since yesterday's close, with the pre-open
+      # gap: BUY and SELL candidates for today's session (alerts/catalyst_alerts.py).
+      - name: Send results and news calls (pre-open)
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:         ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_GMAIL_ADDRESS:      ${{ secrets.ALERT_GMAIL_ADDRESS }}
+          ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
+          ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
+          DATABASE_URL:             ${{ secrets.DATABASE_URL }}
+        run: python alerts/check_alerts.py --mode=catalyst-preopen
+
       - name: Save alert state
         if: always() && steps.restore_state.outcome == 'success'
         uses: actions/cache/save@v5

@@ -107,8 +107,10 @@ class GmailAlerter:
     ) -> bool:
         """Convenience mirror of TelegramAlerter.send_signal so callers
         that already speak that API can swap in a GmailAlerter."""
-        import datetime
-        now = datetime.datetime.now().strftime("%d %b %Y  %H:%M IST")
+        # Real IST: the alert jobs run on UTC runners, where now() printed UTC
+        # under an "IST" label (5.5 h early).
+        from utils.snapshot_time import ist_now
+        now = ist_now().strftime("%d %b %Y  %H:%M IST")
         icon = {"BUY": "[BUY]", "SELL": "[SELL]", "HOLD": "[HOLD]"}.get(
             action.upper(), "[SIG]")
         subject = f"{action.upper()} {ticker} at Rs.{price:,.2f}"

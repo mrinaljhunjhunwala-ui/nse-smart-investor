@@ -80,6 +80,18 @@ def main() -> int:
         len(result.get("reversal_watch", [])),
     )
 
+    # FIX SNAPSHOT-GUARD: a mostly-failed scan must not replace a good snapshot.
+    from utils.snapshot_time import scan_too_degraded
+    _health = result.get("scan_health") or {}
+    if scan_too_degraded(result.get("n_universe"), result.get("n_scored")):
+        _log.error(
+            "warm_tomorrow_watchlist: scan too degraded to persist (scored %s of %s; first "
+            "unscored: %s; reasons: %s) — keeping the previous snapshot",
+            result.get("n_scored"), result.get("n_universe"),
+            ", ".join(_health.get("unavailable_sample") or []) or "n/a",
+            _health.get("unavailable_reasons") or "n/a")
+        return 0
+
     snapshot = {
         "data": result,
         "generated_at": store.snapshot_timestamp(),

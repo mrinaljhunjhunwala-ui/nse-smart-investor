@@ -138,9 +138,15 @@ def test_verdict_and_action_rendered_through_display_mappers():
 def test_display_mappers_cover_every_engine_value():
     from analysis.final_verdict import VERDICTS
     from dashboard.shared.trade_utils import _display_label, verdict_display_label
+    # Owner decision 13 Nov 2026: labels are direct BUY / SELL / HOLD words.
+    # The guard now checks every engine value has an explicit label from the
+    # agreed vocabulary (no raw pass-through, no outcome promises).
+    from analysis.action_labels import ACTION_DISPLAY_LABELS, VERDICT_DISPLAY_LABELS
+    allowed = {"STRONG BUY", "BUY", "WATCH", "HOLD", "REDUCE", "SELL", "AVOID / SELL"}
     for v in VERDICTS:
         out = verdict_display_label(v)
-        assert out != v and not re.search(r"\b(buy|sell|avoid)\b", out, re.I), (v, out)
+        assert v in VERDICT_DISPLAY_LABELS and out in allowed, (v, out)
     for a in ("STRONG BUY", "BUY", "WATCHLIST", "HOLD", "CAUTION", "EXIT", "SELL"):
         out = _display_label(a)
-        assert not re.search(r"\b(buy|sell|exit|avoid)\b", out, re.I), (a, out)
+        assert a in ACTION_DISPLAY_LABELS and out in allowed, (a, out)
+        assert not re.search(r"sure.?shot|guarantee", out, re.I), (a, out)

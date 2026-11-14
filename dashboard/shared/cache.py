@@ -705,6 +705,46 @@ def _unavailable_dict(ticker: str, reason: str = "", extended: bool = False) -> 
     return base
 
 
+_UNSCORED_ACTIONS = ("UNAVAILABLE", "DATA_UNAVAILABLE")
+
+
+def _drop_reason(s: dict) -> str:
+    """Short bucket for WHY a scan result carries no score (from its headline)."""
+    h = str(s.get("headline") or "").lower()
+    if "all sources failed" in h:
+        return "all providers failed"
+    if "insufficient data" in h:
+        return "too little history"
+    if "no session bars" in h:
+        return "no session bars"
+    if "dependencies unavailable" in h:
+        return "engine import failed"
+    if h.startswith("data unavailable (") and h.endswith(")"):
+        return "error: " + str(s.get("headline"))[len("Data unavailable ("):-1]
+    if str(s.get("action") or "") not in _UNSCORED_ACTIONS:
+        return "zero score"
+    return "other"
+
+
+def _scan_drop_summary(scan: str, n_universe: int, dropped: list) -> dict:
+    """FIX SCAN-DROPS (2026-11-13): scans skipped every unscored stock without
+    a trace, so a data outage only showed as a quietly shorter list. One log
+    line per scan (WARNING once 5% of the universe is missing) and a dict
+    for the snapshot: count, first 10 symbols, reason split."""
+    reasons: dict = {}
+    for d in dropped:
+        r = _drop_reason(d)
+        reasons[r] = reasons.get(r, 0) + 1
+    sample = [str(d.get("ticker")) for d in dropped[:10]]
+    n = len(dropped)
+    frac = (n / n_universe) if n_universe else 0.0
+    _log.log(logging.WARNING if frac >= 0.05 else logging.INFO,
+             "cache.%s: %d of %d stocks dropped with no score (%.1f%%) — first: %s — reasons: %s",
+             scan, n, n_universe, 100.0 * frac, ", ".join(sample) or "none", reasons or "none")
+    return {"n_universe": n_universe, "n_unavailable": n,
+            "unavailable_sample": sample, "unavailable_reasons": reasons}
+
+
 # PATCH 3a: TTL reduced from 1800 → 300 (5 min) so single-stock scores
 # used by the watchlist stay near-live during market hours instead of
 # showing 30-min-old data.
@@ -944,6 +984,7 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
     # unavailable-fraction crosses UNAVAIL_WARN_FRACTION.
     _n_scanned = len(results)
     _n_unavail = 0
+    _dropped: list = []       # unscored results, for the per-scan summary
     _excluded: dict = {}      # ticker -> why it's kept off the lists (edge flags)
     for s in results:
         act = s.get("action", "")
@@ -953,6 +994,7 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
         # score <= 0 guard was missing the DATA_UNAVAILABLE string check fully.
         if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
             _n_unavail += 1
+            _dropped.append(s)
             continue
         if s.get("list_excluded"):
             _excluded[s["ticker"]] = s["list_excluded"]
@@ -996,6 +1038,9 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
         "vix_regime": vix_regime,
         "excluded": _excluded,
     }
+    _health = _scan_drop_summary("_home_top_picks", _n_scanned, _dropped)
+    meta["unavailable_sample"] = _health["unavailable_sample"]
+    meta["unavailable_reasons"] = _health["unavailable_reasons"]
     # FIX WL-SNAP1: return the FULL scored map (ticker -> score_dict) for
     # every ticker the scan produced a valid score for, so watchlist scoring
     # (which is almost always a subset of niftytotalmarket) can be served
@@ -1194,12 +1239,14 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     }
     """
     import concurrent.futures as _cf
-    import datetime as _dtm
     import sys, os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from data.universe import get_universe
 
-    scan_time = _dtm.datetime.now().strftime("%d %b %H:%M")
+    # IST, not the machine's zone: the warmer runs on a UTC runner and the
+    # page showed its 10:20 UTC stamp as if it were the 15:50 IST scan time.
+    from utils.snapshot_time import ist_now as _ist_now
+    scan_time = _ist_now().strftime("%d %b %H:%M")
     out = {"breakout_candidates": [], "breakdown_watch": [], "reversal_watch": [],
            "scan_time": scan_time}
     try:
@@ -1239,7 +1286,7 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
                     "list_excluded": _list_exclusion(tk)}
         except Exception as _e:
             _log.debug("cache._tomorrow_watchlist score failed for %s: %s", tk, _e)
-            return None
+            return {"_failed": _unavailable_dict(tk, type(_e).__name__)}
 
     results = []
     try:
@@ -1248,6 +1295,9 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     except Exception as _e:
         _log.debug("cache._tomorrow_watchlist scan degraded: %s", _e)
         results = [r for r in (_one(tk) for tk in _UNIV) if r]
+
+    _dropped = [r["_failed"] for r in results if "_failed" in r]   # FIX SCAN-DROPS
+    results = [r for r in results if "_failed" not in r]
 
     def _item(s, signal_type, key_level):
         return {"ticker": s["ticker"], "score": s["score"], "headline": s["headline"],
@@ -1270,6 +1320,7 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     for s in results:
         act, sc = s.get("action", ""), s.get("score", 0)
         if sc <= 0 or act in ("UNAVAILABLE", "DATA_UNAVAILABLE"):
+            _dropped.append(s)
             continue
         if s.get("list_excluded"):
             _excluded[s["ticker"]] = s["list_excluded"]
@@ -1337,7 +1388,9 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     # Gate-strip inputs on the page: how many names the scan covered and
     # how many it actually scored. Older persisted snapshots lack these keys.
     out["n_universe"] = len(_UNIV)
-    out["n_scored"]   = len(results)
+    # FIX SCAN-DROPS: n_scored counted DATA_UNAVAILABLE results as "scored".
+    out["scan_health"] = _scan_drop_summary("_tomorrow_watchlist", len(_UNIV), _dropped)
+    out["n_scored"]   = max(0, len(_UNIV) - len(_dropped))
     out["excluded"]   = _excluded
     out["breakout_funnel"] = dict(_funnel)
     # Momentum leaders: same frames, regime-independent ranking. Never logged
@@ -1545,7 +1598,8 @@ def _momentum_leaders_from_scan(tickers, scored: "dict | None" = None, n: int = 
                                     extra=extra)
     except Exception as _e:
         _log.debug("cache._momentum_leaders_from_scan degraded: %s", _e)
-    out["scan_time"] = datetime.datetime.now().strftime("%d %b %H:%M")
+    from utils.snapshot_time import ist_now as _ist_now
+    out["scan_time"] = _ist_now().strftime("%d %b %H:%M")
     return out
 
 

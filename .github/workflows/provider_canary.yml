@@ -23,6 +23,11 @@ on:
   # (alerts/README.md). GitHub's cron fired hours late and only cost Actions
   # minutes.
   workflow_dispatch:           # allow manual "Run workflow" from the Actions tab
+    inputs:
+      replay_sessions:
+        description: "Also replay the results / news calls over the last N sessions (0 = off)"
+        required: false
+        default: "0"
 
 concurrency:
   group: provider-canary
@@ -52,3 +57,33 @@ jobs:
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           PYTHONUTF8: "1"
         run: python scripts/provider_canary.py --telegram
+
+  # On demand only (input replay_sessions > 0): rebuild what the pre-open
+  # results / news alert would have said on each of the last N sessions and
+  # grade it against what prices did (scripts/catalyst_replay.py). Needs NSE,
+  # Yahoo and Screener, which is why it runs here and not in a sandbox.
+  catalyst-replay:
+    if: ${{ github.event.inputs.replay_sessions != '' && github.event.inputs.replay_sessions != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Replay results and news calls
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATABASE_URL:       ${{ secrets.DATABASE_URL }}
+          REPLAY_SESSIONS:    ${{ github.event.inputs.replay_sessions }}
+          NSE_AUTO_FILING_FETCH: "0"
+          PYTHONUTF8: "1"
+        run: python scripts/catalyst_replay.py --sessions "$REPLAY_SESSIONS" --cap 80 --telegram

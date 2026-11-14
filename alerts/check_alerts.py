@@ -72,6 +72,37 @@ def _plain(text: str) -> str:
     return _html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
+# ── Message copy (owner decision 13 Nov 2026: direct BUY / SELL wording, short) ──
+# Line 1: emoji + bold title + time. One line per stock, action word first:
+#   "STRONG BUY  <b>PNB</b>  ₹118.40 · stop ₹112.10 · target ₹131.00"
+# One short footer at most. Copy only — logic, caps and dedupe keys unchanged.
+_FOOTER = "<i>Model output, not a guarantee.</i>"
+_MARKET_DOWN = "Market: downtrend — smaller size"
+
+
+def _now_hm() -> str:
+    return f"{datetime.datetime.now(_IST):%H:%M}"
+
+
+def _rs(x) -> str:
+    """₹-formatted number; non-numeric levels (e.g. '~1000') pass through escaped."""
+    try:
+        return f"₹{float(x):,.2f}"
+    except (TypeError, ValueError):
+        return _h(x)
+
+
+def _stock_line(word: str, symbol, price=None, stop=None, target=None, extra: str = "") -> str:
+    """'BUY  <b>SYM</b>  ₹price · stop ₹x · target ₹y' — missing parts dropped."""
+    parts = [f"{word}  <b>{_h(symbol)}</b>"]
+    head = f"{_rs(price)}" if price not in (None, "") else ""
+    tail = [s for s in (head,
+                        f"stop {_rs(stop)}" if stop not in (None, "", 0) else "",
+                        f"target {_rs(target)}" if target not in (None, "", 0) else "",
+                        extra) if s]
+    return parts[0] + ("  " + " · ".join(tail) if tail else "")
+
+
 def send_telegram(text: str) -> bool:
     """Send an HTML message to the configured Telegram chat."""
     token   = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -263,6 +294,8 @@ def _is_market_hours() -> bool:
 _SEND_WINDOWS = {
     "morning-digest":     (datetime.time(7, 0),  datetime.time(10, 0)),
     "intraday-watchlist": (datetime.time(9, 15), datetime.time(10, 30)),
+    "catalyst-preopen":   (datetime.time(8, 0),  datetime.time(9, 20)),
+    "why-moved":          (datetime.time(15, 35), datetime.time(21, 0)),
 }
 
 
@@ -332,10 +365,9 @@ def check_price_alerts(state: dict, today: str) -> int:
         arrow = "🔼" if condition == "above" else "🔽"
         chg   = q.get("chg_pct", 0.0)
         msg = (
-            f"{arrow} <b>{_h(ticker)}</b> price alert\n"
-            f"Now <b>₹{price:,.2f}</b> ({chg:+.2f}% today)\n"
-            f"Crossed <b>{condition} ₹{level:,.2f}</b>"
-            + (f"\n📝 {note}" if note else "")
+            f"{arrow} <b>{_h(ticker)} {condition} ₹{level:,.2f}</b> · {_now_hm()}\n"
+            f"Now <b>₹{price:,.2f}</b> ({chg:+.2f}% today)"
+            + (f"\n📝 {_h(note)}" if note else "")
         )
         if dispatch(msg):
             _mark_fired(state, key, today)
@@ -417,10 +449,9 @@ def check_portfolio_alerts(state: dict, today: str) -> int:
             key = f"pf_step_{ticker}_{ref:.2f}"
             if not _already_fired(state, key, today):
                 arrow = "🔼" if move > 0 else "🔽"
-                msg = (f"{arrow} <b>{_h(ticker)}</b> moved <b>{move:+.1f}%</b> "
-                       f"since ₹{ref:,.2f} ({a.get('ref_date', '?')})\n"
-                       f"Now <b>₹{price:,.2f}</b> ({chg:+.2f}% today)\n"
-                       f"📝 Portfolio holding · next alert at ±{_PF_STEP_PCT:.0f}% from here")
+                msg = (f"{arrow} <b>{_h(ticker)} {move:+.1f}% since ₹{ref:,.2f}</b> · {_now_hm()}\n"
+                       f"Now ₹{price:,.2f} ({chg:+.2f}% today) · holding since {a.get('ref_date', '?')} "
+                       f"· next alert ±{_PF_STEP_PCT:.0f}%")
                 if dispatch(msg):
                     _mark_fired(state, key, today)
                     sent += 1
@@ -441,10 +472,9 @@ def check_portfolio_alerts(state: dict, today: str) -> int:
                 key = f"pf_cost_{ticker}"
                 if not _already_fired(state, key, today):
                     arrow = "🔼" if side == "above" else "🔽"
-                    msg = (f"{arrow} <b>{_h(ticker)}</b> crossed {side} your average cost "
-                           f"<b>₹{avg:,.2f}</b>\n"
-                           f"Now <b>₹{price:,.2f}</b> ({chg:+.2f}% today)\n"
-                           f"📝 Portfolio holding · counted once {_PF_COST_MARGIN_PCT:g}% past the average")
+                    msg = (f"{arrow} <b>{_h(ticker)} crossed {side} your average cost ₹{avg:,.2f}</b>"
+                           f" · {_now_hm()}\n"
+                           f"Now ₹{price:,.2f} ({chg:+.2f}% today)")
                     if dispatch(msg):
                         _mark_fired(state, key, today)
                         sent += 1
@@ -554,17 +584,17 @@ def check_opening_update(state: dict, today: str, now: datetime.datetime | None 
         return 0
 
     rows = []
-    for i, b in enumerate(morning["buys"], start=1):
+    for b in morning["buys"]:
         base = _base_symbol(b.get("ticker"))
         lv = _pick_levels(store, base, today)
         ss = _pick_session(base, today)
         q = _quote(base)
         price = float(q["price"]) if q else (ss or {}).get("last")
         if not price:
-            rows.append(f"{i}. <b>{_h(base)}</b> — no price yet")
+            rows.append(f"<b>{_h(base)}</b> — no price yet")
             continue
         prev = float((q or {}).get("prev_close") or (lv or {}).get("y_close") or 0)
-        line = f"{i}. <b>{_h(base)}</b>"
+        line = f"<b>{_h(base)}</b>"
         if ss and prev:
             line += f" opened ₹{ss['open']:,.2f} ({(ss['open'] / prev - 1) * 100:+.1f}% vs yesterday)"
         if ss and ss.get("or_high"):
@@ -573,10 +603,7 @@ def check_opening_update(state: dict, today: str, now: datetime.datetime | None 
         rows.append(line + f"\n   Now ₹{price:,.2f}{day}"
                     + (f" · {position_vs_levels(price, lv)}" if lv else ""))
 
-    lines = [f"🔔 <b>Opening update — today's picks</b> ({now:%H:%M} IST)", ""] + rows + [
-        "",
-        f"<i>The first 15 minutes set the opening range. Moves of ±{_MOVE_PCT:g}% from "
-        f"yesterday's close are flagged during the day. Descriptive, not advice.</i>"]
+    lines = [f"🔔 <b>Opening update — today's picks</b> · {now:%H:%M}"] + rows
     if dispatch("\n".join(lines), subject="Opening update — NSE Smart Investor"):
         _mark_fired(state, key, today)
         return 1
@@ -616,14 +643,13 @@ def check_pick_moves(state: dict, today: str) -> int:
         msg = f"{icon} <b>{_h(base)} {direction} {abs(chg):.1f}% today</b> · ₹{price:,.2f}"
         if prev:
             msg += f" (yesterday ₹{float(prev):,.2f})"
-        detail = []
+        msg += f" · {_now_hm()}"
+        detail = ["Digest pick"]
         if ss:
             detail.append(f"day range so far ₹{ss['low']:,.2f}–₹{ss['high']:,.2f}")
         if lv:
             detail.append(position_vs_levels(price, lv))
-        if detail:
-            msg += "\n   " + " · ".join(detail)
-        msg += "\n📝 Morning Digest pick"
+        msg += "\n   " + " · ".join(detail)
         if dispatch(msg):
             _mark_fired(state, key, today)
             sent += 1
@@ -653,31 +679,32 @@ def _verdict_of(b: dict):
 
 
 def _regime_note() -> str:
+    """One short market line, only when it changes the meaning (a down market)."""
     try:
-        from analysis.score import _live_regime_label
+        from analysis.score import _BEAR_REGIMES, _live_regime_label
         lbl = _live_regime_label()
     except Exception:
         return ""
-    return f"NIFTY regime: {str(lbl).replace('_', ' ')}" if lbl else ""
+    return _MARKET_DOWN if lbl and str(lbl).lower() in _BEAR_REGIMES else ""
+
+
+def _verdict_pick_lines(verdict: str, b: dict, *, reason: bool = True) -> list:
+    """'STRONG BUY  <b>PNB</b>  ₹118.40 · stop ₹112.10 · target ₹131.00' + optional reason line."""
+    price = b.get("price")
+    line = _stock_line(verdict_display_label(verdict), _base_symbol(b.get("ticker")),
+                       price if isinstance(price, (int, float)) else None, b.get("sl"), b.get("tp"))
+    sector = (b.get("sector") or "").strip()
+    why = " · ".join(x for x in (_h(sector[:30]) if sector else "", f"score {b.get('score')}/90") if x)
+    if not reason:
+        return [f"{line} · score {b.get('score')}/90"]
+    return [line, f"   {why}"]
 
 
 def _format_verdict_alert(verdict: str, b: dict, fv, regime: str, gen_at) -> list:
-    base = _base_symbol(b.get("ticker"))
-    icon = "🟢🟢" if verdict == "STRONG BUY" else "🟢"
-    price = b.get("price")
-    price_str = f"₹{float(price):,.2f}" if isinstance(price, (int, float)) else "n/a"
-    lines = [f"{icon} <b>{_h(base)}</b> — model read <b>{verdict_display_label(verdict)}</b> · conviction "
-             f"{getattr(fv, 'conviction', '?')} · score {b.get('score')}/90 · {price_str}"]
-    meta = [_html.escape(str(x)) for x in ((b.get("sector") or "").strip(), b.get("horizon") or "") if x]
-    if meta:
-        lines.append("   " + " · ".join(meta))
-    if b.get("sl") and b.get("tp"):
-        lines.append(f"   Model reference levels: invalidation ₹{float(b['sl']):,.2f} · "
-                     f"target ₹{float(b['tp']):,.2f}")
+    lines = _verdict_pick_lines(verdict, b)
     if regime:
-        lines.append(f"   {regime}")
-    lines.append(f"<i>Scan at {_snapshot_ist_label(gen_at)}. Model output from past price data — "
-                 "not investment advice; live track record on the Verdict Calibration page.</i>")
+        lines.append(_h(regime))
+    lines.append(_FOOTER)
     return lines
 
 
@@ -759,7 +786,7 @@ def check_verdict_alerts(state: dict, today: str) -> int:
         return 0
     # One Telegram message per run, not one per stock (9 Nov: ~40 separate pings).
     lines = _format_verdict_batch(batch, regime, gen_at)
-    if dispatch("\n".join(lines), subject=f"{len(batch)} new strong read(s) — NSE Smart Investor"):
+    if dispatch("\n".join(lines), subject=f"{len(batch)} new BUY call(s) — NSE Smart Investor"):
         for key, *_ in batch:
             _mark_fired(state, key, today)
         return len(batch)
@@ -767,29 +794,15 @@ def check_verdict_alerts(state: dict, today: str) -> int:
 
 
 def _format_verdict_batch(batch: list, regime: str, gen_at) -> list:
-    """One message for a run's new BUY / STRONG BUY reads, strongest first."""
+    """One message for a run's new BUY / STRONG BUY calls, strongest first.
+    A reason line per stock only while the message stays within 15 lines."""
     n = len(batch)
-    lines = [f"🟢 <b>{n} new strong read{'s' if n != 1 else ''}</b> (scan at {_snapshot_ist_label(gen_at)})"]
+    lines = [f"🟢 <b>{n} new BUY call{'s' if n != 1 else ''}</b> · {_snapshot_ist_label(gen_at).replace(' IST', '')}"]
     if regime:
-        lines.append(f"<i>{_h(regime)}</i>")
-    lines.append("")
-    for i, (_key, verdict, b, fv) in enumerate(batch, start=1):
-        icon = "🟢🟢" if verdict == "STRONG BUY" else "🟢"
-        price = b.get("price")
-        price_str = f" · ₹{float(price):,.2f}" if isinstance(price, (int, float)) else ""
-        lines.append(f"{i}. {icon} <b>{_h(_base_symbol(b.get('ticker')))}</b> — "
-                     f"{verdict_display_label(verdict)} · score {b.get('score')}/90"
-                     f" · conviction {getattr(fv, 'conviction', '?')}{price_str}")
-        meta = [_h(str(x)) for x in ((b.get("sector") or "").strip(), b.get("horizon") or "") if x]
-        if b.get("sl") and b.get("tp"):
-            try:
-                meta.append(f"invalidation ₹{float(b['sl']):,.2f} · target ₹{float(b['tp']):,.2f}")
-            except (TypeError, ValueError):
-                pass
-        if meta:
-            lines.append("   " + " · ".join(meta))
-    lines += ["", "<i>Model output from past price data — not investment advice; live track record "
-              "on the Verdict Calibration page.</i>"]
+        lines.append(_h(regime))
+    for _key, verdict, b, _fv in batch:
+        lines += _verdict_pick_lines(verdict, b, reason=n <= 5)
+    lines.append(_FOOTER)
     return lines
 
 
@@ -811,7 +824,7 @@ def check_picks_recap(state: dict, today: str, now: datetime.datetime | None = N
         return 0
 
     rows, moves = [], []
-    for i, b in enumerate(morning["buys"], start=1):
+    for b in morning["buys"]:
         base = _base_symbol(b.get("ticker"))
         try:
             ref = float(b.get("price") or b.get("last_price") or 0)
@@ -819,17 +832,17 @@ def check_picks_recap(state: dict, today: str, now: datetime.datetime | None = N
             ref = 0.0
         q = _quote(base)
         if not q:
-            rows.append(f"{i}. <b>{_h(base)}</b> — no live price")
+            rows.append(f"<b>{_h(base)}</b> — no live price")
             continue
         price = float(q["price"])
         day = q.get("chg_pct", 0.0) or 0.0
         if ref > 0:
             since = (price / ref - 1) * 100
             moves.append(since)
-            rows.append(f"{i}. <b>{_h(base)}</b> ₹{ref:,.2f} → <b>₹{price:,.2f}</b> "
+            rows.append(f"<b>{_h(base)}</b> ₹{ref:,.2f} → <b>₹{price:,.2f}</b> "
                         f"({since:+.1f}% since the scan · {day:+.2f}% today)")
         else:
-            rows.append(f"{i}. <b>{_h(base)}</b> now <b>₹{price:,.2f}</b> ({day:+.2f}% today)")
+            rows.append(f"<b>{_h(base)}</b> now <b>₹{price:,.2f}</b> ({day:+.2f}% today)")
         extra = []
         ss = _pick_session(base, today)
         if ss:
@@ -839,15 +852,13 @@ def check_picks_recap(state: dict, today: str, now: datetime.datetime | None = N
         if extra:
             rows.append("   " + " · ".join(extra))
 
-    lines = [f"📊 <b>Digest picks — how they did today</b> ({now:%H:%M} IST)",
-             f"<i>This morning's Delivery Digest names "
-             f"(scan at {_snapshot_ist_label(morning.get('generated_at'))}).</i>", ""]
+    lines = [f"📊 <b>Digest picks today</b> · {now:%H:%M} "
+             f"(scan at {_snapshot_ist_label(morning.get('generated_at'))})"]
     lines += rows
     if moves:
         up = sum(m > 0 for m in moves)
         avg_move = round(sum(moves) / len(moves), 1) + 0.0     # + 0.0 turns -0.0 into 0.0
-        lines += ["", f"Average {avg_move:+.1f}% · {up} up / {len(moves) - up} down or flat"]
-    lines += ["", "<i>Price moves since the scan — descriptive, not advice.</i>"]
+        lines += [f"Average {avg_move:+.1f}% · {up} up / {len(moves) - up} down or flat"]
     if dispatch("\n".join(lines), subject="Digest picks recap — NSE Smart Investor"):
         _mark_fired(state, key, today)
         return 1
@@ -871,9 +882,8 @@ def check_vix_regime(state: dict, today: str) -> int:
         key = "vix_unavailable"
         if _already_fired(state, key, today):
             return 0
-        msg = ("⚪ <b>India VIX unavailable</b>\n"
-               f"{info.get('reason') or 'VIX unavailable from NSE / Yahoo'} — the VIX fear "
-               "filter is treated as closed until a reading returns.")
+        msg = (f"⚪ <b>India VIX unavailable</b> · {_now_hm()}\n"
+               f"{_h(info.get('reason') or 'No reading from NSE / Yahoo')} — VIX filter treated as closed.")
         if dispatch(msg):
             _mark_fired(state, key, today)
             return 1
@@ -887,11 +897,9 @@ def check_vix_regime(state: dict, today: str) -> int:
 
     icon = "🚨" if regime == "panic" else "🔴"
     msg = (
-        f"{icon} <b>Market volatility alert</b>\n"
-        f"India VIX is in <b>{regime.upper()}</b> territory"
-        + (f" at <b>{vix:.1f}</b>" if vix else "")
-        + "\nVolatility is elevated — daily swings in this regime run wider "
-          "than usual, in both directions."
+        f"{icon} <b>India VIX {regime.upper()}" + (f" · {vix:.1f}" if vix else "") + f"</b> · {_now_hm()}\n"
+        "Wider daily swings than usual, both ways.\n"
+        "Market: high volatility — smaller size"
     )
     if dispatch(msg):
         _mark_fired(state, key, today)
@@ -923,10 +931,9 @@ def check_nifty_trend(state: dict, today: str) -> int:
 
     chg5 = (price / float(close.iloc[-6]) - 1) * 100 if len(close) >= 6 else 0.0
     msg = (
-        f"📉 <b>Nifty 50 downtrend</b>\n"
-        f"Nifty at <b>{price:,.0f}</b> ({chg5:+.1f}% 5d), now below both "
-        f"SMA20 ({sma20:,.0f}) and SMA50 ({sma50:,.0f}).\n"
-        f"Price &lt; SMA20 &lt; SMA50 — a confirmed downtrend on this rule."
+        f"📉 <b>Nifty 50 downtrend</b> · {_now_hm()}\n"
+        f"Nifty {price:,.0f} ({chg5:+.1f}% 5d), below SMA20 ({sma20:,.0f}) and SMA50 ({sma50:,.0f}).\n"
+        f"{_MARKET_DOWN}"
     )
     if dispatch(msg):
         _mark_fired(state, key, today)
@@ -999,13 +1006,10 @@ def _under_floor_record() -> "dict | None":
 
 def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = None) -> list:
     """Message lines for the Morning Delivery Digest (shared by the real
-    digest and --mode=test-digest)."""
-    lines = [
-        header or "📈 <b>Morning Delivery Digest</b>",
-        f"<i>Top {min(max_picks, len(buys))} positional candidates from today's scan "
-        f"(scan at {_snapshot_ist_label(gen_at, with_date=True)})</i>",
-        "",
-    ]
+    digest and --mode=test-digest). One line per pick, action word first;
+    names under _WATCH_FLOOR read WATCH, not BUY."""
+    lines = [(header or "📈 <b>Morning Delivery Digest</b>")
+             + f" · scan at {_snapshot_ist_label(gen_at, with_date=True)}"]
 
     def _under(b) -> bool:
         try:
@@ -1017,83 +1021,48 @@ def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = Non
     n_under = sum(1 for b in shown if _under(b))
     if n_under:
         rec = _under_floor_record()
-        note = (f"⚠️ None of today's top names scored {_WATCH_FLOOR:.0f}+; all are <b>Watch only</b>."
+        note = (f"⚠️ None scored {_WATCH_FLOOR:.0f}+ today — all WATCH, not BUY"
                 if n_under == len(shown) else
-                f"⚠️ {n_under} of {len(shown)} names scored under {_WATCH_FLOOR:.0f} and are marked "
-                f"<b>Watch only</b>.")
+                f"⚠️ {n_under} of {len(shown)} scored under {_WATCH_FLOOR:.0f} — WATCH, not BUY")
         if rec:
-            note += (f" Names under {_WATCH_FLOOR:.0f} beat Nifty in {rec['beat_rate']:.0f}% of settled "
-                     f"5-day windows (avg {rec['mean_vs_nifty']:+.2f}% vs Nifty, n={rec['n']}).")
-        lines[-1:] = [note, ""]
-    bracketed = False   # footer explains "(…)" only when a line carries one
-    for i, b in enumerate(buys[:max_picks], start=1):
-        tk    = _html.escape(str(b.get("ticker", "?")))
-        score = b.get("score", 0)
-        act   = action_display_label(b.get("action", "").replace("_", " "))
+            note += (f" (under-{_WATCH_FLOOR:.0f} names beat Nifty {rec['beat_rate']:.0f}% of 5-day "
+                     f"windows, n={rec['n']})")
+        lines.append(note)
+    for b in shown:
         price = b.get("price") or b.get("last_price") or b.get("current_price")
-        entry = b.get("entry_zone") or b.get("entry")
+        price = price if isinstance(price, (int, float)) else None
         stop  = b.get("stop_loss") or b.get("stop") or b.get("sl")
         tgt   = b.get("target") or b.get("tp")
-        sec   = _html.escape(str(b.get("sector", "") or "").strip())
-
-        price_str = f"₹{float(price):,.2f}" if isinstance(price, (int, float)) else "n/a"
-        # Under the floor the tag replaces the action label ("Watch · … ·
-        # Watch only" said the same thing twice).
-        under = _under(b)
-        label = "<i>Watch only</i>" if under else act
-        head = f"{i}. <b>{tk}</b> — {label} · Score {score}/90 · {price_str}"
-        if sec:
-            head += f" · {sec}"
-        v = _verdict_of(b)
-        if v:
-            if v[0] in _VERDICT_ALERT_TIERS:
-                head += f" · read <b>{verdict_display_label(v[0])}</b> ({v[1]})"
-                bracketed = True
-            else:
-                head += f" · read {verdict_display_label(v[0])}"
-        lines.append(head)
-        if under:
-            # Watch-only names get reference levels, not an entry/stop/target
-            # plan (rule 1: no instruction-shaped copy). sl sits just under the
-            # recent swing low and tp is a risk multiple above price, so they
-            # are named by position only, not as support/resistance.
-            detail = [f"{x} {pos}" for x, pos in ((stop, "below"), (tgt, "above")) if x]
-            if detail:
-                lines.append("   Levels to watch: " + " · ".join(detail))
+        sec   = _h(str(b.get("sector", "") or "").strip()[:30])
+        tk    = _base_symbol(b.get("ticker", "?"))
+        if _under(b):
+            levels = " / ".join(_rs(x) for x in (stop, tgt) if x)
+            lines.append(_stock_line("WATCH", tk, price, extra=f"levels {levels}" if levels else ""))
         else:
-            detail = []
-            if entry:
-                detail.append(f"Ref {entry}")
-            if stop:
-                detail.append(f"Invalidation {stop}")
-            if tgt:
-                detail.append(f"Measured move {tgt}")
-            if detail:
-                lines.append("   " + " · ".join(str(x) for x in detail))
+            v = _verdict_of(b)
+            word = (verdict_display_label(v[0]) if v
+                    else action_display_label(str(b.get("action", "")).replace("_", " ")))
+            lines.append(_stock_line(word, tk, price, stop, tgt))
+        lines.append("   " + " · ".join(x for x in (sec, f"score {b.get('score', 0)}/90") if x))
 
     # BUY / STRONG BUY verdicts further down the scan than the top max_picks
     extra = []
     for b in buys[max_picks:]:
         v = _verdict_of(b)
-        if v and v[0] in _VERDICT_ALERT_TIERS:
+        if v and v[0] in _VERDICT_ALERT_TIERS and not _under(b):
             extra.append((v, b))
     if extra:
-        bracketed = True
         extra.sort(key=lambda e: (e[0][0] != "STRONG BUY", -float(e[1].get("score") or 0)))
-        lines.extend(["", "🟢 <b>Other names in this scan with a Strong trend / Uptrend read</b>"])
-        for (verdict, conv), b in extra:
-            p = b.get("price")
-            p_str = f"₹{float(p):,.2f}" if isinstance(p, (int, float)) else "n/a"
-            tk_x = _html.escape(str(b.get("ticker", "?")))
-            lines.append(f"• <b>{tk_x}</b> — {verdict_display_label(verdict)} ({conv}) · "
-                         f"Score {b.get('score', 0)}/90 · {p_str}"
-                         + (" · <i>Watch only</i>" if _under(b) else ""))
-    lines.extend([
-        "",
-        "<i>Read = the dashboard's model read" + (" (conviction in brackets)" if bracketed else "") + ". "
-        "Descriptive scan of composite-score leaders — not advice. "
-        "Each name's full breakdown is on the Analyze Stock page.</i>",
-    ])
+        names, used = [], 0
+        for (verdict, _conv), b in extra:
+            item = f"<b>{_h(_base_symbol(b.get('ticker', '?')))}</b>" + (" ★" if verdict == "STRONG BUY" else "")
+            if used + len(_plain(item)) > 70:
+                names.append(f"+{len(extra) - len(names)} more")
+                break
+            names.append(item)
+            used += len(_plain(item)) + 3
+        lines.append("Also BUY further down (★ strong): " + " · ".join(names))
+    lines.append(_FOOTER)
     return lines
 
 
@@ -1235,9 +1204,9 @@ def check_test_verdict_alert(state: dict, today: str) -> int:
     sample = {"ticker": "SAMPLE.NS", "score": 70.0, "price": 1234.50, "sl": 1180.00,
               "tp": 1340.00, "sector": "Pharma", "horizon": "Positional (2–4 weeks)"}
     now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    lines = ["🧪 <b>TEST — sample of a Strong trend ▲▲ alert (not a real stock or signal)</b>", ""]
-    lines += _format_verdict_alert("STRONG BUY", sample, _FV(), "NIFTY regime: trend down", now_utc)
-    return 1 if dispatch("\n".join(lines), subject="NSE Smart Investor — sample model-read alert") else 0
+    lines = [f"🧪 <b>TEST — sample STRONG BUY alert (not a real stock)</b> · {_now_hm()}"]
+    lines += _format_verdict_alert("STRONG BUY", sample, _FV(), _MARKET_DOWN, now_utc)
+    return 1 if dispatch("\n".join(lines), subject="NSE Smart Investor — sample BUY alert") else 0
 
 
 def check_test_digest(state: dict, today: str, *, max_picks: int = 5) -> int:
@@ -1258,8 +1227,7 @@ def check_test_digest(state: dict, today: str, *, max_picks: int = 5) -> int:
     if not buys:
         print("[test-digest] snapshot has 0 picks")
         return 0
-    header = (f"🧪 <b>TEST — Morning Delivery Digest format</b> "
-              f"(built from the last saved scan, {_snapshot_ist_label(gen_at, with_date=True)}; may be stale)")
+    header = "🧪 <b>TEST — Morning Digest (last saved scan, may be stale)</b>"
     msg = "\n".join(_digest_lines(buys, gen_at, max_picks, header=header))
     return 1 if dispatch(msg, subject="NSE Smart Investor — TEST morning digest") else 0
 
@@ -1271,12 +1239,9 @@ def check_test_alert(state: dict, today: str) -> int:
     """
     now_ist = datetime.datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")
     body_html = (
-        "🧪 <b>NSE Smart Investor — Test Alert</b>\n"
-        f"<i>Fired at {now_ist} IST from GitHub Actions workflow_dispatch.</i>\n\n"
-        "If you see this, both the workflow secrets and the send path are "
-        "wired correctly. Your real alerts (delivery digest, momentum scan, "
-        "portfolio posture) will arrive on the same channel(s).\n\n"
-        "<i>Diagnostic — no market data attached.</i>"
+        f"🧪 <b>NSE Smart Investor — Test Alert</b> · {now_ist[11:16]}\n"
+        "The send path works. Real alerts arrive on this same channel.\n"
+        "No market data attached."
     )
     subject = f"NSE Smart Investor test alert — {now_ist} IST"
 
@@ -1346,6 +1311,23 @@ def _manual_holdings_for_posture() -> list:
         if sym and qty > 0:
             out.append({"symbol": sym, "qty": qty, "avg_price": avg})
     return out
+
+
+def _short_skip_reason(reason: str) -> str:
+    r = str(reason)
+    if "could not be fetched" in r:
+        return "price history unavailable"
+    if "trading days" in r:
+        return "too little history"
+    return r[:40]
+
+
+def _not_analysed_line(skipped: list) -> str:
+    """'Not analysed: VEDL, PFC (price history unavailable)' — one line, grouped by reason."""
+    groups: dict = {}
+    for sk in skipped:
+        groups.setdefault(_short_skip_reason(sk.get("reason", "")), []).append(_h(sk.get("symbol", "?")))
+    return "Not analysed: " + " · ".join(f"{', '.join(v)} ({k})" for k, v in groups.items())
 
 
 def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
@@ -1419,17 +1401,14 @@ def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
     # FIX POSTURE-SKIP (2026-10-03): holdings that produced no posture used to
     # vanish, so "couldn't analyse anything" read as "all HOLD". Say so instead.
     if skipped:
-        skip_lines = "\n".join(f"• <b>{_h(sk['symbol'])}</b> — {_h(sk['reason'])}" for sk in skipped)
-        skip_block = (f"\n\n⚠️ <b>Not analysed ({len(skipped)} of {len(holdings)} holdings)</b>\n"
-                      f"{skip_lines}")
+        skip_block = "\n" + _not_analysed_line(skipped)
         if NO_FLAGGED_POSTURES in msg and not hpost and not ipost:
-            msg = ("📋 <b>Portfolio Posture</b>\n"
-                   "No holding could be analysed, so no posture is available." + skip_block)
+            msg = (f"📋 <b>Portfolio Posture</b> · {_now_hm()}\n"
+                   "No holding could be analysed." + skip_block)
         else:
             msg += skip_block
     if test:
-        msg = ("🧪 <b>TEST — Portfolio Posture format</b> (all rows shown, incl. HOLD)\n\n"
-               + msg)
+        msg = "🧪 <b>TEST — Portfolio Posture (all rows, incl. HOLD)</b>\n" + msg
         return 1 if dispatch(msg, subject="NSE Smart Investor — TEST portfolio posture") else 0
     # Suppress the 'nothing to do' message from the daily digest — the whole
     # point of an alert is to surface something. If everything is HOLD,
@@ -1438,9 +1417,8 @@ def check_portfolio_posture(state: dict, today: str, *, test: bool = False,
         if always:
             # After-close run (--always): the owner wants a daily portfolio
             # line even when nothing needs attention.
-            steady = (f"📋 <b>Portfolio after the close</b>\nAll {len(hpost)} holding(s) read "
-                      "steady — no posture change needs attention today.\n"
-                      "<i>Descriptive model read, not investment advice.</i>")
+            steady = (f"📋 <b>Portfolio after the close</b> · {_now_hm()}\n"
+                      f"HOLD all {len(hpost)} holding(s) — nothing needs attention today.")
             if dispatch(steady, subject="Portfolio after the close — all steady"):
                 _mark_fired(state, key, today)
                 return 1
@@ -1509,13 +1487,9 @@ def check_intraday_watchlist(state: dict, today: str, *, max_picks: int = 5) -> 
         print("[intraday] snapshot has 0 buys — nothing to reformat")
         return 0
 
-    lines = [
-        "⚡ <b>Intraday Watchlist — today's picks</b>",
-        f"<i>Top {min(max_picks, len(buys))} names from {source}.</i>",
-        "",
-    ]
+    lines = [f"⚡ <b>Intraday Watchlist</b> · {_now_hm()}", f"From {source}"]
     saved: dict[str, dict] = {}
-    for i, b in enumerate(buys[:max_picks], start=1):
+    for b in buys[:max_picks]:
         tk = b.get("ticker", "?")
         base = _base_symbol(tk)
         try:
@@ -1526,23 +1500,16 @@ def check_intraday_watchlist(state: dict, today: str, *, max_picks: int = 5) -> 
         lv = daily_levels(df)
         if lv is None:
             # Skip the levels for this row but still surface the name
-            lines.append(f"{i}. <b>{_h(base)}</b> — not enough price history for levels")
+            lines.append(f"<b>{_h(base)}</b> — not enough price history for levels")
             continue
         saved[base] = lv
         pct = lv["atr"] / lv["y_close"] * 100
-        lines.append(f"{i}. <b>{_h(base)}</b> · closed ₹{lv['y_close']:,.2f} yesterday · "
+        lines.append(f"<b>{_h(base)}</b> closed ₹{lv['y_close']:,.2f} yesterday · "
                      f"typical day's move ₹{lv['atr']:,.2f} ({pct:.1f}%)")
-        lines.append(f"   ▲ Upside level ₹{lv['up']:,.2f} · next level above it ₹{lv['next_up']:,.2f}")
-        lines.append(f"   ▼ Downside level ₹{lv['down']:,.2f}")
+        lines.append(f"   ▲ Upside level ₹{lv['up']:,.2f} · next level above it ₹{lv['next_up']:,.2f}"
+                     f" · ▼ Downside level ₹{lv['down']:,.2f}")
 
-    lines.extend([
-        "",
-        "<i>How to read it: the upside and downside levels sit half a typical day's "
-        "move either side of yesterday's close. A move above ▲ means the stock is "
-        "pushing past its normal range on the way up; below ▼, on the way down; "
-        "between them it's moving normally. An opening update follows at about 09:30. "
-        "Price arithmetic, not advice.</i>",
-    ])
+    lines.append("<i>Above ▲ = past its normal range up; below ▼ = past it down.</i>")
 
     if not saved:
         print("[intraday] no rows could be enriched — skipping send")
@@ -1599,36 +1566,37 @@ def check_tomorrow_watchlist(state: dict, today: str, *, top_n: int = 5) -> int:
     return 0
 
 
+def _tomorrow_row(p: dict, word: str) -> str:
+    """'BUY  <b>B1</b>  above ₹100.00 · stop ₹94.00 · score 70/90'."""
+    sym = _base_symbol(p.get("ticker"))
+    ref = p.get("entry")
+    if word == "BUY":
+        lead = f"above {_rs(ref)}" if ref else ""
+    elif word == "SELL":
+        lead = f"below {_rs(ref)}" if ref else ""
+    else:
+        lead = "— bounce setup"
+    tail = [x for x in (f"stop {_rs(p['sl'])}" if p.get("sl") else "", f"score {p.get('score')}/90") if x]
+    return f"{word}  <b>{_h(sym)}</b>  " + " · ".join([lead] + tail if lead else tail)
+
+
 def tomorrow_watchlist_lines(data: dict, gen_at, *, top_n: int = 5) -> list:
-    """Message body for check_tomorrow_watchlist; [] when there is nothing to show."""
-    sections = [("🚀 <b>Breakout setups</b>", data.get("breakout_candidates") or []),
-                ("🔄 <b>Reversal watch</b>", data.get("reversal_watch") or [])]
-    if not any(items for _, items in sections):
+    """Message body for check_tomorrow_watchlist; [] when there is nothing to show.
+    Breakout -> BUY above ref; bullish reversal -> WATCH (bounce setup)."""
+    sections = [("🚀 <b>Breakouts</b>", "BUY", data.get("breakout_candidates") or []),
+                ("🔄 <b>Reversals</b>", "WATCH", data.get("reversal_watch") or [])]
+    if not any(items for _, _, items in sections):
         return []
-    lines = [f"🌙 <b>Tomorrow's Watchlist</b> (scan at {_snapshot_ist_label(gen_at, with_date=True)})", ""]
-    for title, items in sections:
+    lines = [f"🌙 <b>Tomorrow's Watchlist</b> · scan at {_snapshot_ist_label(gen_at, with_date=True)}"]
+    for title, word, items in sections:
         if not items:
-            if "Breakout" in title and data.get("bear_scoring_active"):
+            if word == "BUY" and data.get("bear_scoring_active"):
                 rg = str(data.get("regime_label") or "bear").replace("_", " ")
-                lines += [title, f"   None today: held back in the {_h(rg)} market, where scores are "
-                          "kept mid-range on purpose. The list refills when the trend turns.", ""]
+                lines.append(f"{title}: none — held back in the {_h(rg)} market until the trend turns")
             continue
         lines.append(title)
-        for i, p in enumerate(items[:top_n], start=1):
-            row = f"{i}. <b>{_h(_base_symbol(p.get('ticker')))}</b> · score {p.get('score')}/90"
-            try:
-                if p.get("entry"):
-                    row += f" · ref ₹{float(p['entry']):,.2f}"
-                if p.get("sl"):
-                    row += f" · invalidation ₹{float(p['sl']):,.2f}"
-            except (TypeError, ValueError):
-                pass
-            lines.append(row)
-            if p.get("signal_type"):
-                lines.append(f"   {_h(p['signal_type'])}")
-        lines.append("")
-    lines.append("<i>Next-session setups from today's close. Model output from past price data — "
-                 "not investment advice.</i>")
+        lines += [_tomorrow_row(p, word) for p in items[:top_n]]
+    lines.append(_FOOTER)
     return lines
 
 
@@ -1675,7 +1643,12 @@ def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | Non
         nifty_now = float(nifty_close.dropna().iloc[-1])
     except Exception as e:
         print(f"[scorecard] Nifty history unavailable: {e}")
-    cards = vl.week_scorecard_by_list(week, prices, nifty_close, nifty_now)
+    sector_of = None
+    try:
+        from data.universe import get_sector as sector_of
+    except Exception as e:
+        print(f"[scorecard] sector map unavailable: {e}")
+    cards = vl.week_scorecard_by_list(week, prices, nifty_close, nifty_now, sector_of=sector_of)
     if not cards:
         print("[scorecard] no prices for this week's names — nothing to send")
         return 0
@@ -1694,38 +1667,56 @@ def _n_names(n: int) -> str:
     return f"{n} name{'' if n == 1 else 's'}"
 
 
+def _sector_lines(sectors: list) -> list:
+    """'By sector' rows for the report card: the sectors whose names ran furthest
+    ahead of the Nifty and those furthest behind (week_scorecard `sectors`,
+    already ordered best first). Empty when fewer than two sectors qualify."""
+    if len(sectors) < 2:
+        return []
+
+    def _fmt(rows: list) -> str:
+        return " · ".join(f"{_h(r['sector'])} {r['mean_edge']:+.1f} pts ({r['n']})" for r in rows)
+
+    top = sectors[:3]
+    bottom = [r for r in sectors[::-1][:3] if r not in top]
+    out = [f"By sector, vs the Nifty (names): {_fmt(top)}"]
+    if bottom:
+        out.append(f"Furthest behind: {_fmt(bottom)}")
+    return out
+
+
 def weekly_scorecard_lines(cards: dict, monday: str, today: str) -> list:
     """Message body for check_weekly_scorecard: a Top Picks section and a
     Tomorrow's Watchlist section (up-setups and down-setups kept apart)."""
-    lines = [f"🧾 <b>Weekly report card</b> ({monday} → {today})",
-             "<i>Each name from the price when it was first logged this week to today, "
-             "against the Nifty over the same days.</i>"]
+    lines = [f"🧾 <b>Weekly report card</b> · {monday} → {today}",
+             "Each name from its first logged price this week, vs the Nifty over the same days."]
     tp = cards.get("top_picks")
     if tp:
-        lines += ["", f"⭐ <b>Top Picks</b> · {_n_names(tp['n'])}",
+        lines += [f"⭐ <b>Top Picks</b> · {_n_names(tp['n'])}",
                   f"Average move <b>{tp['mean_move']:+.1f}%</b> · {tp['up']} up / "
                   f"{tp['n'] - tp['up']} down or flat"]
         if tp.get("mean_edge") is not None:
             lines.append(f"Vs the Nifty: <b>{tp['mean_edge']:+.1f} pts</b> · "
                          f"{tp['hits']} of {tp['n_edge']} ahead")
+        if tp.get("median_move") is not None and tp["n"] >= 5:
+            lines.append(f"Middle name (median): {tp['median_move']:+.1f}% — a few big moves can carry the average")
         if tp["best"]:
             lines.append(f"{'Most up' if tp['worst'] else 'Moves'}: {_names_line(tp['best'])}")
         if tp["worst"]:
             lines.append(f"Most down: {_names_line(tp['worst'])}")
+        lines += _sector_lines(tp.get("sectors") or [])
     up, down = cards.get("watchlist_up"), cards.get("watchlist_down")
     if up or down:
-        lines += ["", "🌙 <b>Tomorrow's Watchlist</b>"]
-        for card, title, hit_word in ((up, "📈 Bullish setups (breakout, bullish reversal)", "ahead of"),
-                                      (down, "📉 Bearish setups (breakdown, bearish reversal)", "lagged")):
+        lines += ["🌙 <b>Tomorrow's Watchlist</b>"]
+        for card, title, hit_word in ((up, "📈 BUY setups (breakout, bullish reversal)", "ahead of"),
+                                      (down, "📉 SELL setups (breakdown, bearish reversal)", "lagged")):
             if not card:
                 continue
-            row = f"{title} · {_n_names(card['n'])} · average move {card['mean_move']:+.1f}%"
+            row = f"{title} · {_n_names(card['n'])} · avg {card['mean_move']:+.1f}%"
             if card.get("mean_edge") is not None:
-                row += (f" · vs Nifty {card['mean_edge']:+.1f} pts · {card['hits']} of "
-                        f"{card['n_edge']} {hit_word} the Nifty")
+                row += f" · {card['hits']} of {card['n_edge']} {hit_word} the Nifty ({card['mean_edge']:+.1f} pts)"
             lines += [row, f"   Moved most as flagged: {_names_line(card['best'])}"]
-    lines += ["", "<i>One week is noise; the Verdict Calibration page keeps the longer record per "
-              "list. A record of past model output, not investment advice.</i>"]
+    lines += ["<i>One week is noise — the Verdict Calibration page keeps the longer record.</i>"]
     return lines
 
 
@@ -1745,11 +1736,7 @@ def check_weekly_digest(state: dict, today: str) -> int:
         print(f"[weekly] not Sunday (weekday={now_ist.weekday()}) — skipping")
         return 0
 
-    lines = [
-        "📆 <b>Weekly Digest — Week Ahead</b>",
-        f"<i>Sunday {today}. Roll-up of last week's picks + journal + review due.</i>",
-        "",
-    ]
+    lines = [f"📆 <b>Weekly Digest — week ahead</b> · Sun {today}"]
 
     # Section 1 — current top-picks list (from the persisted snapshot)
     try:
@@ -1761,16 +1748,16 @@ def check_weekly_digest(state: dict, today: str) -> int:
         buys = []
 
     if buys:
-        lines.append("<b>Top composite scores from the delivery scan</b>")
-        for i, b in enumerate(buys[:5], start=1):
-            tk = b.get("ticker", "?")
-            score = b.get("score", 0)
-            act   = action_display_label(b.get("action", "").replace("_", " "))
-            lines.append(f"{i}. <b>{_h(tk)}</b> — {act} · Score {score}/90")
-        lines.append("")
+        lines.append("<b>Top scores from the delivery scan</b>")
+        for b in buys[:5]:
+            act = action_display_label(str(b.get("action", "")).replace("_", " "))
+            price = b.get("price") or b.get("last_price")
+            lines.append(_stock_line(act, _base_symbol(b.get("ticker", "?")),
+                                     price if isinstance(price, (int, float)) else None,
+                                     b.get("stop_loss") or b.get("stop") or b.get("sl"),
+                                     extra=f"score {b.get('score', 0)}/90"))
     else:
-        lines.append("<i>No top-picks snapshot to summarise this week.</i>")
-        lines.append("")
+        lines.append("No top-picks snapshot this week.")
 
     # Section 2 — journal entries added this week
     try:
@@ -1784,9 +1771,8 @@ def check_weekly_digest(state: dict, today: str) -> int:
     recent = [e for e in entries if e.added_date >= _week_start]
     if recent:
         lines.append(f"<b>Journal entries this week — {len(recent)}</b>")
-        for e in recent[:8]:
-            lines.append(f"• <b>{_h(e.ticker)}</b> ({_h(e.status)}) — {_h(e.thesis[:80])}")
-        lines.append("")
+        for e in recent[:5]:
+            lines.append(f"• <b>{_h(e.ticker)}</b> ({_h(e.status)}) — {_h(e.thesis[:60])}")
 
     # Section 3 — reviews due in the next 7 days
     _due_cutoff = (now_ist + datetime.timedelta(days=7)).date().isoformat()
@@ -1796,19 +1782,13 @@ def check_weekly_digest(state: dict, today: str) -> int:
     ]
     if due:
         lines.append(f"<b>Journal reviews due next week — {len(due)}</b>")
-        for e in sorted(due, key=lambda x: x.review_date)[:8]:
-            lines.append(f"• <b>{_h(e.ticker)}</b> — review by {e.review_date}: {_h(e.thesis[:80])}")
-        lines.append("")
+        for e in sorted(due, key=lambda x: x.review_date)[:5]:
+            lines.append(f"• <b>{_h(e.ticker)}</b> — review by {e.review_date}: {_h(e.thesis[:50])}")
 
-    if len(lines) <= 4:
-        # Only the header + "no data" line landed — send a "quiet week" note
-        # rather than a near-empty message.
-        lines.append("<i>Quiet week — no snapshot, no journal activity. Nothing to review.</i>")
-
-    lines.extend([
-        "",
-        "<i>Weekly roll-up. Descriptive, not advice.</i>",
-    ])
+    if len(lines) <= 2:
+        # Only the header + "no data" line landed — send a "quiet week" note.
+        lines.append("Quiet week — no journal activity, nothing to review.")
+    lines.append(_FOOTER)
     msg = "\n".join(lines)
 
     if dispatch(msg, subject=f"Weekly Digest — week of {today}"):
@@ -1832,6 +1812,17 @@ def check_weekly_digest(state: dict, today: str) -> int:
 #
 # --force skips the market-hours guard for local/manual runs.
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _catalyst_live(state: dict, today: str) -> int:
+    """Results / announcement-driven BUY and SELL calls during market hours.
+    Isolated so a failure here can never stop the other checks in the run."""
+    try:
+        from alerts.catalyst_alerts import check_catalyst_live
+        return int(check_catalyst_live(state, today) or 0)
+    except Exception as e:
+        print(f"[catalyst] live check failed: {type(e).__name__}: {e}")
+        return 0
+
 
 def _parse_mode(argv: list[str]) -> str:
     for a in argv:
@@ -1874,6 +1865,7 @@ def main() -> int:
         "morning-digest", "portfolio-posture", "test", "test-verdict", "test-digest",
         "test-posture",
         "weekly-digest", "intraday-watchlist", "tomorrow-watchlist", "weekly-scorecard",
+        "catalyst-preopen", "why-moved",
     )
     if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
@@ -1902,6 +1894,12 @@ def main() -> int:
         total += check_tomorrow_watchlist(state, today)
     elif mode == "weekly-scorecard":
         total += check_weekly_scorecard(state, today)
+    elif mode == "catalyst-preopen":
+        from alerts.catalyst_alerts import check_catalyst_preopen
+        total += check_catalyst_preopen(state, today)
+    elif mode == "why-moved":
+        from alerts.catalyst_alerts import check_why_moved
+        total += check_why_moved(state, today)
     elif mode == "test":
         total += check_test_alert(state, today)
     elif mode == "test-verdict":
@@ -1920,6 +1918,7 @@ def main() -> int:
             "verdicts":  check_verdict_alerts(state, today),
             "vix":       check_vix_regime(state, today),
             "nifty":     check_nifty_trend(state, today),
+            "catalyst":  _catalyst_live(state, today),
         }
         print("[main] per-check: " + ", ".join(f"{k}={v}" for k, v in _counts.items()))
         total += sum(_counts.values())

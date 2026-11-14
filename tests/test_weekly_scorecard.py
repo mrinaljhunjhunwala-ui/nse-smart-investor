@@ -67,5 +67,43 @@ def test_scorecard_sends_on_friday_only_and_once(monkeypatch):
     assert ca.check_weekly_scorecard(state, "2026-11-05", now=thu) == 0
     assert ca.check_weekly_scorecard(state, "2026-11-06", now=fri) == 1
     assert ca.check_weekly_scorecard(state, "2026-11-06", now=fri) == 0
-    _assert_descriptive(sent[0])
+    _assert_descriptive(sent[0], max_lines=20)
     assert "2 names" in sent[0] and "+2.5%" in sent[0] and "AAA +10.0%" in sent[0]
+
+
+def _sector_rows():
+    names = [("B1", 100, 110), ("B2", 100, 108), ("B3", 100, 112),      # Banks: +10 / +8 / +12
+             ("I1", 100, 95), ("I2", 100, 97), ("I3", 100, 96),        # IT: -5 / -3 / -4
+             ("X1", 100, 130), ("O1", 100, 101)]                        # one-name sector, unmapped
+    rows = pd.DataFrame([{"ticker": f"{t}.NS", "logged_date": "2026-11-03", "entry_price": float(e),
+                          "verdict": "BUY", "source": "shadow_auto"} for t, e, _ in names])
+    return rows, {f"{t}.NS": float(p) for t, _, p in names}
+
+
+def _sector_of(ticker):
+    return {"B": "Banks", "I": "IT", "X": "Metals"}.get(ticker[0], "Other")
+
+
+def test_week_scorecard_sector_split_and_median():
+    rows, prices = _sector_rows()
+    card = vl.week_scorecard(rows, prices, _nifty(), 1020.0, sector_of=_sector_of)
+    assert [s["sector"] for s in card["sectors"]] == ["Banks", "IT"]      # best first; <3 names and Other left out
+    assert card["sectors"][0]["n"] == 3 and round(card["sectors"][0]["mean_edge"], 1) == 8.0   # +10 avg − Nifty +2
+    assert round(card["sectors"][1]["mean_edge"], 1) == -6.0
+    assert round(card["median_move"], 1) == 4.5 and card["mean_move"] > card["median_move"]
+    assert vl.week_scorecard(rows, prices, _nifty(), 1020.0)["sectors"] == []           # no map, no split
+
+    def _boom(t):
+        raise KeyError(t)
+    assert vl.week_scorecard(rows, prices, _nifty(), 1020.0, sector_of=_boom)["sectors"] == []
+
+
+def test_scorecard_message_shows_sectors_and_median():
+    from tests.test_alert_copy_no_advice import _assert_descriptive
+    rows, prices = _sector_rows()
+    cards = {"top_picks": vl.week_scorecard(rows, prices, _nifty(), 1020.0, sector_of=_sector_of)}
+    msg = "\n".join(ca.weekly_scorecard_lines(cards, "2026-11-02", "2026-11-06"))
+    _assert_descriptive(msg, max_lines=20)
+    assert "By sector, vs the Nifty (names): Banks +8.0 pts (3) · IT -6.0 pts (3)" in msg
+    assert "Middle name (median): +4.5%" in msg
+    assert ca._sector_lines([{"sector": "Banks", "n": 3, "mean_edge": 8.0}]) == []        # one sector says nothing

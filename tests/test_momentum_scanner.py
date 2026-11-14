@@ -283,4 +283,5 @@ def test_format_message_with_candidates():
     msg = format_momentum_message(candidates)
     assert "RELIANCE" in msg
     assert "1,450" in msg   # thousands separator on price
-    assert "not advice" in msg.lower()
+    assert "BUY  <b>RELIANCE</b>  ₹1,450.00 · stop ₹1,400.00 · target ₹1,550.00" in msg
+    assert "not a guarantee" in msg

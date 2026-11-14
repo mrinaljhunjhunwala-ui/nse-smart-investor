@@ -741,6 +741,93 @@ class _SkipAngel(Exception):
     """Internal: Angel tier skipped (busy), not failed."""
 
 
+# -- Coverage gate (FIX TIER-COVERAGE, 2026-11-13) ----------------------------
+# fetch_single() took ANY non-empty frame from the first tier that answered.
+# A tier that returned 27 bars of a 2y request, or history that stopped a
+# week ago, therefore blocked every later tier. A daily frame from an early
+# tier is now checked against what was asked for; if it falls short the next
+# tiers are still tried and the better frame is served. A real new listing is
+# short on every tier, so it is served as before (one extra request).
+_SHORT_MISSING_FRAC = 0.40    # first bar later than start + 40% of the span
+_SHORT_MIN_GAP_DAYS = 30      # ... and at least this many days late
+_LONGER_FRAC = 0.20           # "materially more history": 20% of the span earlier
+_STALE_SESSIONS = 2           # completed sessions with no bar after the last one
+
+
+def _ist_today() -> datetime.date:
+    return (datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(hours=5, minutes=30)).date()
+
+
+def _requested_span_days(period: str) -> Optional[int]:
+    """Calendar days the period asks for; None when unbounded ("max") or unknown."""
+    key = str(period).lower()
+    if key == "ytd":
+        today = _ist_today()
+        return (today - datetime.date(today.year, 1, 1)).days
+    if key == "max":
+        return None
+    return _PERIOD_DAYS.get(key)
+
+
+def _frame_bounds(df: pd.DataFrame) -> Optional[Tuple[datetime.date, datetime.date]]:
+    """(first bar date, last bar date) in IST, or None if the index has no dates."""
+    try:
+        idx = df.index
+        if not isinstance(idx, pd.DatetimeIndex) or not len(idx):
+            return None
+        if idx.tz is not None:
+            idx = idx.tz_convert("Asia/Kolkata").tz_localize(None)
+        return idx.min().date(), idx.max().date()
+    except Exception as e:
+        _log.debug("frame bounds unavailable: %s", e)
+        return None
+
+
+def _missed_sessions(last_bar: datetime.date, today: datetime.date) -> int:
+    """Completed NSE sessions after `last_bar` (today itself is not counted:
+    its bar may not exist yet)."""
+    from utils.nse_holidays import SPECIAL_SESSIONS, is_trading_day
+    n, d = 0, last_bar + datetime.timedelta(days=1)
+    while d < today and n < 30:
+        if is_trading_day(d) or d.isoformat() in SPECIAL_SESSIONS:
+            n += 1
+        d += datetime.timedelta(days=1)
+    return n
+
+
+def _coverage_problem(df: pd.DataFrame, period: str) -> Optional[str]:
+    """"short" / "stale" when a daily frame clearly is not what was requested."""
+    bounds = _frame_bounds(df)
+    if bounds is None:
+        return None
+    first, last = bounds
+    today = _ist_today()
+    span = _requested_span_days(period)
+    if span:
+        late_by = (first - (today - datetime.timedelta(days=span))).days
+        if late_by > max(_SHORT_MIN_GAP_DAYS, _SHORT_MISSING_FRAC * span):
+            return "short"
+    if _missed_sessions(last, today) >= _STALE_SESSIONS:
+        return "stale"
+    return None
+
+
+def _later_tier_wins(held: pd.DataFrame, new: pd.DataFrame, period: str) -> bool:
+    """True when `new` (a later tier) should replace `held` (an earlier tier's
+    frame that failed the coverage gate)."""
+    hb, nb = _frame_bounds(held), _frame_bounds(new)
+    if hb is None or nb is None:
+        return hb is None and nb is not None
+    span = _requested_span_days(period) or max((hb[1] - hb[0]).days, 1)
+    longer = (hb[0] - nb[0]).days >= max(5, _LONGER_FRAC * span)
+    fresher = nb[1] > hb[1]
+    if longer and nb[1] >= hb[1]:
+        return True
+    # Fresher, and not at the price of materially less history.
+    return fresher and (nb[0] - hb[0]).days < max(5, _LONGER_FRAC * span)
+
+
 def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     """
     Fetch OHLCV for one ticker.
@@ -768,6 +855,25 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         _log.warning("data fallback: provider=%s symbol=%s failed: %s: %s",
                      provider, ticker, type(exc).__name__, exc)
 
+    held: list = []      # [(frame, provider, problem)] — FIX TIER-COVERAGE
+
+    def _hold_if_suspect(frame, provider):
+        """Park a daily frame that fails the coverage gate so later tiers still
+        run; returns None then (the tier chain continues), else the frame."""
+        if interval != "1d":
+            return frame
+        problem = _coverage_problem(frame, period)
+        if problem is None:
+            return frame
+        _log.warning("data fallback: provider=%s symbol=%s returned a %s frame "
+                     "(%d bars, %s) for period=%s — trying the next provider",
+                     provider, ticker, problem, len(frame), _frame_bounds(frame), period)
+        _record_provider_diagnostic(provider, ok=False, symbol=ticker,
+                                    reason=f"{problem} frame ({len(frame)} bars) for {period}")
+        if not held or _later_tier_wins(held[0][0], frame, period):
+            held[:] = [(frame, provider, problem)]
+        return None
+
     # ── Tier 0: Angel One SmartAPI (only if credentials configured) ───────────
     try:
         import importlib
@@ -791,6 +897,7 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
             if df is not None and not df.empty:
                 served = "AngelOne"
                 _record_provider_diagnostic("AngelOne", ok=True, symbol=ticker)
+                df = _hold_if_suspect(df, "AngelOne")
             else:
                 _log.warning("data fallback: provider=AngelOne symbol=%s returned no data",
                              ticker)
@@ -833,6 +940,8 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
                 served = "Stooq"
                 _stooq_breaker_record(success=True)
                 _record_provider_diagnostic("Stooq", ok=True, symbol=ticker)
+                if df is not None and not df.empty:
+                    df = _hold_if_suspect(df, "Stooq")
             except Exception as e:
                 df = None
                 _stooq_breaker_record(success=False)
@@ -855,6 +964,21 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
             _fail("Yahoo", e)
             _record_provider_diagnostic("Yahoo", ok=False, symbol=ticker,
                                         reason=f"{type(e).__name__}: {e}")
+
+    # ── FIX TIER-COVERAGE: settle an earlier tier's suspect frame against Yahoo ─
+    if held:
+        h_df, h_provider, h_problem = held[0]
+        if df is None or df.empty:
+            # Nothing better exists (new listing, or Yahoo is down): serve it.
+            df, served = h_df, h_provider
+            _log.warning("data served: symbol=%s provider=%s %s frame kept (%d bars) — "
+                         "no later provider answered", ticker, h_provider, h_problem, len(h_df))
+        elif _later_tier_wins(h_df, df, period):
+            _log.info("data served: symbol=%s provider=%s replaces %s's %s frame "
+                      "(%d bars vs %d)", ticker, served, h_provider, h_problem, len(df), len(h_df))
+        else:
+            # The later tier is no better: the earlier tier's frame stands.
+            df, served = h_df, h_provider
 
     # ── Tier 3: NSE bhavcopy (daily only; last resort; <=60 sessions, unadjusted) ─
     if (df is None or df.empty) and interval == "1d":

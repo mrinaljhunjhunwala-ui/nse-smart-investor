@@ -136,3 +136,103 @@ def test_fetch_single_angel_busy_falls_through_quietly(monkeypatch, caplog):
         df = f.fetch_single("BUSYTEST.NS", period="1y")
     assert df is not None and not df.empty
     assert not [r for r in caplog.records if "AngelOne" in r.getMessage()]
+
+
+# ── FIX TIER-COVERAGE: a short / stale early-tier frame must not block Yahoo ──
+def _daily(n, end=None, price=100.0):
+    """n session bars ending at the last completed weekday before today (IST)."""
+    import data.fetcher as f
+    end = end or f._ist_today() - pd.Timedelta(days=1)
+    idx = pd.bdate_range(end=end, periods=n)
+    return pd.DataFrame({"Open": price, "High": price + 1, "Low": price - 1,
+                         "Close": price + 0.5, "Volume": 1000}, index=idx)
+
+
+def _tiers(monkeypatch, angel_df, yahoo):
+    """Angel returns angel_df; Yahoo returns `yahoo` (a frame) or raises it."""
+    import types
+    import data.fetcher as f
+    calls = {"yahoo": 0}
+    fake = types.SimpleNamespace(
+        is_configured=lambda: True, AngelBusy=type("AngelBusy", (Exception,), {}),
+        fetch_historical=lambda ticker, period=None, interval=None: angel_df.copy())
+
+    def _yahoo(*a, **k):
+        calls["yahoo"] += 1
+        if isinstance(yahoo, Exception):
+            raise yahoo
+        return yahoo.copy()
+
+    monkeypatch.setitem(__import__("sys").modules, "data.angel_fetcher", fake)
+    monkeypatch.setattr(f, "_stooq_enabled", lambda: False)
+    monkeypatch.setattr(f, "_fetch_yahoo_direct", _yahoo)
+    monkeypatch.setattr(f, "_FETCH_CACHE", {})
+    import data.nse_bhavcopy_prices as bp
+    monkeypatch.setattr(bp, "fetch_bhavcopy_history",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("offline")))
+    return f, calls
+
+
+def test_short_angel_frame_loses_to_longer_yahoo(monkeypatch):
+    """27 bars of a 2y request (the PFC / VEDL case) must not be served as history."""
+    f, calls = _tiers(monkeypatch, _daily(27), _daily(480))
+    got = f.fetch_single("PFC.NS", period="2y")
+    assert calls["yahoo"] == 1
+    assert len(got) > 400
+
+
+def test_new_listing_short_on_every_tier_is_still_served(monkeypatch):
+    f, calls = _tiers(monkeypatch, _daily(27, price=100.0), _daily(26, price=200.0))
+    got = f.fetch_single("NEWIPO.NS", period="2y")
+    assert calls["yahoo"] == 1
+    assert 20 <= len(got) <= 27 and got["Open"].iloc[-1] == 100.0     # Angel's frame stands
+
+
+def test_short_frame_served_when_yahoo_is_down(monkeypatch):
+    f, calls = _tiers(monkeypatch, _daily(27), ValueError("Yahoo down"))
+    got = f.fetch_single("NEWIPO.NS", period="2y")
+    assert calls["yahoo"] == 1 and 20 <= len(got) <= 27
+
+
+def test_full_fresh_angel_frame_never_calls_yahoo(monkeypatch):
+    f, calls = _tiers(monkeypatch, _daily(500), _daily(500))
+    f.fetch_single("RELIANCE.NS", period="2y")
+    assert calls["yahoo"] == 0
+
+
+def test_stale_angel_frame_loses_to_fresher_yahoo(monkeypatch):
+    """History that stopped ~2 weeks ago while Yahoo has yesterday's bar."""
+    import data.fetcher as f0
+    stale_end = f0._ist_today() - pd.Timedelta(days=15)
+    f, calls = _tiers(monkeypatch, _daily(500, end=stale_end, price=100.0), _daily(500, price=200.0))
+    got = f.fetch_single("RELIANCE.NS", period="2y")
+    assert calls["yahoo"] == 1
+    assert got["Open"].iloc[-1] == 200.0
+    assert got.index[-1].date() > stale_end
+
+
+def test_suspended_stock_stale_on_every_tier_keeps_first_tier(monkeypatch):
+    import data.fetcher as f0
+    stale_end = f0._ist_today() - pd.Timedelta(days=15)
+    f, calls = _tiers(monkeypatch, _daily(500, end=stale_end, price=100.0),
+                      _daily(500, end=stale_end, price=200.0))
+    got = f.fetch_single("SUSP.NS", period="2y")
+    assert got["Open"].iloc[-1] == 100.0
+
+
+def test_fresher_but_much_shorter_yahoo_does_not_replace_long_history(monkeypatch):
+    import data.fetcher as f0
+    stale_end = f0._ist_today() - pd.Timedelta(days=15)
+    f, calls = _tiers(monkeypatch, _daily(500, end=stale_end, price=100.0), _daily(30, price=200.0))
+    got = f.fetch_single("X.NS", period="2y")
+    assert got["Open"].iloc[-1] == 100.0
+
+
+def test_missed_sessions_ignores_weekend_and_today():
+    import datetime as dt
+    import data.fetcher as f
+    fri, mon = dt.date(2026, 7, 3), dt.date(2026, 7, 6)
+    assert f._missed_sessions(fri, mon) == 0            # Monday pre-open: Friday's bar is current
+    assert f._missed_sessions(fri, dt.date(2026, 7, 9)) == 3
+    # Tue 10 Nov 2026 is an NSE holiday: not a missed session.
+    assert f._missed_sessions(dt.date(2026, 11, 6), dt.date(2026, 11, 12)) == 2

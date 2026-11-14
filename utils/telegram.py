@@ -16,8 +16,6 @@ Usage:
 """
 
 import os
-import json
-import datetime
 import requests
 from typing import Optional
 
@@ -32,8 +30,11 @@ class TelegramAlerter:
         token: Optional[str] = None,
         chat_id: Optional[str] = None,
     ):
-        self.token   = token   or os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID",   "")
+        # Strip: a secret saved with a trailing newline / space makes the URL
+        # .../bot<token>%0A/sendMessage, which Telegram answers with 404 (seen in
+        # the first provider-canary run, 2026-11-14). alerts/check_alerts.py strips too.
+        self.token   = (token   or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+        self.chat_id = str(chat_id or os.getenv("TELEGRAM_CHAT_ID", "")).strip()
 
         if not self.token or not self.chat_id:
             print(
@@ -87,7 +88,10 @@ class TelegramAlerter:
         Returns:
             True if message sent (or printed), False on API error.
         """
-        now  = datetime.datetime.now().strftime("%d %b %Y  %H:%M IST")
+        # Real IST: the alert jobs run on UTC runners, where now() printed UTC
+        # under an "IST" label (5.5 h early).
+        from utils.snapshot_time import ist_now
+        now  = ist_now().strftime("%d %b %Y  %H:%M IST")
         icon = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(action.upper(), "⚪")
 
         # FIX TG1: escape dynamic, data-derived fields — ticker/strategy/reason
@@ -101,7 +105,7 @@ class TelegramAlerter:
 
         lines = [
             f"{icon} *{action.upper()} SIGNAL — {_ticker}*",
-            f"━━━━━━━━━━━━━━━━━━━━━━",
+            "━━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {now}",
             f"💰 Price    : ₹{price:,.2f}",
         ]
@@ -112,7 +116,7 @@ class TelegramAlerter:
             lines.append(f"📊 R:R       : 1 : {rr:.1f}")
         if strategy: lines.append(f"⚙️ Strategy  : {_strategy}")
         if reason:   lines.append(f"📝 Reason    : {_reason}")
-        lines.append(f"━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━")
         lines.append("_⚠️ For educational purposes only. Not investment advice._")
 
         message = "\n".join(lines)
@@ -127,13 +131,13 @@ class TelegramAlerter:
         """
         pnl_icon = "📈" if summary.get("daily_pnl", 0) >= 0 else "📉"
         lines = [
-            f"📋 *PORTFOLIO SUMMARY*",
-            f"━━━━━━━━━━━━━━━━━━━━━━",
+            "📋 *PORTFOLIO SUMMARY*",
+            "━━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {summary.get('date', '')}",
             f"💼 Value    : ₹{summary.get('portfolio_value', 0):,.0f}",
             f"{pnl_icon} Day P&L  : ₹{summary.get('daily_pnl', 0):+,.0f}",
             f"📂 Open     : {summary.get('open_trades', 0)} positions",
-            f"━━━━━━━━━━━━━━━━━━━━━━",
+            "━━━━━━━━━━━━━━━━━━━━━━",
         ]
         return self._send("\n".join(lines))
 

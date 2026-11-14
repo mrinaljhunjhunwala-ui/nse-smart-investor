@@ -65,7 +65,7 @@ def test_exit_watch_when_price_breaks_below_sma50():
     assert result is not None
     assert result.posture == "EXIT_WATCH", \
         f"expected EXIT_WATCH on SMA50 breakdown, got {result.posture}"
-    assert "SMA50" in result.reason
+    assert "50-day average" in result.reason
     assert result.suggested_stop is not None
 
 
@@ -202,9 +202,10 @@ def test_format_message_lists_urgent_rows():
         posture="TARGET_HIT", reason="through target", vwap_today=101.0,
     )
     msg = format_portfolio_message([h], [p])
-    assert "XYZ" in msg and "EXIT_WATCH" in msg
-    assert "ABC" in msg and "TARGET_HIT" in msg
-    assert "Not advice" in msg
+    assert "SELL  <b>XYZ</b>  -15.0% · SMA50 breakdown" in msg
+    assert "TARGET HIT  <b>ABC</b>" in msg
+    assert "EXIT_WATCH" not in msg and "TARGET_HIT" not in msg
+    assert msg.index("SELL") < msg.index("TARGET HIT")                    # SELL first
 
 
 def test_all_intraday_postures_are_valid_labels():

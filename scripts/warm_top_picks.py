@@ -135,6 +135,17 @@ def main() -> int:
         _vix.get("regime", "?"),
     )
 
+    # FIX SNAPSHOT-GUARD: a mostly-failed scan must not replace a good snapshot
+    # (top picks, the all-scored map the alerts read, momentum leaders, ledger).
+    from utils.snapshot_time import scan_too_degraded
+    if "n_scanned" in _meta and scan_too_degraded(_n_scan, _n_ok):
+        _log.error(
+            "warm_top_picks: scan too degraded to persist (scored %d of %d; first unscored: %s; "
+            "reasons: %s) — keeping the previous snapshot",
+            _n_ok, _n_scan, ", ".join(_meta.get("unavailable_sample") or []) or "n/a",
+            _meta.get("unavailable_reasons") or "n/a")
+        return 0
+
     _gen_at = store.snapshot_timestamp()
 
     # FIX WL-SNAP1: pull the full-universe scored map out of the result and

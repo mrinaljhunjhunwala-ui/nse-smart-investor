@@ -4,7 +4,7 @@ Read this before doing anything in the repo, then the **"Latest" section at the 
 
 ## What this is
 
-A 14-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Educational only — never a SEBI-registered advice product.**
+A 14-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Personal tool of its owner — not a SEBI-registered advice product.**
 
 ## Architecture at a glance
 
@@ -34,7 +34,7 @@ trade_store.py                   persistence: SQLite by default, Postgres when D
 
 ## Non-negotiable rules
 
-1. **No buy/sell/hold recommendation, ever.** The Valuation Decision Layer emits a *descriptive posture* (Bullish/Neutral/Bearish/etc.), not an instruction. UI copy that reads as advice is a bug. See `PATTERN_REMOVAL_MIGRATION.md` for tone conventions.
+1. **Direct BUY / SELL / HOLD wording (owner decision, 2026-11-13).** This is the owner's personal tool; picks, Telegram alerts and verdict labels say BUY / SELL / HOLD plainly, with a stop on every BUY. Display labels live in `analysis/action_labels.py`; internal keys, ledger verdict strings and dedupe keys never change. Every call is model output, not a guarantee, and the app is not SEBI-registered advice: if it is ever promoted to other people, revisit this rule first (the older descriptive-only convention is in `PATTERN_REMOVAL_MIGRATION.md` and git history). Never promise an outcome ("sure shot", "guaranteed") in copy.
 2. **Composite score is 0–90, four components (40+25+15+10).** No candlestick component — the 40k-observation study killed it. Do not add it back.
 3. **Sector-aware fundamentals.** Banks/NBFCs/insurers are assessed on P/B + ROE, not "leverage". Route metric selection through `analysis/sector_classification.py` — never hard-code sector logic in a page.
 4. **`analysis/` is pure.** No `import streamlit`, no `st.cache_*`, no session state. Cache at the `dashboard/shared/cache.py` layer.

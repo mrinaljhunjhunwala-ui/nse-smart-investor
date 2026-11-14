@@ -1,42 +1,48 @@
-"""Descriptive display labels for internal CompositeScore action strings.
+"""Display labels for internal CompositeScore action / FinalVerdict strings.
 
-Phase 2 UI honesty — the engine's action strings ("STRONG BUY", "EXIT", ...)
-are internal keys (DB, CSV export, sort keys, signal logic) and are NEVER
-changed. Anything a person reads — dashboard pages, Telegram/Gmail alerts —
-goes through action_display_label() instead (CLAUDE.md rule 1).
+Owner decision, 13 Nov 2026: this app is a purely personal tool, so what a
+person reads is direct BUY / SELL / HOLD wording ("Strong trend" was the wrong
+word for a pick). That replaces the earlier descriptive-label convention for
+display copy only.
+
+The engine's action strings ("STRONG BUY", "EXIT", ...) and FinalVerdict
+values are internal keys (DB, CSV export, ledger, sort keys, dedupe / state
+keys, signal logic) and are NEVER changed here. Anything a person reads —
+dashboard pages, Telegram/Gmail alerts — goes through action_display_label()
+/ verdict_display_label().
 
 Pure module (no Streamlit) so alerts/ can use it without importing the UI.
 """
 
 ACTION_DISPLAY_LABELS = {
-    "STRONG BUY": "Strong Trend ▲▲",
-    "BUY":        "Uptrend ▲",
-    "WATCHLIST":  "Watch",
-    "HOLD":       "Neutral",
-    "CAUTION":    "Weakening ▼",
-    "EXIT":       "Broken Trend ▼▼",
-    "SELL":       "Broken Trend ▼▼",   # legacy alias from signals.py
+    "STRONG BUY": "STRONG BUY",
+    "BUY":        "BUY",
+    "WATCHLIST":  "WATCH",
+    "HOLD":       "HOLD",
+    "CAUTION":    "REDUCE",
+    "EXIT":       "SELL",
+    "SELL":       "SELL",   # legacy alias from signals.py
 }
 
 
 def action_display_label(action: str) -> str:
-    """Descriptive label for an internal action string; unknown values pass through."""
+    """Display label for an internal action string; unknown values pass through."""
     return ACTION_DISPLAY_LABELS.get(action, action)
 
 
-# FinalVerdict (analysis/final_verdict.VERDICTS) → descriptive display label.
+# FinalVerdict (analysis/final_verdict.VERDICTS) → display label.
 VERDICT_DISPLAY_LABELS = {
-    "STRONG BUY": "Strong trend ▲▲",
-    "BUY":        "Uptrend ▲",
-    "WATCH":      "Mixed signals",
-    "HOLD":       "Neutral",
-    "AVOID":      "Weak / broken trend ▼",
+    "STRONG BUY": "STRONG BUY",
+    "BUY":        "BUY",
+    "WATCH":      "WATCH",
+    "HOLD":       "HOLD",
+    "AVOID":      "AVOID / SELL",
     "INSUFFICIENT_DATA": "Not enough fundamental data",   # long lens only; non-directional
 }
 
 
 def verdict_display_label(verdict: str) -> str:
-    """Descriptive label for a FinalVerdict value (never an instruction)."""
+    """Display label for a FinalVerdict value."""
     return VERDICT_DISPLAY_LABELS.get(verdict, verdict)
 
 

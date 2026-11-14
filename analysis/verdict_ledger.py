@@ -52,7 +52,7 @@ from __future__ import annotations
 import datetime as _dt
 import logging
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -1554,10 +1554,14 @@ def plain_summary(res: Dict[str, Any], *, pending_days: int = 0) -> Dict[str, An
     return out
 
 
+WEEK_SECTOR_MIN_NAMES = 3       # a sector needs this many scored names to be listed
+
+
 def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
                    nifty_close: pd.Series, nifty_now: Optional[float], *,
                    verdicts: Optional[tuple] = BULLISH_VERDICTS,
-                   direction: int = 1) -> Optional[Dict[str, Any]]:
+                   direction: int = 1,
+                   sector_of: Optional[Callable[[str], str]] = None) -> Optional[Dict[str, Any]]:
     """How this week's reads moved since they were logged.
 
     rows: ledger rows (ticker, logged_date, entry_price, verdict) for the week.
@@ -1566,8 +1570,11 @@ def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
     The Nifty leg is its close on the log date (or the last session before) to
     nifty_now. `direction` is +1 for an up-call, -1 for a down-call: `hits`
     counts names that beat (up) or lagged (down) the Nifty, and best/worst rank
-    by the move in the flagged direction. Returns None when nothing can be
-    scored. Descriptive only.
+    by the move in the flagged direction. `sector_of` (ticker -> sector name)
+    adds `sectors`: one entry per sector with at least WEEK_SECTOR_MIN_NAMES
+    scored names (unmapped "Other" left out), ordered by average move vs the
+    Nifty, so a week carried by one or two sectors is visible. Returns None
+    when nothing can be scored. Descriptive only.
     """
     if rows is None or rows.empty:
         return None
@@ -1591,6 +1598,21 @@ def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
         out_rows.append({"ticker": r["ticker"], "move": move, "nifty_move": nifty_move})
     if not out_rows:
         return None
+    sectors: List[Dict[str, Any]] = []
+    if sector_of is not None:
+        groups: Dict[str, List[float]] = {}
+        for x in out_rows:
+            if x["nifty_move"] is None:
+                continue
+            try:
+                sec = sector_of(x["ticker"])
+            except Exception:
+                sec = None
+            if sec and sec != "Other":
+                groups.setdefault(sec, []).append(x["move"] - x["nifty_move"])
+        sectors = sorted(({"sector": k, "n": len(v), "mean_edge": float(np.mean(v))}
+                          for k, v in groups.items() if len(v) >= WEEK_SECTOR_MIN_NAMES),
+                         key=lambda d: -d["mean_edge"])
     moves = [x["move"] for x in out_rows]
     edges = [x["move"] - x["nifty_move"] for x in out_rows if x["nifty_move"] is not None]
     sign = -1 if direction < 0 else 1
@@ -1599,6 +1621,8 @@ def week_scorecard(rows: pd.DataFrame, price_now: Dict[str, float],
         "n": len(out_rows),
         "direction": sign,
         "mean_move": float(np.mean(moves)),
+        "median_move": float(np.median(moves)),
+        "sectors": sectors,
         "up": sum(m > 0 for m in moves),
         "mean_edge": float(np.mean(edges)) if edges else None,
         "ahead": sum(e > 0 for e in edges),
@@ -1831,19 +1855,21 @@ _BEARISH_TW = tuple(b for b, (_, dr) in TW_BUCKETS.items() if dr < 0)
 
 
 def week_scorecard_by_list(rows: pd.DataFrame, price_now: Dict[str, float],
-                           nifty_close: pd.Series, nifty_now: Optional[float]) -> Optional[Dict[str, Any]]:
+                           nifty_close: pd.Series, nifty_now: Optional[float], *,
+                           sector_of: Optional[Callable[[str], str]] = None) -> Optional[Dict[str, Any]]:
     """The Friday report card split by list: 'top_picks' (source shadow_auto,
     every card), 'watchlist_up' (breakout + bullish reversal) and
     'watchlist_down' (breakdown + bearish reversal, judged as down-calls).
     `rows` need a `bucket` column for watchlist rows (with_list_buckets).
-    Each value is a week_scorecard() dict or None; returns None when all are."""
+    Each value is a week_scorecard() dict or None; returns None when all are.
+    `sector_of` is passed to the Top Picks card only (its sector split)."""
     if rows is None or rows.empty or "source" not in rows.columns:
         return None
     bucket = rows["bucket"] if "bucket" in rows.columns else pd.Series(np.nan, index=rows.index)
     tw = rows["source"] == "tomorrow_watchlist"
     out = {
         "top_picks": week_scorecard(rows[rows["source"] == "shadow_auto"], price_now,
-                                    nifty_close, nifty_now, verdicts=None),
+                                    nifty_close, nifty_now, verdicts=None, sector_of=sector_of),
         "watchlist_up": week_scorecard(rows[tw & bucket.isin(_BULLISH_TW)], price_now,
                                        nifty_close, nifty_now, verdicts=None),
         "watchlist_down": week_scorecard(rows[tw & bucket.isin(_BEARISH_TW)], price_now,

@@ -191,6 +191,13 @@ def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
     """Last EOD close from Stooq — never rate-limited, works everywhere."""
     try:
         import io, datetime, pandas as pd
+        from data.fetcher import _stooq_enabled
+        if not _stooq_enabled():
+            # Same switch as the history tier (FIX STOOQ-OFF): stooq.com has
+            # answered every script request with a browser-check page since
+            # 2026-09-06, so this tier only added a round-trip of up to 10 s
+            # per symbol whenever the tiers above had already failed.
+            return None
         sym = ticker_ns.lower()
         end   = datetime.date.today()
         start = end - datetime.timedelta(days=7)
@@ -225,6 +232,17 @@ def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
 
 # ─── Internal: build a normalised quote dict ─────────────────────────────────
 
+def _usable(q: Optional[dict]) -> bool:
+    """A tier's answer counts only with a finite price above zero. A NaN / 0 /
+    None "price" (NSE sends null fields pre-open, Stooq a NaN close) used to be
+    truthy enough to be returned, so the remaining tiers never ran."""
+    try:
+        p = float((q or {}).get("price"))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(p) and p > 0
+
+
 def _normalise(q: dict) -> dict:
     """Add chg_pct to a raw {price, prev_close[, volume]} dict.
 
@@ -236,7 +254,12 @@ def _normalise(q: dict) -> dict:
     must .get("volume") defensively, never index it directly.
     """
     p  = float(q["price"])
-    pc = float(q.get("prev_close") or p)
+    try:
+        pc = float(q.get("prev_close") or p)
+    except (TypeError, ValueError):
+        pc = p
+    if not math.isfinite(pc) or pc <= 0:
+        pc = p
     out = {
         "price":      p,
         "prev_close": pc,
@@ -284,7 +307,7 @@ def get_live_quote(symbol: str) -> Optional[dict]:
         from data.angel_fetcher import get_full_quote as _ao_full_quote, is_configured as _ao_ok
         if _ao_ok():
             q = _ao_full_quote(clean_ns)
-            if q:
+            if _usable(q):
                 # FIX VOL1: get_full_quote (not the stripped get_live_quote
                 # wrapper) so this single-symbol path carries "volume"
                 # through just like get_live_prices_batch's Angel One tier
@@ -307,7 +330,7 @@ def get_live_quote(symbol: str) -> Optional[dict]:
         (_stooq_eod_price,  clean_ns),
     ]:
         q = fetch_fn(arg)
-        if q:
+        if _usable(q):
             return _normalise(q)
 
     _log.warning("all live-price tiers failed for %s — no quote available", symbol)
@@ -373,7 +396,7 @@ def get_live_prices_batch(
             ao_results = _ao_batch(remaining)
             resolved: List[str] = []
             for sym, q in ao_results.items():
-                if q and float(q.get("price", 0)) > 0:
+                if _usable(q):
                     # angel_fetcher returns a full dict including chg_pct
                     results[sym] = q
                     resolved.append(sym)
@@ -401,7 +424,7 @@ def get_live_prices_batch(
             (_stooq_eod_price,  clean_ns),
         ]:
             q = fetch_fn(arg)
-            if q:
+            if _usable(q):
                 return sym, _normalise(q)
         _log.warning("all live-price tiers failed for %s — no quote available", sym)
         return sym, None

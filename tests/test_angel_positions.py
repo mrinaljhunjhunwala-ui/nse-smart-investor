@@ -65,7 +65,7 @@ def test_short_history_listing_gets_limited_posture():
     rising = _bars([100 + i for i in range(76)])
     p = analyse_delivery_holding({"symbol": "VOGL", "qty": 10, "avg_price": 120, "ltp": 0}, rising)
     assert p is not None and p.history_days == 76 and p.sma200 is None
-    assert p.reason.startswith("Limited history (76 trading days since listing")
+    assert p.reason.startswith("new listing, short history")
     assert p.filters_detail["trend"] is True and p.posture in ("HOLD", "ADD_WATCH")
     assert p.breakdown_below == p.sma50
 
@@ -81,4 +81,4 @@ def test_full_history_unchanged():
     from analysis.portfolio_posture import analyse_delivery_holding
     p = analyse_delivery_holding({"symbol": "OLD", "qty": 1, "avg_price": 100, "ltp": 0},
                                  _bars([100 + 0.1 * i for i in range(260)]))
-    assert p.history_days is None and p.sma200 is not None and not p.reason.startswith("Limited")
+    assert p.history_days is None and p.sma200 is not None and not p.reason.startswith("new listing")

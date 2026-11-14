@@ -22,7 +22,7 @@ def _setup(monkeypatch, buys, verdicts, age_h=0.2):
     import dashboard.shared.pick_freshness as pf
     monkeypatch.setattr(pf, "compose_finalverdict_for_card",
                         lambda b, tqs=None, log_source=None: _FV(verdicts[b["ticker"]]))
-    monkeypatch.setattr(ca, "_regime_note", lambda: "NIFTY regime: trend down")
+    monkeypatch.setattr(ca, "_regime_note", lambda: ca._MARKET_DOWN)
     sent = []
     monkeypatch.setattr(ca, "dispatch", lambda m, **k: sent.append(m) or True)
     return sent
@@ -35,7 +35,9 @@ def test_sends_buy_and_strong_buy_once_per_day(monkeypatch):
     assert ca.check_verdict_alerts(state, "2026-10-02") == 2
     assert len(sent) == 1                                      # one message per run
     msg = sent[0]
-    assert "2 new strong reads" in msg and "Strong trend" in msg and "not investment advice" in msg
+    assert "2 new BUY calls</b>" in msg and "Model output, not a guarantee." in msg
+    assert "STRONG BUY  <b>AAA</b>  ₹100.00 · stop ₹95.00 · target ₹110.00" in msg
+    assert "BUY  <b>BBB</b>" in msg and "Market: downtrend — smaller size" in msg
     assert msg.index("AAA") < msg.index("BBB") and "CCC" not in msg   # strongest first
     assert ca.check_verdict_alerts(state, "2026-10-02") == 0   # deduped
     assert len(sent) == 1
@@ -67,14 +69,15 @@ def test_verdict_alert_copy_is_descriptive(monkeypatch):
 
 def test_digest_lists_extra_strong_reads(monkeypatch):
     from tests.test_alert_copy_no_advice import _assert_descriptive
-    buys = [_pick(f"T{i}.NS", 60 - i, "WATCHLIST") for i in range(7)]
+    buys = [_pick(f"T{i}.NS", 80 - i, "WATCHLIST") for i in range(7)]
     sent = _setup(monkeypatch, buys, {f"T{i}.NS": ("BUY" if i == 6 else "WATCH") for i in range(7)})
     monkeypatch.setattr(ca, "_verdict_of",
                         lambda b: (("BUY", 79) if b["ticker"] == "T6.NS" else ("WATCH", 60)))
     assert ca.check_delivery_digest({}, "2026-10-02", max_picks=5) == 1
     msg = sent[0]
     _assert_descriptive(msg)
-    assert "Other names in this scan" in msg and "T6.NS" in msg and "T5.NS" not in msg
+    also = next(ln for ln in msg.splitlines() if ln.startswith("Also BUY"))
+    assert "<b>T6</b>" in also and "T5" not in also
 
 
 def test_digest_shows_sl_tp_and_escapes_html(monkeypatch):
@@ -83,8 +86,7 @@ def test_digest_shows_sl_tp_and_escapes_html(monkeypatch):
     monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
     assert "J&amp;KBANK" in sent[0] and "J&KBANK" not in sent[0]
-    assert "Invalidation 95.0" in sent[0] and "Measured move 110.0" in sent[0]
-    assert "Entry" not in sent[0] and "Stop " not in sent[0] and "Target" not in sent[0]
+    assert "WATCH  <b>J&amp;KBANK</b>  ₹100.00 · stop ₹95.00 · target ₹110.00" in sent[0]
 
 
 def test_test_digest_ignores_staleness_and_saves_nothing(monkeypatch):
@@ -107,10 +109,9 @@ def test_digest_marks_under_70_watch_only_with_record(monkeypatch):
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
     msg = sent[0]
     _assert_descriptive(msg)
-    assert "1 of 2 names scored under 70" in msg and "39%" in msg and "n=114" in msg
-    lo_line = next(ln for ln in msg.splitlines() if "LO.NS" in ln)
-    hi_line = next(ln for ln in msg.splitlines() if "HI.NS" in ln)
-    assert "Watch only" in lo_line and "Watch only" not in hi_line
+    assert "1 of 2 scored under 70 — WATCH, not BUY" in msg and "39%" in msg and "n=114" in msg
+    lo_line = next(ln for ln in msg.splitlines() if "LO</b>" in ln)
+    assert lo_line.startswith("WATCH  <b>LO</b>") and "levels ₹95.00 / ₹110.00" in lo_line
 
 
 def test_digest_still_sends_when_nothing_reaches_70(monkeypatch):
@@ -119,8 +120,8 @@ def test_digest_still_sends_when_nothing_reaches_70(monkeypatch):
     monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
     monkeypatch.setattr(ca, "_under_floor_record", lambda: None)   # ledger unreachable
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
-    assert "None of today's top names scored 70+" in sent[0]
-    assert sum("Watch only" in ln for ln in sent[0].splitlines() if ".NS" in ln) == 5
+    assert "None scored 70+ today — all WATCH, not BUY" in sent[0]
+    assert sum(ln.startswith("WATCH  <b>T") for ln in sent[0].splitlines()) == 5
 
 
 def test_digest_has_no_watch_note_when_all_clear_70(monkeypatch):
@@ -128,7 +129,7 @@ def test_digest_has_no_watch_note_when_all_clear_70(monkeypatch):
     monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
     monkeypatch.setattr(ca, "_under_floor_record", lambda: (_ for _ in ()).throw(AssertionError))
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
-    assert "Watch only" not in sent[0]
+    assert "WATCH, not BUY" not in sent[0]
 
 
 def test_under_70_gets_levels_to_watch_not_a_trade_plan(monkeypatch):
@@ -140,23 +141,17 @@ def test_under_70_gets_levels_to_watch_not_a_trade_plan(monkeypatch):
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
     msg = sent[0]
     _assert_descriptive(msg)
-    assert "Levels to watch: 95.0 below · 110.0 above" in msg
-    assert "Entry" not in msg and "Stop " not in msg and "Target" not in msg
-    assert "Ref " not in msg and "Invalidation" not in msg
-    head = next(ln for ln in msg.splitlines() if "LO.NS" in ln)
-    assert "— <i>Watch only</i> · Score 58/90" in head and "Watch ·" not in head
+    head = next(ln for ln in msg.splitlines() if "LO</b>" in ln)
+    assert head == "WATCH  <b>LO</b>  ₹100.00 · levels ₹95.00 / ₹110.00"   # no stop / target plan
+    assert "   Pharma · score 58/90" in msg
 
 
-def test_footer_mentions_brackets_only_when_present(monkeypatch):
-    sent = _setup(monkeypatch, [_pick("AAA.NS", 58, "WATCHLIST")], {"AAA.NS": "WATCH"})
-    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
-    monkeypatch.setattr(ca, "_under_floor_record", lambda: None)
+def test_digest_uses_the_verdict_word_and_one_footer(monkeypatch):
+    sent = _setup(monkeypatch, [_pick("BBB.NS", 72, "BUY")], {"BBB.NS": "BUY"})
+    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("STRONG BUY", 79))
     ca.check_delivery_digest({}, "2026-10-02")
-    assert "brackets" not in sent[0]
-    sent2 = _setup(monkeypatch, [_pick("BBB.NS", 72, "BUY")], {"BBB.NS": "BUY"})
-    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("BUY", 79))
-    ca.check_delivery_digest({}, "2026-10-02")
-    assert "(79)" in sent2[0] and "conviction in brackets" in sent2[0]
+    assert "STRONG BUY  <b>BBB</b>  ₹100.00 · stop ₹95.00" in sent[0]
+    assert sent[0].splitlines()[-1] == ca._FOOTER and "(79)" not in sent[0]
 
 
 def test_scan_label_date_only_where_asked():
@@ -172,11 +167,11 @@ def test_digest_and_test_header_show_scan_date(monkeypatch):
     monkeypatch.setattr(trade_store, "kv_set", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
     assert ca.check_test_digest({}, "2026-10-05") == 1
-    hdr, sub = sent[0].splitlines()[:2]
-    # "(… HH:MM IST, Ddd D Mon; may be stale)" and "(scan at HH:MM IST, Ddd D Mon)"
+    hdr = sent[0].splitlines()[0]
+    # "🧪 TEST — Morning Digest (last saved scan, may be stale) · scan at HH:MM IST, Ddd D Mon"
     import re
-    assert re.search(r"\d\d:\d\d IST, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}; may be stale", hdr)
-    assert re.search(r"scan at \d\d:\d\d IST, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}\)", sub)
+    assert "may be stale" in hdr
+    assert re.search(r"scan at \d\d:\d\d IST, [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}$", hdr)
 
 
 def _setup_full(monkeypatch, buys, all_scored, verdicts, *, same_scan=True):
@@ -226,4 +221,4 @@ def test_daily_cap_across_runs(monkeypatch):
 def test_combined_message_escapes_html(monkeypatch):
     sent = _setup(monkeypatch, [_pick("M&M.NS", 70, "STRONG BUY")], {"M&M.NS": "STRONG BUY"})
     assert ca.check_verdict_alerts({}, "2026-10-02") == 1
-    assert "M&amp;M" in sent[0] and "1 new strong read</b>" in sent[0]
+    assert "M&amp;M" in sent[0] and "1 new BUY call</b>" in sent[0]

@@ -234,7 +234,7 @@ def test_portfolio_posture_fires_when_exit_watch(_silence_dispatch, monkeypatch)
     fired = ca.check_portfolio_posture({}, "2026-09-08")
     assert fired == 1
     msg = _silence_dispatch.call_args[0][0]
-    assert "DANGER" in msg and "EXIT" in msg
+    assert "SELL  <b>DANGER</b>" in msg and "EXIT_WATCH" not in msg
 
 
 # ─────────────────────────────────────────────────────────────────────────────
