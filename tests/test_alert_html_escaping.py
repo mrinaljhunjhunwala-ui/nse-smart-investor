@@ -20,8 +20,8 @@ def test_portfolio_posture_message_escapes():
     h = SimpleNamespace(symbol="J&KBANK", posture="TRIM_WATCH", pnl_pct=-3.2, reason="below 50-SMA & weak")
     p = SimpleNamespace(symbol="M&M", posture="STOP_HIT", pnl_pct=-1.1, reason="hit <stop>")
     msg = format_portfolio_message([h], [p], only_actionable=False)
-    assert "J&amp;KBANK" in msg and "M&amp;M" in msg and "P&amp;L" in msg
-    assert "&lt;stop&gt;" in msg and " & " not in msg and "P&L" not in msg
+    assert "J&amp;KBANK" in msg and "M&amp;M" in msg and "50-SMA &amp; weak" in msg
+    assert "&lt;stop&gt;" in msg and " & " not in msg
 
 
 def test_momentum_message_escapes():
@@ -101,7 +101,7 @@ def test_posture_reports_unanalysed_holdings_instead_of_all_hold(monkeypatch):
                                           {"symbol": "C", "reason": "only 40 trading days of history"}])
     assert ca.check_portfolio_posture({}, "2026-10-03") == 1
     assert "No holding could be analysed" in sent[0] and "currently HOLD" not in sent[0]
-    assert "A&amp;B" in sent[0] and "Not analysed (2 of 2 holdings)" in sent[0]
+    assert "Not analysed: A&amp;B (price history unavailable) · C (too little history)" in sent[0]
 
 
 def test_posture_all_hold_and_nothing_skipped_stays_silent(monkeypatch):
@@ -116,7 +116,7 @@ def test_posture_all_hold_after_close_sends_steady_line(monkeypatch):
     sent = _posture_env(monkeypatch, [hold], [])
     state = {}
     assert ca.check_portfolio_posture(state, "2026-11-09", always=True) == 1
-    assert "All 1 holding(s) read steady" in sent[0]
+    assert "HOLD all 1 holding(s)" in sent[0]
     _assert_descriptive(sent[0])
     assert ca.check_portfolio_posture(state, "2026-11-09", always=True) == 0   # once a day
 

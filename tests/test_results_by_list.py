@@ -197,11 +197,11 @@ def test_friday_message_has_two_sections(monkeypatch):
     fri = dt.datetime(2026, 11, 6, 16, 0, tzinfo=ist)
     assert ca.check_weekly_scorecard({}, "2026-11-06", now=fri) == 1
     msg = sent[0]
-    _assert_descriptive(msg)
+    _assert_descriptive(msg, max_lines=20)
     assert msg.index("Top Picks") < msg.index("Tomorrow's Watchlist")
     assert "Top Picks</b> · 2 names" in msg and "AAA +10.0%" in msg
-    assert "Bullish setups" in msg and "1 of 1 ahead of the Nifty" in msg
-    assert "Bearish setups" in msg and "1 of 1 lagged the Nifty" in msg and "DDD -10.0%" in msg
+    assert "BUY setups" in msg and "1 of 1 ahead of the Nifty" in msg
+    assert "SELL setups" in msg and "1 of 1 lagged the Nifty" in msg and "DDD -10.0%" in msg
     assert "EEE" not in msg                                     # ad-hoc views stay out
 
 

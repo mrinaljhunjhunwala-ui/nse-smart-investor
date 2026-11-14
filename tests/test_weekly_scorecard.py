@@ -67,7 +67,7 @@ def test_scorecard_sends_on_friday_only_and_once(monkeypatch):
     assert ca.check_weekly_scorecard(state, "2026-11-05", now=thu) == 0
     assert ca.check_weekly_scorecard(state, "2026-11-06", now=fri) == 1
     assert ca.check_weekly_scorecard(state, "2026-11-06", now=fri) == 0
-    _assert_descriptive(sent[0])
+    _assert_descriptive(sent[0], max_lines=20)
     assert "2 names" in sent[0] and "+2.5%" in sent[0] and "AAA +10.0%" in sent[0]
 
 
@@ -103,7 +103,7 @@ def test_scorecard_message_shows_sectors_and_median():
     rows, prices = _sector_rows()
     cards = {"top_picks": vl.week_scorecard(rows, prices, _nifty(), 1020.0, sector_of=_sector_of)}
     msg = "\n".join(ca.weekly_scorecard_lines(cards, "2026-11-02", "2026-11-06"))
-    _assert_descriptive(msg)
+    _assert_descriptive(msg, max_lines=20)
     assert "By sector, vs the Nifty (names): Banks +8.0 pts (3) · IT -6.0 pts (3)" in msg
     assert "Middle name (median): +4.5%" in msg
     assert ca._sector_lines([{"sector": "Banks", "n": 3, "mean_edge": 8.0}]) == []        # one sector says nothing

@@ -27,7 +27,7 @@ def pick_pointers(pick: dict) -> list[tuple[str, str]]:
     pts: list[tuple[str, str]] = []
 
     if t >= 30:
-        pts.append(("✅", "Strong trend — price above its key moving averages"))
+        pts.append(("✅", "Trend up — price above its key moving averages"))
     elif t >= 18:
         pts.append(("🟡", "Mixed trend — only partial moving-average support"))
     else:

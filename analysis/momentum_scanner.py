@@ -317,38 +317,29 @@ def format_momentum_message(candidates: List[Dict], *, max_lines: int = 8) -> st
     """Format scan output as an HTML/plain-text alert message.
 
     HTML-ish (Telegram-parse_mode=HTML friendly) with tags the Gmail path
-    strips to plain text — same convention as check_nifty_trend / check_vix
-    messages in alerts/check_alerts.py."""
+    strips to plain text. One line per setup, BUY first, with its stop; a
+    reason line per setup only while the message stays within 15 lines."""
+    import datetime as _dt
+    hm = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30))).strftime("%H:%M")
     if not candidates:
         return (
-            "📊 <b>Momentum scan</b>\n"
-            "No stocks passed today's filters "
-            "(55d breakout + 1.5× volume + RSI 55–75 + trend confirmed).\n"
-            "Quiet day — no momentum setups met the criteria in this scan."
+            f"📊 <b>Momentum scan — quiet</b> · {hm}\n"
+            "No stocks passed today's filters (55-day breakout, 1.5× volume, RSI 55–75, trend)."
         )
 
-    lines: List[str] = [
-        "🚀 <b>Momentum setups</b>",
-        f"<i>{len(candidates)} setup(s) surfaced — top {min(max_lines, len(candidates))} below</i>",
-        "",
-    ]
-    for i, c in enumerate(candidates[:max_lines], start=1):
-        rs_str = f"RS {c['rs_63d']:+.1f}%" if c["rs_63d"] is not None else "RS n/a"
+    shown = candidates[:max_lines]
+    n = len(candidates)
+    lines: List[str] = [f"🚀 <b>Momentum scan — {n} BUY setup{'s' if n != 1 else ''}</b> · {hm}"]
+    for c in shown:
         lines.append(
-            f"{i}. <b>{_html.escape(str(c['ticker']), quote=False)}</b> — ₹{c['price']:,.2f} "
-            f"(broke 55d high +{c['breakout_pct']:.1f}%, vol {c['volume_ratio']:.1f}×, "
-            f"RSI {c['rsi']:.0f}, {rs_str})"
+            f"BUY  <b>{_html.escape(str(c['ticker']), quote=False)}</b>  ₹{c['price']:,.2f} · "
+            f"stop ₹{c['suggested_stop']:,.2f} · target ₹{c['suggested_target']:,.2f}"
         )
-        lines.append(
-            f"   Entry ₹{c['suggested_entry']:,.2f} · "
-            f"Stop ₹{c['suggested_stop']:,.2f} (2-ATR) · "
-            f"Target ₹{c['suggested_target']:,.2f} (2R)"
-        )
-    lines.extend([
-        "",
-        "<i>Descriptive scan — not advice. Levels are rule-derived reference points. "
-        "Filters: trend + Donchian-55 + volume + RSI + VWAP + ATR-exhaustion.</i>",
-    ])
+        if len(shown) <= 6:
+            rs_str = f" · RS {c['rs_63d']:+.1f}%" if c.get("rs_63d") is not None else ""
+            lines.append(f"   55-day high +{c['breakout_pct']:.1f}% · vol {c['volume_ratio']:.1f}× · "
+                         f"RSI {c['rsi']:.0f}{rs_str}")
+    lines.append("<i>Model output, not a guarantee.</i>")
     return "\n".join(lines)
 
 

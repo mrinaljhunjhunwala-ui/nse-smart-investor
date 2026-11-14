@@ -169,9 +169,9 @@ def analyse_delivery_holding(
     posture, reason = _classify_delivery(filters, pnl_pct, ltp, sma_fast, atr_val)
     if short:
         first, hi = float(close.iloc[0]), float(close.max())
-        reason = (f"Limited history ({len(df)} trading days since listing; trend uses SMA20/SMA50, "
-                  f"not SMA200). Since listing: {(ltp / first - 1) * 100:+.1f}%, "
-                  f"{(ltp / hi - 1) * 100:+.1f}% vs its high. " + reason)
+        # Trend uses SMA20/SMA50 instead of SMA200 here (len(df) bars since listing).
+        reason = (f"new listing, short history ({(ltp / first - 1) * 100:+.1f}% since listing, "
+                  f"{(ltp / hi - 1) * 100:+.1f}% vs high) · " + reason)
 
     return HoldingPosture(
         symbol=symbol,
@@ -218,27 +218,13 @@ def _classify_delivery(
 
     if not filters["trend"] and ltp < sma50:
         # SMA50 breakdown is the classic momentum invalidation
-        return (
-            "EXIT_WATCH",
-            f"Price ₹{ltp:,.2f} below SMA50 ₹{sma50:,.2f} — momentum thesis invalidated. "
-            "P&L " + (f"+{pnl_pct:.1f}%" if pnl_pct >= 0 else f"{pnl_pct:.1f}%") + ".",
-        )
+        return ("EXIT_WATCH", f"below 50-day average (₹{sma50:,.2f})")
     if n_pass >= 5 and pnl_pct >= 0:
-        return (
-            "ADD_WATCH",
-            f"{n_pass}/6 filters passing + running position — thesis intact and extending.",
-        )
+        return ("ADD_WATCH", f"{n_pass}/6 filters passing, in profit — trend extending")
     if n_pass <= 2:
-        return (
-            "TRIM_WATCH",
-            f"Only {n_pass}/6 filters passing — setup materially decayed. "
-            f"Invalidation below SMA50 ₹{sma50:,.2f} (currently {(ltp/sma50-1)*100:+.1f}%).",
-        )
-    return (
-        "HOLD",
-        f"{n_pass}/6 filters passing — thesis intact but not extending. "
-        f"2-ATR below price is ₹{ltp - 2*atr:,.2f}.",
-    )
+        return ("TRIM_WATCH", f"only {n_pass}/6 filters passing · stop below 50-day average "
+                              f"₹{sma50:,.2f} ({(ltp/sma50-1)*100:+.1f}% away)")
+    return ("HOLD", f"{n_pass}/6 filters passing · stop ₹{ltp - 2*atr:,.2f} (2 typical moves below)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -280,7 +266,7 @@ def analyse_intraday_position(
         return IntradayPosture(
             symbol=symbol, qty=qty, avg_price=avg, ltp=ltp, pnl_pct=0.0,
             posture="UNCLEAR",
-            reason="Missing avg_price or LTP — cannot compute posture.",
+            reason="no average price or last price",
         )
 
     pnl_pct = ((ltp / avg) - 1) * 100 * (1 if side == "LONG" else -1)
@@ -296,24 +282,22 @@ def analyse_intraday_position(
     if pnl_pct <= -stop_pct:
         posture, reason = (
             "STOP_HIT",
-            f"Position down {pnl_pct:.2f}% — beyond intraday stop of {stop_pct:.1f}%.",
+            f"down {pnl_pct:.2f}% — past the {stop_pct:.1f}% intraday stop",
         )
     elif pnl_pct >= target_pct:
         posture, reason = (
             "TARGET_HIT",
-            f"Position up {pnl_pct:.2f}% — beyond intraday target of {target_pct:.1f}%. "
-            "Past the intraday target.",
+            f"up {pnl_pct:.2f}% — past the {target_pct:.1f}% intraday target",
         )
     elif pnl_pct >= target_pct * 0.6:
         posture, reason = (
             "TRAIL_TIGHTER",
-            f"Position up {pnl_pct:.2f}% — through 60% of target. "
-            f"Breakeven (entry) is ₹{avg:,.2f}.",
+            f"up {pnl_pct:.2f}% — 60% of target · breakeven ₹{avg:,.2f}",
         )
     else:
         posture, reason = (
             "RUNNING",
-            f"Position {pnl_pct:+.2f}% — within trade range, no action indicated.",
+            f"{pnl_pct:+.2f}% — within range",
         )
 
     stop_suggested = (
@@ -397,6 +381,21 @@ def _esc(x) -> str:
     return _html.escape(str(x), quote=False)
 
 
+# Internal posture tag -> the word a person reads (owner decision 13 Nov 2026:
+# direct wording; the tags themselves stay internal and are never printed).
+POSTURE_DISPLAY = {
+    "EXIT_WATCH": "SELL", "STOPPED_OUT": "STOP HIT", "STOP_HIT": "STOP HIT",
+    "TRIM_WATCH": "TRIM", "TARGET_HIT": "TARGET HIT", "TRAIL_TIGHTER": "TRAIL",
+    "ADD_WATCH": "ADD",
+}
+_DISPLAY_ORDER = ("SELL", "STOP HIT", "TRIM", "TARGET HIT", "TRAIL", "ADD", "HOLD")
+
+
+def posture_display(posture: str) -> str:
+    """Display word for a posture tag; anything neutral (HOLD / RUNNING / UNCLEAR) reads HOLD."""
+    return POSTURE_DISPLAY.get(posture, "HOLD")
+
+
 def format_portfolio_message(
     holdings: List[HoldingPosture],
     positions: List[IntradayPosture],
@@ -405,7 +404,8 @@ def format_portfolio_message(
 ) -> str:
     """Format a per-portfolio message. If only_actionable is True (default
     for the alert path), skips HOLD/RUNNING rows and surfaces only the
-    postures the user should look at."""
+    postures the user should look at. One line per holding, SELL first:
+    'SELL  <b>ONGC</b>  +0.5% · below 50-day average (₹230.01)'."""
     urgent_delivery = [
         h for h in holdings
         if h.posture in ("EXIT_WATCH", "TRIM_WATCH", "ADD_WATCH")
@@ -420,31 +420,25 @@ def format_portfolio_message(
     if not urgent_delivery and not urgent_intraday:
         return (
             "📋 <b>Portfolio Posture</b>\n"
-            "All delivery holdings currently HOLD, no intraday positions need attention. "
+            "All holdings HOLD, no intraday position needs attention. "
             + NO_FLAGGED_POSTURES
         )
 
-    lines = ["📋 <b>Portfolio Posture</b>", ""]
-    if urgent_delivery:
-        lines.append("<b>Delivery — needs attention</b>")
-        for h in urgent_delivery:
-            lines.append(
-                f"• <b>{_esc(h.symbol)}</b> [{h.posture}] "
-                f"P&amp;L {h.pnl_pct:+.1f}% — {_esc(h.reason)}"
-            )
-        lines.append("")
-    if urgent_intraday:
-        lines.append("<b>Intraday — needs attention</b>")
-        for p in urgent_intraday:
-            lines.append(
-                f"• <b>{_esc(p.symbol)}</b> [{p.posture}] "
-                f"P&amp;L {p.pnl_pct:+.2f}% — {_esc(p.reason)}"
-            )
-        lines.append("")
-    lines.append(
-        "<i>Descriptive posture from same-recipe momentum filters. "
-        "Not advice.</i>"
-    )
+    rows = [(posture_display(h.posture), h.symbol, f"{h.pnl_pct:+.1f}%", h.reason) for h in urgent_delivery]
+    rows += [(posture_display(p.posture), p.symbol, f"{p.pnl_pct:+.1f}% intraday", p.reason)
+             for p in urgent_intraday]
+    rows.sort(key=lambda r: _DISPLAY_ORDER.index(r[0]))
+    n = len(rows)
+    import datetime as _dt
+    hm = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30))).strftime("%H:%M")
+    lines = [f"📋 <b>Portfolio Posture</b> · {n} holding{'s' if n != 1 else ''} · {hm}"]
+    holds = [r for r in rows if r[0] == "HOLD"]
+    if len(holds) > 3:   # many quiet rows (test mode): one names line keeps it short
+        rows = [r for r in rows if r[0] != "HOLD"]
+    for word, sym, pnl, reason in rows:
+        lines.append(f"{word}  <b>{_esc(sym)}</b>  {pnl} · {_esc(reason)}")
+    if len(holds) > 3:
+        lines.append("HOLD  " + ", ".join(f"<b>{_esc(r[1])}</b>" for r in holds))
     return "\n".join(lines)
 
 
@@ -453,5 +447,5 @@ __all__ = [
     "HoldingPosture", "IntradayPosture",
     "analyse_delivery_holding", "analyse_intraday_position",
     "analyse_holdings", "analyse_positions",
-    "format_portfolio_message",
+    "format_portfolio_message", "POSTURE_DISPLAY", "posture_display",
 ]
