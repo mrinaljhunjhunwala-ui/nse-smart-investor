@@ -3,6 +3,15 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **20-session catalyst replay, 15 Oct – 13 Nov (14 Nov, run 43610018434):** 1,009 universe names
+  with classified filings; 184 positive calls. Same-day opening-range plan on 15-minute bars: 94
+  entered, 49 profitable, 3 target / 8 stop, average +0.1R, entry→close +0.2% (about breakeven
+  before the 0.25% round trip). Held from the open to the latest close: +3.1%, **3.3 pts behind the
+  Nifty**, and no better than the 403 names the engine only watched (+3.4%). Strong year-on-year
+  results +3.0% vs weak +4.2%: the results score did not predict the move. The one-week +1.3 pts
+  was noise. **Decision:** positive reads are sent as `WATCH` (`catalyst_alerts.CALL_WORD`), not
+  BUY, with a footer saying so; "why it moved" and the Friday-card record stay. Do not switch back
+  to BUY until the weekly record shows an edge over a full results season (Jan–Feb 2027).
 - **Follow-ups after #347 (14 Nov):** Friday card gains a "Results & news BUY calls" section
   (`catalyst_alerts.week_record` grades the week's stored BUY reads with `catalysts.grade_picks`
   on daily bars). `score._get_bench_cached` retries a failed `^NSEI` fetch after 30 s (was held for
