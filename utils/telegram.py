@@ -87,7 +87,10 @@ class TelegramAlerter:
         Returns:
             True if message sent (or printed), False on API error.
         """
-        now  = datetime.datetime.now().strftime("%d %b %Y  %H:%M IST")
+        # Real IST: the alert jobs run on UTC runners, where now() printed UTC
+        # under an "IST" label (5.5 h early).
+        from utils.snapshot_time import ist_now
+        now  = ist_now().strftime("%d %b %Y  %H:%M IST")
         icon = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(action.upper(), "⚪")
 
         # FIX TG1: escape dynamic, data-derived fields — ticker/strategy/reason

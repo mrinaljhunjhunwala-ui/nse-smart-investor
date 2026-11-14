@@ -33,3 +33,26 @@ def snapshot_age_seconds(gen_at: Any) -> Optional[float]:
     if ts is None:
         return None
     return (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
+
+
+# FIX SNAPSHOT-GUARD (2026-11-13): the warmers persisted whatever the scan
+# returned. During a provider outage that replaced a good snapshot with an
+# empty or half-universe one, which the app and the alert jobs then served as
+# "today's lists". A scan that scored under half its universe is not persisted;
+# the previous snapshot ages out and readers fall back to their own live scan.
+MIN_SCORED_FRACTION = 0.5
+
+
+def scan_too_degraded(n_universe: Any, n_scored_ok: Any,
+                      min_fraction: float = MIN_SCORED_FRACTION) -> bool:
+    """True when a scan result must not overwrite the persisted snapshot."""
+    try:
+        n_u, n_ok = int(n_universe or 0), int(n_scored_ok or 0)
+    except (TypeError, ValueError):
+        return True
+    return n_u <= 0 or n_ok < min_fraction * n_u
+
+
+def ist_now() -> datetime.datetime:
+    """Aware current time in IST (runners are UTC; the owner reads IST)."""
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
