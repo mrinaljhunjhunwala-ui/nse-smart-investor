@@ -3,6 +3,18 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Catalyst replay, 6–13 Nov (14 Nov; `scripts/catalyst_replay.py`, run from `provider_canary.yml`
+  with input `replay_sessions`, stored in KV `catalyst_replay:<date>`):** 238 universe names with
+  classified filings over 5 sessions. The engine flagged CUPID (12 Nov, +8.7% that day), KALYANKJIL
+  (11 Nov), MSTCLTD (+20%), SYMBIOTEC, DIVISLAB, SAILIFE as BUY. BUY list (40): open→close −0.2%,
+  open→latest +1.6% (+1.3 pts vs Nifty). On 15-minute bars the same-day opening-range plan lost:
+  23 entered, 8 profitable, average −0.2R, entry→close −0.5%, held to latest +1.2%. Negative
+  (SELL) reads (17) bounced +5.2% from the open. Strong year-on-year results alone did not predict
+  the day (79 names, 33 up). **Changes made from this:** `catalysts.INTRADAY_PLANS = False` (plans
+  are a 2–5 session hold, stop 1×ATR under the trigger and never tighter than the opening range,
+  first target 2R); alerts print negative reads as `AVOID` with no trade levels. One week in one
+  results season: do not tune further on it; re-run the replay monthly and add the catalyst record
+  to the Friday card (`catalysts.grade_picks` exists, not yet shown anywhere).
 - **Owner decisions (13–14 Nov):** direct BUY / SELL / HOLD wording (CLAUDE.md rule 1 rewritten;
   labels in `analysis/action_labels.py`); shorter Telegram messages; results / news driven calls;
   "why did the top movers move"; reliability over features.

@@ -37,7 +37,7 @@ WHY_CANDIDATES = 15
 WHY_MAX_SNAPSHOT_AGE_H = 10
 MAX_SYMBOLS = 40
 MAX_LINES = 14
-FOOTER = "<i>Event-driven read, not a guarantee — size small, respect the stop.</i>"
+FOOTER = "<i>Hold 2-5 sessions; out on a close below the stop. Model call, not a guarantee.</i>"
 WHY_FOOTER = "<i>Reasons come only from filings, prices and volume — nothing is guessed.</i>"
 
 
@@ -178,10 +178,16 @@ def compose(header: str, entries: List[tuple], footer: str, max_lines: int = MAX
 
 
 def read_lines(r: Any, h: Callable[[Any], str]) -> tuple:
+    """Two short lines for one read. BUY: the level, the stop and the first target of a
+    few-day hold. A negative read prints as AVOID with no trade levels: in the 6-13 Nov
+    2026 replay, stocks that gapped down on weak results bounced about 5% from the open,
+    so it is information for holders and would-be buyers, not a short call."""
     d = _read_dict(r)
-    word = "above" if d.get("action") == "BUY" else "below"
-    line1 = (f"{d.get('action'):<4} <b>{h(d.get('symbol'))}</b>  {word} {_fmt_px(d.get('trigger'))}"
-             f" · stop {_fmt_px(d.get('stop'))} · target {_fmt_px(d.get('target'))}")
+    if d.get("action") == "BUY":
+        line1 = (f"BUY  <b>{h(d.get('symbol'))}</b>  above {_fmt_px(d.get('trigger'))}"
+                 f" · stop {_fmt_px(d.get('stop'))} · first target {_fmt_px(d.get('target'))}")
+    else:
+        line1 = f"AVOID  <b>{h(d.get('symbol'))}</b>  weak news — no fresh buying; holders review"
     line2 = "   " + " · ".join(h(x) for x in (d.get("reasons") or [])[:3])
     return line1, line2 if line2.strip() else ""
 

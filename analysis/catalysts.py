@@ -62,6 +62,12 @@ MIN_PRICE = 20.0
 CONFIRM_MOVE_PCT = 1.0
 EXTENDED_MOVE_PCT = 8.0
 MIN_REL_VOL = 1.5
+# Plans are swing plans (hold 2-5 sessions, stop 1x ATR under the trigger) unless this is True.
+# 2026-11-14 replay of 6-13 Nov on 15-minute bars: the same-day opening-range plan lost
+# (40 BUY calls, 23 entered, 8 profitable, average -0.2R, entry-to-close -0.5%), while the same
+# names held to the latest close gained +1.2% (about 1.3 pts ahead of the Nifty). That is also what
+# the post-earnings-drift evidence describes: the drift is over days, not inside the first day.
+INTRADAY_PLANS = False
 MIN_RR = 1.5
 TARGET_R = 2.0
 RESULTS_DIRECTION_SCORE = 25.0
@@ -637,7 +643,7 @@ def _catalyst_read(symbol, events, surprise, reaction, *, preopen, avg_turnover_
     d = 1 if net > 0 else -1
     same = sorted([x for x in scored if x[0] * d > 0], key=lambda x: -abs(x[0]))
     lead_cat, lead_elapsed = same[0][1], same[0][2]
-    horizon = "intraday" if lead_elapsed == 0 else "swing"
+    horizon = "intraday" if (lead_elapsed == 0 and INTRADAY_PLANS) else "swing"
 
     # Price confirmation
     if lv.get("chg_pct") is not None:
@@ -712,7 +718,7 @@ def _catalyst_read(symbol, events, surprise, reaction, *, preopen, avg_turnover_
     else:
         k = 0.5 if horizon == "intraday" else 1.0
         stop = trig - d * k * atr
-        if horizon == "intraday":
+        if True:    # the opening range bounds the stop on both horizons (never tighter than the range)
             if d > 0 and or_lo is not None:
                 stop = min(stop, or_lo)
             if d < 0 and or_hi is not None:

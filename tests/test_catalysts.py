@@ -253,7 +253,8 @@ def _read(gap, events=None, surprise="good", rx=None, **kw):
     return C.catalyst_read("cupid", ev, s, rx, preopen=pre, now=MON_PRE, **kw)
 
 
-def test_buy_in_tradable_gap_zone():
+def test_buy_in_tradable_gap_zone(monkeypatch):
+    monkeypatch.setattr(C, "INTRADAY_PLANS", True)             # the same-day plan (off by default)
     r = _read(4.2)
     assert r.action == "BUY" and r.symbol == "CUPID" and r.horizon == "intraday"
     assert r.reasons[0].startswith("Q2 profit +86% YoY") and "gap +4.2%" in r.reasons
@@ -327,7 +328,8 @@ def test_volume_not_confirming_on_event_day():
     assert r.action == "WATCH" and any("volume not confirming" in w for w in r.warnings)
 
 
-def test_opening_range_stop_rule_and_rr_rejection():
+def test_opening_range_stop_rule_and_rr_rejection(monkeypatch):
+    monkeypatch.setattr(C, "INTRADAY_PLANS", True)             # the same-day plan (off by default)
     rx = _pending_rx()
     orr = {"high": rx["last_close"] * 1.05, "low": rx["last_close"] * 1.01}
     r = _read(4.0, rx=rx, opening_range=orr)
@@ -416,3 +418,16 @@ def test_grade_picks():
     sm = g["summary"]
     assert sm["n"] == 4 and sm["hit"] == 1 and sm["stop"] == 1 and sm["win_rate"] == 0.5
     assert C.grade_picks(None, None)["summary"]["n"] == 0
+
+
+def test_default_plan_is_a_swing_hold_with_a_one_atr_stop():
+    """Default since the 2026-11-14 replay: hold a few sessions, stop 1x ATR under the trigger
+    (never tighter than the opening range), first target at 2R."""
+    rx = _pending_rx()
+    r = _read(4.2, rx=rx)
+    assert r.action == "BUY" and r.horizon == "swing"
+    assert r.stop == pytest.approx(r.trigger - rx["atr14"], abs=0.01)
+    assert r.target == pytest.approx(r.trigger + 2 * rx["atr14"], abs=0.02)
+    orr = {"high": rx["last_close"] * 1.05, "low": rx["last_close"] * 0.99}
+    r2 = _read(4.0, rx=rx, opening_range=orr)
+    assert r2.stop == pytest.approx(min(orr["low"], orr["high"] - rx["atr14"]), abs=0.01)

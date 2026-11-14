@@ -366,10 +366,10 @@ def test_preopen_message(monkeypatch, store, sent):
     msg = sent[0]
     lines = msg.split("\n")
     assert len(lines) <= 14 and "Catalyst picks" in lines[0] and "not a guarantee" in lines[-1]
-    assert any(ln.startswith("BUY  <b>CUPID</b>  above ₹") and "· stop ₹" in ln and "· target ₹" in ln
+    assert any(ln.startswith("BUY  <b>CUPID</b>  above ₹") and "· stop ₹" in ln and "· first target ₹" in ln
                for ln in lines)
     assert "Q2 profit +86% YoY, revenue +38% · gap +4.2%" in msg
-    assert "SELL <b>WEAK</b>  below ₹" in msg
+    assert "AVOID  <b>WEAK</b>  weak news" in msg and "SELL" not in msg
     assert "HOT" not in msg and "NOISE" not in msg                    # extended gap -> WATCH, noise -> none
     assert state[CA.PREOPEN_KEY] == "2026-11-16"
     kv = store.kv[("_system", "catalyst_picks:2026-11-16")]
