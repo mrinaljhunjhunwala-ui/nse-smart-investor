@@ -365,16 +365,26 @@ def _quote_setup(monkeypatch, sess):
     monkeypatch.setattr(af, "_get_session", lambda: {"jwt": "J", "api_key": "K"})
     monkeypatch.setattr(af, "_get_token", lambda sym, session: "123")
     monkeypatch.setattr(af, "_hist_rate_limit", lambda: None)
-    monkeypatch.setattr(af._BREAKER_FAILS, 0, 0)
-    monkeypatch.setattr(af._BREAKER_TRIPPED_AT, 0, 0.0)
-    monkeypatch.setattr(af._QUOTE_FAILS, 0, 0)
+    _reset_data_breaker()
+
+
+def _reset_data_breaker():
+    af._BREAKER_FAILS[0] = 0
+    af._BREAKER_TRIPPED_AT[0] = 0.0
+    af._QUOTE_FAILS[0] = 0
+
+
+@pytest.fixture
+def clean_breaker():
+    yield
+    _reset_data_breaker()
 
 
 @pytest.mark.parametrize("sess", [
     _QuoteSession(status=403),
     _QuoteSession(raises=requests.ConnectionError("timed out")),
 ])
-def test_quote_failures_trip_breaker_and_stop_calls(monkeypatch, sess):
+def test_quote_failures_trip_breaker_and_stop_calls(clean_breaker, monkeypatch, sess):
     _quote_setup(monkeypatch, sess)
     for i in range(af._BREAKER_THRESHOLD):
         assert af.get_full_quote(f"Q{i}.NS") is None
@@ -391,7 +401,7 @@ def test_quote_failures_trip_breaker_and_stop_calls(monkeypatch, sess):
     assert sess.quote_calls == calls
 
 
-def test_quote_success_takes_back_only_quote_failures(monkeypatch):
+def test_quote_success_takes_back_only_quote_failures(clean_breaker, monkeypatch):
     sess = _QuoteSession(status=403)
     _quote_setup(monkeypatch, sess)
     af._breaker_record_failure()               # two candle 403s (rate limit) ...
@@ -403,7 +413,7 @@ def test_quote_success_takes_back_only_quote_failures(monkeypatch):
     assert af._BREAKER_FAILS[0] == 2           # candle failures still counted
 
 
-def test_empty_quote_200_is_not_a_breaker_failure(monkeypatch):
+def test_empty_quote_200_is_not_a_breaker_failure(clean_breaker, monkeypatch):
     sess = _QuoteSession(status=200, fetched=[])
     _quote_setup(monkeypatch, sess)
     for i in range(af._BREAKER_THRESHOLD + 2):
@@ -412,19 +422,19 @@ def test_empty_quote_200_is_not_a_breaker_failure(monkeypatch):
 
 
 @pytest.mark.parametrize("ltp", [None, float("nan"), 0, "", "abc"])
-def test_quote_without_a_real_price_is_no_quote(monkeypatch, ltp):
+def test_quote_without_a_real_price_is_no_quote(clean_breaker, monkeypatch, ltp):
     _quote_setup(monkeypatch, _QuoteSession(fetched=[{"ltp": ltp, "close": 99}]))
     assert af.get_full_quote("X.NS") is None
 
 
 @pytest.mark.parametrize("close", [None, float("nan"), 0])
-def test_quote_missing_prev_close_keeps_price(monkeypatch, close):
+def test_quote_missing_prev_close_keeps_price(clean_breaker, monkeypatch, close):
     _quote_setup(monkeypatch, _QuoteSession(fetched=[{"ltp": 100.0, "close": close}]))
     q = af.get_full_quote("X.NS")
     assert q["price"] == 100.0 and q["prev_close"] == 100.0 and q["chg_pct"] == 0.0
 
 
-def test_batch_quote_null_field_does_not_drop_the_batch(monkeypatch):
+def test_batch_quote_null_field_does_not_drop_the_batch(clean_breaker, monkeypatch):
     sess = _QuoteSession(fetched=[{"symbolToken": "1", "ltp": None, "close": 5},
                                   {"symbolToken": "2", "ltp": 50, "close": None}])
     _quote_setup(monkeypatch, sess)
