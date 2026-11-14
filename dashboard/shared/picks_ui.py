@@ -10,6 +10,10 @@ from __future__ import annotations
 import html
 import streamlit as st
 
+# Composite score = Technical 40 + Momentum 25 + Volume 15 + Sentiment 10 (0-90).
+# There is no pattern component (CLAUDE.md rule 2), so there is no Pattern bar.
+SCORE_BARS = (("Technical", 40), ("Momentum", 25), ("Volume", 15), ("Sentiment", 10))
+
 
 def pick_pointers(pick: dict) -> list[tuple[str, str]]:
     """Turn the component-score breakdown into human-readable (emoji, text) bullets.
@@ -108,8 +112,7 @@ def render_pick_analysis(pick: dict, key_prefix: str):
             unsafe_allow_html=True)
 
         st.caption("How the score was built")
-        for label, cap in (("Technical", 40), ("Momentum", 25), ("Volume", 15),
-                           ("Pattern", 10), ("Sentiment", 10)):
+        for label, cap in SCORE_BARS:
             val = float(pick.get(label.lower(), 0) or 0)
             st.markdown(f'<span style="font-size:11px;color:#8899bb">{label} '
                         f'<b style="color:#e0e0e0">{val:.0f}/{cap}</b></span>',

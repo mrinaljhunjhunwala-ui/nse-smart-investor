@@ -471,6 +471,9 @@ def _get_session() -> Optional[Dict]:
             return None
 
 
+_NO_EXACT_LOGGED: set = set()      # symbols already warned about (log once per process)
+
+
 def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
     """
     Resolve and cache Angel token for a bare symbol (no .NS suffix).
@@ -517,6 +520,7 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
         parsed = _safe_parse_json_response(resp)
         scrips = (parsed.get("data") if isinstance(parsed, dict) else None) or []
         token: Optional[str] = None
+        _exact = {key, _search_key, f"{key}-EQ", f"{key}-BE"}
 
         # scrips might be dict/list; normalize to list of dicts
         if isinstance(scrips, dict):
@@ -532,17 +536,22 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
             itype = s.get("instrumenttype", "").upper()
             # symboltoken vs token key naming
             stoken = s.get("symboltoken") or s.get("token") or s.get("symbolToken")
-            if sym in (key, _search_key) and itype in ("", "EQ", "-EQ"):
+            # NSE cash symbols come back with a series suffix ("RELIANCE-EQ").
+            if stoken and sym in _exact and itype in ("", "EQ", "-EQ"):
                 token = str(stoken)
                 break
 
-        # If still no token, pick first available symboltoken if present
+        # No exact symbol match: do NOT take the first hit. searchScrip is a
+        # prefix search, so the first row can be a different instrument (another
+        # company or series) and its price would be shown under this symbol.
+        # Return None so the caller uses the next price tier.
         if token is None and scrips:
-            for s in scrips:
-                stoken = s.get("symboltoken") or s.get("token") or s.get("symbolToken")
-                if stoken:
-                    token = str(stoken)
-                    break
+            _TOKEN_CACHE[key] = (None, time.time())
+            if key not in _NO_EXACT_LOGGED:
+                _NO_EXACT_LOGGED.add(key)
+                _log.warning("angel_fetcher._get_token(%s): searchScrip had %d hit(s) but no exact symbol "
+                             "match; not using Angel One for this symbol", key, len(scrips))
+            return None
 
         if token is None:
             # No token found -> record failure
@@ -562,8 +571,19 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
         return None
 
 
+def _ist_today() -> datetime.date:
+    """Today's date in IST. date.today() is UTC on GitHub runners, a day behind
+    IST until 05:30, which cut the latest session off the requested range."""
+    try:
+        from utils.snapshot_time import ist_now
+        return ist_now().date()
+    except Exception:                                           # noqa: BLE001
+        return (datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(hours=5, minutes=30)).date()
+
+
 def _period_to_dates(period: str) -> Tuple[str, str]:
-    today = datetime.date.today()
+    today = _ist_today()
     if period == "ytd":
         start = datetime.date(today.year, 1, 1)
     else:
@@ -600,7 +620,7 @@ def fetch_historical(
 
     # Compute the requested calendar-day span so we can decide whether to
     # single-shot or chunk. YTD is bounded (< 1 year) and single-shots.
-    today = datetime.date.today()
+    today = _ist_today()
     if period == "ytd":
         start_date = datetime.date(today.year, 1, 1)
     else:
