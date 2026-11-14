@@ -39,7 +39,7 @@ MH6  FIX (this revision) — "Add a holding" required typing the exact NSE
      map.
 
 Phase2  UI honesty — all action labels shown to the user go through
-     _display_label() so "STRONG BUY" → "Strong Trend ▲▲" etc. Internal
+     _display_label() (analysis/action_labels.py: BUY / HOLD / REDUCE / SELL). Internal
      strings (DB, CSV export, sort keys) are unchanged.
 
 QualityFix  compute_quality_score returns 0 for no-data; UI now treats
@@ -574,9 +574,11 @@ if _csv_source is not None:
                     )
 
             st.caption(
-                f"📡 **{len(_pf_buys)}** holding(s) in an **Uptrend / Strong Trend**, "
-                f"**{len(_pf_sells)}** showing **Weakening / Broken Trend** right now — see the cards below. "
-                "Trend-quality scores only; the app never auto-executes real trades. "
+                f"📡 **{len(_pf_buys)}** holding(s) rated "
+                f"**{_display_label('STRONG BUY')} / {_display_label('BUY')}**, "
+                f"**{len(_pf_sells)}** rated **{_display_label('CAUTION')} / {_display_label('EXIT')}** "
+                "right now — see the cards below. "
+                "Model output, not a guarantee; the app never auto-executes real trades. "
                 "Toggle **Auto-refresh** to keep this live while the page is open.")
 
             if _pf_auto:
@@ -1762,33 +1764,33 @@ else:
     st.info(
         "No holdings yet. Use **➕ Add a holding** above to get started.  \n\n"
         "**What you'll see once added:**  \n"
-        "- 🚀 Strong Trend / Uptrend = strong, persistent trend momentum  \n"
-        "- 🟡 Neutral = mixed signals, no clear edge  \n"
-        "- ⚠️ Weakening / Broken Trend = trend deteriorating  \n"
+        f"- 🚀 {_display_label('STRONG BUY')} / {_display_label('BUY')} = strong, persistent trend momentum  \n"
+        f"- 🟡 {_display_label('HOLD')} = mixed signals, no clear edge  \n"
+        f"- ⚠️ {_display_label('CAUTION')} / {_display_label('EXIT')} = trend deteriorating  \n"
         "- Composite score (0–90) — higher = stronger trend (not a return forecast)  \n"
         "- Plain English explanation and the model's reference stop / target levels per holding"
     )
     col_ex1, col_ex2, col_ex3 = st.columns(3)
     with col_ex1:
-        st.markdown("""
+        st.markdown(f"""
         <div class="card-green">
-        <b>🚀 Strong Trend ▲▲ / Uptrend ▲ (Score ≥ 65)</b><br>
+        <b>🚀 {_display_label('STRONG BUY')} / {_display_label('BUY')} (Score ≥ 65)</b><br>
         Technicals, momentum, and volume are aligned.
-        This is a trend-quality score — not a return forecast or advice to buy.
+        Model output from the composite score — not a guarantee.
         </div>
         """, unsafe_allow_html=True)
     with col_ex2:
-        st.markdown("""
+        st.markdown(f"""
         <div class="card-yellow">
-        <b>🟡 Neutral (Score 40–64)</b><br>
+        <b>🟡 {_display_label('HOLD')} (Score 40–64)</b><br>
         Mixed signals — some positives, some caution.
         No clear directional edge right now.
         </div>
         """, unsafe_allow_html=True)
     with col_ex3:
-        st.markdown("""
+        st.markdown(f"""
         <div class="card-red">
-        <b>⚠️ Weakening ▼ / Broken Trend ▼▼ (Score &lt; 40)</b><br>
+        <b>⚠️ {_display_label('CAUTION')} / {_display_label('EXIT')} (Score &lt; 40)</b><br>
         Trend quality is deteriorating.
         Price has broken below key averages or momentum has turned negative.
         </div>

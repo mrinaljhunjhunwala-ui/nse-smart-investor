@@ -636,7 +636,8 @@ if analyze_btn or _prefill_active or (
             try:
                 from utils.live_price import get_live_quote as _an_lq
                 _anq = _an_lq(ticker)
-                if isinstance(_anq, dict) and _anq.get("price"):
+                # An end-of-day quote (suspended stock: days-old price) is not live.
+                if isinstance(_anq, dict) and _anq.get("price") and not _anq.get("eod"):
                     _an_live = float(_anq["price"])
             except Exception as _lq_e:
                 import logging; logging.getLogger("dashboard.analyze_stock").debug("Live quote fetch failed for %s: %s", ticker, _lq_e)

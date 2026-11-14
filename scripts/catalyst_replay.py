@@ -106,6 +106,62 @@ def grade_intraday(action: str, trigger: Optional[float], stop: Optional[float],
             "entry": entry, "exit": last}
 
 
+HELD_SESSIONS = 5
+
+
+def grade_held(action: str, entry: Optional[float], stop: Optional[float],
+               closes: List[float], sessions: int = HELD_SESSIONS) -> Dict[str, Any]:
+    """The swing plan the alerts describe, on daily closes. Pure.
+
+    `closes` starts with the entry day's close. BUY: out at the first daily
+    CLOSE below the stop, else at the close `sessions` sessions after the entry
+    day, else (not enough history yet) at the latest close. SELL mirrors.
+    Returns {"h_outcome": stop_close|time|open|None, "h_pct", "h_days"}; h_pct
+    is the % made on the trade (positive = profitable for either side)."""
+    cl = [float(c) for c in (closes or []) if c is not None and c == c]
+    if action not in ("BUY", "SELL") or not entry or not cl:
+        return {"h_outcome": None, "h_pct": None, "h_days": None}
+    up = action == "BUY"
+    window = cl[:sessions + 1]
+    outcome, k = ("time" if len(cl) > sessions else "open"), len(window) - 1
+    if stop:
+        for j, c in enumerate(window):
+            if (up and c < stop) or (not up and c > stop):
+                outcome, k = "stop_close", j
+                break
+    pct = _pct(window[k], entry)
+    return {"h_outcome": outcome, "h_pct": pct if up else -pct, "h_days": k}
+
+
+INTRADAY_15M_PERIODS = ("60d", "1mo")
+
+
+def fetch_15m(fetch_single: Any, ticker: str) -> Any:
+    """15-minute bars over the widest range data/fetcher serves ("60d", Yahoo's
+    limit for this interval), falling back to "1mo" if that request fails or
+    comes back empty. Returns None when neither works; never raises."""
+    for period in INTRADAY_15M_PERIODS:
+        try:
+            df = fetch_single(ticker, period=period, interval="15m")
+        except Exception as e:                                  # noqa: BLE001
+            print(f"[replay] {ticker}: 15m {period} failed ({type(e).__name__}: {e})")
+            continue
+        if df is not None and not getattr(df, "empty", True):
+            return df
+    return None
+
+
+def _esc(x: Any) -> str:
+    """HTML-escape dynamic text for the parse_mode=HTML Telegram message (the
+    bucket names carry raw <= / >=, which made Telegram reject the send)."""
+    try:
+        from alerts.check_alerts import _h
+        return _h(x)
+    except Exception:                                           # noqa: BLE001
+        import html
+        return html.escape(str(x), quote=False)
+
+
 def day_bars_15m(df: Any, day: _dt.date) -> List[dict]:
     """That day's 15-minute bars in IST order from an intraday frame (tz-aware, naive IST or naive UTC)."""
     import pandas as pd
@@ -163,6 +219,11 @@ def summarise(rows: List[dict]) -> Dict[str, Any]:
                 "avg_entry_to_close": avg([r.get("entry_to_close") for r in it if r.get("i_entered")]),
                 "avg_entry_to_last": avg([r.get("entry_to_last") for r in it if r.get("i_entered")]),
             })([r for r in rs if r.get("i_outcome")]),
+            "held": (lambda hd: {
+                "graded": len(hd), "wins": sum(r["h_pct"] > 0 for r in hd),
+                "stopped": sum(r.get("h_outcome") == "stop_close" for r in hd),
+                "avg_pct": avg([r["h_pct"] for r in hd]),
+            })([r for r in ent if r.get("h_pct") is not None]),
             "avg_open_to_close": avg([r.get("open_to_close") for r in rs]),
             "avg_open_to_last": avg([r.get("open_to_last") for r in rs]),
             "avg_vs_nifty_to_last": avg([(r["open_to_last"] - r["nifty_to_last"])
@@ -210,6 +271,13 @@ def report_lines(rows: List[dict], summ: Dict[str, Any], sessions: List[_dt.date
                          f"stop {it['stop']} | profitable {it['wins']} | average {_fmt(it['avg_r'], 'R')} | "
                          f"entry->close {_fmt(it['avg_entry_to_close'])} | held to latest close "
                          f"{_fmt(it['avg_entry_to_last'])}")
+    lines += ["", f"Same calls held as the swing plan (from the entry: out on the first daily close beyond the "
+              f"stop, else at the close {HELD_SESSIONS} sessions later, or the latest close):"]
+    for act in ("BUY", "SELL"):
+        hd = summ["by_action"][act].get("held") or {}
+        if hd.get("graded"):
+            lines.append(f"  {act:<5} {hd['graded']:>3} held | profitable {hd['wins']} | closed beyond stop "
+                         f"{hd['stopped']} | average {_fmt(hd['avg_pct'])}")
     lines += ["", "Did the quarter's numbers line up with the price? (results filers only; day move = previous "
               "close to that day's close)"]
     for k, b in sorted(summ["by_bucket"].items()):
@@ -225,6 +293,7 @@ def report_lines(rows: List[dict], summ: Dict[str, Any], sessions: List[_dt.date
                      f"{_fmt(r.get('gap')):>6}  {_fmt(r.get('day_move')):>6}  {_fmt(r.get('open_to_last')):>9}   "
                      f"{r.get('outcome', ''):<9} {_fmt(r.get('r'), 'R'):>6} "
                      f"15m:{r.get('i_outcome') or '-':<8} {_fmt(r.get('i_r'), 'R'):>6} "
+                     f"held:{_fmt(r.get('h_pct')):>6} "
                      f"{'; '.join(r.get('reasons') or [])[:80]}")
     movers = sorted([r for r in rows if r.get("day_move") is not None], key=lambda x: -abs(x["day_move"]))[:12]
     lines += ["", "Biggest day moves among names with a filing, and what the app would have said:"]
@@ -343,11 +412,14 @@ def run(n_sessions: int, cap: int) -> Dict[str, Any]:
                 action = read.action if read is not None else "no call"
                 g = grade_day(action, getattr(read, "trigger", None), getattr(read, "stop", None),
                               getattr(read, "target", None), o, h, lo, c)
+                held = (grade_held(action, g.get("entry"), getattr(read, "stop", None),
+                                   [float(x) for x in df["Close"].iloc[i:i + HELD_SESSIONS + 1]])
+                        if g.get("entered") else {})
                 intr: Dict[str, Any] = {}
                 if action in ("BUY", "SELL"):
                     try:
                         if sym not in intraday:
-                            intraday[sym] = fetch_single(f"{sym}.NS", period="1mo", interval="15m")
+                            intraday[sym] = fetch_15m(fetch_single, f"{sym}.NS")
                             time.sleep(0.3)
                         bars = day_bars_15m(intraday[sym], s)
                         if len(bars) >= 4:
@@ -380,7 +452,7 @@ def run(n_sessions: int, cap: int) -> Dict[str, Any]:
                     "gap": pre["gap_pct"], "day_move": day_move, "open_to_close": _pct(c, o),
                     "open_to_last": _pct(last_close, o),
                     "nifty_to_last": _pct(float(nifty["Close"].iloc[-1]), nopen.get(s)),
-                    **g, **intr,
+                    **g, **held, **intr,
                 })
             except Exception as e:                              # noqa: BLE001
                 print(f"[replay] {s} {sym}: skipped ({type(e).__name__}: {e})")
@@ -400,11 +472,15 @@ def telegram_lines(summ: Dict[str, Any], sessions: List[_dt.date]) -> List[str]:
         elif a["n"]:
             lines.append(f"{act}: {a['n']} calls · {a['entered']} entered · {a['target']} hit target · "
                          f"{a['stop']} stopped · average {_fmt(a['avg_r'], 'R')} (daily bars)")
+        hd = a.get("held") or {}
+        if hd.get("graded"):
+            lines.append(f"{act} held {HELD_SESSIONS} sessions: {hd['graded']} trades · {hd['wins']} profitable · "
+                         f"average {_fmt(hd['avg_pct'])}")
     w = summ["by_action"]["WATCH"]
     if w["n"]:
         lines.append(f"WATCH: {w['n']} names · open→latest {_fmt(w['avg_open_to_last'])}")
     for k, b in sorted(summ["by_bucket"].items()):
-        lines.append(f"{k}: {b['n']} names · day move {_fmt(b['avg_day_move'])} · after the open "
+        lines.append(f"{_esc(k)}: {b['n']} names · day move {_fmt(b['avg_day_move'])} · after the open "
                      f"{_fmt(b['avg_open_to_last'])}")
     lines.append("One week: a behaviour check, not proof. Full table in the Actions log.")
     return lines

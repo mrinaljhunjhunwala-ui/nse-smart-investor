@@ -291,11 +291,22 @@ UI_PERIOD_MAP = {
 }
 
 
+def _ist_today() -> datetime.date:
+    """Today's date in IST. date.today() is UTC on GitHub runners, a day behind
+    IST until 05:30, which cut the latest session off the requested range."""
+    try:
+        from utils.snapshot_time import ist_now
+        return ist_now().date()
+    except Exception:                                           # noqa: BLE001
+        return (datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(hours=5, minutes=30)).date()
+
+
 def _period_to_dates(period: str):
     """Convert period string to (start_str, end_str) for Stooq.
     Handles UI labels (1d/5d/1m/6m/ytd/max) and legacy yfinance strings.
     """
-    end = datetime.date.today()
+    end = _ist_today()
     if period.lower() == "ytd":
         start = datetime.date(end.year, 1, 1)
     elif period.lower() == "max":
@@ -752,11 +763,6 @@ _SHORT_MISSING_FRAC = 0.40    # first bar later than start + 40% of the span
 _SHORT_MIN_GAP_DAYS = 30      # ... and at least this many days late
 _LONGER_FRAC = 0.20           # "materially more history": 20% of the span earlier
 _STALE_SESSIONS = 2           # completed sessions with no bar after the last one
-
-
-def _ist_today() -> datetime.date:
-    return (datetime.datetime.now(datetime.timezone.utc)
-            + datetime.timedelta(hours=5, minutes=30)).date()
 
 
 def _requested_span_days(period: str) -> Optional[int]:
