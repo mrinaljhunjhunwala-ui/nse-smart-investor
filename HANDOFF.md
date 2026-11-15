@@ -11,7 +11,12 @@ This section is the running memory between sessions; older sections below are hi
   (`trade_utils._fetch_single_live_price` passes `eod` / `as_of` through). Market Overview shows a
   clear message when the VIX / Nifty frames are empty (ported from the never-merged
   `claude/laptop-diagnosis-5gg6j5`). Tests: `tests/test_small_fixes_nov15.py`.
-  **Open PRs: none (checked 15 Nov).** **Branches:** 69 besides `main`; every one is merged or
+  **Open PRs (15 Nov):** only #351, the first automatic universe refresh (+3 / −2). Its `test` job
+  failed because PFIZER re-entered the index while still listed in `universe.FORMER_CONSTITUENTS`;
+  the list now drops any name that is in the current universe (`_drop_current_constituents`), so
+  #351 needs its branch updated from `main` (or closed and the refresh re-run) to go green. Names
+  the refresh removes (CCAVENUE; ICICIPRULI renamed ICICILIFE) are not added to the former list by
+  the tool, so they stop resolving in `resolve_ticker`: still open. **Branches:** 69 besides `main`; every one is merged or
   superseded (#282 and the extra commit on `feat/eod-portfolio-posture` are in `main` via #288 /
   #334). A cloud session cannot delete remote branches (the push is refused), so the owner deletes
   them on github.com → Branches, and can tick Settings → General → "Automatically delete head

@@ -129,3 +129,11 @@ def test_market_overview_guards_empty_vix_frames():
     src = (ROOT / "dashboard" / "views" / "market_breadth.py").read_text(encoding="utf-8")
     assert '"Close" not in vix_df or "Close" not in nifty_df' in src
     assert src.index("data providers unreachable") < src.index('curr_vix   = float(vix_df["Close"]')
+
+
+# ── a stock that re-enters an index is no longer a "former constituent" ──────
+def test_reentered_constituent_is_dropped_from_the_former_list():
+    import data.universe as u
+    assert u._drop_current_constituents(["PFIZER.NS", "GONE.NS"], ["PFIZER.NS", "TCS.NS"]) == ["GONE.NS"]
+    assert not (set(u.FORMER_CONSTITUENTS) & set(u.get_universe("all")))
+    assert u.resolve_ticker("PFIZER") == "PFIZER.NS"            # resolvable either way
