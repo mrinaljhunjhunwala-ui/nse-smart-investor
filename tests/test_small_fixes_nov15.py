@@ -137,3 +137,46 @@ def test_reentered_constituent_is_dropped_from_the_former_list():
     assert u._drop_current_constituents(["PFIZER.NS", "GONE.NS"], ["PFIZER.NS", "TCS.NS"]) == ["GONE.NS"]
     assert not (set(u.FORMER_CONSTITUENTS) & set(u.get_universe("all")))
     assert u.resolve_ticker("PFIZER") == "PFIZER.NS"            # resolvable either way
+
+
+# ── Markdown Telegram path: a parse error must not lose the message ──────────
+class _R:
+    def __init__(self, code, text=""):
+        self.status_code, self.text = code, text
+
+
+def _alerter(monkeypatch, replies):
+    import utils.telegram as tg
+    calls = []
+
+    def post(url, json=None, timeout=None):
+        calls.append(json)
+        return replies[min(len(calls), len(replies)) - 1]
+    monkeypatch.setattr(tg.requests, "post", post)
+    a = tg.TelegramAlerter.__new__(tg.TelegramAlerter)
+    a.token, a.chat_id, a._console_only = "T", "C", False
+    return a, calls
+
+
+def test_markdown_rejected_message_is_resent_as_plain_text(monkeypatch):
+    a, calls = _alerter(monkeypatch, [_R(400, "can't parse entities"), _R(200)])
+    assert a.send_text("price_store: 3 ok") is True
+    assert calls[0]["parse_mode"] == "Markdown"
+    assert calls[1] == {"chat_id": "C", "text": "price_store: 3 ok"}        # same text, no parse mode
+    a, calls = _alerter(monkeypatch, [_R(200)])
+    assert a.send_text("fine") is True and len(calls) == 1
+    a, calls = _alerter(monkeypatch, [_R(400), _R(400)])
+    assert a.send_text("x_y") is False and len(calls) == 2
+    a, calls = _alerter(monkeypatch, [_R(500)])
+    assert a.send_text("x") is False and len(calls) == 1                     # only 400 is retried
+
+
+def test_price_store_summary_is_markdown_safe(monkeypatch):
+    import scripts.warm_price_store as w
+    import utils.telegram as tg
+    sent = []
+    monkeypatch.setattr(tg.TelegramAlerter, "__init__", lambda self, *a, **k: None)
+    monkeypatch.setattr(tg.TelegramAlerter, "send_text", lambda self, text: sent.append(text) or True)
+    w._telegram("price_store: 740 ok, 8 skipped, 12 new rows, took 95s")
+    assert sent == ["🗄 price\\_store: 740 ok, 8 skipped, 12 new rows, took 95s"]
+    assert sent[0].replace("\\_", "").count("_") == 0                        # no unescaped underscore

@@ -3,6 +3,18 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Telegram text check (15 Nov, later):** all 61 distinct messages the alert tests produce were
+  captured and checked (HTML tags balanced, no bare `<` / `&`, under 4096 chars, a stop on every BUY,
+  no promise wording, no old "Strong trend / Weakening" labels): the HTML path is clean. One real
+  fault on the Markdown path (`utils/telegram.TelegramAlerter`, used by the price store, provider
+  canary and universe refresh): the price-store summary `price_store: N ok ...` has one `_`, which
+  Telegram's Markdown rejects, and `_send` had no fallback, so that message was never delivered.
+  Fixed: the line is escaped and `_send` resends as plain text on HTTP 400. **#351 merged** (the
+  universe refresh; the entry below still calls it open) so no PR is open. Owner to decide (wording
+  only, not changed): the Morning Digest calls a score under 70 WATCH, while Tomorrow's Watchlist
+  breakouts and the "new BUY calls" alert can print BUY with a score in the 60s (they follow the
+  bucket / verdict, not the 70 line); the Friday card prints ISO dates where other cards print
+  "Sun 15 Nov".
 - **Fixes + housekeeping (15 Nov):** a stale daily frame (2+ completed sessions with no bar) is
   patched from the NSE bhavcopy (`fetcher._patch_stale_from_bhavcopy`): only rows after the frame's
   last bar, only when both sources agree on that bar's close within 1% and no appended close jumps
