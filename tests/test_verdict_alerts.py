@@ -29,7 +29,7 @@ def _setup(monkeypatch, buys, verdicts, age_h=0.2):
 
 
 def test_sends_buy_and_strong_buy_once_per_day(monkeypatch):
-    buys = [_pick("AAA.NS", 70, "STRONG_BUY"), _pick("BBB.NS", 62, "BUY"), _pick("CCC.NS", 55, "WATCHLIST")]
+    buys = [_pick("AAA.NS", 70, "STRONG_BUY"), _pick("BBB.NS", 72, "BUY"), _pick("CCC.NS", 55, "WATCHLIST")]
     sent = _setup(monkeypatch, buys, {"AAA.NS": "STRONG BUY", "BBB.NS": "BUY", "CCC.NS": "WATCH"})
     state = {}
     assert ca.check_verdict_alerts(state, "2026-10-02") == 2
@@ -45,7 +45,7 @@ def test_sends_buy_and_strong_buy_once_per_day(monkeypatch):
 
 def test_upgrade_fires_again(monkeypatch):
     state = {}
-    _setup(monkeypatch, [_pick("AAA.NS", 62, "BUY")], {"AAA.NS": "BUY"})
+    _setup(monkeypatch, [_pick("AAA.NS", 72, "BUY")], {"AAA.NS": "BUY"})
     assert ca.check_verdict_alerts(state, "2026-10-02") == 1
     _setup(monkeypatch, [_pick("AAA.NS", 70, "STRONG_BUY")], {"AAA.NS": "STRONG BUY"})
     assert ca.check_verdict_alerts(state, "2026-10-02") == 1
@@ -58,7 +58,7 @@ def test_stale_snapshot_sends_nothing(monkeypatch):
 
 def test_verdict_alert_copy_is_descriptive(monkeypatch):
     from tests.test_alert_copy_no_advice import _assert_descriptive
-    sent = _setup(monkeypatch, [_pick("AAA.NS", 70, "STRONG_BUY"), _pick("BBB.NS", 62, "BUY")],
+    sent = _setup(monkeypatch, [_pick("AAA.NS", 70, "STRONG_BUY"), _pick("BBB.NS", 72, "BUY")],
                   {"AAA.NS": "STRONG BUY", "BBB.NS": "BUY"})
     ca.check_verdict_alerts({}, "2026-10-02")
     assert ca.check_test_verdict_alert({}, "2026-10-02") == 1
@@ -187,7 +187,7 @@ def _setup_full(monkeypatch, buys, all_scored, verdicts, *, same_scan=True):
 
 def test_reads_buy_names_beyond_the_shortlist(monkeypatch):
     buys = [_pick("AAA.NS", 70, "STRONG BUY")]
-    rest = [buys[0], _pick("DDD.NS", 58, "BUY"), _pick("EEE.NS", 50, "WATCHLIST")]
+    rest = [buys[0], _pick("DDD.NS", 71, "BUY"), _pick("EEE.NS", 50, "WATCHLIST")]
     sent = _setup_full(monkeypatch, buys, rest,
                        {"AAA.NS": "STRONG BUY", "DDD.NS": "BUY", "EEE.NS": "BUY"})
     assert ca.check_verdict_alerts({}, "2026-10-02") == 2      # EEE's action is not BUY
@@ -195,13 +195,13 @@ def test_reads_buy_names_beyond_the_shortlist(monkeypatch):
 
 
 def test_ignores_full_map_from_another_scan(monkeypatch):
-    sent = _setup_full(monkeypatch, [], [_pick("DDD.NS", 58, "BUY")], {"DDD.NS": "BUY"},
+    sent = _setup_full(monkeypatch, [], [_pick("DDD.NS", 71, "BUY")], {"DDD.NS": "BUY"},
                        same_scan=False)
     assert ca.check_verdict_alerts({}, "2026-10-02") == 0 and not sent
 
 
 def test_per_run_cap_then_rest_next_run(monkeypatch):
-    rest = [_pick(f"X{i}.NS", 60 + i, "BUY") for i in range(ca._VERDICT_MAX_PER_RUN + 3)]
+    rest = [_pick(f"X{i}.NS", 70 + i, "BUY") for i in range(ca._VERDICT_MAX_PER_RUN + 3)]
     _setup_full(monkeypatch, [], rest, {p["ticker"]: "BUY" for p in rest})
     state = {}
     assert ca.check_verdict_alerts(state, "2026-10-02") == ca._VERDICT_MAX_PER_RUN
@@ -209,7 +209,7 @@ def test_per_run_cap_then_rest_next_run(monkeypatch):
 
 
 def test_daily_cap_across_runs(monkeypatch):
-    rest = [_pick(f"Y{i}.NS", 60 + i, "BUY") for i in range(30)]
+    rest = [_pick(f"Y{i}.NS", 70 + i % 15, "BUY") for i in range(30)]
     _setup_full(monkeypatch, [], rest, {p["ticker"]: "BUY" for p in rest})
     state = {}
     assert ca.check_verdict_alerts(state, "2026-11-09") == ca._VERDICT_MAX_PER_RUN
@@ -222,3 +222,22 @@ def test_combined_message_escapes_html(monkeypatch):
     sent = _setup(monkeypatch, [_pick("M&M.NS", 70, "STRONG BUY")], {"M&M.NS": "STRONG BUY"})
     assert ca.check_verdict_alerts({}, "2026-10-02") == 1
     assert "M&amp;M" in sent[0] and "1 new BUY call</b>" in sent[0]
+
+
+def test_buy_verdict_under_70_is_not_sent_as_a_buy_call(monkeypatch):
+    """Owner decision 15 Nov: under 70 a name reads WATCH everywhere, so it is not a BUY call."""
+    buys = [_pick("HI.NS", 74, "BUY"), _pick("LO.NS", 66, "BUY"), _pick("EDGE.NS", 70, "BUY")]
+    sent = _setup(monkeypatch, buys, {"HI.NS": "BUY", "LO.NS": "BUY", "EDGE.NS": "BUY"})
+    state = {}
+    assert ca.check_verdict_alerts(state, "2026-10-02") == 2
+    assert "2 new BUY calls" in sent[0] and "HI" in sent[0] and "EDGE" in sent[0] and "LO" not in sent[0]
+    assert "verdict_buy_LO" not in state                         # not marked: it can fire once it reaches 70
+    sent = _setup(monkeypatch, [_pick("LO.NS", 66, "BUY")], {"LO.NS": "BUY"})
+    assert ca.check_verdict_alerts({}, "2026-10-02") == 0 and sent == []
+
+
+def test_floor_word():
+    assert ca._floor_word("BUY", 69.9) == "WATCH" and ca._floor_word("STRONG BUY", 60) == "WATCH"
+    assert ca._floor_word("BUY", 70) == "BUY" and ca._floor_word("STRONG BUY", 85) == "STRONG BUY"
+    assert ca._floor_word("BUY", None) == "BUY" and ca._floor_word("BUY", "x") == "BUY"   # no score: unchanged
+    assert ca._floor_word("SELL", 10) == "SELL" and ca._floor_word("HOLD", 50) == "HOLD"
