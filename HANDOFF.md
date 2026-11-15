@@ -13,7 +13,12 @@ This section is the running memory between sessions; older sections below are hi
   logic) and the momentum scan (its BUY setups carry no composite score).
   **Calibration report** also measures the calls against the Nifty 500 (`^CRSLDX` on Yahoo,
   recomputed close-to-close from the logging session; a method-check line compares the same
-  recomputation for the Nifty 50 with the ledger's own figure).
+  recomputation for the Nifty 50 with the ledger's own figure; it read 0.00 pts on 15 Nov).
+  **Against the Nifty 500 (15 Nov run):** BUY / STRONG BUY −0.4 pts at 5 sessions and −0.4 pts at
+  20 (vs −0.5 / −1.2 against the Nifty 50); rising-Nifty days −1.6 pts at 5 sessions, 1 of 5 days
+  ahead (vs −2.3, 0 of 5). So the large-cap benchmark explains about a third of the rising-market
+  lag, not all of it. Score bands at 20 sessions vs the Nifty 500: under 50 −5.7, 50–59 −3.6,
+  60–69 −1.5, 70–79 +1.4, 80+ −0.2 (14 names).
 - **Calibration read (15 Nov; `scripts/calibration_report.py`, read-only, run from
   `provider_canary.yml` with input `calibration_report` = true; prints to the Actions log):** ledger
   28 Aug → 13 Nov, 2,478 rows, 34 logging days. BUY / STRONG BUY calls: 5 sessions −0.5 pts vs the
