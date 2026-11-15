@@ -1,6 +1,6 @@
 {
-  "refreshed": "2026-10-08",
-  "checked": "2026-10-08",
-  "count": 747,
+  "refreshed": "2026-11-15",
+  "checked": "2026-11-15",
+  "count": 748,
   "source": "NSE index constituent CSVs (tools/refresh_universe.py)"
 }
