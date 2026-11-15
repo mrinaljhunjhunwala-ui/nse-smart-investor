@@ -819,6 +819,64 @@ def _coverage_problem(df: pd.DataFrame, period: str) -> Optional[str]:
     return None
 
 
+_PATCH_MAX_CLOSE_GAP = 0.01   # overlap close must agree within 1% (same price basis)
+_PATCH_MAX_BAR_JUMP = 0.25    # an appended close may not jump more than 25% bar to bar
+
+
+def _patch_stale_from_bhavcopy(df: pd.DataFrame, ticker: str, period: str) -> pd.DataFrame:
+    """Append the sessions a stale daily frame is missing from NSE's bhavcopy.
+
+    Yahoo sometimes stops a symbol's daily bars a few sessions back while the
+    stock keeps trading, so scores were computed on old prices. When the frame
+    is "stale" (2+ completed sessions with no bar), the bhavcopy rows dated
+    after its last bar are appended, but only when the two sources agree on the
+    close of the frame's own last bar (within 1%): bhavcopy prices are
+    unadjusted, so a split or bonus inside the gap must not be stitched on.
+    A stock that really stopped trading has no bhavcopy rows and stays as is.
+    Returns the frame unchanged on any doubt; never raises."""
+    try:
+        if ticker.startswith("^") or _coverage_problem(df, period) != "stale":
+            return df
+        from data.nse_bhavcopy_prices import fetch_bhavcopy_history
+        bhav = fetch_bhavcopy_history(ticker, period="1mo")
+        if bhav is None or bhav.empty:
+            return df
+        idx = df.index
+        if idx.tz is not None:
+            return df
+        last = idx.max().normalize()
+        b_days = bhav.index.normalize()
+        overlap = bhav[b_days == last]
+        if overlap.empty:
+            return df
+        y_close, b_close = float(df["Close"].iloc[-1]), float(overlap["Close"].iloc[-1])
+        if not (y_close > 0 and abs(b_close / y_close - 1.0) <= _PATCH_MAX_CLOSE_GAP):
+            _log.info("stale frame not patched: symbol=%s closes differ on %s (%.2f vs bhavcopy %.2f)",
+                      ticker, last.date(), y_close, b_close)
+            return df
+        new = bhav[b_days > last]
+        if new.empty:
+            return df
+        closes = [y_close] + [float(c) for c in new["Close"]]
+        if any(abs(b / a - 1.0) > _PATCH_MAX_BAR_JUMP for a, b in zip(closes, closes[1:]) if a > 0):
+            _log.info("stale frame not patched: symbol=%s bhavcopy close jumps over %d%%",
+                      ticker, int(_PATCH_MAX_BAR_JUMP * 100))
+            return df
+        cols = [c for c in df.columns if c in new.columns]
+        add = new[cols].copy()
+        add.index = pd.DatetimeIndex(add.index.normalize(), name=df.index.name)
+        out = pd.concat([df, add.reindex(columns=df.columns)]).sort_index()
+        out = out[~out.index.duplicated(keep="first")]
+        out.attrs.update(df.attrs)
+        out.attrs.update({"patched_from": "NSE-bhavcopy", "patched_bars": len(add)})
+        _log.info("stale frame patched: symbol=%s +%d bar(s) from bhavcopy (last bar %s -> %s)",
+                  ticker, len(add), last.date(), out.index.max().date())
+        return out
+    except Exception as e:                                      # noqa: BLE001
+        _log.debug("stale frame patch skipped for %s: %s", ticker, e)
+        return df
+
+
 def _later_tier_wins(held: pd.DataFrame, new: pd.DataFrame, period: str) -> bool:
     """True when `new` (a later tier) should replace `held` (an earlier tier's
     frame that failed the coverage gate)."""
@@ -1008,6 +1066,8 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
         df = clean_daily_bars(normalize_ohlcv_frame(df))
         if df is None or df.empty:
             raise ValueError(f"No session bars for {ticker} after cleaning ({served})")
+        if served != "NSE-bhavcopy":
+            df = _patch_stale_from_bhavcopy(df, ticker, period)
 
     # Log the provider that ultimately succeeded — INFO when a fallback was needed
     # (a degraded path worth noticing), DEBUG on a clean first-tier hit.

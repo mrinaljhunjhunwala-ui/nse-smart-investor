@@ -841,7 +841,8 @@ else:
             _sl   = float(_row["sl"]) if _row.get("sl") else (_ep * 0.95)
             _tp   = float(_row["tp"]) if _row.get("tp") else (_ep * 1.10)
             _lp   = _open_lp.get(_tk, {})
-            _has_live = bool(_lp.get("price"))
+            # An end-of-day quote (suspended stock: days-old price) is not live.
+            _has_live = bool(_lp.get("price")) and not _lp.get("eod")
             _cur  = _lp.get("price", _ep)   # fallback to entry (flagged above)
             _prv  = _lp.get("prev",  _cur)
             _unr      = (_cur - _ep) * _qty
