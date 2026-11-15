@@ -3,6 +3,25 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Fixes + housekeeping (15 Nov):** a stale daily frame (2+ completed sessions with no bar) is
+  patched from the NSE bhavcopy (`fetcher._patch_stale_from_bhavcopy`): only rows after the frame's
+  last bar, only when both sources agree on that bar's close within 1% and no appended close jumps
+  over 25% (bhavcopy is unadjusted), never for indices; `df.attrs["patched_from"]` marks it. Live
+  Ticker tags an end-of-day quote "last traded <date>" and Paper Trades shows it as Stale, not Live
+  (`trade_utils._fetch_single_live_price` passes `eod` / `as_of` through). Market Overview shows a
+  clear message when the VIX / Nifty frames are empty (ported from the never-merged
+  `claude/laptop-diagnosis-5gg6j5`). Tests: `tests/test_small_fixes_nov15.py`.
+  **Open PRs: none (checked 15 Nov).** **Branches:** 69 besides `main`; every one is merged or
+  superseded (#282 and the extra commit on `feat/eod-portfolio-posture` are in `main` via #288 /
+  #334). A cloud session cannot delete remote branches (the push is refused), so the owner deletes
+  them on github.com → Branches, and can tick Settings → General → "Automatically delete head
+  branches". Keep `main` only; `claude/festive-fermi-150awb` and `claude/small-fixes-nov14` are the
+  two session branches still in use.
+  **Owner setup confirmed 15 Nov:** cron-job.org now has Price store (#11) and Momentum digest (#5);
+  Portfolio posture (#6) is on hold by choice; `AUTOMERGE_TOKEN` is set and "Allow GitHub Actions to
+  create and approve pull requests" is on. Still to confirm from real runs: Sunday canary + universe
+  refresh (first automatic fire 15 Nov), Market Alerts and weekly digest answering 204, the first
+  price-store run's `price_store:` line and any Angel One 403s.
 - **20-session catalyst replay, 15 Oct – 13 Nov (14 Nov, run 43610018434):** 1,009 universe names
   with classified filings; 184 positive calls. Same-day opening-range plan on 15-minute bars: 94
   entered, 49 profitable, 3 target / 8 stop, average +0.1R, entry→close +0.2% (about breakeven
@@ -226,7 +245,7 @@ This section is the running memory between sessions; older sections below are hi
 - [x] **Provider canary (job #10):** `provider_canary.yml`, body `{"ref":"main"}`, crontab
   `0 9 * * 0` IST (Sunday 09:00), same four headers. First run: check the table in the Actions log
   and the 🟢/🔴 Telegram line; a red job means Yahoo, bhavcopy or VIX FAILED.
-- [ ] **Price store (job #11):** add GitHub secret `ANGEL_HIST_API_KEY` (optional, a second SmartAPI
+- [x] **Price store (job #11; created 15 Nov, first run still to be read):** add GitHub secret `ANGEL_HIST_API_KEY` (optional, a second SmartAPI
   app key) and the cron-job.org job: `warm_price_store.yml`, body `{"ref":"main"}`, crontab
   `30 18 * * 1-5` IST. Dispatch once by hand first and read the final `price_store: N ok, M skipped,
   K new rows` line: check the index symbols were served (Angel index tokens are unverified) and how
@@ -237,7 +256,7 @@ This section is the running memory between sessions; older sections below are hi
   intraday BUY alerts.
 - [ ] **Weekly digest:** failed with an HTTP error on 1 Nov. Body
   `{"ref":"main","inputs":{"mode":"weekly-digest","force":"false"}}` plus `Content-Type: application/json`.
-- [ ] **Momentum digest (job #5):** not created yet. `market-digest.yml`, body
+- [x] **Momentum digest (job #5; created 15 Nov):** `market-digest.yml`, body
   `{"ref":"main","inputs":{"mode":"momentum","force":"false"}}`, crontab `0,30 10-14 * * 1-5` IST.
 
 ## Open decisions (owner)
