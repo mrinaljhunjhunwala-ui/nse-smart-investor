@@ -28,6 +28,10 @@ on:
         description: "Also replay the results / news calls over the last N sessions (0 = off)"
         required: false
         default: "0"
+      calibration_report:
+        description: "Also print how the logged calls have done (read-only): by score band, Nifty direction, list"
+        required: false
+        default: "false"
 
 concurrency:
   group: provider-canary
@@ -87,3 +91,28 @@ jobs:
           NSE_AUTO_FILING_FETCH: "0"
           PYTHONUTF8: "1"
         run: python scripts/catalyst_replay.py --sessions "$REPLAY_SESSIONS" --cap 80 --telegram
+
+  # On demand only (input calibration_report = true): read the verdict ledger and
+  # print how the logged calls did against the Nifty (scripts/calibration_report.py).
+  # Read-only: nothing is written and no rule is changed.
+  calibration-report:
+    if: ${{ github.event.inputs.calibration_report == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Calibration report
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PYTHONUTF8: "1"
+        run: python scripts/calibration_report.py
