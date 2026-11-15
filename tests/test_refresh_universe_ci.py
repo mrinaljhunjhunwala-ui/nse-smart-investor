@@ -198,3 +198,64 @@ def test_stale_warning_degrades_without_meta(tmp_path):
 def test_committed_meta_is_readable():
     assert os.path.isfile(universe._CONSTITUENTS_META)
     assert universe.universe_refresh_date() is not None
+
+
+# ── removed / renamed symbols stay resolvable ────────────────────────────────
+def test_update_former_records_removed_and_renamed(tmp_path):
+    path = tmp_path / "former.json"
+    d = {"removed": ["GONE"], "renamed": [("OLDCO", "NEWCO")], "added": ["FRESH"]}
+    assert ru.update_former(d, ["NEWCO", "FRESH", "KEEP"], path=str(path), today=TODAY) is True
+    assert json.loads(path.read_text()) == {"removed": {"GONE": "2026-11-15"}, "renamed": {"OLDCO": "NEWCO"}}
+    assert ru.update_former(d, ["NEWCO", "FRESH", "KEEP"], path=str(path), today=TODAY) is False   # no change
+    # GONE re-enters the universe a week later: it is no longer "former"; the first date is kept otherwise
+    later = TODAY + dt.timedelta(days=7)
+    assert ru.update_former({"removed": ["OTHER"], "renamed": []}, ["GONE", "NEWCO"], path=str(path),
+                            today=later) is True
+    assert json.loads(path.read_text()) == {"removed": {"OTHER": "2026-11-22"}, "renamed": {"OLDCO": "NEWCO"}}
+    # a symbol first seen as removed, then detected as a rename, moves to renamed
+    assert ru.update_former({"removed": [], "renamed": [("OTHER", "OTHER2")]}, ["OTHER2"], path=str(path),
+                            today=later) is True
+    got = json.loads(path.read_text())
+    assert got["removed"] == {} and got["renamed"] == {"OLDCO": "NEWCO", "OTHER": "OTHER2"}
+
+
+def test_run_ci_publishes_the_former_file_with_the_refresh(repo, tmp_path):
+    former = tmp_path / "former.json"
+    tiers = _copy(repo["base"])
+    first_tier = next(iter(tiers))
+    dropped = tiers[first_tier].pop(0)[0]
+    out, meta = repo["out"], repo["meta"]
+    published = []
+    rc = ru.run_ci(today=TODAY, fetch=lambda: _fetched(tiers),
+                   publish_fn=lambda b, t, body, paths: published.append(paths) or "78",
+                   out_path=str(out), meta_path=str(meta), former_path=str(former))
+    assert rc == 0 and len(published[0]) == 3 and published[0][2].endswith("former.json")
+    assert json.loads(former.read_text())["removed"] == {dropped: "2026-11-15"}
+    # the default run on temp paths (no former_path) must not touch the real file
+    before = open(ru.FORMER_PATH, encoding="utf-8").read()
+    assert repo["run"](tiers=_copy(repo["base"])) == 0
+    assert open(ru.FORMER_PATH, encoding="utf-8").read() == before
+
+
+def test_universe_resolves_removed_and_renamed_symbols(tmp_path, monkeypatch):
+    path = tmp_path / "former.json"
+    path.write_text(json.dumps({"removed": {"GONECO": "2026-11-15"}, "renamed": {"OLDSYM": "TCS", "OLDER": "OLDSYM"}}))
+    removed, renamed = universe.load_former_symbols(str(path))
+    assert removed == ["GONECO"] and renamed == {"OLDSYM": "TCS", "OLDER": "OLDSYM"}
+    assert universe.load_former_symbols(str(tmp_path / "missing.json")) == ([], {})
+    (tmp_path / "bad.json").write_text("not json")
+    assert universe.load_former_symbols(str(tmp_path / "bad.json")) == ([], {})
+    monkeypatch.setattr(universe, "RENAMED_SYMBOLS", renamed)
+    monkeypatch.setattr(universe, "FORMER_CONSTITUENTS", universe.FORMER_CONSTITUENTS + ["GONECO.NS"])
+    monkeypatch.setattr(universe, "_NAME_MAP", {})
+    assert universe.resolve_ticker("GONECO") == "GONECO.NS"
+    assert universe.resolve_ticker("OLDSYM") == "TCS.NS" and universe.resolve_ticker("OLDER") == "TCS.NS"
+    monkeypatch.setattr(universe, "_NAME_MAP", {})               # rebuilt from the real lists afterwards
+
+
+def test_committed_former_file_covers_the_15_nov_refresh():
+    removed, renamed = universe.load_former_symbols()
+    assert {"CCAVENUE", "ICICIPRULI"} <= set(removed)
+    assert universe.resolve_ticker("CCAVENUE") == "CCAVENUE.NS"
+    assert universe.resolve_ticker("ICICIPRULI") == "ICICIPRULI.NS"
+    assert not (set(universe.FORMER_CONSTITUENTS) & set(universe.get_universe("all")))

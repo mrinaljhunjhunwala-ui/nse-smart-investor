@@ -60,7 +60,7 @@ def patch_session(monkeypatch):
     # credentials so the login path always actually runs in any environment.
     monkeypatch.setattr(af, "_get_credentials", lambda: {
         "api_key": "TESTKEY", "client_id": "TESTCLIENT",
-        "password": "TESTPASS", "totp_secret": "JBSWY3DPEHPK3PXP",
+        "password": "TESTPASS", "totp_secret": "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",   # 160 bits: pyotp 2.12 rejects under 112
     })
     yield fake
 

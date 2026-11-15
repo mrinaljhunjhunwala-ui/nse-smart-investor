@@ -107,3 +107,60 @@ def test_scorecard_message_shows_sectors_and_median():
     assert "By sector, vs the Nifty (names): Banks +8.0 pts (3) · IT -6.0 pts (3)" in msg
     assert "Middle name (median): +4.5%" in msg
     assert ca._sector_lines([{"sector": "Banks", "n": 3, "mean_edge": 8.0}]) == []        # one sector says nothing
+
+
+def test_report_card_dates_read_like_the_other_cards():
+    assert ca._day_label("2026-11-02") == "Mon 2 Nov" and ca._day_label("2026-11-15") == "Sun 15 Nov"
+    assert ca._day_label("not a date") == "not a date"
+    cards = {"top_picks": {"n": 1, "mean_move": 1.0, "up": 1, "best": [{"ticker": "A.NS", "move": 1.0}],
+                           "worst": [], "mean_edge": None}}
+    head = ca.weekly_scorecard_lines(cards, "2026-11-02", "2026-11-06")[0]
+    assert head == "🧾 <b>Weekly report card</b> · Mon 2 Nov → Fri 6 Nov"
+
+
+def _ledger_with_returns():
+    rows = []
+    for day, nifty in (("2026-10-01", -1.0), ("2026-10-02", 2.0)):
+        for i, (score, verdict, edge) in enumerate([(85, "STRONG BUY", 3.0), (72, "BUY", 1.0),
+                                                    (65, "WATCH", -2.0), (40, "AVOID", -4.0)]):
+            rows.append({"id": len(rows) + 1, "logged_date": day, "ticker": f"T{i}.NS", "verdict": verdict,
+                         "composite_score": score, "source": "shadow_auto", "entry_price": 100.0,
+                         "ret_5d": nifty + edge, "nifty_ret_5d": nifty,
+                         "ret_20d": nifty + edge * 2, "nifty_ret_20d": nifty})
+    return pd.DataFrame(rows)
+
+
+def test_record_summary_and_longer_record_message():
+    from analysis.calibration_summary import record_summary
+    from tests.test_alert_copy_no_advice import _assert_descriptive
+    rec = record_summary(_ledger_with_returns())
+    assert rec["since"] == "2026-10-01"
+    b5, b20 = rec["bullish_5"], rec["bullish_20"]
+    assert b5["picks"] == 4 and b5["days"] == 2 and b5["avg_alpha"] == 2.0 and b5["day_win_pct"] == 100.0
+    assert b20["avg_alpha"] == 4.0
+    assert rec["at_floor_20"]["avg_alpha"] == 4.0 and rec["under_floor_20"]["avg_alpha"] == -6.0
+    lines = ca.longer_record_lines(rec)
+    msg = "\n".join(lines)
+    _assert_descriptive(msg)
+    assert lines[0] == "📏 <b>Longer record</b> · every BUY call since Thu 1 Oct"
+    assert "5 sessions on: +2.0 pts vs the Nifty · ahead on 100% of 2 days (4 calls)" in msg
+    assert "20 sessions on: +4.0 pts vs the Nifty" in msg
+    assert "Score 70+ after 20 sessions: +4.0 pts · under 70: -6.0 pts" in msg
+    assert ca.longer_record_lines(record_summary(pd.DataFrame())) == []
+    assert ca.longer_record_lines(record_summary(None)) == []
+
+
+def test_friday_card_is_followed_by_the_longer_record(monkeypatch):
+    led = _ledger_with_returns().assign(logged_date=lambda d: d["logged_date"].replace(
+        {"2026-10-01": "2026-11-03", "2026-10-02": "2026-11-04"}))
+    monkeypatch.setattr(vl, "load_ledger", lambda **k: led)
+    monkeypatch.setattr(vl, "ledger_error", lambda df: None)
+    monkeypatch.setattr(vl, "with_list_buckets", lambda df: df)
+    monkeypatch.setattr(ca, "_quote", lambda b: {"price": 105.0})
+    import data.fetcher as f
+    monkeypatch.setattr(f, "fetch_single", lambda *a, **k: pd.DataFrame({"Close": _nifty()}))
+    sent = []
+    monkeypatch.setattr(ca, "dispatch", lambda m, **k: sent.append(m) or True)
+    fri = dt.datetime(2026, 11, 6, 16, 0, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    assert ca.check_weekly_scorecard({}, "2026-11-06", now=fri) == 1
+    assert len(sent) == 2 and sent[0].startswith("🧾") and sent[1].startswith("📏 <b>Longer record</b>")

@@ -43,6 +43,7 @@ if _ROOT not in sys.path:  # `python tools/refresh_universe.py` → make utils/ 
     sys.path.insert(0, _ROOT)
 OUT_PATH = os.path.join(_ROOT, "data", "nse_index_constituents.csv")
 META_PATH = os.path.join(_ROOT, "data", "nse_index_constituents.meta.json")
+FORMER_PATH = os.path.join(_ROOT, "data", "nse_former_symbols.json")
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -215,6 +216,40 @@ def write(rows: List[Dict[str, str]], path: str = OUT_PATH, meta_path: Optional[
         write_meta(len(rows), refreshed=(today or dt.date.today()).isoformat(), path=meta_path, today=today)
 
 
+def update_former(d: Dict[str, list], current: List[str], path: str = FORMER_PATH,
+                  today: Optional[dt.date] = None) -> bool:
+    """Record this refresh's removed and renamed symbols in
+    data/nse_former_symbols.json so data.universe.resolve_ticker still knows
+    them: {"removed": {SYM: date}, "renamed": {OLD: NEW}}. A symbol that is in
+    the current universe again is dropped from both. Returns True when the
+    file changed (and was written)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            old = json.load(fh)
+    except (OSError, ValueError):
+        old = {}
+    old = old if isinstance(old, dict) else {}
+    removed = dict(old.get("removed") or {})
+    renamed = dict(old.get("renamed") or {})
+    prev = {"removed": dict(sorted(removed.items())), "renamed": dict(sorted(renamed.items()))}
+    day = (today or dt.date.today()).isoformat()
+    for s in d.get("removed", []):
+        removed.setdefault(s, day)
+    for a, b in d.get("renamed", []):
+        renamed[a] = b
+        removed.pop(a, None)
+    cur = set(current)
+    removed = {s: v for s, v in removed.items() if s not in cur}
+    renamed = {a: b for a, b in renamed.items() if a not in cur}
+    new = {"removed": dict(sorted(removed.items())), "renamed": dict(sorted(renamed.items()))}
+    if new == prev:
+        return False
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(new, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return True
+
+
 # ── --ci mode ────────────────────────────────────────────────────────────────
 
 def _names(syms: List[str], limit: int = 12) -> str:
@@ -258,7 +293,10 @@ def pr_body(d: Dict[str, list], old: List[Dict[str, str]], new: List[Dict[str, s
     if not any(d[k] for k in ("added", "removed", "renamed", "retiered")):
         out.append("No symbol changes: either company / industry text changed, or this only re-stamps "
                    "the `checked` date in the meta file so the dashboard's staleness caption stays quiet.")
-    out += ["", "After merge: renamed symbols may need their `_SECTOR_ASSIGNMENTS` / `STOCK_SEARCH_MAP` "
+    out += ["", "Removed and renamed symbols are recorded in `data/nse_former_symbols.json`, so "
+            "`resolve_ticker` still knows them (a rename the tool did not detect shows as one removed "
+            "plus one added: move it to `renamed` by hand if needed).",
+            "", "After merge: renamed symbols may need their `_SECTOR_ASSIGNMENTS` / `STOCK_SEARCH_MAP` "
             "entries moved (`data/universe.py`, `dashboard/shared/cache.py`)."]
     return "\n".join(out)
 
@@ -307,7 +345,8 @@ def publish(branch: str, title: str, body: str, paths: List[str]) -> str:
 
 def run_ci(today: Optional[dt.date] = None, fetch: Callable[[], dict] = fetch_all,
            publish_fn: Callable[..., str] = publish,
-           out_path: str = OUT_PATH, meta_path: str = META_PATH) -> int:
+           out_path: str = OUT_PATH, meta_path: str = META_PATH,
+           former_path: Optional[str] = None) -> int:
     today = today or dt.date.today()
     old = load_existing(out_path)
     try:
@@ -338,15 +377,20 @@ def run_ci(today: Optional[dt.date] = None, fetch: Callable[[], dict] = fetch_al
         print("universe unchanged")
         return 0
 
+    paths = [os.path.relpath(out_path, _ROOT), os.path.relpath(meta_path, _ROOT)]
     if content_changed:
         write(new, path=out_path, meta_path=meta_path, today=today)
+        # Default file only for the default CSV, so a test run on temp paths never touches it.
+        if former_path is None and out_path == OUT_PATH:
+            former_path = FORMER_PATH
+        if former_path and update_former(d, [r["Symbol"] for r in new], path=former_path, today=today):
+            paths.append(os.path.relpath(former_path, _ROOT))
         title = f"data · universe refresh {today.isoformat()} (+{len(d['added'])} / −{len(d['removed'])})"
     else:
         write_meta(len(new), path=meta_path, today=today)
         title = f"data · universe unchanged, re-stamp checked date {today.isoformat()}"
     try:
-        pr = publish_fn(f"auto/universe-{today.isoformat()}", title, pr_body(d, old, new),
-                        [os.path.relpath(out_path, _ROOT), os.path.relpath(meta_path, _ROOT)])
+        pr = publish_fn(f"auto/universe-{today.isoformat()}", title, pr_body(d, old, new), paths)
     except Exception as exc:  # noqa: BLE001
         err = getattr(exc, "stderr", "") or exc
         notify(f"Universe check FAILED: could not open the PR: {str(err).strip()[:300]}")
@@ -382,6 +426,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"{k}: {d[k]}")
     if args.apply:
         write(new)
+        update_former(d, [r["Symbol"] for r in new])
         print(f"wrote {OUT_PATH}")
     else:
         print("dry run — pass --apply to write")

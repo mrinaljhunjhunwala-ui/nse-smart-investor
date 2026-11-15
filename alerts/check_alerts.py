@@ -1685,8 +1685,52 @@ def check_weekly_scorecard(state: dict, today: str, now: datetime.datetime | Non
         print(f"[scorecard] catalyst record skipped: {e}")
     if dispatch("\n".join(lines), subject="Weekly report card — NSE Smart Investor"):
         _mark_fired(state, key, today)
+        try:    # the longer record, as its own short message so the card stays within its line cap
+            from analysis.calibration_summary import record_summary
+            more = longer_record_lines(record_summary(ledger))
+            if more:
+                dispatch("\n".join(more), subject="Longer record — NSE Smart Investor")
+        except Exception as e:
+            print(f"[scorecard] longer record skipped: {e}")
         return 1
     return 0
+
+
+def _day_label(iso: str) -> str:
+    """'2026-11-02' -> 'Mon 2 Nov' (the form the other cards use); the input
+    comes back unchanged when it is not an ISO date."""
+    try:
+        d = datetime.date.fromisoformat(str(iso)[:10])
+    except ValueError:
+        return str(iso)
+    return f"{d:%a} {d.day} {d:%b}"
+
+
+def _record_part(r: "dict | None") -> str:
+    return (f"{r['avg_alpha']:+.1f} pts vs the Nifty · ahead on {r['day_win_pct']:.0f}% of "
+            f"{r['days']} days") if r and r.get("day_win_pct") is not None else ""
+
+
+def longer_record_lines(rec: dict) -> list:
+    """Friday's short 'longer record' message from
+    analysis.calibration_summary.record_summary: every BUY / STRONG BUY call
+    since logging began, 5 and 20 sessions on, plus score 70+ against under 70.
+    [] when nothing has settled. Past calls only; changes no rule."""
+    rows = []
+    for h in (5, 20):
+        part = _record_part(rec.get(f"bullish_{h}"))
+        if part:
+            rows.append(f"{h} sessions on: {part} ({rec[f'bullish_{h}']['picks']} calls)")
+    hi, lo = rec.get("at_floor_20"), rec.get("under_floor_20")
+    if hi and lo:
+        rows.append(f"Score {_WATCH_FLOOR:.0f}+ after 20 sessions: {hi['avg_alpha']:+.1f} pts · "
+                    f"under {_WATCH_FLOOR:.0f}: {lo['avg_alpha']:+.1f} pts")
+    if not rows:
+        return []
+    since = _day_label(rec["since"]) if rec.get("since") else "the start"
+    return [f"📏 <b>Longer record</b> · every BUY call since {since}", *rows,
+            "<i>Ahead on well over half the days, over many more days, would be an edge. "
+            "Past calls, not a guarantee.</i>"]
 
 
 def _names_line(rows: list) -> str:
@@ -1718,7 +1762,7 @@ def _sector_lines(sectors: list) -> list:
 def weekly_scorecard_lines(cards: dict, monday: str, today: str) -> list:
     """Message body for check_weekly_scorecard: a Top Picks section and a
     Tomorrow's Watchlist section (up-setups and down-setups kept apart)."""
-    lines = [f"🧾 <b>Weekly report card</b> · {monday} → {today}",
+    lines = [f"🧾 <b>Weekly report card</b> · {_day_label(monday)} → {_day_label(today)}",
              "Each name from its first logged price this week, vs the Nifty over the same days."]
     tp = cards.get("top_picks")
     if tp:
@@ -1766,7 +1810,7 @@ def check_weekly_digest(state: dict, today: str) -> int:
         print(f"[weekly] not Sunday (weekday={now_ist.weekday()}) — skipping")
         return 0
 
-    lines = [f"📆 <b>Weekly Digest — week ahead</b> · Sun {today}"]
+    lines = [f"📆 <b>Weekly Digest — week ahead</b> · {_day_label(today)}"]
 
     # Section 1 — current top-picks list (from the persisted snapshot)
     try:
