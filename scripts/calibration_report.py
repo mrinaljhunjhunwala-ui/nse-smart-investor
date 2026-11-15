@@ -29,6 +29,8 @@ HORIZONS = (5, 20)
 SCORE_BANDS = ((None, 50, "under 50"), (50, 60, "50-59"), (60, 70, "60-69"),
                (70, 80, "70-79"), (80, None, "80 and over"))
 BULLISH = ("BUY", "STRONG BUY")
+BROAD_INDEX = "^CRSLDX"                 # Nifty 500 on Yahoo
+BROAD_NAME = "Nifty 500"
 
 
 def _wilson_lower(wins: int, n: int, z: float = 1.96) -> float:
@@ -66,6 +68,39 @@ def settled(df: pd.DataFrame, h: int) -> pd.DataFrame:
     out = out.dropna(subset=["ret", "nifty"])
     out["alpha"] = out["ret"] - out["nifty"]
     out["logged_date"] = out["logged_date"].astype(str)
+    return out
+
+
+def bench_returns(index_df: Optional[pd.DataFrame], dates: List[str], h: int) -> Dict[str, float]:
+    """% move of an index from the close of each logging session to the close h
+    sessions later (the ledger's own basis). A date that is not a session uses
+    the last close before it. Dates whose window has not finished are left out.
+    Pure; returns {} when the index history is missing."""
+    if index_df is None or getattr(index_df, "empty", True) or "Close" not in index_df.columns:
+        return {}
+    close = pd.to_numeric(index_df["Close"], errors="coerce").dropna()
+    if close.empty:
+        return {}
+    days = [d.date().isoformat() for d in pd.to_datetime(close.index)]
+    vals = [float(v) for v in close.values]
+    out: Dict[str, float] = {}
+    for d in dates:
+        i = max((k for k, day in enumerate(days) if day <= str(d)), default=None)
+        if i is None or i + h >= len(vals) or not vals[i]:
+            continue
+        out[str(d)] = (vals[i + h] / vals[i] - 1.0) * 100.0
+    return out
+
+
+def rebased(s: pd.DataFrame, bench: Dict[str, float]) -> pd.DataFrame:
+    """`s` (from settled) measured against another index: `nifty` and `alpha`
+    replaced by that index's move; rows with no index move dropped. Pure."""
+    if s.empty or not bench:
+        return s.iloc[0:0]
+    out = s.copy()
+    out["nifty"] = out["logged_date"].map(bench)
+    out = out.dropna(subset=["nifty"])
+    out["alpha"] = out["ret"] - out["nifty"]
     return out
 
 
@@ -139,9 +174,14 @@ def _table(title: str, rows: List[Dict[str, Any]], order: Optional[List[str]] = 
     return out
 
 
-def build_report(df: pd.DataFrame, regimes: Optional[Dict[str, Optional[str]]] = None) -> List[str]:
+def build_report(df: pd.DataFrame, regimes: Optional[Dict[str, Optional[str]]] = None,
+                 broad: Optional[pd.DataFrame] = None, nifty: Optional[pd.DataFrame] = None) -> List[str]:
     """Report lines from ledger rows. `regimes` maps a logged_date string to
-    'Rising' / 'Falling' (Nifty's trailing 20 sessions before that day). Pure."""
+    'Rising' / 'Falling' (Nifty's trailing 20 sessions before that day).
+    `broad` is the daily history of a broad index (Nifty 500): when given, the
+    main tables are repeated against it, because the picks come from ~750
+    names and a rally led by the 50 largest reads as the model lagging.
+    `nifty` (Nifty 50 history) is only used to check that method. Pure."""
     regimes = regimes or {}
     lines: List[str] = []
     if df is None or df.empty:
@@ -184,6 +224,31 @@ def build_report(df: pd.DataFrame, regimes: Optional[Dict[str, Optional[str]]] =
                 if len(part):
                     lines += _table(f"  ... the same, calls made while the Nifty was {reg.lower()}:",
                                     group_stats(part, "band"), order)
+        b_ret = bench_returns(broad, sorted(s["logged_date"].unique()), h)
+        if b_ret:
+            sb = rebased(s, b_ret)
+            lines += ["", f"--- The same calls against the {BROAD_NAME} (the broad market the picks come from); "
+                          f"the 'Nifty' column is the {BROAD_NAME} here ---"]
+            chk = bench_returns(nifty, sorted(s["logged_date"].unique()), h)
+            if chk:
+                both = s.assign(re=s["logged_date"].map(chk)).dropna(subset=["re"])
+                if len(both):
+                    gap = float((both["re"] - both["nifty"]).abs().mean())
+                    lines.append(f"(method check: the Nifty 50 recomputed this way differs from the ledger's own "
+                                 f"Nifty move by {gap:.2f} pts on average)")
+            bullb = one_per_day_ticker(sb[sb["verdict"].isin(BULLISH)]) if "verdict" in sb.columns else sb.iloc[0:0]
+            lines += _table(f"BUY / STRONG BUY calls vs the {BROAD_NAME}, all:",
+                            group_stats(bullb.assign(all="all bullish calls"), "all"))
+            lines += _table(f"BUY / STRONG BUY calls vs the {BROAD_NAME}, by Nifty direction on the day:",
+                            group_stats(bullb, "regime"), ["Rising", "Falling", "Unknown"])
+            if "composite_score" in sb.columns:
+                scb = one_per_day_ticker(sb.dropna(subset=["composite_score"])).copy()
+                scb["band"] = scb["composite_score"].map(score_band)
+                lines += _table(f"Every scored name vs the {BROAD_NAME}, by composite score:",
+                                group_stats(scb, "band"), [b[2] for b in SCORE_BANDS])
+        elif broad is not None:
+            lines += ["", f"--- {BROAD_NAME} history has no finished window for these days ---"]
+        if "composite_score" in s.columns:
             rc = score_rank_corr(sc)
             if rc["days"]:
                 lines.append(f"Score vs result, within each day: average rank correlation "
@@ -229,12 +294,19 @@ def main() -> int:
     except Exception as e:                                      # noqa: BLE001
         print(f"[calibration] ledger unavailable: {type(e).__name__}: {e}")
         return 1
-    nifty = None
+    nifty = broad = None
     try:
         from data.fetcher import fetch_index
         nifty = fetch_index("^NSEI", period="2y")
     except Exception as e:                                      # noqa: BLE001
-        print(f"[calibration] Nifty history unavailable ({type(e).__name__}: {e}); regime split is 'Unknown'")
+        print(f"[calibration] Nifty history unavailable ({type(e).__name__}: {e}); "
+              f"regime split is 'Unknown'")
+    try:
+        from data.fetcher import fetch_index
+        broad = fetch_index(BROAD_INDEX, period="2y")
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[calibration] {BROAD_NAME} history unavailable ({type(e).__name__}: {e}); "
+              f"the broad-market tables are left out")
     regimes: Dict[str, Optional[str]] = {}
     if not df.empty:
         import datetime as _dt
@@ -243,7 +315,9 @@ def main() -> int:
                 regimes[d] = vl.nifty_regime_at(nifty, _dt.date.fromisoformat(d))
             except ValueError:
                 regimes[d] = None
-    lines = build_report(df, regimes) + (_registered_lines(vl, df, nifty) if not df.empty else [])
+    lines = build_report(df, regimes, broad=broad, nifty=nifty)
+    if not df.empty:
+        lines += _registered_lines(vl, df, nifty)
     print("\n".join(lines))
     step = os.environ.get("GITHUB_STEP_SUMMARY")
     if step:

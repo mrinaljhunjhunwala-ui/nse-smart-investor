@@ -3,6 +3,22 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **BUY only at 70+ in every alert (owner decision, 15 Nov):** `check_alerts._floor_word` /
+  `_under_watch_floor` (same `_WATCH_FLOOR = 70` the Morning Digest already used). The "new BUY
+  calls" alert no longer sends a BUY / STRONG BUY verdict whose score is under 70 (it is not marked
+  as fired, so it can fire once it reaches 70); Tomorrow's Watchlist breakouts under 70 keep their
+  "above ₹level" line but read WATCH; the weekly digest uses the same word. Display only: verdict
+  strings, ledger rows, dedupe keys and scoring are unchanged, so the registered tests are not
+  affected. Not changed: the dashboard's composite action band (BUY from 65 in `score.py`, scoring
+  logic) and the momentum scan (its BUY setups carry no composite score).
+  **Calibration report** also measures the calls against the Nifty 500 (`^CRSLDX` on Yahoo,
+  recomputed close-to-close from the logging session; a method-check line compares the same
+  recomputation for the Nifty 50 with the ledger's own figure; it read 0.00 pts on 15 Nov).
+  **Against the Nifty 500 (15 Nov run):** BUY / STRONG BUY −0.4 pts at 5 sessions and −0.4 pts at
+  20 (vs −0.5 / −1.2 against the Nifty 50); rising-Nifty days −1.6 pts at 5 sessions, 1 of 5 days
+  ahead (vs −2.3, 0 of 5). So the large-cap benchmark explains about a third of the rising-market
+  lag, not all of it. Score bands at 20 sessions vs the Nifty 500: under 50 −5.7, 50–59 −3.6,
+  60–69 −1.5, 70–79 +1.4, 80+ −0.2 (14 names).
 - **Calibration read (15 Nov; `scripts/calibration_report.py`, read-only, run from
   `provider_canary.yml` with input `calibration_report` = true; prints to the Actions log):** ledger
   28 Aug → 13 Nov, 2,478 rows, 34 logging days. BUY / STRONG BUY calls: 5 sessions −0.5 pts vs the

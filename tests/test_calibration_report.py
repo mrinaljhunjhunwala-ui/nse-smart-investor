@@ -57,3 +57,38 @@ def test_build_report_sections():
         assert part in text, part
     assert C.build_report(pd.DataFrame())[1].startswith("The verdict ledger is empty")
     assert C._wilson_lower(0, 0) == 0.0 and 0.5 < C._wilson_lower(30, 40) < 0.75
+
+
+def _index(closes, start="2026-09-28"):
+    idx = pd.bdate_range(start=start, periods=len(closes))
+    return pd.DataFrame({"Close": closes}, index=idx)
+
+
+def test_bench_returns_close_to_close_h_sessions_later():
+    ix = _index([100, 101, 102, 103, 104, 105, 110, 111])               # 28 Sep (Mon) ... 7 Oct
+    r = C.bench_returns(ix, ["2026-09-28", "2026-09-30", "2026-10-03", "2026-10-07"], 5)
+    assert round(r["2026-09-28"], 6) == 5.0                             # 100 -> 105
+    assert round(r["2026-09-30"], 6) == round((111 / 102 - 1) * 100, 6)
+    assert "2026-10-03" not in r and "2026-10-07" not in r              # windows not finished
+    assert round(C.bench_returns(ix, ["2026-10-03"], 3)["2026-10-03"], 6) == \
+        round((111 / 104 - 1) * 100, 6)                                 # Saturday: from Friday's close
+    assert C.bench_returns(None, ["2026-09-28"], 5) == {} and C.bench_returns(pd.DataFrame(), ["x"], 5) == {}
+    assert C.bench_returns(ix, ["2020-01-01"], 5) == {}                 # before the history
+
+
+def test_rebased_swaps_the_benchmark():
+    s = C.settled(_rows(), 5)
+    out = C.rebased(s, {"2026-10-01": 0.0})                             # only day 1 has a broad move
+    assert set(out["logged_date"]) == {"2026-10-01"} and (out["alpha"] == out["ret"]).all()
+    assert C.rebased(s, {}).empty
+
+
+def test_build_report_adds_broad_market_tables():
+    # broad index flat over both windows, Nifty 50 as in the rows
+    broad = _index([100.0] * 12, start="2026-09-28")
+    regimes = {"2026-10-01": "Falling", "2026-10-02": "Rising"}
+    text = "\n".join(C.build_report(_rows(), regimes, broad=broad, nifty=broad))
+    assert "against the Nifty 500" in text and "BUY / STRONG BUY calls vs the Nifty 500, all:" in text
+    assert "Every scored name vs the Nifty 500, by composite score:" in text and "method check" in text
+    plain = "\n".join(C.build_report(_rows(), regimes))
+    assert "Nifty 500" not in plain                                     # left out when no broad history
