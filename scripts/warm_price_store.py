@@ -189,7 +189,9 @@ def run(symbols: Optional[Iterable[str]] = None, *,
 def _telegram(line: str) -> None:
     try:
         from utils.telegram import TelegramAlerter
-        TelegramAlerter().send_text("🗄 " + line)
+        # Escaped: the "_" in "price_store" is an unclosed italic in Telegram's
+        # Markdown, which made it reject the whole message.
+        TelegramAlerter().send_text("🗄 " + TelegramAlerter._escape_md(line))
     except Exception as e:
         _log.warning("price_store: Telegram summary not sent: %s", e)
 

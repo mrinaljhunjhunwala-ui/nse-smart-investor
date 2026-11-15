@@ -162,6 +162,15 @@ class TelegramAlerter:
             resp = requests.post(url, json=payload, timeout=10)
             if resp.status_code == 200:
                 return True
+            if resp.status_code == 400:
+                # Telegram could not parse the Markdown (most often one stray
+                # "_", as in "price_store: ..."). Don't lose the message:
+                # resend the same text with no parse mode.
+                print(f"  [Telegram] Markdown rejected ({resp.text[:120]}) — resending as plain text")
+                plain = requests.post(url, json={"chat_id": self.chat_id, "text": text}, timeout=10)
+                if plain.status_code == 200:
+                    return True
+                resp = plain
             print(f"  [Telegram] Error {resp.status_code}: {resp.text[:200]}")
             return False
         except requests.RequestException as e:
