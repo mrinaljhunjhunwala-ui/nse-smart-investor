@@ -413,6 +413,32 @@ FORMER_CONSTITUENTS: List[str] = [
 ]
 
 
+# Names the weekly refresh (tools/refresh_universe.py) took out of the universe,
+# and symbols it saw renamed, are recorded in data/nse_former_symbols.json so an
+# old watchlist / ledger / journal entry on one still resolves: a removed name
+# to itself, a renamed one to its new symbol. Static file, no network at import.
+_FORMER_SYMBOLS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "nse_former_symbols.json")
+
+
+def load_former_symbols(path: str = _FORMER_SYMBOLS_JSON) -> Tuple[List[str], Dict[str, str]]:
+    """(removed symbols, {old symbol: new symbol}) from the refresh tool's file;
+    bare symbols, upper case. Empty when the file is missing or unreadable."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+        removed = [str(s).strip().upper() for s in (raw.get("removed") or {}) if str(s).strip()]
+        renamed = {str(a).strip().upper(): str(b).strip().upper()
+                   for a, b in (raw.get("renamed") or {}).items() if str(a).strip() and str(b).strip()}
+        return removed, renamed
+    except (OSError, ValueError, AttributeError):
+        return [], {}
+
+
+_removed_syms, RENAMED_SYMBOLS = load_former_symbols()
+FORMER_CONSTITUENTS = list(dict.fromkeys(FORMER_CONSTITUENTS + [f"{s}.NS" for s in _removed_syms]))
+
+
 def _drop_current_constituents(former: List[str], current: List[str]) -> List[str]:
     """Former names that are not in the current universe. A stock that re-enters
     an index (PFIZER, 15 Nov 2026) is scanned again and is no longer "former";
@@ -426,6 +452,14 @@ def _build_name_map() -> Dict[str, str]:
     for t in FORMER_CONSTITUENTS + get_universe("niftytotalmarket"):
         base = t.replace(".NS", "").replace(".BO", "")
         m[base.upper()] = t
+    # A renamed symbol resolves to its new one (followed through a second rename).
+    for old, new in RENAMED_SYMBOLS.items():
+        seen = {old}
+        while new in RENAMED_SYMBOLS and new not in seen:
+            seen.add(new)
+            new = RENAMED_SYMBOLS[new]
+        if old not in m:
+            m[old] = m.get(new, f"{new}.NS")
     return m
 
 

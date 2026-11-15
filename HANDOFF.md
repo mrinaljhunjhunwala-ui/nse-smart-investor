@@ -3,6 +3,18 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Follow-ups (15 Nov, evening):** (1) removed and renamed symbols stay resolvable:
+  `tools/refresh_universe.update_former` records each refresh's removed symbols and detected
+  renames in `data/nse_former_symbols.json` (published in the same auto PR), and
+  `data/universe` loads it: a removed name resolves to itself, a renamed one to its new symbol
+  (`RENAMED_SYMBOLS`). Seeded with CCAVENUE and ICICIPRULI as removed; the tool saw ICICIPRULI →
+  ICICILIFE as one removed plus one added (the company names differ), so if that was a rename,
+  move it to `renamed` by hand. (2) Friday report card and Sunday weekly digest print dates as
+  "Mon 2 Nov" (`check_alerts._day_label`). (3) After the Friday card a short 📏 "Longer record"
+  message follows: every BUY / STRONG BUY call since logging began, 5 and 20 sessions on, vs the
+  Nifty, plus score 70+ against under 70 (`longer_record_lines`, from the pure
+  `analysis/calibration_summary.record_summary`, which `scripts/calibration_report.py` now shares).
+  Descriptive only; no rule, threshold or score changed.
 - **BUY only at 70+ in every alert (owner decision, 15 Nov):** `check_alerts._floor_word` /
   `_under_watch_floor` (same `_WATCH_FLOOR = 70` the Morning Digest already used). The "new BUY
   calls" alert no longer sends a BUY / STRONG BUY verdict whose score is under 70 (it is not marked
@@ -54,12 +66,10 @@ This section is the running memory between sessions; older sections below are hi
   (`trade_utils._fetch_single_live_price` passes `eod` / `as_of` through). Market Overview shows a
   clear message when the VIX / Nifty frames are empty (ported from the never-merged
   `claude/laptop-diagnosis-5gg6j5`). Tests: `tests/test_small_fixes_nov15.py`.
-  **Open PRs (15 Nov):** only #351, the first automatic universe refresh (+3 / −2). Its `test` job
-  failed because PFIZER re-entered the index while still listed in `universe.FORMER_CONSTITUENTS`;
-  the list now drops any name that is in the current universe (`_drop_current_constituents`), so
-  #351 needs its branch updated from `main` (or closed and the refresh re-run) to go green. Names
-  the refresh removes (CCAVENUE; ICICIPRULI renamed ICICILIFE) are not added to the former list by
-  the tool, so they stop resolving in `resolve_ticker`: still open. **Branches:** 69 besides `main`; every one is merged or
+  **Open PRs: none.** #351, the first automatic universe refresh (+3 / −2), failed `test` because
+  PFIZER re-entered the index while still listed in `universe.FORMER_CONSTITUENTS`; the list now
+  drops any name that is in the current universe (`_drop_current_constituents`), and #351 merged
+  once its branch was updated from `main`. **Branches:** 69 besides `main`; every one is merged or
   superseded (#282 and the extra commit on `feat/eod-portfolio-posture` are in `main` via #288 /
   #334). A cloud session cannot delete remote branches (the push is refused), so the owner deletes
   them on github.com → Branches, and can tick Settings → General → "Automatically delete head
