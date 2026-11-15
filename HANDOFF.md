@@ -3,6 +3,21 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Calibration read (15 Nov; `scripts/calibration_report.py`, read-only, run from
+  `provider_canary.yml` with input `calibration_report` = true; prints to the Actions log):** ledger
+  28 Aug → 13 Nov, 2,478 rows, 34 logging days. BUY / STRONG BUY calls: 5 sessions −0.5 pts vs the
+  Nifty (517 picks, 27 days, ahead on 44% of days); 20 sessions −1.2 pts (345 picks, 22 days, 41%).
+  Neither is distinguishable from chance yet. **Rising Nifty:** only 5 logging days have a
+  5-session result (all early Nov): −2.3 pts, 0 of 5 days ahead, but every score band lagged by
+  2–3 pts in that rally (the Nifty 50 rose +5% in 5 sessions; the 750-name universe lagged it), so
+  that is the benchmark / universe, not the score choosing wrong names. No rising-market call has a
+  20-session result yet. **Score:** at 20 sessions it sorts names (under 50 −7.9 pts, 50–59 −5.8,
+  60–69 −3.2, 70–79 +1.6; within-day rank correlation +0.08 over 22 days); at 5 sessions it does
+  not (−0.01). STRONG BUY +0.7 pts at 20 sessions, plain BUY −3.0, WATCH −7.1, AVOID −5.4.
+  Registered tests as they stand: DECISION_RULE insufficient (354 verdicts, 22 of 30 days),
+  DECISION_RULE_RISING 0 verdicts, WATCHLIST_RULE too early (2 days). **No scoring change made or
+  proposed before the registered dates.** Open for the owner: BUY wording only at 70+ everywhere
+  (the 60–69 band lags); a broad-market benchmark (Nifty 500) next to the Nifty 50 in the report.
 - **Telegram text check (15 Nov, later):** all 61 distinct messages the alert tests produce were
   captured and checked (HTML tags balanced, no bare `<` / `&`, under 4096 chars, a stop on every BUY,
   no promise wording, no old "Strong trend / Weakening" labels): the HTML path is clean. One real
