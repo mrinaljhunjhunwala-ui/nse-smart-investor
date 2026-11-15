@@ -15,6 +15,12 @@ This section is the running memory between sessions; older sections below are hi
   Nifty, plus score 70+ against under 70 (`longer_record_lines`, from the pure
   `analysis/calibration_summary.record_summary`, which `scripts/calibration_report.py` now shares).
   Descriptive only; no rule, threshold or score changed.
+  **CI went red on every PR (15 Nov night):** pyotp 2.12.0 came out and refuses TOTP secrets under
+  112 bits; `tests/test_angel_fetcher.py` used a 16-character fake secret, so the Angel login tests
+  failed (also on `main`). Test secret lengthened; `requirements.txt` holds `pyotp<2.12` so the
+  LIVE Angel One login cannot break if the real `ANGEL_TOTP_SECRET` is shorter than 23 base32
+  characters. **Owner:** count the characters of the Angel One TOTP key; at 23 or more the cap can
+  be lifted.
 - **BUY only at 70+ in every alert (owner decision, 15 Nov):** `check_alerts._floor_word` /
   `_under_watch_floor` (same `_WATCH_FLOOR = 70` the Morning Digest already used). The "new BUY
   calls" alert no longer sends a BUY / STRONG BUY verdict whose score is under 70 (it is not marked

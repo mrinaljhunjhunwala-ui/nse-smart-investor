@@ -42,7 +42,10 @@ xgboost>=2.0.0,<4.0
 # ── (LSTM removed — see FIX DEAD-LSTM in main.py.) ──────────────────────────
 
 # ── TOTP generation (for Angel One SmartAPI authentication) ──────────────────
-pyotp>=2.8.0,<3.0
+# Held below 2.12: that release (Nov 2026) refuses TOTP secrets under 112 bits
+# (23 base32 characters), which would stop the Angel One login outright if the
+# account's TOTP key is shorter. Lift the cap once the key's length is confirmed.
+pyotp>=2.8.0,<2.12
 
 # ── Persistent paper-trade storage (Postgres backend, optional) ──────────────
 # Only used when a DATABASE_URL / [database].url secret is set; without it the
