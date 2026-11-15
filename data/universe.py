@@ -413,6 +413,14 @@ FORMER_CONSTITUENTS: List[str] = [
 ]
 
 
+def _drop_current_constituents(former: List[str], current: List[str]) -> List[str]:
+    """Former names that are not in the current universe. A stock that re-enters
+    an index (PFIZER, 15 Nov 2026) is scanned again and is no longer "former";
+    without this the Sunday universe-refresh PR failed CI and could not merge."""
+    cur = set(current)
+    return [t for t in former if t not in cur]
+
+
 def _build_name_map() -> Dict[str, str]:
     m: Dict[str, str] = {}
     for t in FORMER_CONSTITUENTS + get_universe("niftytotalmarket"):
@@ -466,6 +474,10 @@ def get_universe(level: str = "nifty50") -> List[str]:
         return _dedup(n100, NIFTY_MIDCAP150, NIFTY_SMALLCAP250, NIFTY_MICROCAP250,
                       NIFTY_TOTALMARKET_REST, LIQUID_EXTRAS)
     return _dedup(n100, _official(NIFTY_MIDCAP), _official(NIFTY_SMALLCAP))
+
+
+# Runs here because get_universe is defined just above.
+FORMER_CONSTITUENTS = _drop_current_constituents(FORMER_CONSTITUENTS, get_universe("all"))
 
 
 def resolve_ticker(query: str) -> str:

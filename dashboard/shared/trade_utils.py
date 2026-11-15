@@ -370,6 +370,11 @@ def _fetch_single_live_price(ticker: str, max_wait_seconds: float = 10) -> dict:
             }
             if q.get("volume"):
                 out["volume"] = q["volume"]
+            # Quote time / end-of-day flag (utils.live_price): callers showing a
+            # "live" badge must treat an "eod" quote as not live.
+            for _k in ("as_of", "eod"):
+                if q.get(_k):
+                    out[_k] = q[_k]
             return out
     except Exception as _e:
         _log.debug("trade_utils._fetch_single_live_price(%s) degraded: %s", ticker, _e)

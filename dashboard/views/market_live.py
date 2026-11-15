@@ -15,6 +15,13 @@ mover drill-down and news follow below.
 """
 
 
+def _eod_tag(q: dict) -> str:
+    """Suffix for a quote flagged end-of-day (utils.live_price "eod"): the price
+    is the last trade from an earlier session, not a live one."""
+    day = str(q.get("as_of") or "")[:10]
+    return f" · last traded {day}" if day else " · not live"
+
+
 def render() -> None:
     """Render the Live Ticker view (body moved verbatim from its old page)."""
     import os
@@ -129,7 +136,8 @@ def render() -> None:
                              if q.get("prev_close", 0) > 0 else 0.0)
                 rows.append({
                     "ticker":     t,
-                    "name":       get_display_name(t),
+                    # An end-of-day quote (suspended stock: days-old price) is not live.
+                    "name":       get_display_name(t) + (_eod_tag(q) if q.get("eod") else ""),
                     "price":      q["price"],
                     "prev_close": q.get("prev_close", q["price"]),
                     "chg_pct":    chg,
@@ -203,7 +211,7 @@ def render() -> None:
             pct = q.get("chg_pct")
             rows.append({
                 "ticker": q["ticker"], "sym": q["ticker"].replace(".NS", ""),
-                "sub": _sector_of(q["ticker"]),
+                "sub": _sector_of(q["ticker"]) + (_eod_tag(q) if q.get("eod") else ""),
                 "price": px, "chg": px - prev,
                 "chg_pct": float(pct) if pct is not None else ((px / prev - 1) * 100 if prev else 0.0),
                 "volume": q.get("volume"), "high": q.get("high") or None,
