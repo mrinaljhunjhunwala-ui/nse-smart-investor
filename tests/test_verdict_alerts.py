@@ -241,3 +241,41 @@ def test_floor_word():
     assert ca._floor_word("BUY", 70) == "BUY" and ca._floor_word("STRONG BUY", 85) == "STRONG BUY"
     assert ca._floor_word("BUY", None) == "BUY" and ca._floor_word("BUY", "x") == "BUY"   # no score: unchanged
     assert ca._floor_word("SELL", 10) == "SELL" and ca._floor_word("HOLD", 50) == "HOLD"
+
+
+def test_names_new_since_the_open_have_their_own_allowance(monkeypatch):
+    """16 Nov: the first run spent the whole day cap, so later BUYs could not be sent."""
+    import trade_store
+    opening = [_pick(f"O{i}.NS", 70 + i % 15, "BUY") for i in range(30)]
+    _setup_full(monkeypatch, [], opening, {p["ticker"]: "BUY" for p in opening})
+    state = {}
+    day = "2026-11-16"
+    assert ca.check_verdict_alerts(state, day) == ca._VERDICT_MAX_PER_RUN
+    assert ca.check_verdict_alerts(state, day) == ca._VERDICT_MAX_PER_DAY - ca._VERDICT_MAX_PER_RUN
+    assert ca.check_verdict_alerts(state, day) == 0                         # opening list: cap spent
+    later = opening + [_pick("NEW1.NS", 71, "BUY"), _pick("NEW2.NS", 73, "BUY")]
+    sent = _setup_full(monkeypatch, [], later, {p["ticker"]: "BUY" for p in later})
+    assert ca.check_verdict_alerts(state, day) == 2
+    assert "NEW1" in sent[0] and "NEW2" in sent[0]
+    assert ca.check_verdict_alerts(state, day) == 0                         # deduped
+    many = later + [_pick(f"F{i}.NS", 75, "BUY") for i in range(20)]
+    _setup_full(monkeypatch, [], many, {p["ticker"]: "BUY" for p in many})
+    total = 2
+    for _ in range(4):
+        total += ca.check_verdict_alerts(state, day)
+    assert total == ca._VERDICT_FRESH_MAX_PER_DAY                           # fresh names are capped too
+    assert trade_store is not None
+
+
+def test_digest_names_are_not_repeated_and_take_no_slot(monkeypatch):
+    import trade_store
+    picks = [_pick("DIG.NS", 80, "BUY"), _pick("OTHER.NS", 71, "BUY")]
+    sent = _setup(monkeypatch, picks, {"DIG.NS": "BUY", "OTHER.NS": "BUY"})
+    snap = trade_store.kv_get("top_picks_snapshot")
+    digest = {"date": "2026-11-16", "buys": [{"ticker": "DIG.NS", "price": 100.0}]}
+    monkeypatch.setattr(trade_store, "kv_get",
+                        lambda key, *a, **k: digest if key == ca._MORNING_PICKS_KEY else snap)
+    state = {}
+    assert ca.check_verdict_alerts(state, "2026-11-16") == 1
+    assert "OTHER" in sent[0] and "DIG" not in sent[0]
+    assert not any(k.startswith("verdict_") and k.endswith("_DIG") for k in state)

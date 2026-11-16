@@ -610,6 +610,30 @@ def check_opening_update(state: dict, today: str, now: datetime.datetime | None 
     return 0
 
 
+def _pick_stop(b: dict) -> float:
+    """The stop the Morning Digest printed for this pick, 0.0 when it had none."""
+    try:
+        return float(b.get("sl") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _stop_hit_alert(state: dict, today: str, b: dict, base: str, price: float) -> int:
+    """One 'STOP HIT' message the first time a digest BUY trades at or under the
+    stop it was sent with (16 Nov: a pick closed 3% under its stop and the day's
+    messages only said 'down 2%+ at one point')."""
+    stop = _pick_stop(b)
+    key = f"stop_{base}"
+    if stop <= 0 or price > stop or state.get(key) == today or _FORCE_SEND:
+        return 0
+    msg = (f"🛑 STOP HIT  <b>{_h(base)}</b>  ₹{price:,.2f} · stop was ₹{stop:,.2f} · {_now_hm()}"
+           "\n   This morning's digest BUY is at or under its stop.")
+    if dispatch(msg):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
 def check_pick_moves(state: dict, today: str) -> int:
     try:
         import trade_store as store
@@ -629,13 +653,14 @@ def check_pick_moves(state: dict, today: str) -> int:
             print(f"[moves] {base}: no quote")
             continue
         chg = float(q.get("chg_pct") or 0.0)
+        price = float(q["price"])
+        sent += _stop_hit_alert(state, today, b, base, price)
         if abs(chg) < _MOVE_PCT:
             continue
         direction = "up" if chg > 0 else "down"
         key = f"mv_{direction}_{base}"
         if _already_fired(state, key, today):
             continue
-        price = float(q["price"])
         prev = q.get("prev_close")
         ss = _pick_session(base, today)
         lv = _pick_levels(store, base, today)
@@ -663,6 +688,12 @@ _VERDICT_MAX_PER_RUN = 8
 # BUY / STRONG BUY names (9 Nov), and 8 per 15-min run became ~40 messages by
 # 10:30 IST. Strongest names go first, so the cap keeps the best reads.
 _VERDICT_MAX_PER_DAY = 10
+# Names that reach BUY at 70+ only after the day's first run get their own
+# allowance. On 16 Nov the first run spent the whole day cap on the pre-open
+# scan (five of the eight were the digest's own names, sent 30 min earlier), so
+# nothing that turned BUY during the session could be sent.
+_VERDICT_FRESH_MAX_PER_DAY = 10
+_VSEEN, _VFRESH = "vseen_", "vfresh_"
 _TOMORROW_MAX_SNAPSHOT_AGE_H = 3             # caps a burst now that the whole scan is read
 
 
@@ -774,18 +805,45 @@ def check_verdict_alerts(state: dict, today: str) -> int:
           f"{_snapshot_ist_label(gen_at)} ({n_all - len(hits)} under {_WATCH_FLOOR:.0f} left as WATCH)")
 
     regime = _regime_note()
-    sent_today = sum(1 for k, v in state.items() if k.startswith("verdict_") and v == today)
-    room = min(_VERDICT_MAX_PER_RUN, max(0, _VERDICT_MAX_PER_DAY - sent_today))
-    batch = []
-    for verdict, b, fv in sorted(hits, key=lambda h: (h[0] != "STRONG BUY", -float(h[1].get("score") or 0))):
-        key = f"verdict_{verdict.replace(' ', '_').lower()}_{_base_symbol(b.get('ticker'))}"
+    # The digest already sent its names as BUY this morning: not news, no slot.
+    digest = _today_picks(store, today)
+    digest_names = {_base_symbol(b.get("ticker")) for b in (digest or {}).get("buys", [])}
+    # First run of the day: every name in the scan is the opening list. A name
+    # first seen at 70+ on a later run is fresh and draws on its own allowance.
+    first_run = not any(k.startswith(_VSEEN) and v == today for k, v in state.items())
+    names = {_base_symbol(h[1].get("ticker")) for h in hits}
+    fresh_names = set() if first_run else {
+        n for n in names if state.get(_VSEEN + n) != today or state.get(_VFRESH + n) == today}
+    if not _FORCE_SEND:
+        for n in names:
+            state[_VSEEN + n] = today
+            if n in fresh_names:
+                state[_VFRESH + n] = today
+
+    def _n_sent(fresh: bool) -> int:
+        return sum(1 for k, v in state.items() if v == today and k.startswith("verdict_")
+                   and (state.get(_VFRESH + k.rsplit("_", 1)[-1]) == today) == fresh)
+
+    left = {False: max(0, _VERDICT_MAX_PER_DAY - _n_sent(False)),
+            True: max(0, _VERDICT_FRESH_MAX_PER_DAY - _n_sent(True))}
+    batch, capped = [], False
+    for verdict, b, fv in sorted(hits, key=lambda h: (_base_symbol(h[1].get("ticker")) not in fresh_names,
+                                                      h[0] != "STRONG BUY", -float(h[1].get("score") or 0))):
+        base = _base_symbol(b.get("ticker"))
+        if base in digest_names:
+            continue
+        key = f"verdict_{verdict.replace(' ', '_').lower()}_{base}"
         if _already_fired(state, key, today):
             continue
-        if len(batch) >= room:
-            print(f"[verdicts] cap reached ({_VERDICT_MAX_PER_RUN}/run, {_VERDICT_MAX_PER_DAY}/day, "
-                  f"{sent_today} already today); the rest are on Top Picks")
-            break
+        fresh = base in fresh_names
+        if len(batch) >= _VERDICT_MAX_PER_RUN or left[fresh] <= 0:
+            capped = True
+            continue
+        left[fresh] -= 1
         batch.append((key, verdict, b, fv))
+    if capped:
+        print(f"[verdicts] cap reached ({_VERDICT_MAX_PER_RUN}/run, {_VERDICT_MAX_PER_DAY}/day from the "
+              f"opening scan, {_VERDICT_FRESH_MAX_PER_DAY}/day new since the open); the rest are on Top Picks")
     if not batch:
         return 0
     # One Telegram message per run, not one per stock (9 Nov: ~40 separate pings).
@@ -853,6 +911,9 @@ def check_picks_recap(state: dict, today: str, now: datetime.datetime | None = N
             extra.append(f"day range ₹{ss['low']:,.2f}–₹{ss['high']:,.2f}")
         extra += [f"{d} {_MOVE_PCT:g}%+ at one point"
                   for d in ("up", "down") if state.get(f"mv_{d}_{base}") == today]
+        stop = _pick_stop(b)
+        if stop > 0 and (price <= stop or state.get(f"stop_{base}") == today):
+            extra.append(f"STOP HIT (stop ₹{stop:,.2f})")
         if extra:
             rows.append("   " + " · ".join(extra))
 

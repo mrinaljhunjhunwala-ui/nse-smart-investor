@@ -440,3 +440,44 @@ def test_postgres_ddl_upsert_and_status_round_trip():
     assert ps.price_store_status()["rows"] >= 30
     assert ps.all_latest_dates()["PGT.NS"] == dates[-1]
     assert ps.delete_symbol("PGT.NS") == 30
+
+
+def test_rate_limit_slows_the_pace():
+    clk = _FakeClock()
+    th = wps.Throttle(1.4, clock=clk, sleep=clk.sleep)
+    assert th.slow_down() == pytest.approx(1.4 / wps.SLOW_DOWN_FACTOR)
+    for _ in range(20):
+        th.slow_down()
+    assert 1.0 / th.interval == pytest.approx(wps.MIN_RPS)       # never slower than the floor
+
+
+def test_time_budget_stops_cleanly_with_a_summary(monkeypatch):
+    """16 Nov: the first live run was killed by the workflow limit with no summary line."""
+    monkeypatch.setenv("PRICE_STORE_BUDGET_S", "100")
+    dates = _sessions_ending(_last_session(), 10)
+    clk = _FakeClock()
+
+    def slow_fetch(sym, d1, d2):
+        clk.t += 60
+        return _frame(dates), "ok"
+
+    syms = [f"S{i}.NS" for i in range(5)]
+    r = wps.run(syms, fetch=slow_fetch, clock=clk, sleep=clk.sleep)
+    assert (r["ok"], r["skipped"]) == (2, 3)
+    assert "stopped at the 2-min budget, 3 left for the next run" in r["line"]
+    monkeypatch.setenv("PRICE_STORE_BUDGET_S", "100000")
+    r2 = wps.run(syms, fetch=slow_fetch, clock=clk, sleep=clk.sleep)   # carries on where it stopped
+    assert (r2["ok"], r2["skipped"]) == (5, 0)
+
+
+def test_summary_counts_rate_limits():
+    seq = ["rate_limited", "ok"]
+    dates = _sessions_ending(_last_session(), 10)
+
+    def fake_fetch(sym, d1, d2):
+        st = seq.pop(0)
+        return (_frame(dates), "ok") if st == "ok" else (None, st)
+
+    clk = _FakeClock()
+    r = wps.run(["AAA.NS"], fetch=fake_fetch, clock=clk, sleep=clk.sleep)
+    assert r["ok"] == 1 and r["line"].endswith("· 1 rate limits")

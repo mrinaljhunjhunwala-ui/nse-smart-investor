@@ -51,20 +51,29 @@ def test_hold_when_thesis_intact_but_not_extending():
     assert 2 <= result.filters_passing <= 6
 
 
-def test_exit_watch_when_price_breaks_below_sma50():
-    """SMA50 breakdown must flip to EXIT_WATCH regardless of P&L."""
-    # Build an uptrend, then a hard 15% drop at the end
+def test_trim_when_price_breaks_below_sma50_with_longer_trend_up():
+    """Under the 50-day average while it is still above the 200-day: TRIM, not SELL."""
     closes = _uptrend(240, drift=0.4)
-    # Force last 10 bars to crash below SMA50
     sma50_level = float(pd.Series(closes).rolling(50).mean().iloc[-1])
     for i in range(10):
         closes = np.append(closes, sma50_level * 0.90)
     df = _mk_frame(closes)
+    holding = {"symbol": "PULLBACK", "qty": 10, "avg_price": 50.0, "ltp": float(closes[-1])}
+    result = analyse_delivery_holding(holding, df)
+    assert result is not None
+    assert result.posture == "TRIM_WATCH", result.posture
+    assert "50-day average" in result.reason and "longer trend still up" in result.reason
+
+
+def test_exit_watch_when_below_sma50_and_longer_trend_broken():
+    """Under the 50-day average with the 50-day under the 200-day: EXIT_WATCH (SELL)."""
+    closes = np.concatenate([_uptrend(150, drift=0.4), 160.0 - np.arange(110) * 0.6])
+    df = _mk_frame(closes)
     holding = {"symbol": "BROKEN", "qty": 10, "avg_price": 50.0, "ltp": float(closes[-1])}
     result = analyse_delivery_holding(holding, df)
     assert result is not None
-    assert result.posture == "EXIT_WATCH", \
-        f"expected EXIT_WATCH on SMA50 breakdown, got {result.posture}"
+    assert result.sma50 < result.sma200
+    assert result.posture == "EXIT_WATCH", result.posture
     assert "50-day average" in result.reason
     assert result.suggested_stop is not None
 
