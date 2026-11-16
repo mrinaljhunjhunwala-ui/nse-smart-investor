@@ -1960,6 +1960,26 @@ def _catalyst_live(state: dict, today: str) -> int:
         return 0
 
 
+def _movers_radar(state: dict, today: str) -> int:
+    """Intraday movers radar (all NSE gainers by market-cap tier). Isolated like _catalyst_live."""
+    try:
+        from alerts.movers_alerts import check_movers_radar
+        return int(check_movers_radar(state, today) or 0)
+    except Exception as e:
+        print(f"[movers] radar check failed: {type(e).__name__}: {e}")
+        return 0
+
+
+def _holding_guard(state: dict, today: str) -> int:
+    """Holdings: sharp falls and bad filings only (independent of ALERT_HOLDINGS)."""
+    try:
+        from alerts.movers_alerts import check_holding_guard
+        return int(check_holding_guard(state, today) or 0)
+    except Exception as e:
+        print(f"[holding-guard] check failed: {type(e).__name__}: {e}")
+        return 0
+
+
 def _parse_mode(argv: list[str]) -> str:
     for a in argv:
         if a.startswith("--mode="):
@@ -2055,6 +2075,8 @@ def main() -> int:
             "vix":       check_vix_regime(state, today),
             "nifty":     check_nifty_trend(state, today),
             "catalyst":  _catalyst_live(state, today),
+            "movers":    _movers_radar(state, today),
+            "guard":     _holding_guard(state, today),
         }
         print("[main] per-check: " + ", ".join(f"{k}={v}" for k, v in _counts.items()))
         total += sum(_counts.values())

@@ -18,6 +18,7 @@ slow ``tests/test_provenance_*`` canaries use (those tests import the
   nse_results_filed  results filers, last 10 days            no  (catalyst alerts)
   nse_quarterly      results-comparision for RELIANCE (>=4q) no  (catalyst alerts)
   nse_preopen        market-data-pre-open?key=ALL            no  (catalyst alerts)
+  nse_gainers        live-analysis-variations?index=gainers  no  (movers radar)
 
 Each row is ``ok`` / ``degraded`` / ``FAILED`` with a one-line reason and the
 schema check that failed. Prints a table; with ``--telegram`` also sends it via
@@ -386,6 +387,22 @@ def _probe_nse_preopen() -> ProbeResult:
                                           f"{'present' if CANARY_SYMBOL in snap else 'absent'}")
 
 
+def _probe_nse_gainers() -> ProbeResult:
+    import data.nse_movers as NM
+    rows = NM.fetch_nse_gainers()
+    fail = check_rows(rows, ("symbol", "pct", "price"), min_rows=10)
+    if fail:
+        return ProbeResult("nse_gainers", FAILED, fail, "check_rows(gainers >= 10)")
+    top = rows[0]
+    with_turnover = sum(1 for r in rows if r.get("turnover_cr") is not None)
+    return ProbeResult("nse_gainers", OK, f"{len(rows)} gainers; top {top['symbol']} {top['pct']:+.1f}%; "
+                                          f"turnover on {with_turnover}")
+
+
+# Movers-radar probe (data/nse_movers.py). Non-scoring; the radar falls back to the scan snapshot.
+MOVERS_PROBES: List[tuple] = [("nse_gainers", _probe_nse_gainers, False)]
+
+
 # Catalyst-engine probes (data/nse_announcements.py). Never scoring paths: they report but never
 # make the job exit 1. Kept out of PROBES so the core list (and its tests) stay unchanged.
 CATALYST_PROBES: List[tuple] = [
@@ -485,7 +502,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    results = run_probes(PROBES + CATALYST_PROBES)
+    results = run_probes(PROBES + CATALYST_PROBES + MOVERS_PROBES)
     print(format_table(results))
     code = exit_code(results)
     print(f"\nexit {code}: " + ("a scoring provider FAILED" if code else "no scoring provider FAILED"))
