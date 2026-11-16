@@ -295,8 +295,71 @@ def paper_close_trade(
     trade_id: int, exit_price: float,
     reason: str = "Manual close",
     path: str = "trades.db",
+    exit_time: str = None,
 ):
-    _store.close_trade(trade_id, exit_price, reason=reason)
+    return _store.close_trade(trade_id, exit_price, reason=reason, exit_time=exit_time)
+
+
+def reconcile_paper_exits(account: str = None, history_fn=None) -> list:
+    """Close OPEN paper trades whose own SL / TP was already hit on a past daily bar.
+
+    Live auto-close only sees the current price while the page is open, so trades
+    that touched SL / TP while the app was asleep (or intraday, then pulled back)
+    never closed and never showed in Closed Trade History. This replays daily bars
+    since entry (trading.paper_exits.find_exit) and closes each trade at the first
+    touch, stamped with the session it happened. Runs regardless of the live
+    auto-close toggle: it records what already happened under the trade's own plan.
+
+    history_fn(ticker) -> daily OHLC frame; defaults to data.fetcher.fetch_single.
+    Never raises; a ticker with no history is skipped.
+    """
+    from trading.paper_exits import find_exit
+
+    if history_fn is None:
+        def history_fn(tk):
+            from data.fetcher import fetch_single
+            return fetch_single(tk, period="1y", interval="1d")
+
+    closed = []
+    try:
+        rows = _store.fetch_open(account)
+    except Exception as _e:
+        _log.warning("reconcile_paper_exits: could not read open trades: %s", _e)
+        return closed
+    if rows is None or rows.empty:
+        return closed
+
+    today = _ist_now().date()
+    for _, r in rows.iterrows():
+        tk = str(r.get("ticker", ""))
+        try:
+            bars = history_fn(tk)
+            acct = str(r.get("account") or account or "My Account")
+            hit = find_exit(
+                bars, r.get("timestamp"), r.get("sl"), r.get("tp"),
+                action=str(r.get("action") or "BUY"),
+                product=paper_account_type(acct),
+                today=today,
+            )
+            if not hit:
+                continue
+            exit_ts = f"{hit['exit_date'].isoformat()}T15:30:00"
+            if paper_close_trade(int(r["id"]), hit["exit_price"], hit["reason"],
+                                 exit_time=exit_ts):
+                ep = float(r.get("price", 0) or 0)
+                qty = int(r.get("quantity", 0) or 0)
+                closed.append({
+                    "ticker":  tk.replace(".NS", ""),
+                    "type":    "catchup",
+                    "exit":    hit["exit_price"],
+                    "date":    hit["exit_date"],
+                    "reason":  hit["reason"],
+                    "pnl":     (hit["exit_price"] - ep) * qty,
+                    "account": acct,
+                })
+        except Exception as _e:
+            _log.warning("reconcile_paper_exits: %s skipped: %s", tk, _e)
+    return closed
 
 
 def paper_edit_trade(
