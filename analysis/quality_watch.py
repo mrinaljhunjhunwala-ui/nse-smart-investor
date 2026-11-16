@@ -28,6 +28,27 @@ from typing import Dict, Optional, Tuple
 from analysis.fundamentals import valuation_decision as _vd
 from analysis.sector_classification import SectorProfile, quality_ratio_keys
 
+def ranking_log_entries(rows: list) -> list:
+    """Compact, JSON-safe log rows for a Quality Watch ranking: ticker, quality
+    score, fundamental score, posture, flag counts. Rows without a posture (a
+    failed fetch) are left out. Pure."""
+    out = []
+    for r in rows or []:
+        if not r.get("ticker") or not r.get("posture"):
+            continue
+
+        def _num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return None if f != f else round(f, 2)
+        out.append({"ticker": str(r["ticker"]), "quality_score": _num(r.get("quality_score")),
+                    "fund_score": _num(r.get("fund_score")), "posture": str(r["posture"]),
+                    "red_flags": int(r.get("red_flags") or 0), "amber_flags": int(r.get("amber_flags") or 0)})
+    return out
+
+
 POSTURE_POINTS: Dict[str, int] = {
     _vd.SUPPORTED_BY_GROWTH_AND_QUALITY: 40,
     _vd.REASONABLE: 40,
@@ -57,8 +78,16 @@ def compute_quality_score(posture: Optional[str], confidence: Optional[str],
                           roe: Optional[float] = None, roce: Optional[float] = None,
                           debt_to_equity: Optional[float] = None,
                           pb: Optional[float] = None,
-                          sector_profile: Optional[SectorProfile] = None) -> Tuple[int, dict]:
+                          sector_profile: Optional[SectorProfile] = None,
+                          fundamental_score: Optional[float] = None) -> Tuple[int, dict]:
     """Return (score_0_to_100, breakdown). Never raises.
+
+    `fundamental_score` (0-100, analysis/fundamental_score.py: Piotroski F +
+    growth + valuation sanity, the number Analyze Stock uses) fills the
+    20-point quality block when it is available, so the two pages cannot
+    disagree about the same company (owner decision, 16 Nov 2026). Without it
+    the block falls back to the sector-aware ratios below.
+    breakdown["quality_basis"] says which was used.
 
     Missing ratios are rescaled out (FIX QW1): "unknown" reduces coverage,
     it is not scored as the worst reading. If no applicable ratio is
@@ -90,6 +119,14 @@ def compute_quality_score(posture: Optional[str], confidence: Optional[str],
         weight += mx
         used.append(key)
     breakdown["quality_ratios"] = round(min(20.0, q * 20.0 / weight)) if weight > 0 else 10
+    breakdown["quality_basis"] = "ratios" if weight > 0 else "none"
+    try:
+        fs = float(fundamental_score) if fundamental_score is not None else None
+    except (TypeError, ValueError):
+        fs = None
+    if fs is not None and fs == fs:
+        breakdown["quality_ratios"] = round(20.0 * max(0.0, min(100.0, fs)) / 100.0)
+        breakdown["quality_basis"] = "fundamental_score"
 
     total = (breakdown["valuation_posture"] + breakdown["confidence"]
              + breakdown["governance_safety"] + breakdown["quality_ratios"])

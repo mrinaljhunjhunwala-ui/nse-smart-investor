@@ -2031,3 +2031,22 @@ def price_source_caption(status: dict | None) -> str:
         return (f"Prices: store (as of {status['latest_date']}, {int(status.get('symbols') or 0)} names)"
                 " · Yahoo fallback")
     return "Prices: Yahoo (store empty)"
+
+
+@st.cache_data(ttl=60 * 60, show_spinner=False)
+def load_band_record(band: str, horizon_days: int = 20):
+    """Track record of one composite-score band from the verdict ledger
+    (analysis.calibration_summary.band_record), cached an hour. `band` is a
+    score_band label; any score inside the band gives the same answer. None
+    when the ledger is unreachable or too few names have settled."""
+    try:
+        from analysis import verdict_ledger as _vl
+        from analysis.calibration_summary import SCORE_BANDS, band_record
+        df = _vl.load_ledger(limit=1_000_000)
+        if df is None or df.empty or _vl.ledger_error(df):
+            return None
+        mid = {label: (lo if lo is not None else (hi or 50) - 1) for lo, hi, label in SCORE_BANDS}
+        return band_record(df, mid.get(band), horizon_days)
+    except Exception as _e:
+        _log.debug("cache.load_band_record degraded: %s", _e)
+        return None

@@ -26,27 +26,12 @@ import numpy as np                                              # noqa: E402
 import pandas as pd                                             # noqa: E402
 
 from analysis.calibration_summary import (                      # noqa: E402,F401
-    BULLISH, _wilson_lower, group_stats, one_per_day_ticker, settled,
+    BULLISH, SCORE_BANDS, _wilson_lower, group_stats, one_per_day_ticker, score_band, settled,
 )
 
 HORIZONS = (5, 20)
-SCORE_BANDS = ((None, 50, "under 50"), (50, 60, "50-59"), (60, 70, "60-69"),
-               (70, 80, "70-79"), (80, None, "80 and over"))
 BROAD_INDEX = "^CRSLDX"                 # Nifty 500 on Yahoo
 BROAD_NAME = "Nifty 500"
-
-
-def score_band(score: Any) -> Optional[str]:
-    try:
-        s = float(score)
-    except (TypeError, ValueError):
-        return None
-    if s != s:
-        return None
-    for lo, hi, label in SCORE_BANDS:
-        if (lo is None or s >= lo) and (hi is None or s < hi):
-            return label
-    return None
 
 
 def bench_returns(index_df: Optional[pd.DataFrame], dates: List[str], h: int) -> Dict[str, float]:
@@ -207,6 +192,64 @@ def build_report(df: pd.DataFrame, regimes: Optional[Dict[str, Optional[str]]] =
     return lines
 
 
+QW_BANDS = ((70, None, "70 and over"), (50, 70, "50-69"), (None, 50, "under 50"))
+
+
+def grade_quality_log(logs: Dict[str, list], closes: Dict[str, Any], bench: Optional[pd.DataFrame],
+                      horizons: tuple = (20, 60)) -> List[str]:
+    """Quality Watch rankings (KV quality_watch_log:<date> -> rows) graded by
+    quality-score band: average move minus the broad index, h sessions after the
+    logging day. `closes` maps ticker -> daily Close series. Pure."""
+    out = ["", "=== Quality Watch score, by band (vs the " + BROAD_NAME + ") ==="]
+    if not logs:
+        return out + ["  no Quality Watch rankings logged yet (logging started 16 Nov 2026; "
+                      "open the page to log a day)"]
+    out.append(f"  {len(logs)} logged day(s): " + ", ".join(sorted(logs)[:6]) + (" ..." if len(logs) > 6 else ""))
+    for h in horizons:
+        rows = []
+        for day, entries in logs.items():
+            b = bench_returns(bench, [day], h).get(day)
+            for e in entries or []:
+                ser = closes.get(e.get("ticker"))
+                r = bench_returns(pd.DataFrame({"Close": ser}), [day], h).get(day) if ser is not None else None
+                q = e.get("quality_score")
+                if r is None or b is None or q is None:
+                    continue
+                band = next(lbl for lo, hi, lbl in QW_BANDS if (lo is None or q >= lo) and (hi is None or q < hi))
+                rows.append({"logged_date": day, "ticker": e["ticker"], "ret": r, "nifty": b,
+                             "alpha": r - b, "band": band})
+        if not rows:
+            out.append(f"  {h} sessions on: nothing has settled yet")
+            continue
+        out += _table(f"{h} sessions on:", group_stats(pd.DataFrame(rows), "band"), [b[2] for b in QW_BANDS])
+    return out
+
+
+def _quality_log_lines(broad: Optional[pd.DataFrame]) -> List[str]:
+    """Read the logged rankings and their price histories; never raises."""
+    try:
+        import datetime as _dt
+
+        import trade_store as _ts
+        from data.fetcher import fetch_single
+        from utils.snapshot_time import ist_now
+        today, logs = ist_now().date(), {}
+        for k in range(0, 400):
+            day = (today - _dt.timedelta(days=k)).isoformat()
+            v = _ts.kv_get(f"quality_watch_log:{day}", user_id="_system")
+            if isinstance(v, dict) and v.get("rows"):
+                logs[day] = list(v["rows"].values())
+        closes: Dict[str, Any] = {}
+        for t in sorted({e["ticker"] for es in logs.values() for e in es})[:400]:
+            try:
+                closes[t] = fetch_single(t, period="2y")["Close"]
+            except Exception:                                   # noqa: BLE001
+                continue
+        return grade_quality_log(logs, closes, broad)
+    except Exception as e:                                      # noqa: BLE001
+        return ["", f"Quality Watch log could not be graded ({type(e).__name__}: {e})"]
+
+
 def _registered_lines(vl: Any, df: pd.DataFrame, nifty: Optional[pd.DataFrame]) -> List[str]:
     out = ["", "=== Registered tests (reported as they stand; not to be retuned) ==="]
     for name, rule in (("DECISION_RULE", vl.DECISION_RULE), ("DECISION_RULE_RISING", vl.DECISION_RULE_RISING)):
@@ -267,6 +310,7 @@ def main() -> int:
     lines = build_report(df, regimes, broad=broad, nifty=nifty)
     if not df.empty:
         lines += _registered_lines(vl, df, nifty)
+    lines += _quality_log_lines(broad)
     print("\n".join(lines))
     step = os.environ.get("GITHUB_STEP_SUMMARY")
     if step:

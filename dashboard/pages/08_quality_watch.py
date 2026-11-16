@@ -45,6 +45,7 @@ nifty50/100. The Deep Dive's heavier calls (quarterly statements, peers,
 raw shareholding, documents, sizing) still run only for the one ticker
 you click into — never across the whole universe.
 """
+import html
 import os, sys
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -113,6 +114,8 @@ _RATIO_NAMES = {"roe": "ROE", "roce": "ROCE", "debt_to_equity": "D/E", "pb": "P/
 
 
 def _ratio_label(bd: dict) -> str:
+    if bd.get("quality_basis") == "fundamental_score":
+        return "Fundamental score, as on Analyze Stock"
     used = bd.get("ratios_used") or []
     return "/".join(_RATIO_NAMES.get(k, k) for k in used) or "none available"
 
@@ -129,6 +132,7 @@ def _assess_one(ticker: str) -> dict:
         "roe": None, "roce": None, "debt_to_equity": None,
         "red_flags": 0, "amber_flags": 0, "green_flags": 0,
         "quality_score": 0, "score_breakdown": {}, "error": None,
+        "fund_score": None, "rev_yoy": None, "data_label": "", "data_stale": False,
     }
     try:
         from analysis.fundamentals.service import default_service as _fund_service
@@ -159,6 +163,19 @@ def _assess_one(ticker: str) -> dict:
             "roce": getattr(r, "roce", None) if r else None,
             "debt_to_equity": getattr(r, "debt_to_equity", None) if r else None,
         })
+        # Same Fundamental score Analyze Stock uses (Piotroski F + growth +
+        # valuation sanity), revenue growth, and where / how old the figures are.
+        try:
+            from analysis.fundamental_score import compute_fundamental_score
+            from analysis.fundamentals.provenance import provenance as _prov
+            _fs = compute_fundamental_score(cf, sector_profile=sector_profile, analytics=analytics_res)
+            out["fund_score"] = getattr(_fs, "score", None)
+            _ry = _fund_analytics.revenue_yoy(cf)
+            out["rev_yoy"] = _ry.value if getattr(_ry, "available", False) else None
+            _pv = _prov(cf)
+            out["data_label"], out["data_stale"] = _pv["label"], bool(_pv["stale"])
+        except Exception as _fs_e:
+            _log.debug("quality_watch: fundamental score failed for %s: %s", ticker, _fs_e)
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
         _log.debug("quality_watch: fundamentals/valuation failed for %s: %s", ticker, e)
@@ -181,11 +198,31 @@ def _assess_one(ticker: str) -> dict:
     score, breakdown = _qw_score(
         out["posture"], out["confidence"], out["red_flags"], out["amber_flags"],
         roe=out["roe"], roce=out["roce"], debt_to_equity=out["debt_to_equity"],
-        pb=out["pb"], sector_profile=_profile,
+        pb=out["pb"], sector_profile=_profile, fundamental_score=out.get("fund_score"),
     )
     out["quality_score"] = score
     out["score_breakdown"] = breakdown
     return out
+
+
+def _log_quality_ranking(ranked: pd.DataFrame) -> None:
+    """Store today's ranking once a day in KV `quality_watch_log:<IST date>` so
+    the score gets a track record (graded by scripts/calibration_report.py).
+    Deliberately NOT the verdict ledger: DECISION_RULE pools every ledger
+    source, and these are not BUY calls. Best effort; never raises."""
+    try:
+        import trade_store as _ts
+        from analysis.quality_watch import ranking_log_entries
+        from utils.snapshot_time import ist_now
+        key = f"quality_watch_log:{ist_now().date().isoformat()}"
+        prev = _ts.kv_get(key, user_id="_system") or {}
+        rows = dict(prev.get("rows") or {}) if isinstance(prev, dict) else {}
+        new = {e["ticker"]: e for e in ranking_log_entries(ranked.to_dict("records"))}
+        if set(new) - set(rows):
+            rows.update({k: v for k, v in new.items() if k not in rows})
+            _ts.kv_set(key, {"rows": rows}, user_id="_system")
+    except Exception as _e:
+        _log.debug("quality_watch: ranking log skipped: %s", _e)
 
 
 @st.cache_data(ttl=4 * 60 * 60, show_spinner=False)
@@ -699,6 +736,7 @@ else:
                 ranked = ranked[ranked["red_flags"] == 0]
 
             ranked = ranked.sort_values(by="quality_score", ascending=False)
+            _log_quality_ranking(ranked)
 
             st.markdown("---")
             st.markdown(
@@ -771,7 +809,16 @@ else:
                             f'confidence: {row["confidence"]}'
                             + (f' · P/E {row["pe"]:.1f}x' if pd.notna(row["pe"]) else '')
                             + (f' · P/B {row["pb"]:.1f}x' if pd.notna(row["pb"]) else '')
-                            + '</span></div>',
+                            + (f' · Fundamental {int(row["fund_score"])}/100'
+                               if pd.notna(row.get("fund_score")) else ' · Fundamental score n/a')
+                            + (f' · revenue {row["rev_yoy"]:+.0f}% YoY'
+                               if pd.notna(row.get("rev_yoy")) else '')
+                            + '</span>'
+                            + (f'<br><span style="font-size:11px;color:'
+                               f'{"var(--amber)" if row.get("data_stale") else "var(--faint)"}">'
+                               f'{html.escape(str(row.get("data_label") or ""))}</span>'
+                               if row.get("data_label") else '')
+                            + '</div>',
                             unsafe_allow_html=True,
                         )
                     with btn_col1:

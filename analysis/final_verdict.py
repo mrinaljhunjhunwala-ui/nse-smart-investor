@@ -619,6 +619,39 @@ def combine(*,
     )
 
 
+GATE_TITLES = {"technical": "Chart and momentum", "quality": "Business quality and flags",
+               "valuation": "Price paid", "thesis": "Thesis", "trend": "Trend quality"}
+GATE_ORDER = ("quality", "valuation", "thesis", "trend", "technical")
+
+
+def gate_rows(fv: Optional["FinalVerdict"]) -> List[Dict[str, Any]]:
+    """The checks behind a verdict as plain rows for a 'why' strip, in the order
+    the tree applies them (business first, timing last). Each row: name, title,
+    state ('blocks' | 'weakens' | 'supports' | 'passes' | 'no data'), message,
+    limiting (True on the check that held the verdict back most). Pure."""
+    if fv is None:
+        return []
+    by = {g.name: g for g in (getattr(fv, "gates", None) or [])}
+    rows: List[Dict[str, Any]] = []
+    for name in GATE_ORDER:
+        g = by.get(name)
+        if g is None:
+            continue
+        if g.passed is None:
+            state = "no data"
+        elif g.effect == "veto":
+            state = "blocks"
+        elif g.effect == "damp":
+            state = "weakens"
+        elif g.effect == "amplify":
+            state = "supports"
+        else:
+            state = "passes" if g.passed else "weakens"
+        rows.append({"name": name, "title": GATE_TITLES.get(name, name.title()), "state": state,
+                     "message": g.message, "limiting": name == getattr(fv, "limiting_gate", None)})
+    return rows
+
+
 def _subsystem_labels(composite_action, tqs, valuation_posture, thesis_verdict,
                       quality_score, quality_flags) -> Dict[str, str]:
     labels: Dict[str, str] = {}
