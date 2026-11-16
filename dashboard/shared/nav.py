@@ -67,7 +67,8 @@ _group_icons: dict = {
 # view switch, view labels in display order). The page file passes the same
 # key/labels to dashboard.views.view_switch().
 _PAGE_VIEWS: dict = {
-    "Markets":       ("mk_view", ["📡 Live Ticker", "📊 Breadth & Macro", "🏦 FII / DII Flows"]),
+    "Markets":       ("mk_view", ["📡 Live Ticker", "🚀 Today's Movers", "📊 Breadth & Macro",
+                                 "🏦 FII / DII Flows"]),
     "Find Ideas":    ("fi_view", ["🔎 Smart Screener", "📈 Trend Quality Score"]),
     "Trading Tools": ("tt_view", ["⚡ Intraday Trader", "📐 Position Sizer"]),
 }
