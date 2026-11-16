@@ -133,3 +133,22 @@ def test_command_centre_keeps_scan_notes_in_data_health_only():
     footer = src[src.index('with st.expander("Data health details"'):]
     assert "price_source_caption" in footer and "_cc_excluded_note" in footer
     assert src.index("_render_open_trades_line()") < src.index("_render_top_picks_section(_cc_vix_r")
+
+
+def test_my_lists_unlocks_in_place(no_network, monkeypatch):
+    """A locked list gets a PIN box right on Today; the right PIN unlocks My Portfolio there."""
+    monkeypatch.setenv("ANGEL_PAGE_PIN", "4821")
+    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    labels = [e.label for e in at.expander]
+    assert any("Unlock My Portfolio" in lb for lb in labels) and any("Unlock Angel One" in lb for lb in labels)
+    at.text_input(key="pin_inline_in_my_portfolio_today_lists").input("1111")
+    at.button(key="FormSubmitter:pin_inline_my_portfolio_today_lists-Unlock").click().run()
+    assert "_pin_unlocked_at_my_portfolio" not in at.session_state
+    assert any("Wrong PIN" in str(e.value) for e in at.error)
+    at.text_input(key="pin_inline_in_my_portfolio_today_lists").input("4821")
+    at.button(key="FormSubmitter:pin_inline_my_portfolio_today_lists-Unlock").click().run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert "_pin_unlocked_at_my_portfolio" in at.session_state
+    assert not any("Unlock My Portfolio" in e.label for e in at.expander)
+    assert "_pin_unlocked_at_angel_one" not in at.session_state      # one PIN box unlocks one scope

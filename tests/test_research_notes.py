@@ -99,7 +99,7 @@ def test_locked_briefing_and_library(no_network):
     at = AppTest.from_file(_PAGE, default_timeout=120).run()
     assert not at.exception, [str(e.value) for e in at.exception]
     tab = _rn_tab(at)
-    assert any("Unlock **My Portfolio**" in str(i.value) for i in tab.info)
+    assert any("My Portfolio is locked" in str(c.value) for c in tab.caption)
     labels = [e.label for e in tab.expander]
     assert any("Portfolio · Dividend income check" in lb for lb in labels)
     assert any("PFC · FY25 AR" in lb for lb in labels)

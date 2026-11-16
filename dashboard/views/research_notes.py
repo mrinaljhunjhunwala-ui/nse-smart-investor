@@ -126,14 +126,12 @@ def _render_briefing(st) -> None:
     from analysis.research_notes import (
         PORTFOLIO_NOTES_KEY, QUESTION_PRESETS, build_portfolio_briefing, new_portfolio_note,
     )
-    from dashboard.shared.pin_gate import holdings_unlocked
+    from dashboard.shared.pin_gate import unlock_inline
     st.markdown("#### 💼 Portfolio briefing for Claude")
     st.caption("1 · Pick a question · 2 · Build the briefing and copy it into Claude (claude.ai or Claude Code) "
                "· 3 · Paste Claude's answer below and save it. It is kept here and linked to every stock "
                "it covered.")
-    if not holdings_unlocked():
-        st.info("Unlock **My Portfolio** (PIN) in this session to build a briefing from your holdings.",
-                icon="🔒")
+    if not unlock_inline("my_portfolio", "My Portfolio", "research_notes", collapsible=False):
         return
     holdings = _holdings_rows()
     if not holdings:

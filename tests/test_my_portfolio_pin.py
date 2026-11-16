@@ -70,4 +70,4 @@ def test_sidebar_quick_view_hides_holdings_until_unlocked(monkeypatch):
     at = AppTest.from_file(page, default_timeout=180).run()
     assert not at.exception, at.exception
     assert reads == []
-    assert any("Unlock **My Portfolio**" in str(c.value) for c in at.sidebar.caption)
+    assert any("My Portfolio is locked" in str(c.value) for c in at.sidebar.caption)

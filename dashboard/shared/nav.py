@@ -656,7 +656,7 @@ def render_sidebar(current: str = None) -> None:
     with st.sidebar.expander("💼 Portfolio Quick View", expanded=True):
         try:
             from dashboard.shared.trade_utils import load_manual_holdings
-            from dashboard.shared.pin_gate import holdings_unlocked
+            from dashboard.shared.pin_gate import unlock_inline
             # FIX: load_manual_holdings() returns a list[dict] (same as
             # my_portfolio.py consumes it — .append()/.pop() on it directly),
             # not a DataFrame. Calling .empty/.itertuples() on the raw list
@@ -665,10 +665,8 @@ def render_sidebar(current: str = None) -> None:
             # does locally before handing it to PortfolioManager.
             # Public app: holdings stay hidden until My Portfolio is unlocked
             # with the owner PIN in this browser session.
-            _locked = not holdings_unlocked()
+            _locked = not unlock_inline("my_portfolio", "My Portfolio", "sidebar_qv", collapsible=False)
             _holdings_list = [] if _locked else load_manual_holdings()
-            if _locked:
-                st.caption("🔒 Unlock **My Portfolio** with your PIN to see your holdings here.")
             _qdf = pd.DataFrame(_holdings_list) if _holdings_list else pd.DataFrame()
             if not _qdf.empty:
                 _qsyms = tuple((t if str(t).endswith(".NS") else f"{t}.NS")

@@ -3,6 +3,12 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Unlock in place (17 Nov, owner):** every place that only *reads* PIN-locked data now shows its
+  own PIN box instead of "go unlock it on My Portfolio / Angel One": Today → My lists (My Portfolio
+  and Angel One, each in a collapsed "🔒 Unlock … to include it here" expander), Research Notes'
+  portfolio briefing, the sidebar Portfolio Quick View and Analyze Stock's Portfolio fit.
+  `pin_gate.unlock_inline(scope, label, where)` reuses the same PIN, lockout and 15-minute unlock as
+  the page gates (`require_pin`, unchanged), never `st.stop()`s, and unlocks only the scope asked.
 - **Command Centre / Today follow-ups (17 Nov, owner):** the scan's price-source line and the
   "Left off this list" (new listings etc.) note moved from above the Top Picks cards into Command
   Centre's *Data health details* expander; a one-line **Open paper trades** strip (ticker, qty,

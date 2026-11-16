@@ -2623,10 +2623,9 @@ if analyze_btn or _prefill_active or (
                 try:
                     # FIX A9: manual holdings (kv-backed) replace the old CSV path read
                     from dashboard.shared.pin_gate import holdings_unlocked as _hu2
-                    _pf_holds_raw = load_manual_holdings() if _hu2() else []
-                    if not _hu2():
-                        st.caption("🔒 Unlock **My Portfolio** with your PIN to compare this stock "
-                                   "with your holdings.")
+                    from dashboard.shared.pin_gate import unlock_inline as _ul2
+                    _pf_holds_raw = (load_manual_holdings()
+                                     if _ul2("my_portfolio", "My Portfolio", "analyze_pf") else [])
                     _pf_holds = []
                     for _r in _pf_holds_raw:
                         _t = str(_r.get("ticker", "")).strip()
