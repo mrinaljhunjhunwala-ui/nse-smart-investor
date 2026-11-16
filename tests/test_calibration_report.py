@@ -92,3 +92,34 @@ def test_build_report_adds_broad_market_tables():
     assert "Every scored name vs the Nifty 500, by composite score:" in text and "method check" in text
     plain = "\n".join(C.build_report(_rows(), regimes))
     assert "Nifty 500" not in plain                                     # left out when no broad history
+
+
+def test_band_record_and_gate_rows():
+    from analysis.calibration_summary import band_record, score_band
+    from analysis.final_verdict import combine, gate_rows
+    df = pd.concat([_rows()] * 1, ignore_index=True)
+    assert score_band(72) == "70-79" and band_record(df, 72, 5, min_picks=2)["avg_alpha"] == 1.0
+    assert band_record(df, 72, 5) is None                           # under 20 settled names: no record shown
+    assert band_record(df, None, 5) is None and band_record(pd.DataFrame(), 72, 5) is None
+    fv = combine(composite_score=80, composite_action="BUY", quality_flags={"severity": "red"},
+                 valuation_posture="DEMANDING_VS_GROWTH")
+    rows = {r["name"]: r for r in gate_rows(fv)}
+    assert [r["name"] for r in gate_rows(fv)][0] == "quality"       # business first, timing last
+    assert rows["quality"]["state"] == "blocks" and rows["quality"]["limiting"] is True
+    assert rows["valuation"]["state"] == "weakens" and rows["thesis"]["state"] == "no data"
+    assert gate_rows(None) == []
+
+
+def test_grade_quality_log():
+    idx = pd.bdate_range("2026-09-01", periods=80)
+    flat = pd.Series(100.0, index=idx)
+    up = pd.Series([100.0] * 10 + [110.0] * 70, index=idx)
+    day = idx[5].date().isoformat()
+    logs = {day: [{"ticker": "HI.NS", "quality_score": 82}, {"ticker": "LO.NS", "quality_score": 40},
+                  {"ticker": "NOPX.NS", "quality_score": 75}]}
+    text = "\n".join(C.grade_quality_log(logs, {"HI.NS": up, "LO.NS": flat}, pd.DataFrame({"Close": flat})))
+    assert "70 and over" in text and "under 50" in text and "+10.0 pts" in text
+    assert "no Quality Watch rankings logged yet" in "\n".join(C.grade_quality_log({}, {}, None))
+    late = {idx[-3].date().isoformat(): logs[day]}
+    assert "nothing has settled yet" in "\n".join(
+        C.grade_quality_log(late, {"HI.NS": up, "LO.NS": flat}, pd.DataFrame({"Close": flat})))

@@ -79,3 +79,47 @@ def test_governance_and_posture_unaffected_by_fix(compute_quality_score):
     assert breakdown["valuation_posture"] == 15
     assert breakdown["confidence"] == 10
     assert breakdown["governance_safety"] == 25 - 8 - 6  # 25 - 1*8 - 2*3
+
+
+# ── one quality number on both pages; ranking log; data-age label ────────────
+def test_fundamental_score_fills_the_quality_block():
+    from analysis.quality_watch import compute_quality_score
+    base, bd0 = compute_quality_score("REASONABLE", "high", 0, 0, roe=0.20, roce=0.20, debt_to_equity=0.2)
+    assert bd0["quality_basis"] == "ratios" and bd0["quality_ratios"] == 20
+    s, bd = compute_quality_score("REASONABLE", "high", 0, 0, roe=0.20, roce=0.20, debt_to_equity=0.2,
+                                  fundamental_score=45)
+    assert bd["quality_basis"] == "fundamental_score" and bd["quality_ratios"] == 9 and s == base - 11
+    assert compute_quality_score("REASONABLE", "high", 0, 0, fundamental_score=100)[1]["quality_ratios"] == 20
+    for bad in (None, "x", float("nan")):                          # no usable score: ratios as before
+        assert compute_quality_score("REASONABLE", "high", 0, 0, roe=0.20, roce=0.20, debt_to_equity=0.2,
+                                     fundamental_score=bad)[0] == base
+    assert compute_quality_score("REASONABLE", "high", 0, 0)[1]["quality_basis"] == "none"
+
+
+def test_ranking_log_entries_are_compact_and_skip_failed_rows():
+    from analysis.quality_watch import ranking_log_entries
+    rows = [{"ticker": "A.NS", "quality_score": 81, "fund_score": 72.0, "posture": "REASONABLE",
+             "red_flags": 0, "amber_flags": 1, "phrase": "long text"},
+            {"ticker": "B.NS", "quality_score": 40, "fund_score": float("nan"), "posture": None},
+            {"ticker": None, "posture": "REASONABLE"}]
+    assert ranking_log_entries(rows) == [{"ticker": "A.NS", "quality_score": 81.0, "fund_score": 72.0,
+                                          "posture": "REASONABLE", "red_flags": 0, "amber_flags": 1}]
+    assert ranking_log_entries([]) == [] and ranking_log_entries(None) == []
+
+
+def test_provenance_label_and_staleness():
+    import datetime as dt
+    from types import SimpleNamespace as NS
+
+    from analysis.fundamentals.provenance import provenance
+    today = dt.date(2026, 11, 16)
+    cf = NS(statement_date=dt.date(2026, 3, 31), provider_name="Yahoo + Screener",
+            last_updated=dt.datetime(2026, 11, 15, 9, 0))
+    p = provenance(cf, today=today)
+    assert p["label"] == "Annual figures for the year ended 31 Mar 2026 · source Yahoo + Screener · fetched 15 Nov"
+    assert p["stale"] is False and p["age_days"] == 230
+    old = provenance(NS(statement_date=dt.date(2024, 3, 31), provider_name=None, last_updated=None), today=today)
+    assert old["stale"] is True and "months old" in old["label"]
+    assert provenance(None)["label"] == "No company financials found"
+    assert "not reported" in provenance(NS(statement_date=None, provider_name="X", last_updated=None,
+                                           latest_income=lambda: None), today=today)["label"]

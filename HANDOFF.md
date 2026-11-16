@@ -3,6 +3,29 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Presentation and one quality number (16 Nov, owner go-ahead):** (1) Quality Watch's 20-point
+  quality block now takes the Fundamental score Analyze Stock uses (`fundamental_score.py`:
+  Piotroski F + growth + valuation sanity) when it is available, ratios otherwise
+  (`quality_watch.compute_quality_score(fundamental_score=)`, `breakdown["quality_basis"]`); the
+  ranking changes for names where the two disagreed. (2) Every fundamentals line carries the
+  statement year, source and fetch date, amber when the annual statement is over ~18 months old
+  (`analysis/fundamentals/provenance.py`). (3) Analyze Stock shows "Why this verdict" under the
+  headline: the five checks in tree order with blocks / weakens / supports / passes / no data and
+  which one held the verdict back most (`final_verdict.gate_rows`). (4) Quality Watch rankings are
+  logged once a day to KV `quality_watch_log:<date>` (NOT the verdict ledger: DECISION_RULE pools
+  every ledger source) and graded by score band vs the Nifty 500 at 20 / 60 sessions in
+  `scripts/calibration_report.py`. (5) A "Track record" line beside the verdict gives the score
+  band's 20-session record from the ledger (`calibration_summary.band_record`, hidden under 20
+  settled names). (6) Revenue growth (YoY, the one fundamental the research supports) is shown on
+  both pages. No verdict logic, threshold or registered rule changed; golden snapshots pass.
+  **Long-term lens, findings, NOT changed (owner to decide):** the long read starts from 30%
+  composite + 30% TQS + 40% fundamentals, so 60% of its base is the chart, and 100% when the
+  Fundamental score is missing but valuation data exists; growth reaches it only through 20 of the
+  Fundamental score's 100 points; it uses the swing thresholds (65 = BUY); and no long outcome has
+  ever been graded (the ledger has settled 5 and 20 sessions only; 60 / 250-session columns exist).
+  Proposed, as a NEW separately registered rule so DECISION_RULE is untouched: base 70%
+  fundamentals + 30% trend, no long BUY without a Fundamental score, graded at 60 and 250 sessions
+  vs the Nifty 500. The page now says the long read has no track record.
 - **Follow-ups (15 Nov, evening):** (1) removed and renamed symbols stay resolvable:
   `tools/refresh_universe.update_former` records each refresh's removed symbols and detected
   renames in `data/nse_former_symbols.json` (published in the same auto PR), and

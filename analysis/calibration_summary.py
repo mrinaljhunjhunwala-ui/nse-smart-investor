@@ -69,6 +69,43 @@ def group_stats(df: pd.DataFrame, key: str) -> List[Dict[str, Any]]:
     return rows
 
 
+SCORE_BANDS = ((None, 50, "under 50"), (50, 60, "50-59"), (60, 70, "60-69"),
+               (70, 80, "70-79"), (80, None, "80 and over"))
+MIN_BAND_PICKS = 20
+
+
+def score_band(score: Any) -> Optional[str]:
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return None
+    if s != s:
+        return None
+    for lo, hi, label in SCORE_BANDS:
+        if (lo is None or s >= lo) and (hi is None or s < hi):
+            return label
+    return None
+
+
+def band_record(df: Optional[pd.DataFrame], score: Any, h: int = 20,
+                min_picks: int = MIN_BAND_PICKS) -> Optional[Dict[str, Any]]:
+    """How every logged name in this composite-score band did `h` sessions on
+    (the group_stats row plus "band" and "h"); None when the score has no band
+    or fewer than `min_picks` names have settled. Past calls only. Pure."""
+    band = score_band(score)
+    if band is None or df is None or df.empty or "composite_score" not in df.columns:
+        return None
+    s = settled(df, h)
+    if s.empty:
+        return None
+    sc = one_per_day_ticker(s.dropna(subset=["composite_score"])).copy()
+    sc["band"] = sc["composite_score"].map(score_band)
+    for r in group_stats(sc, "band"):
+        if r["group"] == band and r["picks"] >= min_picks:
+            return dict(r, band=band, h=h)
+    return None
+
+
 def record_summary(df: Optional[pd.DataFrame], horizons: tuple = (5, 20),
                    floor: float = SCORE_FLOOR) -> Dict[str, Any]:
     """Compact record for a short message. Per horizon h: `bullish_{h}` (the

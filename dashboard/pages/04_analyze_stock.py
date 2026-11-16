@@ -1263,6 +1263,60 @@ if analyze_btn or _prefill_active or (
                     _conf_bits.append(f"{_bull} of {_tot} confirmation signals agree")
                 _conf_bits.append("educational analysis only – not SEBI-registered investment advice")
                 st.caption("Confidence · " + " · ".join(_conf_bits))
+                # ── Why this verdict: the five checks, business first, timing last ──
+                try:
+                    import html as _hv_html
+                    from analysis.final_verdict import gate_rows as _gate_rows
+                    _why = _gate_rows(_fv)
+                    if _why:
+                        _st_col = {"blocks": "var(--bear)", "weakens": "var(--amber)",
+                                   "supports": "var(--bull)", "passes": "var(--bull)",
+                                   "no data": "var(--dim)"}
+                        _st_glyph = {"blocks": "✕", "weakens": "▼", "supports": "▲",
+                                     "passes": "✓", "no data": "–"}
+                        _why_html = "".join(
+                            f'<div style="display:flex;gap:10px;padding:5px 0;'
+                            f'border-top:1px solid var(--hairline);font-size:12.5px">'
+                            f'<span style="min-width:190px;color:var(--ink-mid)">{_hv_html.escape(_r["title"])}'
+                            f'{" · <b>held it back most</b>" if _r["limiting"] else ""}</span>'
+                            f'<span style="min-width:86px;color:{_st_col[_r["state"]]};font-weight:600">'
+                            f'{_st_glyph[_r["state"]]} {_r["state"]}</span>'
+                            f'<span style="color:var(--dim)">{_hv_html.escape(str(_r["message"]))}</span></div>'
+                            for _r in _why)
+                        st.markdown(
+                            f'<div style="margin:6px 0 2px 0"><div style="font-size:11px;'
+                            f'letter-spacing:.06em;color:var(--faint);text-transform:uppercase">'
+                            f'Why this verdict · {verdict_display_label(_fv.verdict)}</div>{_why_html}</div>',
+                            unsafe_allow_html=True)
+                except Exception as _why_e:
+                    _log.debug("why-strip failed: %s", _why_e)
+                # ── Track record of this score band, data age, revenue growth ──
+                try:
+                    from analysis.calibration_summary import score_band as _sband
+                    from dashboard.shared.cache import load_band_record as _band_rec
+                    _band = _sband(cs.score)
+                    _rec = _band_rec(_band, 20) if _band else None
+                    if _rec:
+                        st.caption(
+                            f"Track record · names scored {_rec['band']} moved {_rec['avg_alpha']:+.1f} pts vs the "
+                            f"Nifty over the next 20 sessions on average ({_rec['picks']} logged, ahead on "
+                            f"{_rec['day_win_pct']:.0f}% of {_rec['days']} days). Past calls, not a forecast.")
+                    elif _band:
+                        st.caption(f"Track record · too few settled names scored {_band} yet to show a record.")
+                except Exception as _tr_e:
+                    _log.debug("track record line failed: %s", _tr_e)
+                try:
+                    from analysis.fundamentals import analytics as _an_mod
+                    from analysis.fundamentals.provenance import provenance as _prov_fn
+                    _pv = _prov_fn(_fv_cf if (_fv_cf is not None and _fv_cf.has_any_data()) else None)
+                    _fd_bits = [_pv["label"]]
+                    if _fv_cf is not None and _fv_cf.has_any_data():
+                        _ry = _an_mod.revenue_yoy(_fv_cf)
+                        if getattr(_ry, "available", False) and _ry.value is not None:
+                            _fd_bits.insert(0, f"Revenue {_ry.value:+.0f}% on the year before")
+                    (st.warning if _pv["stale"] else st.caption)("Fundamentals · " + " · ".join(_fd_bits))
+                except Exception as _pv_e:
+                    _log.debug("fundamentals provenance line failed: %s", _pv_e)
                 try:
                     from analysis.score_coverage import coverage_note as _cov_note
                     _cov_txt = _cov_note(cs)
@@ -1559,6 +1613,9 @@ if analyze_btn or _prefill_active or (
                         if (_hz_long is not None and _hz_long.verdict == "INSUFFICIENT_DATA"
                                 and _fv.horizon != "long"):
                             st.caption("Long-term · " + _hz_long.primary_reason)
+                            st.caption("The long-term read has no track record yet: the ledger has only "
+                                       "graded calls 5 and 20 sessions on. Treat it as a checklist of "
+                                       "business, price and trend, not as a tested signal.")
                         st.caption(
                             f"{_fv.primary_reason} · Same subsystem inputs re-weighted per horizon; "
                             "independent of the chart window."

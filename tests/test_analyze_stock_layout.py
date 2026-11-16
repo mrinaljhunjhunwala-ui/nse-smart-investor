@@ -136,6 +136,11 @@ def test_overview_layout_non_financial(_stubs):
     assert i_hero < i_lens < i_comb
     assert any("Confidence ·" in str(c.value) and "5 of 6" in str(c.value) for c in at.caption)
     assert any("not SEBI-registered investment advice" in str(c.value) for c in at.caption)
+    # 16 Nov: the reasoning sits under the headline — the five checks, business first.
+    why = next(b for b in blobs if "Why this verdict" in b)
+    assert why.index("Business quality and flags") < why.index("Price paid") < why.index("Chart and momentum")
+    assert any(str(c.value).startswith("Fundamentals ·") for c in list(at.caption) + list(at.warning))
+    assert any(str(c.value).startswith("Track record ·") for c in at.caption)
     labels = [e.label for e in at.expander]
     assert any("Horizon reads" in x for x in labels) and any("Thesis · bull" in x for x in labels)
     assert not any("gate-by-gate" in x for x in labels)        # no nested expander
