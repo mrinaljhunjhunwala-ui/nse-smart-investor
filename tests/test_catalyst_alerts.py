@@ -572,3 +572,20 @@ def test_week_record_grades_stored_buy_calls(monkeypatch):
     assert CA.week_record_lines(None, str) == []
     monkeypatch.setattr(CA, "_kv", lambda k: None)
     assert CA.week_record("2026-11-09", "2026-11-13") is None
+
+
+def test_scan_rows_carry_the_one_day_return_why_moved_reads():
+    """The real scan row (cache._score_to_dict) must carry return_1d: the fixtures above
+    add it by hand, which hid that production rows lacked it and why-moved never sent."""
+    from dashboard.shared import cache as cache_mod
+    s = types.SimpleNamespace(ticker="X.NS", price=100.0, score=70.0, grade="B", action="BUY", headline="",
+                              entry=100.0, stop_loss=95.0, target=110.0, risk_reward=2.0, return_1d=3.4)
+    row = cache_mod._score_to_dict(s, extended=True)
+    assert row["return_1d"] == 3.4
+
+
+def test_market_alerts_workflow_installs_quarterly_figure_fallback_deps():
+    """The intraday results read falls back to Screener (bs4) and Yahoo (yfinance)."""
+    import pathlib
+    yml = (pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/market-alerts.yml").read_text()
+    assert "yfinance" in yml and "beautifulsoup4" in yml

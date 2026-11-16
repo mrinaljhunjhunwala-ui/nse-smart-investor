@@ -684,6 +684,9 @@ def _score_to_dict(s, extended: bool = False) -> dict:
             "sentiment": getattr(s, "sentiment_score", 0),
             "horizon":     getattr(s, "horizon", ""),      # FIX HZ1
             "valid_until": getattr(s, "valid_until", ""),  # FIX HZ1
+            # The close "why it moved" alert ranks the day's movers from this
+            # field in the all-scored snapshot; without it every row is dropped.
+            "return_1d":   getattr(s, "return_1d", 0.0),
         })
     return base
 

@@ -47,8 +47,14 @@ jobs:
 
       # pyotp: Angel One TOTP login. Without it angel_fetcher fails with
       # "No module named 'pyotp'" and every fetch falls back to Yahoo.
+      # yfinance + beautifulsoup4: the Screener and Yahoo tiers of
+      # fetch_quarterly_figures. Without them every intraday results read
+      # failed ("beautifulsoup4 not installed" / "No module named 'yfinance'")
+      # whenever the NSE results list came back empty.
       - name: Install minimal deps
-        run: pip install --quiet pandas numpy requests "pyotp>=2.8.0,<3.0" "psycopg2-binary>=2.9.0,<3.0"
+        run: >-
+          pip install --quiet pandas numpy requests "pyotp>=2.8.0,<3.0" "psycopg2-binary>=2.9.0,<3.0"
+          "yfinance>=1.0,<2" "beautifulsoup4>=4.12.0,<5.0" "lxml>=4.9.0,<7.0"
 
       # Persist the de-dup state file between runs so the same alert
       # isn't re-sent every 15 minutes. New cache each run, restore latest.
