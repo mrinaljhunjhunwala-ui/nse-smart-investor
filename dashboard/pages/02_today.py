@@ -145,10 +145,12 @@ with tab_lists:
         sources["Tomorrow's Watchlist"] = {s: f"#{r} {lbl}" for s, (lbl, r, _) in ranks.items()}
     notes = []
     try:
-        from dashboard.shared.pin_gate import holdings_unlocked, is_unlocked
+        from dashboard.shared.pin_gate import unlock_inline
     except Exception:
-        holdings_unlocked = is_unlocked = None
-    if holdings_unlocked and holdings_unlocked():
+        unlock_inline = None
+    _pf_open = bool(unlock_inline and unlock_inline("my_portfolio", "My Portfolio", "today_lists"))
+    _ao_open = bool(unlock_inline and unlock_inline("angel_one", "Angel One", "today_lists"))
+    if _pf_open:
         hold = _kv("manual_portfolio_holdings", user=None) or []
         mine = {}
         for h in hold if isinstance(hold, list) else []:
@@ -158,8 +160,8 @@ with tab_lists:
                 mine[sym] = f"avg ₹{float(avg):,.2f}" if avg else ""
         if mine:
             sources["My Portfolio"] = mine
-    else:
-        notes.append("My Portfolio is locked — unlock it on the My Portfolio page to include your holdings.")
+        else:
+            notes.append("No holdings saved on My Portfolio yet.")
     try:
         import trade_store as _ts
         _open = _ts.fetch_open()
@@ -171,14 +173,12 @@ with tab_lists:
             sources["Paper Trades"] = _pt
     except Exception:
         pass
-    if is_unlocked and is_unlocked("angel_one"):
+    if _ao_open:
         ah = {str(h.get("symbol", "")).upper(): f"qty {h.get('qty')}" for h in _angel_holdings() if h.get("symbol")}
         if ah:
             sources["Angel One"] = ah
         else:
             notes.append("Angel One returned no holdings (not connected, or none held).")
-    else:
-        notes.append("Angel One is locked — unlock it on the Angel One page to include broker holdings.")
     syms = tuple(sorted({s for items in sources.values() for s in items}))
     moves = list_moves(sources, _quotes(syms), threshold_pct=thr)
     st.caption(f"{len(syms)} names across {', '.join(sources) or 'no lists'} · "

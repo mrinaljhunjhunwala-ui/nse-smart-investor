@@ -109,8 +109,14 @@ def require_pin(scope: str = "angel_one", label: str = "Angel One",
         st.error(f"Too many wrong PINs. Try again in {left // 60}m {left % 60:02d}s.")
         st.stop()
 
-    with st.form(f"pin_form_{scope}", clear_on_submit=True):
-        entered = st.text_input("PIN", type="password", key=f"pin_input_{scope}")
+    _pin_form(scope, expected, f"pin_form_{scope}", f"pin_input_{scope}")
+    st.stop()
+
+
+def _pin_form(scope: str, expected: str, form_key: str, input_key: str) -> None:
+    """The PIN box + Unlock button; on the right PIN it unlocks `scope` and reruns."""
+    with st.form(form_key, clear_on_submit=True):
+        entered = st.text_input("PIN", type="password", key=input_key)
         submitted = st.form_submit_button("Unlock")
     if submitted:
         result = check_pin(scope, entered, expected)
@@ -121,7 +127,43 @@ def require_pin(scope: str = "angel_one", label: str = "Angel One",
             st.error(f"Too many wrong PINs. Locked for {LOCKOUT_S // 60} minutes.")
         else:
             st.error("Wrong PIN.")
-    st.stop()
+
+
+def unlock_inline(scope: str, label: str, where: str, *, collapsible: bool = True) -> bool:
+    """True when `scope` is unlocked; otherwise show a small PIN box right here.
+
+    For places that only *read* locked data (Today's lists, Research Notes, the
+    sidebar quick view, Analyze Stock): the owner unlocks in place instead of
+    walking to My Portfolio / Angel One first. Same PIN, same lockout, same
+    15-minute unlock, so the page gates themselves are not weakened. Never
+    st.stop()s, so the rest of the page keeps rendering. `where` keeps widget
+    keys unique when one page shows several boxes."""
+    try:
+        if is_unlocked(scope):
+            return True
+        expected = configured_pin()
+    except Exception:
+        return False
+    if expected is None:
+        st.caption(f"🔒 {label} is locked and no PIN is set yet. Add `page_pin` under "
+                   "`[angel_one]` in the app's secrets.")
+        return False
+    left = lockout_remaining(scope)
+
+    def _body():
+        if left:
+            st.caption(f"Too many wrong PINs. Try again in {left // 60}m {left % 60:02d}s.")
+            return
+        st.caption(f"Enter the owner PIN. The unlock lasts {UNLOCK_TTL_S // 60} minutes in this browser.")
+        _pin_form(scope, expected, f"pin_inline_{scope}_{where}", f"pin_inline_in_{scope}_{where}")
+
+    if collapsible:
+        with st.expander(f"🔒 Unlock {label} to include it here"):
+            _body()
+    else:
+        st.caption(f"🔒 {label} is locked.")
+        _body()
+    return False
 
 
 def holdings_unlocked() -> bool:
