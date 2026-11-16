@@ -1,0 +1,37 @@
+name: Movers Evidence
+
+# Weekly rebuild of the movers radar's "similar past moves" table
+# (scripts/build_movers_evidence.py -> KV movers_evidence). A late GitHub cron
+# fire is harmless here: the table changes slowly. Run it once by hand after
+# merging so the radar has a record from day one.
+
+on:
+  schedule:
+    - cron: "17 4 * * 0"       # Sunday ~09:47 IST
+  workflow_dispatch:
+
+concurrency:
+  group: movers-evidence
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Build the movers evidence table
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PYTHONUTF8: "1"
+        run: python scripts/build_movers_evidence.py

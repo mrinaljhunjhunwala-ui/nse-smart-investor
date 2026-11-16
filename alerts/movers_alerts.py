@@ -1,0 +1,256 @@
+"""alerts/movers_alerts.py — intraday movers radar and the holding guard (Telegram).
+
+check_movers_radar(state, today, now=None)
+    Every 15-minute market run from 09:45 to 15:25 IST. Sends only stocks that newly crossed
+    their tier's move threshold since the last message (each symbol once a day), at most 5 per
+    market-cap tier plus every bullish name from last evening's Tomorrow's Watchlist (any rank)
+    up 4%+. Each line says why it moved (filings / volume, from evidence only) and how similar
+    past moves did over the next 5 sessions vs the Nifty. At most RADAR_MAX_MSGS messages a day.
+    The day's list is kept in KV ``movers_radar:<date>`` (user "_system") for the dashboard.
+
+check_holding_guard(state, today, now=None)
+    For My Portfolio holdings only real trouble: a sharp one-day fall for the stock's tier, a
+    negative filing (fraud, auditor exit, regulatory order, ...) or clearly weak results. Once per
+    holding per day. Runs regardless of ALERT_HOLDINGS (the routine ±10% / level alerts stay off).
+
+Maths in analysis/movers.py (pure); network in data/nse_movers.py and data/nse_announcements.py.
+Both entry points never raise and return the number of messages sent.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import logging
+from typing import Any, Dict, List, Optional
+
+_log = logging.getLogger("alerts.movers_alerts")
+IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+KV_USER = "_system"
+EVIDENCE_KEY = "movers_evidence"
+RADAR_START = _dt.time(9, 45)
+RADAR_END = _dt.time(15, 25)
+RADAR_MAX_MSGS = 6
+RADAR_MAX_ITEMS = 15
+TW_MAX_AGE_H = 30            # last evening's Tomorrow's Watchlist is the one that applies today
+SCAN_MAX_AGE_H = 3
+MSG_CHAR_BUDGET = 3800       # Telegram caps a message at 4096 characters
+RADAR_FOOTER = ("<i>Reasons come from filings and volume only. 'Similar past moves' is history, "
+                "not a promise. A big up-day is often a poor entry.</i>")
+GUARD_FOOTER = "<i>Only sharp falls and bad filings are sent for holdings; daily moves stay quiet.</i>"
+
+
+def radar_kv_key(day: str) -> str:
+    return f"movers_radar:{day}"
+
+
+def _now(now: Optional[_dt.datetime]) -> _dt.datetime:
+    n = now or _dt.datetime.now(IST)
+    return n.replace(tzinfo=IST) if n.tzinfo is None else n.astimezone(IST)
+
+
+def _kv(key: str, user: Optional[str] = KV_USER) -> Any:
+    try:
+        import trade_store as store
+        return store.kv_get(key, None, user_id=user) if user else store.kv_get(key, None)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _kv_set(key: str, value: Any) -> None:
+    try:
+        import trade_store as store
+        store.kv_set(key, value, user_id=KV_USER)
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[movers] could not store {key}: {type(e).__name__}: {e}")
+
+
+def _fresh(snap: Any, max_age_h: float) -> Optional[dict]:
+    if not (isinstance(snap, dict) and isinstance(snap.get("data"), dict)):
+        return None
+    try:
+        from utils.snapshot_time import snapshot_age_seconds
+        age = snapshot_age_seconds(snap.get("generated_at"))
+    except Exception:                                       # noqa: BLE001
+        return None
+    return snap if age is not None and age / 3600 <= max_age_h else None
+
+
+def _bands() -> Dict[str, str]:
+    try:
+        from analysis.movers import band_map
+        from data.universe import _CONSTITUENTS
+        return band_map(_CONSTITUENTS)
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[movers] index tiers unavailable: {e}")
+        return {}
+
+
+def _events_by_symbol(now: _dt.datetime, days: int = 3) -> Dict[str, List[dict]]:
+    try:
+        from data.nse_announcements import fetch_announcements
+        out: Dict[str, List[dict]] = {}
+        for e in fetch_announcements(now - _dt.timedelta(days=days), now) or []:
+            if isinstance(e, dict) and e.get("symbol"):
+                out.setdefault(str(e["symbol"]).upper().replace(".NS", ""), []).append(e)
+        return out
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[movers] announcements unavailable: {e}")
+        return {}
+
+
+def _score_part(scan: Optional[dict], sym: str) -> str:
+    """Model read for the line; BUY only at 70+ with a stop (the alerts' BUY floor)."""
+    row = (scan or {}).get("data", {}).get(f"{sym}.NS") if scan else None
+    if not isinstance(row, dict) or not row.get("score"):
+        return "not in the scan"
+    score = float(row.get("score") or 0)
+    sl = float(row.get("sl") or 0)
+    if "BUY" in str(row.get("action") or "").upper() and score >= 70 and sl > 0:
+        return f"score {score:.0f} · BUY, stop ₹{sl:,.2f}"
+    return f"score {score:.0f} · WATCH"
+
+
+def radar_lines(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, List[str]],
+                evidence: Optional[dict], scan: Optional[dict], source: str) -> List[str]:
+    """Message body: header, two lines per mover grouped by tier, footer, trimmed to fit."""
+    from alerts.check_alerts import _h
+    from analysis.movers import BAND_LABEL, chase_lookup, evidence_phrase
+
+    src = "all NSE stocks" if source == "NSE" else "scan universe only (NSE feed down)"
+    lines = [f"📡 <b>Movers radar</b> · {now:%H:%M} IST · {src}"]
+    band = None
+    for m in movers:
+        if m["band"] != band:
+            band = m["band"]
+            lines.append(f"<b>{BAND_LABEL[band]}</b>")
+        tag = ""
+        if m.get("watchlist"):
+            label, rank, _ = m["watchlist"]
+            tag = f" · 📋 on Tomorrow's Watchlist #{rank} ({_h(label)})"
+        lines.append(f"▲ <b>{_h(m['symbol'])}</b> {m['pct']:+.1f}% ₹{m['price']:,.2f}{tag}")
+        why = "; ".join(_h(r) for r in (reasons.get(m["symbol"]) or [])[:2]) or "no filing found"
+        stats = chase_lookup((evidence or {}).get("table"), m["band"], m["pct"], m.get("vol_ratio"))
+        lines.append(f"   why: {why} · {_h(evidence_phrase(stats))} · {_h(_score_part(scan, m['symbol']))}")
+    lines.append(RADAR_FOOTER)
+    while len("\n".join(lines)) > MSG_CHAR_BUDGET and len(lines) > 4:
+        del lines[-3:-1]                                    # drop the last mover (2 lines), keep footer
+    return lines
+
+
+def check_movers_radar(state: dict, today: str, now: Optional[_dt.datetime] = None) -> int:
+    try:
+        from alerts.check_alerts import _FORCE_SEND, dispatch
+        from analysis import catalysts as C
+        from analysis.movers import select_movers, watchlist_ranks
+        from data.nse_movers import fetch_gainers
+
+        n = _now(now)
+        if not (RADAR_START <= n.time() <= RADAR_END) and not _FORCE_SEND:
+            return 0
+        sent_msgs = sum(1 for k in state if k.startswith("movers_msg_"))
+        if sent_msgs >= RADAR_MAX_MSGS and not _FORCE_SEND:
+            print(f"[movers] daily cap of {RADAR_MAX_MSGS} radar messages reached")
+            return 0
+        scan = _fresh(_kv("all_scored_snapshot"), SCAN_MAX_AGE_H)
+        rows = fetch_gainers(scan)
+        if not rows:
+            print("[movers] no gainers feed (NSE and scan snapshot both unavailable)")
+            return 0
+        tw = _fresh(_kv("tomorrow_watchlist_snapshot"), TW_MAX_AGE_H)
+        ranks = watchlist_ranks(tw["data"]) if tw else {}
+        already = [k[len("mover_"):] for k in state if k.startswith("mover_")]
+        movers = select_movers(rows, bands=_bands(), ranks=ranks, already=already)[:RADAR_MAX_ITEMS]
+        if not movers:
+            print(f"[movers] no new movers past their thresholds ({len(rows)} gainers checked)")
+            return 0
+        events = _events_by_symbol(n)
+        reasons = {m["symbol"]: C.explain_move(m["symbol"], m["pct"], events=events.get(m["symbol"], []),
+                                               reaction={"rel_vol": m.get("vol_ratio")})
+                   for m in movers}
+        evidence = _kv(EVIDENCE_KEY)
+        lines = radar_lines(movers, now=n, reasons=reasons, evidence=evidence, scan=scan,
+                            source=str(rows[0].get("source") or ""))
+        if not dispatch("\n".join(lines), subject="Movers radar"):
+            return 0
+        for m in movers:
+            state[f"mover_{m['symbol']}"] = today
+        state[f"movers_msg_{sent_msgs + 1}"] = today
+        log = _kv(radar_kv_key(today))
+        log = log if isinstance(log, list) else []
+        stamp = f"{n:%H:%M}"
+        log += [{"time": stamp, "symbol": m["symbol"], "pct": m["pct"], "price": m["price"],
+                 "band": m["band"], "watchlist": list(m["watchlist"]) if m.get("watchlist") else None,
+                 "vol_ratio": m.get("vol_ratio"), "why": reasons.get(m["symbol"], [])[:2]} for m in movers]
+        _kv_set(radar_kv_key(today), log)
+        print(f"[movers] sent {len(movers)} mover(s)")
+        return 1
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[movers] radar failed: {type(e).__name__}: {e}")
+        return 0
+
+
+def _holdings() -> List[str]:
+    rows = _kv("manual_portfolio_holdings", user=None) or []
+    out = []
+    for h in rows if isinstance(rows, list) else []:
+        sym = str((h or {}).get("ticker", "")).upper().replace(".NS", "").replace(".BO", "").strip()
+        if sym and sym not in out:
+            out.append(sym)
+    return out
+
+
+def check_holding_guard(state: dict, today: str, now: Optional[_dt.datetime] = None) -> int:
+    try:
+        from alerts.check_alerts import _h, dispatch
+        from analysis import catalysts as C
+        from analysis.movers import BAND_LABEL, cap_band, guard_reason
+
+        n = _now(now)
+        held = [s for s in _holdings() if state.get(f"guard_{s}") != today]
+        if not held:
+            return 0
+        bands = _bands()
+        events = _events_by_symbol(n, days=1)
+        hits = []
+        for sym in held:
+            q = None
+            try:
+                from utils.live_price import get_live_quote
+                q = get_live_quote(sym)
+            except Exception:                               # noqa: BLE001
+                q = None
+            pct = q.get("chg_pct") if isinstance(q, dict) else None
+            negs, results_score = [], None
+            for ev in events.get(sym, []):
+                cat = C.classify_announcement(ev.get("category"), ev.get("headline"), ev.get("detail"))
+                if cat is None:
+                    continue
+                if cat.direction < 0:
+                    negs.append(cat.label)
+                elif cat.kind == "results" and results_score is None:
+                    try:
+                        from data.nse_announcements import fetch_quarterly_figures
+                        s = C.results_surprise(fetch_quarterly_figures(sym))
+                        results_score = s.get("score") if s else None
+                    except Exception:                       # noqa: BLE001
+                        results_score = None
+            band = cap_band(sym, bands)
+            why = guard_reason(pct, band, negative_filings=negs, results_score=results_score)
+            if why:
+                price = q.get("price") if isinstance(q, dict) else None
+                hits.append((sym, band, price, why))
+        if not hits:
+            return 0
+        lines = [f"⚠️ <b>Holding alert</b> · {n:%H:%M} IST"]
+        for sym, band, price, why in hits:
+            px = f" ₹{float(price):,.2f}" if price else ""
+            lines.append(f"<b>{_h(sym)}</b>{px} · {_h(BAND_LABEL[band])}")
+            lines.append(f"   {_h(why)}")
+        lines.append(GUARD_FOOTER)
+        if not dispatch("\n".join(lines), subject="Holding alert"):
+            return 0
+        for sym, *_ in hits:
+            state[f"guard_{sym}"] = today
+        return 1
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[holding-guard] failed: {type(e).__name__}: {e}")
+        return 0

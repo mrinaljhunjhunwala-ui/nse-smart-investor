@@ -3,6 +3,24 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Movers radar + holding guard (16 Nov, owner request):** the owner missed DHANBANK / STYLEBAAZA
+  runs (Tomorrow's Watchlist Telegram shows only its top 5; STYLEBAAZA is not in the scan universe)
+  and found Momentum Leaders unhelpful for catching the day's moves. New, every 15-minute market
+  run 09:45-15:25 IST (`alerts/movers_alerts.check_movers_radar`): NSE's all-market gainers feed
+  (`data/nse_movers.py`, `allSec` of `/api/live-analysis-variations?index=gainers`; scan snapshot
+  fallback) split by NSE tier (Nifty 100 / Midcap 150 / Smallcap 250 / micro-other, thresholds
+  3 / 5 / 7 / 8%), top 5 new names per tier plus any bullish Tomorrow's Watchlist name at ANY rank
+  up 4%+, each symbol once a day, at most 6 messages a day. Each line: why (filings + volume via
+  `catalysts.explain_move`, evidence only), "similar past moves" 5 sessions later vs the Nifty
+  from KV `movers_evidence` (`scripts/build_movers_evidence.py`, weekly `movers-evidence.yml`;
+  **run it once by hand after merge**), and the model read (BUY only at 70+ with a stop, else
+  WATCH). Day log KV `movers_radar:<date>`, shown on Markets → 🚀 Today's Movers.
+  **Holding guard** (`check_holding_guard`, independent of `ALERT_HOLDINGS`, which stays off by
+  the owner's choice): holdings only on real trouble (tier fall -5 / -7 / -8% in a day, a
+  `direction=-1` filing, or results surprise score <= -20), once per holding per day. NSE feed
+  field names are unverified live (canary probe `nse_gainers` added). No score / verdict / ledger
+  change. Next owner asks: portfolio co-pilot chat on My Portfolio (reassess holdings, swap ideas
+  for the same goal: dividend / growth / momentum).
 - **16 Nov session review (owner rule: fix what is broken, and close gaps that lose opportunities):**
   from the day's Actions logs. (1) "Why it moved" never sent: scan rows had no `return_1d`
   (`cache._score_to_dict`), now carried. (2) Market Alerts did not install `yfinance` /

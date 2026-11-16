@@ -211,7 +211,7 @@ _MERGED_VIEWS = _merged_views()
 def test_every_merged_page_has_views():
     pages = {f for f, _, _ in _MERGED_VIEWS}
     assert pages == {"02_markets.py", "12_trading_tools.py", "13_find_ideas.py"}, pages
-    assert len(_MERGED_VIEWS) == 7
+    assert len(_MERGED_VIEWS) == 8
 
 
 @pytest.mark.smoke

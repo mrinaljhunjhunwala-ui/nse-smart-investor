@@ -1,7 +1,7 @@
 """Markets - NSE Smart Investor.
 
 One page for the market-wide views (merged 2026-11-09): Live Ticker,
-Breadth & Macro (the old Market Breadth page) and FII / DII Flows. Each view
+Today's Movers (added 2026-11-16), Breadth & Macro (the old Market Breadth page) and FII / DII Flows. Each view
 does its own live fetches, so a view switch runs only the chosen one rather
 than tabs, which would run all three on every rerun. View bodies live in
 dashboard/views/. Other pages open a view with nav.request_view("Markets", label)
@@ -30,6 +30,9 @@ if _view == _VIEWS[0]:
     from dashboard.views import market_live
     market_live.render()
 elif _view == _VIEWS[1]:
+    from dashboard.views import todays_movers
+    todays_movers.render()
+elif _view == _VIEWS[2]:
     from dashboard.views import market_breadth
     market_breadth.render()
 else:
