@@ -3,6 +3,18 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Research Notes + portfolio briefing for Claude (17 Nov, owner request; no API key, no cost):**
+  page 08 is now **Watchlist & Notes** (slug unchanged); the Stock Journal tab became
+  📝 Research Notes (`dashboard/views/research_notes.py`; journal CSV and the weekly digest's read of
+  it untouched). 💼 Portfolio briefing (needs the My Portfolio PIN): one prompt with every holding
+  (live price, P&L, weight, app score / read, dividend yield = latest dividends paid / market cap,
+  ROE, D/E, 3y revenue growth), same-sector scan alternatives and the latest saved note per stock
+  (`analysis/research_notes.build_portfolio_briefing`, pure); copy into Claude, paste the answer
+  back -> KV `portfolio_briefing_history` with the tickers it covered. 🔎 Stock deep dive: the old
+  Deep Dive prompt, moved off Analyze Stock (which now has an "Open in Research Notes" button that
+  carries the ticker and puts the tab first). 📚 Library: every Deep Dive (`deep_dive_history:*`,
+  found with the new `trade_store.kv_keys(prefix)`) and portfolio answer, newest first, filter by
+  stock, delete. Nav: "Watchlist & Journal", "Stock Journal", "Research Notes", "Deep Dive" route here.
 - **Today page + Command Centre trimmed (17 Nov, owner request):** new page **02 Today** (pages
   renumbered 02-14 -> 03-15; URLs unchanged) with tabs 🚀 Movers (sector medians and cap-size
   gainers / losers from the scan, then the movers radar list, which moved here from Markets),

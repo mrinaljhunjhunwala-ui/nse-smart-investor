@@ -144,7 +144,7 @@ def test_overview_layout_non_financial(_stubs):
     labels = [e.label for e in at.expander]
     assert any("Horizon reads" in x for x in labels) and any("Thesis · bull" in x for x in labels)
     assert not any("gate-by-gate" in x for x in labels)        # no nested expander
-    assert any(t.label == "Build the Deep Dive research prompt" for t in at.toggle)
+    assert any(b.label == "📝 Open TESTCO in Research Notes" for b in at.button)   # Deep Dive moved
 
     # Rule 1: the head and hero never print the engine's action string.
     hero = next(str(m.value) for m in at.markdown if "Business · Trend ·" in str(m.value))
@@ -172,14 +172,22 @@ def test_fundamentals_tab_keeps_leverage_for_non_financials(_stubs):
     assert "Debt/Equity" in _html(at)
 
 
-def test_deep_dive_toggle_renders_offline(_stubs):
+def test_deep_dive_link_and_prompt_render_offline(_stubs):
+    """Analyze Stock links to Research Notes; there the Deep Dive prompt builds with the network
+    blocked (moved off Analyze Stock 2026-11-17)."""
     mp, cache = _stubs
     at = _run(cache, mp, "TESTCO3", "Energy", "Test Energy Three Ltd")
     assert not at.exception, at.exception
-    tg = next(t for t in at.toggle if t.label == "Build the Deep Dive research prompt")
-    at = tg.set_value(True).run()
-    assert not at.exception, at.exception
-    assert any("Step 1 · Copy this prompt" in str(m.value) for m in at.markdown)
+    assert any(b.label == "📝 Open TESTCO3 in Research Notes" for b in at.button)
+    rn = AppTest.from_file(os.path.join(os.path.dirname(_PAGE), "08_watchlist_journal.py"), default_timeout=240)
+    rn.session_state["rn_ticker"] = "TESTCO3"
+    rn.run()
+    assert not rn.exception, rn.exception
+    assert [t.label for t in rn.tabs][0] == "📝 Research Notes"           # arriving from Analyze Stock
+    tg = next(t for t in rn.toggle if t.label == "Build the TESTCO3 research prompt")
+    rn = tg.set_value(True).run()
+    assert not rn.exception, rn.exception
+    assert any("Step 1 · Copy this prompt" in str(m.value) for m in rn.markdown)
 
 
 def _qp(at):
