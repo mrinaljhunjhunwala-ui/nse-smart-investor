@@ -47,6 +47,15 @@ INDEX_SYMBOLS = ("^NSEI", "^INDIAVIX")
 DEFAULT_RPS = 1.4
 RATE_LIMIT_SLEEP_S = 65
 MAX_CONSECUTIVE_RATE_LIMITED = 3
+# First live run (16 Nov 2026): at 1.4 req/s Angel answered "exceeding access
+# rate" every ~15 calls, so 40 of the run's 44 minutes were 65 s sleeps and the
+# workflow's 45-minute limit killed it before the summary line. Each rate limit
+# now also slows the pace, and the run stops itself inside a time budget so the
+# summary (and Telegram line) always goes out; the next run carries on from the
+# symbols still missing.
+SLOW_DOWN_FACTOR = 1.5
+MIN_RPS = 0.2
+DEFAULT_BUDGET_S = 38 * 60
 
 
 def _env_float(name: str, default: float) -> float:
@@ -80,6 +89,11 @@ class Throttle:
             self.sleep(self._next - now)
             now = self._next
         self._next = now + self.interval
+
+    def slow_down(self, factor: float = SLOW_DOWN_FACTOR, min_rps: float = MIN_RPS) -> float:
+        """Stretch the gap between calls after a rate limit; returns the new req/s."""
+        self.interval = min(self.interval * factor, 1.0 / min_rps)
+        return 1.0 / self.interval
 
 
 def fetch_window(latest: Optional[datetime.date], target: datetime.date,
@@ -115,7 +129,8 @@ def run(symbols: Optional[Iterable[str]] = None, *,
 
     t0 = clock()
     ok = skipped = new_rows = 0
-    rate_streak = 0
+    rate_streak = rate_limits = 0
+    note = ""
     try:
         if fetch is None:
             from data import angel_fetcher as af
@@ -123,6 +138,7 @@ def run(symbols: Optional[Iterable[str]] = None, *,
             fetch = af.fetch_daily_candles
         rps = _env_float("ANGEL_BULK_RPS", DEFAULT_RPS)
         backfill = _env_int("ANGEL_BACKFILL_DAYS", 2000)
+        budget = _env_float("PRICE_STORE_BUDGET_S", DEFAULT_BUDGET_S)
         throttle = Throttle(rps, clock=clock, sleep=sleep)
         syms = list(symbols) if symbols is not None else _symbols()
         target = ps.last_completed_session(now)
@@ -140,6 +156,12 @@ def run(symbols: Optional[Iterable[str]] = None, *,
             if window is None:
                 ok += 1            # already current: no request
                 continue
+            if clock() - t0 > budget:
+                rest = len(syms) - i
+                skipped += rest
+                note = f" · stopped at the {budget / 60:.0f}-min budget, {rest} left for the next run"
+                _log.warning("price_store: time budget reached — stopping, %d left unfetched", rest)
+                break
             df, status = None, "error"
             for attempt in range(2):
                 throttle.wait()
@@ -149,8 +171,9 @@ def run(symbols: Optional[Iterable[str]] = None, *,
                     df, status = None, f"error:{type(e).__name__}"
                 if status != "rate_limited" or attempt == 1:
                     break
-                _log.warning("price_store: %s rate-limited, sleeping %ds then retrying once",
-                             sym, RATE_LIMIT_SLEEP_S)
+                rate_limits += 1
+                _log.warning("price_store: %s rate-limited, sleeping %ds then retrying once "
+                             "(pace now %.2f req/s)", sym, RATE_LIMIT_SLEEP_S, throttle.slow_down())
                 sleep(RATE_LIMIT_SLEEP_S)
             if status == "rate_limited":
                 rate_streak += 1
@@ -182,6 +205,9 @@ def run(symbols: Optional[Iterable[str]] = None, *,
 
     took = clock() - t0
     line = f"price_store: {ok} ok, {skipped} skipped, {new_rows} new rows, took {took:.0f}s"
+    if rate_limits:
+        line += f" · {rate_limits} rate limits"
+    line += note
     _log.info(line)
     return {"ok": ok, "skipped": skipped, "new_rows": new_rows, "took": took, "line": line}
 

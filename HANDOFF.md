@@ -14,10 +14,14 @@ This section is the running memory between sessions; older sections below are hi
   (`_stop_hit_alert`), repeated as a tag in the 15:15 recap. (5) Portfolio: under the 50-day
   average reads SELL only when the 50-day is under the 200-day, TRIM otherwise
   (`_classify_delivery(long_trend_up=)`), as the docstring always said. Display / alert logic only:
-  no score, threshold, verdict string or ledger row changed. **Open:** Angel One answers 403 to
-  candle and quote calls in the alert jobs and the log line has no response body, so rate limit vs
-  refusal is undecided; read the first `Warm Price Store` run (16 Nov, 18:30 IST) for
-  `rate_limited` vs `http_403`. Results-date gate (`data/events.should_skip_entry` is unused) not done.
+  no score, threshold, verdict string or ledger row changed. **Angel One, settled by the first `Warm Price Store` run (16 Nov, run 43871729370):** it works
+  from GitHub's runners (years of bars came back); every failure was the rate limit ("access
+  rate"), about one per 15 calls at 1.4 req/s, so 40 of 44 minutes were 65 s sleeps and the
+  45-minute limit cancelled the run with no summary. Now each rate limit slows the pace (x1.5, floor
+  0.2 req/s), the run stops itself at `PRICE_STORE_BUDGET_S` (38 min) with a summary that says how
+  many are left, and the next run carries on. The backfill will take a few evenings. The 403s in
+  the alert jobs are the same limit: nothing to change there, Yahoo answers.
+  Results-date gate (`data/events.should_skip_entry` is unused) not done.
 - **Presentation and one quality number (16 Nov, owner go-ahead):** (1) Quality Watch's 20-point
   quality block now takes the Fundamental score Analyze Stock uses (`fundamental_score.py`:
   Piotroski F + growth + valuation sanity) when it is available, ratios otherwise
