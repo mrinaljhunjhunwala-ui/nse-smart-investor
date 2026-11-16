@@ -3,6 +3,12 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Command Centre / Today follow-ups (17 Nov, owner):** the scan's price-source line and the
+  "Left off this list" (new listings etc.) note moved from above the Top Picks cards into Command
+  Centre's *Data health details* expander; a one-line **Open paper trades** strip (ticker, qty,
+  entry only; no P&L / win rate; `trade_utils.open_trades_line`) sits above Top Picks with a link
+  to Paper Trades. Today → My lists also includes open paper trades, and its Detail column shows
+  only the detail ("#14 Breakout", "avg ₹410.00") since From names the list.
 - **Research Notes + portfolio briefing for Claude (17 Nov, owner request; no API key, no cost):**
   page 08 is now **Watchlist & Notes** (slug unchanged); the Stock Journal tab became
   📝 Research Notes (`dashboard/views/research_notes.py`; journal CSV and the weekly digest's read of

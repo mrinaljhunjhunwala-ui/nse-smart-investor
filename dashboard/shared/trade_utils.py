@@ -300,6 +300,29 @@ def paper_close_trade(
     return _store.close_trade(trade_id, exit_price, reason=reason, exit_time=exit_time)
 
 
+def open_trades_line(rows) -> tuple:
+    """("RELIANCE 10 @ ₹1,400.00 · TCS 5 @ ₹3,000.00", count) for open paper trades, oldest first.
+    Entry only: no live price, P&L or win rate (Command Centre's one-line summary)."""
+    import html as _h
+    items = []
+    try:
+        recs = rows.sort_values("timestamp").to_dict("records") if rows is not None and len(rows) else []
+    except Exception:
+        recs = []
+    for r in recs:
+        tk = _h.escape(str(r.get("ticker", "")).replace(".NS", ""))
+        try:
+            items.append(f"{tk} {int(r.get('quantity') or 0)} @ ₹{float(r.get('price') or 0):,.2f}")
+        except (TypeError, ValueError):
+            items.append(tk)
+    return " · ".join(items), len(items)
+
+
+def load_open_trades_line() -> tuple:
+    """open_trades_line over every account's OPEN paper trades."""
+    return open_trades_line(_store.fetch_open())
+
+
 def reconcile_paper_exits(account: str = None, history_fn=None) -> list:
     """Close OPEN paper trades whose own SL / TP was already hit on a past daily bar.
 

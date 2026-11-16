@@ -6,7 +6,8 @@ alerts say":
 
   🚀 Movers           sector moves and the biggest gainers / losers per market-cap tier (from the
                       latest scan), then the movers radar's all-NSE list (the Telegram feed)
-  📋 My lists         Tomorrow's Watchlist, My Portfolio and Angel One holdings that moved ±1.5%+
+  📋 My lists         Tomorrow's Watchlist, My Portfolio, Angel One holdings and open paper trades
+                      that moved ±1.5%+
   🔥 Picks            today's Top Picks (all 20) with their move today; ±3% or stop / target flagged
   🔔 Changes & alerts posture changes from the verdict ledger, and every alert sent today
 
@@ -159,6 +160,17 @@ with tab_lists:
             sources["My Portfolio"] = mine
     else:
         notes.append("My Portfolio is locked — unlock it on the My Portfolio page to include your holdings.")
+    try:
+        import trade_store as _ts
+        _open = _ts.fetch_open()
+        _pt = {}
+        for _r in (_open.to_dict("records") if _open is not None and len(_open) else []):
+            _pt[str(_r.get("ticker", "")).replace(".NS", "")] = (
+                f"qty {int(_r.get('quantity') or 0)} @ ₹{float(_r.get('price') or 0):,.2f}")
+        if _pt:
+            sources["Paper Trades"] = _pt
+    except Exception:
+        pass
     if is_unlocked and is_unlocked("angel_one"):
         ah = {str(h.get("symbol", "")).upper(): f"qty {h.get('qty')}" for h in _angel_holdings() if h.get("symbol")}
         if ah:

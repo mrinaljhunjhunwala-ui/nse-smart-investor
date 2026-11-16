@@ -32,7 +32,7 @@ def test_list_moves_joins_sources_and_filters():
     out = M.list_moves(sources, quotes, threshold_pct=1.5)
     assert [r["symbol"] for r in out] == ["DHANBANK", "PFC"]
     assert out[1]["sources"] == ["Tomorrow's Watchlist", "My Portfolio"]
-    assert "My Portfolio: avg ₹410.00" in out[1]["details"]
+    assert out[1]["details"] == ["#2 Reversal", "avg ₹410.00"]
 
 
 def test_sector_and_band_moves():
@@ -113,3 +113,23 @@ def test_today_page_tabs_render_stored_data(no_network):
     frames = [df.value for df in at.dataframe]
     assert any("DHANBANK" in df.to_string() for df in frames)          # radar list
     assert any("RELIANCE" in df.to_string() for df in frames)          # picks / cap tables
+
+
+def test_open_trades_line_entry_only():
+    import pandas as pd
+    from dashboard.shared.trade_utils import open_trades_line
+    rows = pd.DataFrame([{"ticker": "TCS.NS", "quantity": 5, "price": 3000.0, "timestamp": "2026-11-12T10:00"},
+                         {"ticker": "DHANBANK.NS", "quantity": 1086, "price": 42.84, "timestamp": "2026-11-10T10:00"}])
+    txt, n = open_trades_line(rows)
+    assert n == 2 and txt == "DHANBANK 1086 @ ₹42.84 · TCS 5 @ ₹3,000.00"
+    assert "%" not in txt                                   # no P&L / win rate on Command Centre
+    assert open_trades_line(pd.DataFrame()) == ("", 0)
+
+
+def test_command_centre_keeps_scan_notes_in_data_health_only():
+    src = open("dashboard/pages/01_command_centre.py", encoding="utf-8").read()
+    picks = src[src.index("def _render_top_picks_section"):src.index("def _render_open_trades_line")]
+    assert "st.caption(price_source_caption" not in picks and "st.caption(_cc_excl)" not in picks
+    footer = src[src.index('with st.expander("Data health details"'):]
+    assert "price_source_caption" in footer and "_cc_excluded_note" in footer
+    assert src.index("_render_open_trades_line()") < src.index("_render_top_picks_section(_cc_vix_r")
