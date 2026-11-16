@@ -30,7 +30,7 @@ import trade_store as _store
 # Earlier history (Slice 1 IA restructure, Deep Dive fold-in): see
 # docs/UI_UX_DESIGN_2026-09.md §2.
 _NAV_GROUPS: dict = {
-    "Home":      ["Command Centre", "Markets", "Tomorrow's Watchlist", "Analyze Stock"],
+    "Home":      ["Command Centre", "Today", "Markets", "Tomorrow's Watchlist", "Analyze Stock"],
     "Portfolio": ["My Portfolio", "Paper Trades", "Watchlist & Journal", "Long-Term Quality"],
     "Advanced":  ["Verdict Calibration", "Backtest", "Angel One"],
     "Tools":     ["Trading Tools", "Find Ideas", "Investor Guide"],
@@ -41,6 +41,7 @@ _COLLAPSED_GROUPS: frozenset = frozenset({"Advanced"})
 
 _PAGE_EMOJI: dict = {
     "Command Centre":       "🎯",
+    "Today":                "🚀",
     "Markets":              "📊",
     "Tomorrow's Watchlist": "📅",
     "Find Ideas":           "🔎",
@@ -66,8 +67,7 @@ _group_icons: dict = {
 # view switch, view labels in display order). The page file passes the same
 # key/labels to dashboard.views.view_switch().
 _PAGE_VIEWS: dict = {
-    "Markets":       ("mk_view", ["📡 Live Ticker", "🚀 Today's Movers", "📊 Breadth & Macro",
-                                 "🏦 FII / DII Flows"]),
+    "Markets":       ("mk_view", ["📡 Live Ticker", "📊 Breadth & Macro", "🏦 FII / DII Flows"]),
     "Find Ideas":    ("fi_view", ["🔎 Smart Screener", "📈 Trend Quality Score"]),
     "Trading Tools": ("tt_view", ["⚡ Intraday Trader", "📐 Position Sizer"]),
 }
@@ -98,27 +98,28 @@ _LEGACY_FULL_NAME: dict = {
 
 _PAGE_FILE = {
     # File numbers follow the sidebar order in _NAV_GROUPS (renumbered
-    # 2026-11-09, then again for the 14-page layout). Streamlit's URL slug
+    # 2026-11-09, again for the 14-page layout, and 2026-11-17 for Today at 02). Streamlit's URL slug
     # drops the numeric prefix, so a renumber never changes a page's URL;
     # merged pages got new slugs.
     # Home
     "Command Centre":       "pages/01_command_centre.py",
-    "Markets":              "pages/02_markets.py",
-    "Tomorrow's Watchlist": "pages/03_tomorrow_watchlist.py",
-    "Analyze Stock":        "pages/04_analyze_stock.py",
+    "Today":                "pages/02_today.py",
+    "Markets":              "pages/03_markets.py",
+    "Tomorrow's Watchlist": "pages/04_tomorrow_watchlist.py",
+    "Analyze Stock":        "pages/05_analyze_stock.py",
     # Portfolio
-    "My Portfolio":         "pages/05_my_portfolio.py",
-    "Paper Trades":         "pages/06_paper_trades.py",
-    "Watchlist & Journal":  "pages/07_watchlist_journal.py",
-    "Long-Term Quality":    "pages/08_quality_watch.py",   # renamed from "Quality Watch"; slug kept
+    "My Portfolio":         "pages/06_my_portfolio.py",
+    "Paper Trades":         "pages/07_paper_trades.py",
+    "Watchlist & Journal":  "pages/08_watchlist_journal.py",
+    "Long-Term Quality":    "pages/09_quality_watch.py",   # renamed from "Quality Watch"; slug kept
     # Advanced (collapsed unless current)
-    "Verdict Calibration":  "pages/09_verdict_calibration.py",
-    "Backtest":             "pages/10_backtest.py",
-    "Angel One":            "pages/11_angel_one.py",
+    "Verdict Calibration":  "pages/10_verdict_calibration.py",
+    "Backtest":             "pages/11_backtest.py",
+    "Angel One":            "pages/12_angel_one.py",
     # Tools
-    "Trading Tools":        "pages/12_trading_tools.py",
-    "Find Ideas":           "pages/13_find_ideas.py",
-    "Investor Guide":       "pages/14_investor_guide.py",
+    "Trading Tools":        "pages/13_trading_tools.py",
+    "Find Ideas":           "pages/14_find_ideas.py",
+    "Investor Guide":       "pages/15_investor_guide.py",
 }
 # Old names route to the page that now holds them (see nav_to for the view).
 _PAGE_FILE.update({_old: _PAGE_FILE[_new] for _old, (_new, _v) in _LEGACY_PAGES.items()})
@@ -419,7 +420,7 @@ def _render_command_bar() -> None:
 
     # When the box is empty and the user has previously analyzed some
     # tickers this session, surface them as quick-jump buttons. Writing
-    # side lives on Analyze Stock (04_analyze_stock.py) — see
+    # side lives on Analyze Stock (05_analyze_stock.py) — see
     # st.session_state['__recent_tickers'].
     if not hits and not (q or "").strip():
         _recent = st.session_state.get("__recent_tickers", [])
@@ -863,7 +864,7 @@ def render_sidebar(current: str = None) -> None:
     # widget ... is instantiated" because the text_input has already been
     # created earlier in this same script run. The fix (same deferred-flag
     # + st.rerun() pattern already used for the search boxes in
-    # dashboard/pages/04_analyze_stock.py's "_as_clear_pending" flag): set
+    # dashboard/pages/05_analyze_stock.py's "_as_clear_pending" flag): set
     # a plain flag when "＋" is clicked, then consume it up here, before the
     # widget is instantiated on the *next* run.
     if st.session_state.pop("_wl_add_clear_pending", False):

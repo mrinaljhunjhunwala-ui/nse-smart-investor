@@ -3,6 +3,20 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Today page + Command Centre trimmed (17 Nov, owner request):** new page **02 Today** (pages
+  renumbered 02-14 -> 03-15; URLs unchanged) with tabs 🚀 Movers (sector medians and cap-size
+  gainers / losers from the scan, then the movers radar list, which moved here from Markets),
+  📋 My lists (Tomorrow's Watchlist any rank, My Portfolio and Angel One holdings moving ±1.5%+;
+  holdings only after their PIN is unlocked), 🔥 Picks (all 20 Top Picks with today's move; ±3%,
+  stop or target flagged), 🔔 Changes & alerts (posture changes, every alert sent today from KV
+  `alerts_sent:<date>` written by `check_alerts.dispatch`, and the price-alerts viewer that was on
+  Command Centre). Command Centre is now market posture (full-width, larger type), the breadth
+  line, Top Picks (10, "Show all 20" toggle; the list still refreshes per scan) and data health
+  at the bottom; the Nifty 50 gainers / posture-changes panels, Momentum Leaders (still on
+  Tomorrow's Watchlist), Paper Trades overview and open positions were removed (Paper Trades has
+  them). The scrolling line in the top bar is now the live top 5 Nifty 50 gainers and top 5
+  losers (was 14 fixed large caps). Next: Research Notes (Deep Dive out of Analyze Stock, replacing
+  the Journal) + a "portfolio briefing for Claude" copy-out / paste-back; no API key needed.
 - **Movers radar + holding guard (16 Nov, owner request):** the owner missed DHANBANK / STYLEBAAZA
   runs (Tomorrow's Watchlist Telegram shows only its top 5; STYLEBAAZA is not in the scan universe)
   and found Momentum Leaders unhelpful for catching the day's moves. New, every 15-minute market
@@ -210,7 +224,7 @@ This section is the running memory between sessions; older sections below are hi
   `ACTION  SYMBOL  ₹price · stop · target` per stock, one footer, ≤15 lines (weekly card ≤20).
   Portfolio Posture groups SELL → STOP HIT → TRIM → ADD → HOLD (`POSTURE_DISPLAY`), no raw tags.
   `tests/test_alert_copy_no_advice.py` now guards THIS format (`_assert_descriptive` kept as alias).
-  Not yet aligned: page copy such as `05_my_portfolio.py` "Weakening / Broken Trend".
+  Not yet aligned: page copy such as `06_my_portfolio.py` "Weakening / Broken Trend".
 - **Catalyst engine (14 Nov):** `analysis/catalysts.py` (pure; rule table in its docstring),
   `data/nse_announcements.py` (announcements / results filed / quarterly figures / pre-open; NSE →
   RSS → BSE; never raises), `alerts/catalyst_alerts.py`. Modes: `--mode=catalyst-preopen` (step in

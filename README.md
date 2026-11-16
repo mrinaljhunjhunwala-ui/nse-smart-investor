@@ -13,11 +13,11 @@ intraday tools, and optional live broker integration via Angel One SmartAPI.
 
 ## ✨ Features
 
-A 14-page platform, grouped into four sidebar sections (Advanced starts collapsed):
+A 15-page platform, grouped into four sidebar sections (Advanced starts collapsed):
 
 | Section | Pages |
 |---|---|
-| **Home** | Command Centre (landing) · Markets (Live Ticker / Breadth & Macro / FII-DII Flows) · Tomorrow's Watchlist · Analyze Stock (incl. Deep Dive tab and swing checklist) |
+| **Home** | Command Centre (landing: market posture + Top Picks) · Today (movers, your lists ±1.5%, picks, alerts sent) · Markets (Live Ticker / Breadth & Macro / FII-DII Flows) · Tomorrow's Watchlist · Analyze Stock (incl. Deep Dive tab and swing checklist) |
 | **Portfolio** | My Portfolio · Paper Trades · Watchlist & Journal · Long-Term Quality (long-term holds) |
 | **Advanced** | Verdict Calibration · Backtest · Angel One |
 | **Tools** | Trading Tools (Intraday Trader: CPR / ORB / Supertrend / VWAP / OI & options · Position Sizer) · Find Ideas (Smart Screener · TQS Scanner) · Investor Guide |
@@ -114,7 +114,7 @@ py -m pytest -m "not slow" -q      # default suite (what CI runs)
 py -m pytest -m slow -q            # gated end-to-end backtest smoke (needs network)
 ```
 
-- **Page smoke** (`tests/test_pages_smoke.py`) loads all 14 pages (and each view of the merged pages) headlessly with network blocked,
+- **Page smoke** (`tests/test_pages_smoke.py`) loads all 15 pages (and each view of the merged pages) headlessly with network blocked,
   so they take the graceful degraded path → deterministic.
 - **Valuation regression** (`tests/test_valuation_golden_snapshot.py`) replays captured inputs through
   the pure engine and fails on posture/confidence drift.

@@ -1,4 +1,4 @@
-"""Smart Screener view, rendered by dashboard/pages/13_find_ideas.py via render().
+"""Smart Screener view, rendered by dashboard/pages/14_find_ideas.py via render().
 
 Moved out of its own page on 2026-11-09 (page simplification); the body is
 unchanged apart from being wrapped in render() and st.stop() becoming return.

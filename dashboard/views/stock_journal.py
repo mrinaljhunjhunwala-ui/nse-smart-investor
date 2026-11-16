@@ -1,4 +1,4 @@
-"""Stock Journal view, rendered by dashboard/pages/07_watchlist_journal.py via render().
+"""Stock Journal view, rendered by dashboard/pages/08_watchlist_journal.py via render().
 
 Moved out of its own page on 2026-11-09 (page simplification); the body is
 unchanged apart from being wrapped in render() and st.stop() becoming return.

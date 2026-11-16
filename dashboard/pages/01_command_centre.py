@@ -6,9 +6,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import threading
-import pandas as pd
 import streamlit as st
-import trade_store as _store
 
 from dashboard.shared.design import apply_design
 from dashboard.shared.nav import render_sidebar
@@ -19,7 +17,6 @@ from dashboard.shared.ui_components import chip_pill, ticker_hover_wrap
 from dashboard.shared.cache import (
     get_top_picks,
     _persisted_top_picks_snapshot,   # FIX TP-FAST1 / FIX TP-NOOP1
-    _score_watchlist,
     _sector_ranks_tuple,
     _sparkline_closes,
     _sparkline_svg,
@@ -29,15 +26,9 @@ from dashboard.shared.cache import (
     get_vix_info,
 )
 from dashboard.shared.trade_utils import (
-    _auto_close_breached,
     _display_label,            # Phase 2 UI honesty
     verdict_display_label,
-    _is_squareoff_time,
     _paper_trade_popover,
-    _portfolio_live_prices,
-    _render_autoclose_banner,
-    paper_close_trade,
-    reconcile_paper_exits,
 )
 
 apply_design()
@@ -65,12 +56,11 @@ from analysis.score import (
     _regime_weights_enabled as _cc_rw_enabled, _BEAR_REGIMES as _cc_bear, grade_label as _grade_label,
 )
 from dashboard.shared.cache import (
-    get_regime_snapshot, get_fii_dii_recent, get_recent_posture_changes,
-    _nifty50_gainers_ticker, get_display_name,
+    get_regime_snapshot, get_fii_dii_recent,
 )
 from dashboard.shared.chart_helpers import _index_strip_data
 from dashboard.shared.ui_components import (
-    gate_strip, signal_table, chip_delta, chip_tag, fmt_inr, rank_chip,
+    gate_strip, chip_delta, fmt_inr,
 )
 
 _v2_flag = _cc_rw_enabled()   # default ON since 2026-09-24; NSE_USE_REGIME_WEIGHTS=0 disables
@@ -78,15 +68,9 @@ _v2_flag = _cc_rw_enabled()   # default ON since 2026-09-24; NSE_USE_REGIME_WEIG
 st.markdown('<h1 class="page-title-serif">Command <em>Centre</em></h1>', unsafe_allow_html=True)
 
 _mb_now = _mb_dt.datetime.now(_mb_dt.timezone(_mb_dt.timedelta(hours=5, minutes=30)))
-try:
-    _mbo = _store.fetch_open()
-    _mb_open = 0 if (_mbo is None or _mbo.empty) else len(_mbo)
-    _mb_open_txt = f"{_mb_open} open paper position{'s' if _mb_open != 1 else ''}"
-except Exception as _e:
-    _mb_open_txt = "paper positions unavailable"
 st.markdown(
-    f'<p class="page-subtitle">{_mb_now.strftime("%a %d %b %Y · %H:%M IST")} · {_mb_open_txt} · '
-    'market conditions, open positions and watchlist in one place.</p>',
+    f'<p class="page-subtitle">{_mb_now.strftime("%a %d %b %Y · %H:%M IST")} · '
+    'market posture and today\'s top picks. What is moving and what was sent to you: Today.</p>',
     unsafe_allow_html=True,
 )
 
@@ -211,7 +195,7 @@ try:
         _hero_verdict(posture=_pn, posture_qualifier=_pq,
                       kicker=("Market posture · regime unavailable · " + _mode if _cc_label == "unknown"
                               else f"Market posture · {_cc_label.replace('_', ' ')} regime · {_mode}"),
-                      why=_posture_why(), tone=_pt),
+                      why=_posture_why(), tone=_pt, wide=True),
         unsafe_allow_html=True,
     )
 except Exception as _hv_err:
@@ -246,89 +230,8 @@ except Exception as _ms_err:
     st.caption("Market breadth summary unavailable.")
 
 
-# ── Two columns: today's gainers + recent posture changes ────────────────────
-def _panel_html(title: str, sub: str, body: str) -> str:
-    return (f'<div class="kit-panel"><div class="kit-panel-hd"><span class="kit-panel-t">{title}</span>'
-            f'<span class="kit-panel-s">{sub}</span></div>{body}</div>')
 
 
-def _gainers_html() -> str:
-    try:
-        rows = _nifty50_gainers_ticker(n=5)
-    except Exception:
-        rows = []
-    if not rows:
-        return _panel_html(f"Top gainers · {session_label()}", "Nifty 50 · live",
-                           '<div class="ledger-note" style="padding:14px">'
-                           f"No Nifty 50 name is up {session_label()}, or quotes are unavailable.</div>")
-    body = signal_table(
-        [("#", "l"), ("Ticker", "l"), ("LTP", "r"), ("Δ %", "r")],
-        [[rank_chip(i),
-          f'<span class="sym">{_html.escape(r["ticker"].replace(".NS", ""))}</span>'
-          f'<span class="co">{_html.escape(get_display_name(r["ticker"]))}</span>',
-          "₹" + fmt_inr(r["price"], 2 if r["price"] < 1000 else 0),
-          chip_delta(r["chg_pct"])]
-         for i, r in enumerate(rows, start=1)],
-    )
-    return _panel_html(f"Top gainers · {session_label()}", "Nifty 50 · live, 60 s cache", body)
-
-
-def _changes_html() -> str:
-    try:
-        changes = get_recent_posture_changes(limit=5)
-    except Exception:
-        changes = []
-    if not changes:
-        return _panel_html("Posture changes · recent", "verdict ledger",
-                           '<div class="ledger-note" style="padding:14px">'
-                           "No verdict has changed between logged sessions yet.</div>")
-    items = []
-    for c in changes:
-        _sc = ""
-        if c.get("prev_score") is not None and c.get("new_score") is not None:
-            try:
-                _sc = f"composite {float(c['prev_score']):.0f} → {float(c['new_score']):.0f} · "
-            except (TypeError, ValueError):
-                _sc = ""
-        items.append(
-            f'<li><span class="ledger-when">{_html.escape(c["date"][5:])}</span><div>'
-            f'<span class="ledger-sym">{_html.escape(str(c["ticker"]).replace(".NS", ""))}</span>'
-            f'{chip_tag(_html.escape(verdict_display_label(c["prev"])))} → '
-            f'{chip_tag(_html.escape(verdict_display_label(c["new"])))}'
-            f'<div class="ledger-note">{_sc}logged by {_html.escape(str(c["source"]).replace("_", " "))}</div>'
-            f'</div></li>'
-        )
-    return _panel_html("Posture changes · recent", "verdict ledger · latest change per ticker",
-                       f'<ul class="ledger-list">{"".join(items)}</ul>')
-
-
-_cc_c1, _cc_c2 = st.columns(2, gap="medium")
-with _cc_c1:
-    st.markdown(_gainers_html(), unsafe_allow_html=True)
-with _cc_c2:
-    st.markdown(_changes_html(), unsafe_allow_html=True)
-
-
-# ── Data health: one-line strip, full table on demand (Task 2.3) ─────────────
-# Read-only aggregation of each provider's own diagnostics; no network here.
-try:
-    from dashboard.shared.data_health import (
-        collect_all_health as _dh_collect, render_data_health_html as _dh_render,
-    )
-    _dh_checks = _dh_collect()
-    _dh_dot = {"healthy": "bull", "stale": "amber", "degraded": "bear"}
-    st.markdown(
-        '<div class="health-strip"><b>Data health</b>' + "".join(
-            f'<span class="health-item"><span class="health-dot" '
-            f'style="background:var(--{_dh_dot.get(c.status, "faint")})"></span>{_html.escape(c.name)}</span>'
-            for c in _dh_checks) + "</div>",
-        unsafe_allow_html=True,
-    )
-    with st.expander("Data health details", expanded=False):
-        st.markdown(_dh_render(_dh_checks), unsafe_allow_html=True)
-except Exception as _dh_err:
-    import logging
-    logging.getLogger("dashboard.command_centre").debug("data_health strip render failed: %s", _dh_err)
 
 st.markdown("---")
 
@@ -426,7 +329,6 @@ import datetime
 # out of this file still passes.
 from dashboard.shared.pick_freshness import (
     COST_ROUNDTRIP_PCT as _COST_ROUNDTRIP_PCT,
-    LIVE_DRIFT_THRESHOLD_PCT as _LIVE_DRIFT_THRESHOLD_PCT,
     reanchor_levels as _reanchor_levels,
     compose_finalverdict_for_card as _compose_fv_for_card,
 )
@@ -789,6 +691,14 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
     # the fragment tick prunes symbols no longer in the picks output.
     _pk_pulse, _pk_pulse_commit = tick_pulse_tracker("_cc_picks_prev")
 
+    # Owner request 2026-11-17: 10 picks by default, all 20 on demand. The list still refreshes
+    # with each scan; Today → Picks tracks all 20 with their move today.
+    _pk_n = len(_picks["buys"])
+    _pk_all = st.toggle(f"Show all {_pk_n}", key="cc_picks_show_all", value=False,
+                        help="Command Centre shows the top 10; Today → Picks follows all of them.") \
+        if _pk_n > 10 else True
+    _pk_limit = None if _pk_all else 10
+
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
         st.markdown(
@@ -798,7 +708,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         )
         if not _picks["buys"]:
             st.caption("No names in the strong-trend band in today's scan.")
-        for _b in _picks["buys"]:
+        for _b in _picks["buys"][:_pk_limit]:
             _bl = _b["ticker"].replace(".NS", "")
             _tt_lbl, _tt_emo, _tt_col = _trade_type(_b.get("headline", ""))
             _grade_tag = _card_grade_tag(_b["score"])
@@ -951,7 +861,7 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         )
         if not _picks["sells"]:
             st.caption("No names in the weak/broken-trend band in today's scan.")
-        for _sv in _picks["sells"]:
+        for _sv in _picks["sells"][:_pk_limit]:
             _svl = _sv["ticker"].replace(".NS", "")
             # FIX CC-LIVE1: same bounded pattern as the Buy loop above —
             # price only, from the one shared _pk_live batch fetch already
@@ -1004,283 +914,26 @@ _sec_tuple = _sector_ranks_tuple()
 st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
 _render_top_picks_section(_cc_vix_r, _sec_tuple)
 
-# Momentum leaders: a separate, regime-independent list read from the same
-# scheduled scan's snapshot (no scan, no extra network here).
-try:
-    from dashboard.shared.cache import get_momentum_leaders as _get_mom
-    from dashboard.shared.momentum_leaders_ui import render_momentum_leaders as _render_mom
-    _render_mom(_get_mom())
-except Exception as _mom_e:
-    st.caption(f"Momentum leaders unavailable ({type(_mom_e).__name__}).")
 
 st.markdown("---")
 
-# ── PAPER TRADES OVERVIEW (quick view; moved below Top Picks per the mockup) ─────────────────────────────────
+# ── Data health: one-line strip, full table on demand (Task 2.3) — page footer ─────────────
+# Read-only aggregation of each provider's own diagnostics; no network here.
 try:
-    import trade_store as _pto_ts
-    _pto_open  = _pto_ts.fetch_open()
-    _pto_accts = _pto_ts.list_accounts()
-    _pto_all   = (pd.concat([_pto_ts.load_by_account(_a) for _a in _pto_accts],
-                            ignore_index=True)
-                  if _pto_accts else pd.DataFrame())
-
-    _pto_n = 0 if (_pto_open is None or _pto_open.empty) else len(_pto_open)
-
-    _pto_unreal = 0.0
-    if _pto_n:
-        _pto_syms = tuple(_pto_open["ticker"].tolist())
-        _pto_lp   = _portfolio_live_prices(_pto_syms)
-        for _, _por in _pto_open.iterrows():
-            _pep = float(_por.get("price", 0) or 0)
-            _pqt = int(_por.get("quantity", 0) or 0)
-            _pcur = _pto_lp.get(str(_por["ticker"]), {}).get("price", _pep)
-            _pto_unreal += (_pcur - _pep) * _pqt
-
-    _pto_real, _pto_wins, _pto_tot = 0.0, 0, 0
-    if not _pto_all.empty and "status" in _pto_all.columns:
-        _pto_closed = _pto_all[_pto_all["status"].isin(["CLOSED", "STOPPED"])]
-        if not _pto_closed.empty and "pnl" in _pto_closed.columns:
-            _pnl_series = _pto_closed["pnl"].fillna(0)
-            _pto_real = float(_pnl_series.sum())
-            _pto_tot  = int(len(_pto_closed))
-            _pto_wins = int((_pnl_series > 0).sum())
-    _pto_wr = (_pto_wins / _pto_tot * 100) if _pto_tot else 0.0
-
-    # Task 1.3: this block used a bespoke _pto_cell helper + a raw
-    # .glass-panel wrapper with drifting hex ("var(--ink)", "var(--faint)",
-    # "var(--faint)", "var(--dim)"). Migrated to the shared panel() + stat()
-    # components so it renders in the same visual language as every
-    # other card in the app and pulls color from CSS custom properties.
-    from dashboard.shared.ui_components import panel as _panel, stat as _stat
-    _u_tone = "bull" if _pto_unreal >= 0 else "bear"
-    _r_tone = "bull" if _pto_real   >= 0 else "bear"
-    _wr_tone = ("bull" if _pto_wr >= 50 else
-                "amber" if _pto_wr >= 35 else "bear")
-    _pto_body = (
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));'
-        'gap:14px 22px">'
-        + _stat("Open Positions", f"{_pto_n}", tone="neutral", align="center")
-        + _stat("Unrealised P&amp;L", f"Rs.{_pto_unreal:+,.0f}",
-                sub="live prices", tone=_u_tone, align="center")
-        + _stat("Realised P&amp;L", f"Rs.{_pto_real:+,.0f}",
-                sub=f"{_pto_tot} closed", tone=_r_tone, align="center")
-        + _stat("Win Rate", f"{_pto_wr:.0f}%",
-                sub=(f"{_pto_wins}/{_pto_tot} wins" if _pto_tot else "no closed trades"),
-                tone=_wr_tone, align="center")
-        + '</div>'
+    from dashboard.shared.data_health import (
+        collect_all_health as _dh_collect, render_data_health_html as _dh_render,
     )
+    _dh_checks = _dh_collect()
+    _dh_dot = {"healthy": "bull", "stale": "amber", "degraded": "bear"}
     st.markdown(
-        _panel(_pto_body, kind="glass", tone="neutral",
-               title="Paper Trades Overview", margin="0 0 14px 0"),
+        '<div class="health-strip"><b>Data health</b>' + "".join(
+            f'<span class="health-item"><span class="health-dot" '
+            f'style="background:var(--{_dh_dot.get(c.status, "faint")})"></span>{_html.escape(c.name)}</span>'
+            for c in _dh_checks) + "</div>",
         unsafe_allow_html=True,
     )
-except Exception as _pto_e:
-    st.caption(f"⚠️ Paper trades overview unavailable ({_pto_e}).")
-
-
-@st.fragment
-def _render_open_positions_section():
-    """Own fragment so Close Now / autoclose-toggle clicks only rerun this section, not the whole Command Centre page."""
-    # ── 3. OPEN POSITION ALERTS + AUTO-CLOSE ───────────────────────────────────
-    _cc_h1, _cc_h2 = st.columns([5, 2])
-    _cc_h1.markdown(
-        '<div class="t-h1" style="margin:6px 0 4px 0">'
-        '📌 Open Positions</div>',
-        unsafe_allow_html=True,
-    )
-    with _cc_h2:
-        _cc_autoclose = st.toggle(
-            "🤖 Auto-close CNC on SL/TP",
-            value=st.session_state.get("auto_close_on", False),
-            key="cc_autoclose_toggle",
-            help="When ON, CNC (delivery) paper trades that hit their target or stop-loss are "
-                 "closed automatically on page load (during market hours only, on live prices). "
-                 "MIS (intraday) positions are ALWAYS squared off at 15:15 regardless of this toggle. "
-                 "Real broker holdings are never auto-traded — only alerted.",
-        )
-        st.session_state["auto_close_on"] = _cc_autoclose
-
-    # Catch-up: record SL / TP exits already hit on past daily bars (all
-    # accounts), so stale positions don't linger here. Once per 10 minutes.
-    import time as _time
-    if _time.time() - float(st.session_state.get("cc_reconciled_at", 0) or 0) > 600:
-        st.session_state["cc_reconciled_at"] = _time.time()
-        _cc_caught = reconcile_paper_exits()
-        if _cc_caught:
-            st.info(
-                f"📒 Recorded {len(_cc_caught)} paper exit(s) that happened while the app "
-                "wasn't open — see Paper Trades → Closed Trade History.",
-                icon="📒",
-            )
-
-    _cc_sq_banner_shown = False
-    if _is_squareoff_time():
-        _sq_all_closed = _auto_close_breached()
-        _sq_mis_closed = [c for c in _sq_all_closed if c["type"] == "squareoff"]
-        if _sq_mis_closed:
-            _render_autoclose_banner(_sq_mis_closed)
-            # BUGFIX: only live prices need to be re-fetched after an auto-close —
-            # a blanket st.cache_data.clear() here also nuked Top Picks, watchlist
-            # scores, and VIX info on every squareoff event.
-            _portfolio_live_prices.clear()
-            _cc_sq_banner_shown = True
-    
-    if _cc_autoclose:
-        _cc_all_closed = _auto_close_breached()
-        _cc_sltp_closed = [c for c in _cc_all_closed if c["type"] in ("target", "stop")]
-        if _cc_sltp_closed:
-            _render_autoclose_banner(_cc_sltp_closed)
-            _portfolio_live_prices.clear()
-    
-    _cc_open_df = pd.DataFrame()
-    try:
-        _cc_open_df = _store.fetch_open()
-    except Exception as _e:
-        st.caption(f"⚠️ Couldn't load open paper positions ({_e}).")
-    
-    if _cc_open_df.empty:
-        # F5 empty-state kit -- see dashboard/shared/ui_components.py.
-        from dashboard.shared.ui_components import empty_state as _empty_cc_pt
-        st.markdown(
-            _empty_cc_pt(
-                title="No open paper positions",
-                hint="Use the **Paper Trades** page, or click "
-                     "**Paper Trade** on any setup card below.",
-                icon="📌",
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        _cc_syms = tuple(_cc_open_df["ticker"].tolist())
-        _cc_lp   = _portfolio_live_prices(_cc_syms)
-    
-        _cc_alerts, _cc_normal_pos = [], []
-        for _, _ccr in _cc_open_df.iterrows():
-            _ck  = _ccr["ticker"]
-            _cep = float(_ccr.get("price", 0) or 0)
-            _cqt = int(  _ccr.get("quantity", 0) or 0)
-            _csl = float(_ccr.get("sl", 0) or 0) or None
-            _ctp = float(_ccr.get("tp", 0) or 0) or None
-            _clp_d = _cc_lp.get(_ck, {})
-            _ccur  = _clp_d.get("price", _cep)
-            _cunr  = (_ccur - _cep) * _cqt
-            _cunr_pct = (_ccur / _cep - 1) * 100 if _cep > 0 else 0
-    
-            _cst = "normal"
-            if _ctp and _ccur >= _ctp:       _cst = "target_hit"
-            elif _csl and _ccur <= _csl:     _cst = "sl_hit"
-            elif abs(_cunr_pct) >= 5:        _cst = "big_move"
-    
-            _entry_d = dict(id=int(_ccr["id"]), ticker=_ck,
-                            account=str(_ccr.get("account","My Account")),
-                            ep=_cep, cur=_ccur, qty=_cqt, sl=_csl, tp=_ctp,
-                            unr=_cunr, unr_pct=_cunr_pct, status=_cst)
-            (_cc_alerts if _cst != "normal" else _cc_normal_pos).append(_entry_d)
-    
-        if _cc_alerts:
-            st.markdown("**⚠️ These positions need your attention:**")
-    
-        for _pos in _cc_alerts + _cc_normal_pos:
-            _pbdr = {"target_hit": "var(--bull)", "sl_hit": "var(--bear)", "big_move": "var(--amber)",
-                     "normal": "var(--accent)"}.get(_pos["status"], "var(--accent)")
-            _pbg  = {"target_hit": "var(--sunken)", "sl_hit": "var(--sunken)",  "big_move": "var(--sunken)",
-                     "normal": "var(--surface)"}.get(_pos["status"], "var(--surface)")
-            _purc = "var(--bull)" if _pos["unr"] >= 0 else "var(--bear)"
-            _palert = {
-                "target_hit": f"🎯 Target reached — price is at or above your target",
-                "sl_hit":     f"🚨 Stop-loss breached — price is below your stop",
-                "big_move":   f"{'📈' if _pos['unr_pct']>0 else '📉'} Large move since entry",
-            }.get(_pos["status"], "")
-    
-            _pc1, _pc2 = st.columns([5, 1])
-            with _pc1:
-                st.markdown(
-                    f'<div style="background:{_pbg};border-left:5px solid {_pbdr};'
-                    f'border-radius:10px;padding:11px 15px;margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<div><span style="font-size:16px;font-weight:700;color:var(--ink)">'
-                    f'{_pos["ticker"].replace(".NS","")}</span>'
-                    f'<span style="font-size:11px;color:var(--dim);margin-left:8px">📂 {_pos["account"]}</span>'
-                    f'<span style="font-size:12px;color:var(--dim);margin-left:8px">'
-                    f'Entry ₹{_pos["ep"]:,.2f} → Now ₹{_pos["cur"]:,.2f}</span></div>'
-                    f'<div style="font-size:16px;font-weight:700;color:{_purc}">'
-                    f'₹{_pos["unr"]:+,.0f} ({_pos["unr_pct"]:+.1f}%)</div></div>'
-                    + (f'<div style="font-size:13px;color:var(--ink-mid);margin-top:4px">{_palert}</div>' if _palert else '')
-                    + '</div>',
-                    unsafe_allow_html=True,
-                )
-            with _pc2:
-                if _pos["status"] in ("target_hit", "sl_hit"):
-                    if st.button("Close Now", key=f"cc_cl_{_pos['id']}",
-                                 width="stretch", type="primary"):
-                        paper_close_trade(_pos["id"], _pos["cur"],
-                                          "Closed via Command Centre")
-                        # BUGFIX: closing one position only needs fresh live
-                        # prices for the remaining open positions — it doesn't
-                        # need to invalidate Top Picks or watchlist scores too.
-                        _portfolio_live_prices.clear()
-                        st.rerun()
-    
-
-_render_open_positions_section()
-
-# FIX CC-TRIM — the bottom "Watchlist — What to Do Today" section was removed
-# from this page on request. It duplicated 08_my_watchlist.py, which is where
-# per-name scoring lives exclusively. Home page below is Top Picks + Open
-# Positions + Background Alerts.
-
-# ── 5. BACKGROUND TELEGRAM ALERTS (viewer) ─────────────────────────────────
-st.markdown("---")
-with st.expander("🔔 Background Alerts (Telegram) — fire even when this app is closed", expanded=False):
-    st.caption(
-        "A GitHub Actions job checks these every 15 min during market hours and "
-        "messages you on Telegram. Edit **data/alerts.csv** in your GitHub repo to "
-        "change them. Full setup: **alerts/README.md**."
-    )
-    try:
-        import pathlib as _alp
-        _alerts_path = _alp.Path(_ROOT) / "data" / "alerts.csv"
-        if _alerts_path.exists():
-            _al_df = pd.read_csv(_alerts_path)
-            _act_df = _al_df[_al_df["enabled"].astype(str).isin(["1", "True", "true"])]
-            st.markdown(f"**{len(_act_df)} active** of {len(_al_df)} configured price alerts:")
-            if not _act_df.empty:
-                _al_show = _act_df[["ticker", "condition", "level", "note"]].copy()
-                _al_show.columns = ["Stock", "When price goes", "Level (₹)", "Note"]
-                st.dataframe(_al_show, hide_index=True, width="stretch")
-            else:
-                from dashboard.shared.ui_components import empty_state as _empty_al
-                st.markdown(
-                    _empty_al(
-                        title="No active price alerts",
-                        hint="All rows are examples (enabled=0). Set "
-                             "`enabled=1` on a row in `data/alerts.csv` to "
-                             "activate it.",
-                        icon="🔔",
-                    ),
-                    unsafe_allow_html=True,
-                )
-        else:
-            from dashboard.shared.ui_components import empty_state as _empty_al2
-            st.markdown(
-                _empty_al2(
-                    title="No alerts.csv found yet",
-                    hint="Create `data/alerts.csv` with your desired price "
-                         "levels to start getting Telegram notifications.",
-                    icon="📄",
-                ),
-                unsafe_allow_html=True,
-            )
-    except Exception as _ale:
-        st.caption(f"Could not read alerts.csv: {_ale}")
-
-    st.markdown(
-        "**Also alerted automatically:** 🔴 VIX entering fear/panic · 📉 Nifty breaking into a downtrend.  \n"
-        "**One-time setup:** create a Telegram bot via @BotFather, then add "
-        "`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` as GitHub Actions secrets "
-        "(Settings → Secrets and variables → Actions)."
-    )
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 1 — MY PORTFOLIO
-# ═══════════════════════════════════════════════════════════════════════════════
+    with st.expander("Data health details", expanded=False):
+        st.markdown(_dh_render(_dh_checks), unsafe_allow_html=True)
+except Exception as _dh_err:
+    import logging
+    logging.getLogger("dashboard.command_centre").debug("data_health strip render failed: %s", _dh_err)

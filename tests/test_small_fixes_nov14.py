@@ -13,7 +13,7 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
 # ── 2. My Portfolio wording ──────────────────────────────────────────────────
 def test_my_portfolio_has_no_descriptive_trend_labels():
-    src = (ROOT / "dashboard" / "pages" / "05_my_portfolio.py").read_text(encoding="utf-8")
+    src = (ROOT / "dashboard" / "pages" / "06_my_portfolio.py").read_text(encoding="utf-8")
     for old in ("Weakening", "Broken Trend", "Strong Trend", "Uptrend"):
         assert old not in src, old
     from analysis.action_labels import action_display_label as lab

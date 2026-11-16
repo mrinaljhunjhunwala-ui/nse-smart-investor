@@ -13,7 +13,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "13_find_ideas.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "14_find_ideas.py")
 
 
 def _app(timeout):

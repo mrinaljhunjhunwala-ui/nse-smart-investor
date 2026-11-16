@@ -498,22 +498,26 @@ def index_rail_data() -> list:
 
 
 @st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def _ticker_tape_data():
-    _names = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS",
-              "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "AXISBANK.NS",
-              "MARUTI.NS", "TMCV.NS", "SUNPHARMA.NS", "TITAN.NS"]
+    """Scrolling line: the top 5 Nifty 50 gainers, then the top 5 losers, live.
+    Returns [(label, symbol, price, chg%)]; [] when quotes are unavailable."""
     try:
+        from analysis.movers import gainers_and_losers
+        from data.universe import get_universe
         from utils.live_price import get_live_prices_batch
-        raw = get_live_prices_batch(_names, max_workers=10)
+        names = list(get_universe("nifty50"))
+        raw = get_live_prices_batch(names, max_workers=12)
     except Exception as _e:
         _log.debug("chart_helpers.%s degraded: %s", "_ticker_tape_data", _e)
-        raw = {}
-    out = []
-    for t in _names:
-        q = raw.get(t)
-        if isinstance(q, dict) and q.get("price"):
-            out.append((t.replace(".NS", ""), float(q["price"]), float(q.get("chg_pct", 0.0))))
-    return out
+        return []
+    rows = []
+    for t in names:
+        q = raw.get(t) if isinstance(raw, dict) else None
+        if isinstance(q, dict) and q.get("price") and q.get("chg_pct") is not None:
+            rows.append((t.replace(".NS", ""), float(q["price"]), float(q["chg_pct"])))
+    up, down = gainers_and_losers(rows, n=5)
+    return [("gainer", *r) for r in up] + [("loser", *r) for r in down]
 
 
 def tick_pulse_tracker(key: str):
@@ -641,7 +645,13 @@ def _live_top_bar():
         _tt = _ticker_tape_data()
         if _tt:
             _tt_items = ""
-            for _sym, _px, _chg in _tt:
+            _seen_kind = None
+            for _kind, _sym, _px, _chg in _tt:
+                if _kind != _seen_kind:
+                    _seen_kind = _kind
+                    _tt_items += (f'<span style="margin:0 10px 0 22px;color:#8899bb;font-size:11px;'
+                                  f'letter-spacing:.6px;font-weight:600">'
+                                  f'{"NIFTY 50 GAINERS" if _kind == "gainer" else "NIFTY 50 LOSERS"}</span>')
                 _tc = "#00d4aa" if _chg >= 0 else "#ff4757"
                 _ta = "▲" if _chg >= 0 else "▼"
                 _tt_items += (

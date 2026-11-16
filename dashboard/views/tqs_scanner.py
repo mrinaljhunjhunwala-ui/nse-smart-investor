@@ -1,4 +1,4 @@
-"""Trend Quality Score view, rendered by dashboard/pages/13_find_ideas.py via render().
+"""Trend Quality Score view, rendered by dashboard/pages/14_find_ideas.py via render().
 
 Moved out of its own page on 2026-11-09 (page simplification); the body is
 unchanged apart from being wrapped in render() and st.stop() becoming return.
@@ -7,7 +7,7 @@ Trend Quality Score (TQS) — Universe Scanner.
 
 Score a universe of tickers by TQS, rank them, show a sortable table +
 heatmap. The single-stock DEEP DIVE mode this page used to have was folded
-into 04_analyze_stock.py's "🌊 TQS breakdown" expander (Analysis
+into 05_analyze_stock.py's "🌊 TQS breakdown" expander (Analysis
 consolidation #2) so a user gets both the composite verdict AND the TQS
 pillar decomposition in one place — no need to visit two pages.
 """

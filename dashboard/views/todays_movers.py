@@ -1,4 +1,4 @@
-"""Today's Movers view, rendered by dashboard/pages/02_markets.py via render().
+"""Movers-radar section, rendered on the Today page (dashboard/pages/02_today.py) via render().
 
 Shows what the intraday movers radar (alerts/movers_alerts.py) sent today: every NSE stock that
 crossed its market-cap tier's move threshold, whether it was on last evening's Tomorrow's
@@ -25,7 +25,7 @@ def _evidence():
         return None
 
 
-def render() -> None:
+def render(show_title: bool = True) -> None:
     import datetime as dt
 
     import pandas as pd
@@ -34,7 +34,8 @@ def render() -> None:
     from analysis.movers import BAND_LABEL, BANDS, MOVE_BUCKETS, THRESHOLD_PCT, WATCHLIST_MIN_PCT, \
         chase_lookup, evidence_phrase
 
-    st.markdown('<h2 class="page-title-serif">Today\'s <em>Movers</em></h2>', unsafe_allow_html=True)
+    if show_title:
+        st.markdown('<h2 class="page-title-serif">Today\'s <em>Movers</em></h2>', unsafe_allow_html=True)
     st.caption(
         "Every NSE stock that moved up past its tier's threshold today — large caps from "
         f"+{THRESHOLD_PCT['Large']:g}%, mid +{THRESHOLD_PCT['Mid']:g}%, small +{THRESHOLD_PCT['Small']:g}%, "
