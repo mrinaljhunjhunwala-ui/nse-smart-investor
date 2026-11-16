@@ -44,6 +44,7 @@ FIX APPTEST  st.selectbox index=None replaced with explicit index lookup so
 
 import os
 import sys
+import time
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -70,6 +71,7 @@ from dashboard.shared.trade_utils import (
     paper_list_accounts,
     paper_open_trade,
     paper_rename_account,
+    reconcile_paper_exits,
     set_paper_account_type,
 )
 from dashboard.shared.chart_helpers import render_top_bar
@@ -699,7 +701,26 @@ def _autoclose_fragment():
 
 _autoclose_fragment()
 
-trades = load_trades_by_account(st.session_state.get("pt_account", "My Account"))
+# Catch-up: close trades whose own SL / TP was hit on a past daily bar while the
+# app wasn't watching (live auto-close only sees the current price). Throttled
+# to once per account per 10 minutes; independent of the live toggle above.
+_pt_acct_now = st.session_state.get("pt_account", "My Account")
+_rc_key = f"pt_reconciled_at:{_pt_acct_now}"
+if time.time() - float(st.session_state.get(_rc_key, 0) or 0) > 600:
+    st.session_state[_rc_key] = time.time()
+    _caught = reconcile_paper_exits(account=_pt_acct_now)
+    if _caught:
+        _paper_trade_suggestions.clear()
+        st.info(
+            f"📒 Recorded {len(_caught)} exit(s) that happened while the app wasn't open: "
+            + " · ".join(
+                f"{c['ticker']} @ ₹{c['exit']:,.2f} on {c['date']:%d %b} ({c['reason'].split(' (')[0]})"
+                for c in _caught
+            ),
+            icon="📒",
+        )
+
+trades = load_trades_by_account(_pt_acct_now)
 
 if trades.empty:
     # F5 empty-state kit -- see dashboard/shared/ui_components.py.
@@ -967,11 +988,16 @@ else:
         _cl_disp = all_closed[
             [c for c in ["id", "ticker", "price", "quantity", "sl", "tp",
                           "exit_price", "exit_reason", "pnl", "charges", "pnl_pct",
-                          "status", "timestamp"]
+                          "status", "timestamp", "exit_time"]
              if c in all_closed.columns]
         ].copy()
         if "pnl" in _cl_disp.columns:
             _cl_disp["pnl"] = pd.to_numeric(_cl_disp["pnl"], errors="coerce")
+        # Newest exit first: rows came back in entry order, so a trade opened
+        # weeks ago and closed today sat at the bottom looking like it was missing.
+        _sort_key = _cl_disp["exit_time"] if "exit_time" in _cl_disp.columns else _cl_disp["timestamp"]
+        _cl_disp = _cl_disp.assign(_sk=pd.to_datetime(_sort_key, errors="coerce")) \
+                           .sort_values("_sk", ascending=False, na_position="last").drop(columns="_sk")
 
         _CTH = ("background:var(--sunken);padding:7px 11px;font-size:11px;color:var(--ink-mid);"
                 "font-weight:600;border-bottom:2px solid var(--hairline);text-align:right;white-space:nowrap")
@@ -992,7 +1018,8 @@ else:
             f'<th style="{_CTH}" title="Estimated: STT, stamp duty, exchange/SEBI fees, GST, DP and brokerage">Charges ₹ (est.)</th>'
             f'<th style="{_CTH}">Net ₹</th>'
             f'<th style="{_CTH}">P&amp;L %</th>'
-            f'<th style="{_CTH}">Date</th>'
+            f'<th style="{_CTH}">Opened</th>'
+            f'<th style="{_CTH}">Closed</th>'
             f'</tr></thead><tbody>'
         )
         for _, _cr in _cl_disp.iterrows():
@@ -1009,7 +1036,10 @@ else:
             _c_tp   = f"₹{float(_cr.get('tp', 0)):,.2f}" if _cr.get("tp")         else "—"
             _c_xp   = f"₹{float(_cr.get('exit_price', 0)):,.2f}" if _cr.get("exit_price") else "—"
             _c_xr   = str(_cr.get("exit_reason", "") or "")
-            _c_dt   = str(_cr.get("timestamp", ""))[:10]
+            _c_dt   = str(_cr.get("timestamp", "") or "")[:10]
+            _c_xt   = str(_cr.get("exit_time", "") or "")[:10] or "—"
+            if _c_xt in ("None", "nan", "NaT"):
+                _c_xt = "—"
             _ct_html += (
                 f'<tr style="background:{_c_bg}">'
                 f'<td style="{_CTX}"><b>{_c_tick}</b></td>'
@@ -1024,6 +1054,7 @@ else:
                 f'<td style="{_CTD};color:{_n_col};font-weight:700">₹{_c_net:+,.0f}</td>'
                 f'<td style="{_CTD};color:{_c_col}">{_c_pct:+.1f}%</td>'
                 f'<td style="{_CTD}">{_c_dt}</td>'
+                f'<td style="{_CTD}">{_c_xt}</td>'
                 f'</tr>'
             )
         _ct_html += "</tbody></table>"

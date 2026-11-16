@@ -22,6 +22,15 @@ This section is the running memory between sessions; older sections below are hi
   many are left, and the next run carries on. The backfill will take a few evenings. The 403s in
   the alert jobs are the same limit: nothing to change there, Yahoo answers.
   Results-date gate (`data/events.should_skip_entry` is unused) not done.
+- **Paper trades that hit SL / TP now close (16 Nov):** live auto-close only ran while Paper Trades
+  was open, in market hours, with its toggle on (default off, per session), and only compared the
+  current price, so trades touched while the app slept stayed OPEN and never reached Closed Trade
+  History. Manual Close was fine (checked on SQLite and Postgres). `trading/paper_exits.find_exit`
+  (pure) replays daily bars after the entry day (gap → open fill; SL and TP same day → SL; MIS →
+  entry session's close) and `trade_utils.reconcile_paper_exits` closes at the first touch with
+  the real exit date; it runs on Paper Trades and Command Centre load (once per 10 min, regardless
+  of the toggle). `trade_store.close_trade` takes `exit_time` and only updates OPEN rows (a second
+  click no longer overwrites). History is ordered by exit, with Opened / Closed date columns.
 - **Presentation and one quality number (16 Nov, owner go-ahead):** (1) Quality Watch's 20-point
   quality block now takes the Fundamental score Analyze Stock uses (`fundamental_score.py`:
   Piotroski F + growth + valuation sanity) when it is available, ratios otherwise
