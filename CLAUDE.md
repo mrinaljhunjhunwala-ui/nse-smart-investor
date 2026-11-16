@@ -4,14 +4,14 @@ Read this before doing anything in the repo, then the **"Latest" section at the 
 
 ## What this is
 
-A 14-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Personal tool of its owner — not a SEBI-registered advice product.**
+A 15-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Personal tool of its owner — not a SEBI-registered advice product.**
 
 ## Architecture at a glance
 
 ```
 dashboard/                       Streamlit UI — the "view" layer
 ├── app.py                       thin entry: page config + theme + redirect
-├── pages/*.py                   14 pages (01–14, numbered in sidebar order), one per screen
+├── pages/*.py                   15 pages (01–15, numbered in sidebar order), one per screen
 ├── views/*.py                   bodies of merged pages as render() (Markets, Find Ideas, Watchlist & Journal, Trading Tools)
 └── shared/                      cross-page utilities (design/theme, nav, cache, chart helpers)
 analysis/                        PURE engine — NO Streamlit imports here
@@ -71,10 +71,10 @@ py -m streamlit run dashboard/app.py --server.port 8501 --server.headless true
 py -m pytest -m "not slow" -q
 
 # One page's smoke test only (fast during dashboard/pages/ edits)
-py -m pytest tests/test_pages_smoke.py -k "04_analyze_stock" -q
+py -m pytest tests/test_pages_smoke.py -k "05_analyze_stock" -q
 
 # Lint a single file (config: pyproject.toml → [tool.ruff], max-line 120)
-py -m ruff check dashboard/pages/04_analyze_stock.py
+py -m ruff check dashboard/pages/05_analyze_stock.py
 
 # Slow end-to-end backtest (needs network — gated out of CI)
 py -m pytest -m slow -q

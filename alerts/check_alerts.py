@@ -200,7 +200,30 @@ def dispatch(msg: str, *, subject: str = "NSE Smart Investor alert") -> bool:
     # Name the alert in the run log — "1 alert(s) sent" alone didn't say which.
     print(f"[sent] {_subj} (telegram={'ok' if _tg_ok else 'fail'}, "
           f"gmail={'ok' if _gmail_ok else 'fail'})")
-    return bool(_tg_ok or _gmail_ok)
+    ok = bool(_tg_ok or _gmail_ok)
+    if ok:
+        _log_sent(_subj, msg)
+    return ok
+
+
+ALERT_LOG_PREFIX = "alerts_sent:"
+_ALERT_LOG_MAX = 80
+
+
+def _log_sent(subject: str, msg: str) -> None:
+    """Append one sent alert to KV alerts_sent:<IST date> (user "_system") so the
+    Today page can list everything Telegram received. Never raises."""
+    try:
+        import trade_store as store
+        now = datetime.datetime.now(_IST)
+        key = f"{ALERT_LOG_PREFIX}{now:%Y-%m-%d}"
+        log = store.kv_get(key, None, user_id="_system")
+        log = log if isinstance(log, list) else []
+        log.append({"time": f"{now:%H:%M}", "subject": str(subject)[:120],
+                    "text": _plain(str(msg or "")).strip()[:3000]})
+        store.kv_set(key, log[-_ALERT_LOG_MAX:], user_id="_system")
+    except Exception as e:
+        print(f"[sent] alert log not saved: {type(e).__name__}: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""Intraday Trader view, rendered by dashboard/pages/12_trading_tools.py via render().
+"""Intraday Trader view, rendered by dashboard/pages/13_trading_tools.py via render().
 
 Moved out of its own page on 2026-11-09 (page simplification); the body is
 unchanged apart from being wrapped in render() and st.stop() becoming return.
@@ -236,7 +236,7 @@ def render() -> None:
         # "Resolve ticker" logic below, so a new dropdown pick had no visible
         # effect if the manual box still held something from an earlier search.
         # Same on_change + clear-pending pattern already used (and verified) in
-        # dashboard/pages/04_analyze_stock.py's search boxes. The clear-pending
+        # dashboard/pages/05_analyze_stock.py's search boxes. The clear-pending
         # flag (rather than writing session_state directly in the button block)
         # is required because Streamlit raises "cannot be modified after the
         # widget ... is instantiated" once a widget has already rendered in the

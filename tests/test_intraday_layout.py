@@ -15,7 +15,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PAGE = os.path.join(_ROOT, "dashboard", "pages", "12_trading_tools.py")
+_PAGE = os.path.join(_ROOT, "dashboard", "pages", "13_trading_tools.py")
 
 
 def _app(timeout):

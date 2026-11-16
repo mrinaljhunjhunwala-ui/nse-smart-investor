@@ -98,6 +98,80 @@ def _num(x: Any) -> Optional[float]:
     return v if math.isfinite(v) else None
 
 
+def gainers_and_losers(rows: Iterable[Tuple[str, float, float]], n: int = 5
+                       ) -> Tuple[List[Tuple[str, float, float]], List[Tuple[str, float, float]]]:
+    """Top ``n`` gainers (biggest first) and top ``n`` losers (worst first) from
+    (symbol, price, change %) rows. A flat or red market can give fewer than n gainers;
+    nothing is backfilled."""
+    clean = [(s, float(p), float(c)) for s, p, c in rows or []
+             if s and _num(p) is not None and _num(c) is not None]
+    up = sorted([r for r in clean if r[2] > 0], key=lambda r: -r[2])[:n]
+    down = sorted([r for r in clean if r[2] < 0], key=lambda r: r[2])[:n]
+    return up, down
+
+
+def list_moves(sources: Mapping[str, Mapping[str, str]], quotes: Mapping[str, Mapping[str, Any]],
+               threshold_pct: float = 1.5) -> List[dict]:
+    """Stocks from the owner's lists that moved at least ``threshold_pct`` today.
+
+    sources: {source label: {SYMBOL: detail}}, e.g. {"Tomorrow's Watchlist": {"DHANBANK": "#14
+    Breakout"}, "My Portfolio": {"PFC": "avg ₹410"}}. quotes: {SYMBOL or SYMBOL.NS: {price,
+    chg_pct}}. One row per symbol (sources joined), biggest absolute move first.
+    """
+    merged: Dict[str, dict] = {}
+    for label, items in (sources or {}).items():
+        for sym, detail in (items or {}).items():
+            b = base_symbol(sym)
+            if not b:
+                continue
+            row = merged.setdefault(b, {"symbol": b, "sources": [], "details": []})
+            if label not in row["sources"]:
+                row["sources"].append(label)
+            if detail:
+                row["details"].append(f"{label}: {detail}")
+    out = []
+    for b, row in merged.items():
+        q = quotes.get(b) or quotes.get(f"{b}.NS") or {}
+        pct, price = _num(q.get("chg_pct")), _num(q.get("price"))
+        if pct is None or price is None or abs(pct) < threshold_pct:
+            continue
+        out.append({**row, "pct": round(pct, 2), "price": price})
+    return sorted(out, key=lambda r: -abs(r["pct"]))
+
+
+def sector_moves(scored: Mapping[str, Mapping[str, Any]], min_names: int = 3) -> List[dict]:
+    """Median one-day move per sector from the scan's all-scored map, best first."""
+    by: Dict[str, List[float]] = {}
+    for v in (scored or {}).values():
+        if not isinstance(v, Mapping):
+            continue
+        sec, r = str(v.get("sector") or "").strip(), _num(v.get("return_1d"))
+        if sec and r is not None:
+            by.setdefault(sec, []).append(r)
+    out = [{"sector": k, "median_pct": round(float(pd.Series(xs).median()), 2), "names": len(xs),
+            "up": sum(1 for x in xs if x > 0)} for k, xs in by.items() if len(xs) >= min_names]
+    return sorted(out, key=lambda r: -r["median_pct"])
+
+
+def band_gainers_losers(scored: Mapping[str, Mapping[str, Any]], bands: Mapping[str, str],
+                        n: int = 5) -> Dict[str, Tuple[List[dict], List[dict]]]:
+    """{band: (top n gainers, top n losers)} from the scan's all-scored map."""
+    rows: Dict[str, List[Tuple[str, float, float]]] = {b: [] for b in BANDS}
+    for k, v in (scored or {}).items():
+        if not isinstance(v, Mapping):
+            continue
+        sym = base_symbol(v.get("ticker") or k)
+        r, px = _num(v.get("return_1d")), _num(v.get("price"))
+        if sym and r is not None and px:
+            rows[cap_band(sym, bands)].append((sym, px, r))
+    out = {}
+    for b, rs in rows.items():
+        up, down = gainers_and_losers(rs, n=n)
+        out[b] = ([{"symbol": s, "price": p, "pct": c} for s, p, c in up],
+                  [{"symbol": s, "price": p, "pct": c} for s, p, c in down])
+    return out
+
+
 # ── Choosing the movers to send ────────────────────────────────────────────────────────────────
 
 def qualifies(row: Mapping[str, Any], band: str, on_watchlist: bool) -> bool:

@@ -13,7 +13,7 @@ import pathlib as _pl
 
 # Absolute: AppTest resolves relative paths against the calling test file on
 # some Streamlit versions (CI), not the repo root.
-PAGE22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "02_markets.py")
+PAGE22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "pages" / "03_markets.py")
 # The FII / DII view body (source checks read this file).
 VIEW22 = str(_pl.Path(__file__).resolve().parents[1] / "dashboard" / "views" / "fii_dii_flows.py")
 

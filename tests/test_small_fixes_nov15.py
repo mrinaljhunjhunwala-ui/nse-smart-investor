@@ -121,7 +121,7 @@ def test_live_ticker_tags_an_eod_quote():
 
 
 def test_paper_trades_live_badge_ignores_eod_quotes():
-    src = (ROOT / "dashboard" / "pages" / "06_paper_trades.py").read_text(encoding="utf-8")
+    src = (ROOT / "dashboard" / "pages" / "07_paper_trades.py").read_text(encoding="utf-8")
     assert '_has_live = bool(_lp.get("price")) and not _lp.get("eod")' in src
 
 

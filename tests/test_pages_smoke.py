@@ -121,7 +121,7 @@ def test_all_pages_present():
     #
     # 2026-08-30 sprint (Analysis-page consolidation): −1 page
     #   * 13_swing_checklist.py removed — its 8-factor go/no-go was folded
-    #     into 04_analyze_stock.py via dashboard/shared/checklist_ui.py.
+    #     into 05_analyze_stock.py via dashboard/shared/checklist_ui.py.
     #
     # 2026-09-09 (PR 3 alerts follow-through): +1 page
     #   * 13_stock_journal.py — reclaims the number vacated by the swing
@@ -132,7 +132,7 @@ def test_all_pages_present():
     #
     # 2026-09-18 (Slice 2 · Deep Dive fold-in): −1 page
     #   * 20_deep_dive.py removed — its indicators / candlestick / mini-
-    #     report views were folded into 04_analyze_stock.py as an 8th tab
+    #     report views were folded into 05_analyze_stock.py as an 8th tab
     #     via dashboard/shared/deep_dive_tab.py. See PR #115.
     #
     # 2026-11-09 (page simplification, owner-approved layout): 19 -> 14 pages.
@@ -142,7 +142,7 @@ def test_all_pages_present():
     #   * Trading Tools (12) = Intraday Trader + Position Sizer (view switch)
     #   The merged pages' bodies live in dashboard/views/; each view gets its
     #   own smoke run in test_merged_page_view_loads below.
-    assert len(_PAGES) == 14, f"expected 14 pages, found {len(_PAGES)}: {_IDS}"
+    assert len(_PAGES) == 15, f"expected 15 pages, found {len(_PAGES)}: {_IDS}"
 
 
 def test_page_numbers_follow_sidebar_order():
@@ -210,8 +210,8 @@ _MERGED_VIEWS = _merged_views()
 
 def test_every_merged_page_has_views():
     pages = {f for f, _, _ in _MERGED_VIEWS}
-    assert pages == {"02_markets.py", "12_trading_tools.py", "13_find_ideas.py"}, pages
-    assert len(_MERGED_VIEWS) == 8
+    assert pages == {"03_markets.py", "13_trading_tools.py", "14_find_ideas.py"}, pages
+    assert len(_MERGED_VIEWS) == 7
 
 
 @pytest.mark.smoke
@@ -231,7 +231,7 @@ def test_merged_page_view_loads(fname, key, label):
 
 @pytest.mark.smoke
 def test_watchlist_journal_renders_both_tabs():
-    at = AppTest.from_file(os.path.join(_PAGES_DIR, "07_watchlist_journal.py"),
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "08_watchlist_journal.py"),
                            default_timeout=240).run()
     assert not at.exception, at.exception
     assert [t.label for t in at.tabs][:2] == ["⭐ My Watchlist", "📓 Stock Journal"]
@@ -241,7 +241,7 @@ def test_watchlist_journal_renders_both_tabs():
 def test_open_view_flag_selects_view():
     """nav.request_view's one-shot flag (used by legacy _goto_page names and
     the command bar) opens the requested view and is consumed."""
-    at = AppTest.from_file(os.path.join(_PAGES_DIR, "02_markets.py"), default_timeout=240)
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "03_markets.py"), default_timeout=240)
     at.session_state["_open_mk_view"] = "🏦 FII / DII Flows"
     at.run()
     assert not at.exception, at.exception
@@ -253,7 +253,7 @@ def test_open_view_flag_selects_view():
 def test_sizer_prefill_opens_position_sizer():
     """Analyze Stock's "Size Position" button sets ps_entry/ps_sl/ps_tp and
     switches to Trading Tools; new prefill values open the Position Sizer."""
-    at = AppTest.from_file(os.path.join(_PAGES_DIR, "12_trading_tools.py"), default_timeout=240)
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "13_trading_tools.py"), default_timeout=240)
     at.session_state["ps_entry"] = 101.5
     at.session_state["ps_sl"] = 97.0
     at.session_state["ps_tp"] = 110.0
@@ -261,7 +261,7 @@ def test_sizer_prefill_opens_position_sizer():
     assert not at.exception, at.exception
     assert at.session_state["tt_view"] == "📐 Position Sizer"
     # Without a prefill the page opens on the first view.
-    at2 = AppTest.from_file(os.path.join(_PAGES_DIR, "12_trading_tools.py"), default_timeout=240).run()
+    at2 = AppTest.from_file(os.path.join(_PAGES_DIR, "13_trading_tools.py"), default_timeout=240).run()
     assert not at2.exception, at2.exception
     assert at2.session_state["tt_view"] == "⚡ Intraday Trader"
 
@@ -340,7 +340,7 @@ def test_analyze_headline_business_gate_leads(monkeypatch):
     monkeypatch.setattr(_svc, "default_service", lambda: _Svc())
     st.cache_data.clear()
     try:
-        at = AppTest.from_file(os.path.join(_PAGES_DIR, "04_analyze_stock.py"),
+        at = AppTest.from_file(os.path.join(_PAGES_DIR, "05_analyze_stock.py"),
                                default_timeout=240)
         at.query_params["ticker"] = "ITC"
         at.run()

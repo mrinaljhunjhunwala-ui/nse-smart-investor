@@ -898,8 +898,12 @@ def hero_verdict(posture: str,
                  tone: str = "accent",
                  pillars: Optional[list] = None,
                  second_score: Optional[dict] = None,
-                 score_label: str = "Composite") -> str:
+                 score_label: str = "Composite",
+                 wide: bool = False) -> str:
     """Editorial verdict hero card (mockup Variant A -- serif italic posture).
+
+    wide=True (Command Centre's market posture, no score column): larger type and the why
+    paragraph runs the full card width instead of a narrow 46-character column.
 
     Two-column card. LEFT: kicker, serif italic posture noun, muted
     qualifier, why paragraph. RIGHT: big mono composite score with
@@ -959,18 +963,20 @@ def hero_verdict(posture: str,
     # inline the escaped-quotes ternary or CI collection breaks.
     serif_stack = "'Instrument Serif','Iowan Old Style',Georgia,serif"
     why_html = ""
+    _why_fs, _why_mw = ("17px", "none") if wide else ("13.5px", "46ch")
+    _post_fs, _kick_fs = ("42px", "12px") if wide else ("32px", "10px")
     if why:
         why_html = (
-            '<p style="font-size:13.5px;color:var(--ink-mid);line-height:1.55;'
-            f'margin:0;max-width:46ch">{why}</p>'
+            f'<p style="font-size:{_why_fs};color:var(--ink-mid);line-height:{"1.6" if wide else "1.55"};'
+            f'margin:0;max-width:{_why_mw}">{why}</p>'
         )
     lead_html = (
         f'<div style="padding:22px 26px;background:linear-gradient(180deg,'
         f'color-mix(in srgb,{tone_color} 6%,var(--surface)),var(--surface) 80%);'
         f'border-right:1px solid var(--hairline)">'
-        f'<div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;'
+        f'<div style="font-size:{_kick_fs};letter-spacing:.16em;text-transform:uppercase;'
         f'color:{tone_color};font-weight:700;margin-bottom:10px">{kicker}</div>'
-        f'<div style="font-family:{serif_stack};font-weight:400;font-size:32px;'
+        f'<div style="font-family:{serif_stack};font-weight:400;font-size:{_post_fs};'
         f'line-height:1.1;letter-spacing:-.015em;color:var(--ink);'
         f'margin:4px 0 10px 0">'
         f'<em style="font-style:italic;color:{tone_color}">{posture}.</em>{q_html}'

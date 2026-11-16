@@ -1,4 +1,4 @@
-"""Breadth & Macro view, rendered by dashboard/pages/02_markets.py via render().
+"""Breadth & Macro view, rendered by dashboard/pages/03_markets.py via render().
 
 Moved out of its own page on 2026-11-09 (page simplification); the body is
 unchanged apart from being wrapped in render() and st.stop() becoming return.

@@ -1,4 +1,4 @@
-"""Position Sizer view, rendered by dashboard/pages/12_trading_tools.py via render().
+"""Position Sizer view, rendered by dashboard/pages/13_trading_tools.py via render().
 
 Moved out of its own page on 2026-11-09 (page simplification); the body is
 unchanged apart from being wrapped in render() and st.stop() becoming return.
