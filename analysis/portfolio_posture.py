@@ -166,7 +166,10 @@ def analyse_delivery_holding(
     n_pass = sum(1 for v in filters.values() if v)
 
     # ── Posture decision — descriptive, not directive ─────────────────────
-    posture, reason = _classify_delivery(filters, pnl_pct, ltp, sma_fast, atr_val)
+    # Longer trend: 50-day above 200-day (short history: 20-day above 50-day).
+    long_trend_up = (sma_slow > sma_fast) if short else (sma_fast > sma_slow)
+    posture, reason = _classify_delivery(filters, pnl_pct, ltp, sma_fast, atr_val,
+                                         long_trend_up=long_trend_up)
     if short:
         first, hi = float(close.iloc[0]), float(close.max())
         # Trend uses SMA20/SMA50 instead of SMA200 here (len(df) bars since listing).
@@ -204,6 +207,7 @@ def _classify_delivery(
     ltp: float,
     sma50: float,
     atr: float,
+    long_trend_up: bool = False,
 ) -> tuple[str, str]:
     """Turn six-filter state + P&L into a descriptive posture label.
 
@@ -217,7 +221,12 @@ def _classify_delivery(
     n_pass = sum(1 for v in filters.values() if v)
 
     if not filters["trend"] and ltp < sma50:
-        # SMA50 breakdown is the classic momentum invalidation
+        # Under the 50-day average. With the longer trend still up (50-day above
+        # the 200-day) that is a pullback: TRIM. Only with the longer trend
+        # broken too is it SELL. Until 16 Nov both read SELL, so 10 of 11
+        # holdings said SELL on one day, a +684% holding next to a -76% one.
+        if long_trend_up:
+            return ("TRIM_WATCH", f"below 50-day average (₹{sma50:,.2f}), longer trend still up")
         return ("EXIT_WATCH", f"below 50-day average (₹{sma50:,.2f})")
     if n_pass >= 5 and pnl_pct >= 0:
         return ("ADD_WATCH", f"{n_pass}/6 filters passing, in profit — trend extending")

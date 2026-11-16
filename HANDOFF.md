@@ -3,6 +3,21 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **16 Nov session review (owner rule: fix what is broken, and close gaps that lose opportunities):**
+  from the day's Actions logs. (1) "Why it moved" never sent: scan rows had no `return_1d`
+  (`cache._score_to_dict`), now carried. (2) Market Alerts did not install `yfinance` /
+  `beautifulsoup4` / `lxml`, so the Screener and Yahoo tiers of the intraday results read failed
+  every run. (3) New-BUY alert: the day's first run spent the whole 10/day cap on the pre-open scan,
+  five of them the digest's own names; digest names are now skipped (no slot) and names first seen
+  at 70+ after the first run draw on a separate `_VERDICT_FRESH_MAX_PER_DAY = 10` (state keys
+  `vseen_` / `vfresh_`). (4) `🛑 STOP HIT` once per digest pick at or under its stop
+  (`_stop_hit_alert`), repeated as a tag in the 15:15 recap. (5) Portfolio: under the 50-day
+  average reads SELL only when the 50-day is under the 200-day, TRIM otherwise
+  (`_classify_delivery(long_trend_up=)`), as the docstring always said. Display / alert logic only:
+  no score, threshold, verdict string or ledger row changed. **Open:** Angel One answers 403 to
+  candle and quote calls in the alert jobs and the log line has no response body, so rate limit vs
+  refusal is undecided; read the first `Warm Price Store` run (16 Nov, 18:30 IST) for
+  `rate_limited` vs `http_403`. Results-date gate (`data/events.should_skip_entry` is unused) not done.
 - **Presentation and one quality number (16 Nov, owner go-ahead):** (1) Quality Watch's 20-point
   quality block now takes the Fundamental score Analyze Stock uses (`fundamental_score.py`:
   Piotroski F + growth + valuation sanity) when it is available, ratios otherwise

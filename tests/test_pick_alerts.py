@@ -158,3 +158,24 @@ def test_holdings_never_get_move_alerts(env, monkeypatch):
     env.quote["ONGC"] = {"price": 200.0, "prev_close": 210.0, "chg_pct": -4.8}
     assert ca.check_pick_moves({}, TODAY) == 0
     assert not any("ONGC" in m for m in env.sent)
+
+
+def test_stop_hit_sent_once_and_shown_in_recap(env):
+    """16 Nov: a digest BUY closed 3% under its stop and no message said so."""
+    env.kv[ca._MORNING_PICKS_KEY]["buys"][0]["sl"] = 1550.0
+    state: dict = {}
+    env.quote["RUBICON"] = {"price": 1590.0, "prev_close": 1600.0, "chg_pct": -0.6}
+    assert ca.check_pick_moves(state, TODAY) == 0                           # above the stop
+    env.quote["RUBICON"] = {"price": 1549.0, "prev_close": 1600.0, "chg_pct": -3.2}
+    assert ca.check_pick_moves(state, TODAY) == 2                           # stop hit + the 2% move
+    stop_msg = env.sent[0]
+    assert "STOP HIT  <b>RUBICON</b>  ₹1,549.00 · stop was ₹1,550.00" in stop_msg
+    assert ca.check_pick_moves(state, TODAY) == 0                           # once a day
+    env.quote["RUBICON"] = {"price": 1580.0, "prev_close": 1600.0, "chg_pct": -1.2}
+    assert ca.check_picks_recap(state, TODAY, now=_at(15, 15)) == 1
+    assert "STOP HIT (stop ₹1,550.00)" in env.sent[-1]                      # still shown after a bounce
+
+
+def test_no_stop_hit_without_a_stop(env):
+    env.quote["RUBICON"] = {"price": 10.0, "prev_close": 1600.0, "chg_pct": -0.5}
+    assert ca.check_pick_moves({}, TODAY) == 0 and env.sent == []
