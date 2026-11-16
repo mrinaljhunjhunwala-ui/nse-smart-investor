@@ -37,6 +37,7 @@ from dashboard.shared.trade_utils import (
     _portfolio_live_prices,
     _render_autoclose_banner,
     paper_close_trade,
+    reconcile_paper_exits,
 )
 
 apply_design()
@@ -1098,7 +1099,20 @@ def _render_open_positions_section():
                  "Real broker holdings are never auto-traded — only alerted.",
         )
         st.session_state["auto_close_on"] = _cc_autoclose
-    
+
+    # Catch-up: record SL / TP exits already hit on past daily bars (all
+    # accounts), so stale positions don't linger here. Once per 10 minutes.
+    import time as _time
+    if _time.time() - float(st.session_state.get("cc_reconciled_at", 0) or 0) > 600:
+        st.session_state["cc_reconciled_at"] = _time.time()
+        _cc_caught = reconcile_paper_exits()
+        if _cc_caught:
+            st.info(
+                f"📒 Recorded {len(_cc_caught)} paper exit(s) that happened while the app "
+                "wasn't open — see Paper Trades → Closed Trade History.",
+                icon="📒",
+            )
+
     _cc_sq_banner_shown = False
     if _is_squareoff_time():
         _sq_all_closed = _auto_close_breached()

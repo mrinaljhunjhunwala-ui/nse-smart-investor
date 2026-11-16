@@ -369,25 +369,35 @@ def open_trade(
     return int(new_id)
 
 
-def close_trade(trade_id: int, exit_price: float, reason: str = "Manual close") -> None:
-    now = _now_ist_iso()
+def close_trade(trade_id: int, exit_price: float, reason: str = "Manual close",
+                exit_time: Optional[str] = None) -> bool:
+    """Close an OPEN trade. Returns True if a row was closed.
+
+    exit_time: when the exit actually happened (the daily-bar catch-up passes the
+    session it found); defaults to now. Only OPEN rows are touched, so a second
+    click or a race with auto-close can't overwrite the first exit.
+    """
+    now = exit_time or _now_ist_iso()
+    exit_price = float(exit_price)
     with _get_conn() as conn:
         cur = conn.cursor()
         cur.execute(_q("SELECT price, quantity, action FROM trades WHERE id=?"), (trade_id,))
         row = cur.fetchone()
         if not row:
-            return
+            return False
         entry_price, qty, action = float(row[0]), int(row[1]), str(row[2]).upper()
         # P&L direction depends on trade side
-        direction = -1 if action == "SELL" else 1
+        direction = -1 if action in ("SELL", "SHORT") else 1
         pnl       = direction * (exit_price - entry_price) * qty
         pnl_pct   = direction * (exit_price / entry_price - 1) * 100 if entry_price > 0 else 0
         cur.execute(
             _q("UPDATE trades SET status='CLOSED', exit_price=?, exit_time=?, "
-               "exit_reason=?, pnl=?, pnl_pct=? WHERE id=?"),
-            (exit_price, now, reason, round(pnl, 2), round(pnl_pct, 2), trade_id),
+               "exit_reason=?, pnl=?, pnl_pct=? WHERE id=? AND status='OPEN'"),
+            (exit_price, now, reason, round(pnl, 2), round(pnl_pct, 2), int(trade_id)),
         )
+        closed = (cur.rowcount or 0) > 0
         conn.commit()
+    return closed
 
 
 def edit_trade(
