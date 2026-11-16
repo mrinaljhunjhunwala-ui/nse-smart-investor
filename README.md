@@ -18,7 +18,7 @@ A 15-page platform, grouped into four sidebar sections (Advanced starts collapse
 | Section | Pages |
 |---|---|
 | **Home** | Command Centre (landing: market posture + Top Picks) · Today (movers, your lists ±1.5%, picks, alerts sent) · Markets (Live Ticker / Breadth & Macro / FII-DII Flows) · Tomorrow's Watchlist · Analyze Stock (incl. Deep Dive tab and swing checklist) |
-| **Portfolio** | My Portfolio · Paper Trades · Watchlist & Journal · Long-Term Quality (long-term holds) |
+| **Portfolio** | My Portfolio · Paper Trades · Watchlist & Notes (My Watchlist · Research Notes: portfolio briefing for Claude, stock deep dives, saved notes) · Long-Term Quality (long-term holds) |
 | **Advanced** | Verdict Calibration · Backtest · Angel One |
 | **Tools** | Trading Tools (Intraday Trader: CPR / ORB / Supertrend / VWAP / OI & options · Position Sizer) · Find Ideas (Smart Screener · TQS Scanner) · Investor Guide |
 
@@ -84,8 +84,8 @@ dashboard/
   app.py                 thin entry point (page config + theme + redirect to Command Centre)
   pages/01..14_*.py      one file per page, numbered in sidebar order (explicit imports)
   views/                 bodies of merged pages (render()): market_live · market_breadth · fii_dii_flows ·
-                         smart_screener · tqs_scanner · my_watchlist · stock_journal · intraday_trader ·
-                         position_sizer — rendered by Markets / Find Ideas / Watchlist & Journal / Trading Tools
+                         smart_screener · tqs_scanner · my_watchlist · research_notes · intraday_trader ·
+                         position_sizer — rendered by Markets / Find Ideas / Watchlist & Notes / Trading Tools
   shared/                design.py (NSE Pro theme) · nav.py · cache.py · chart_helpers.py · trade_utils.py
 analysis/                PURE engine, no Streamlit — heavily unit-tested
   score.py · hedging.py · portfolio_risk.py · portfolio_manager.py · liquidity.py

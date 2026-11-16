@@ -12,7 +12,7 @@ A 15-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It score
 dashboard/                       Streamlit UI — the "view" layer
 ├── app.py                       thin entry: page config + theme + redirect
 ├── pages/*.py                   15 pages (01–15, numbered in sidebar order), one per screen
-├── views/*.py                   bodies of merged pages as render() (Markets, Find Ideas, Watchlist & Journal, Trading Tools)
+├── views/*.py                   bodies of merged pages as render() (Markets, Find Ideas, Watchlist & Notes, Trading Tools)
 └── shared/                      cross-page utilities (design/theme, nav, cache, chart helpers)
 analysis/                        PURE engine — NO Streamlit imports here
 ├── score.py                     composite score (technical 40 + momentum 25 + volume 15 + sentiment 10)

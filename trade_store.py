@@ -556,6 +556,21 @@ def kv_set(key: str, value: Any, user_id: str = "default") -> bool:
         return False
 
 
+def kv_keys(prefix: str, user_id: str = "default") -> List[str]:
+    """All KV keys for ``user_id`` that start with ``prefix`` (sorted). [] on failure."""
+    try:
+        _kv_ensure()
+        like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_q("SELECT k FROM user_kv WHERE user_id=? AND k LIKE ? ESCAPE '\\' ORDER BY k"),
+                        (user_id, like))
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        _log.warning("kv_keys(%r, user=%r) failed: %s", prefix, user_id, e)
+        return []
+
+
 def kv_delete(key: str, user_id: str = "default") -> bool:
     """Delete a single KV entry. Returns True on success."""
     try:

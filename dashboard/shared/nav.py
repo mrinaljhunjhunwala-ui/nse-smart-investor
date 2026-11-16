@@ -21,7 +21,7 @@ import trade_store as _store
 # dashboard/views/ (a view switch for heavy parts, tabs for light ones):
 #   Markets             = Live Ticker + Breadth & Macro + FII / DII Flows (switch)
 #   Find Ideas          = Smart Screener + Trend Quality Score         (switch)
-#   Watchlist & Journal = My Watchlist + Stock Journal                 (tabs)
+#   Watchlist & Notes = My Watchlist + Research Notes (was Stock Journal, 2026-11-17) (tabs)
 #   Trading Tools       = Intraday Trader + Position Sizer             (switch)
 # Quality Watch is shown as "Long-Term Quality" (file name kept, so its URL
 # is unchanged). The Advanced group stays collapsed unless you are on one of
@@ -31,7 +31,7 @@ import trade_store as _store
 # docs/UI_UX_DESIGN_2026-09.md §2.
 _NAV_GROUPS: dict = {
     "Home":      ["Command Centre", "Today", "Markets", "Tomorrow's Watchlist", "Analyze Stock"],
-    "Portfolio": ["My Portfolio", "Paper Trades", "Watchlist & Journal", "Long-Term Quality"],
+    "Portfolio": ["My Portfolio", "Paper Trades", "Watchlist & Notes", "Long-Term Quality"],
     "Advanced":  ["Verdict Calibration", "Backtest", "Angel One"],
     "Tools":     ["Trading Tools", "Find Ideas", "Investor Guide"],
 }
@@ -48,7 +48,7 @@ _PAGE_EMOJI: dict = {
     "Analyze Stock":        "🔍",
     "My Portfolio":         "🏠",
     "Paper Trades":         "📂",
-    "Watchlist & Journal":  "⭐",
+    "Watchlist & Notes":    "⭐",
     "Long-Term Quality":    "🏆",
     "Trading Tools":        "⚡",
     "Investor Guide":       "📖",
@@ -80,8 +80,11 @@ _LEGACY_PAGES: dict = {
     "FII / DII Flows":     ("Markets", "🏦 FII / DII Flows"),
     "Smart Screener":      ("Find Ideas", "🔎 Smart Screener"),
     "Trend Quality Score": ("Find Ideas", "📈 Trend Quality Score"),
-    "My Watchlist":        ("Watchlist & Journal", None),
-    "Stock Journal":       ("Watchlist & Journal", None),
+    "My Watchlist":        ("Watchlist & Notes", None),
+    "Stock Journal":       ("Watchlist & Notes", None),
+    "Watchlist & Journal": ("Watchlist & Notes", None),
+    "Research Notes":      ("Watchlist & Notes", None),
+    "Deep Dive":           ("Watchlist & Notes", None),
     "Quality Watch":       ("Long-Term Quality", None),
     "Intraday Trader":     ("Trading Tools", "⚡ Intraday Trader"),
     "Position Sizer":      ("Trading Tools", "📐 Position Sizer"),
@@ -110,7 +113,7 @@ _PAGE_FILE = {
     # Portfolio
     "My Portfolio":         "pages/06_my_portfolio.py",
     "Paper Trades":         "pages/07_paper_trades.py",
-    "Watchlist & Journal":  "pages/08_watchlist_journal.py",
+    "Watchlist & Notes":    "pages/08_watchlist_journal.py",   # slug kept
     "Long-Term Quality":    "pages/09_quality_watch.py",   # renamed from "Quality Watch"; slug kept
     # Advanced (collapsed unless current)
     "Verdict Calibration":  "pages/10_verdict_calibration.py",

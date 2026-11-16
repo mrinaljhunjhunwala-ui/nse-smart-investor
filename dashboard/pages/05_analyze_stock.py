@@ -1352,7 +1352,7 @@ if analyze_btn or _prefill_active or (
                     else:
                         _ctx_chips.append(chip_pill(
                             "No Deep Dive saved", "neutral",
-                            title="Deep Dive (foot of Overview) builds a research prompt you can run "
+                            title="Deep Dive (Watchlist & Notes → Research Notes) builds a research prompt to run "
                                   "with your own annual report / concall PDFs."))
                 except Exception as _fresh_e:
                     _log.debug("Thesis freshness check failed for %s: %s", ticker, _fresh_e)
@@ -1898,7 +1898,7 @@ if analyze_btn or _prefill_active or (
                         "- **Overview (this tab)** – posture, chart, sector-aware fundamentals "
                         "and reference levels up top; horizon reads, thesis, overlays, TQS and "
                         "the pre-trade checklist under Other lenses.\n"
-                        "- **Deep Dive (below)** – prepares a full equity-research prompt (all of "
+                        "- **Deep Dive (Research Notes)** – prepares a full equity-research prompt (all of "
                         "this page's outputs + fundamentals + governance flags + thesis verdict) "
                         "to paste into a Claude conversation with the annual report / concall "
                         "PDFs attached. Save the write-up back with a date.\n"
@@ -1909,15 +1909,16 @@ if analyze_btn or _prefill_active or (
 
                 # Deep Dive (was its own tab): behind a toggle, because building
                 # the prompt context pulls fundamentals, flags and thesis.
+                # 2026-11-17: the Deep Dive prompt moved to Watchlist & Notes → Research Notes,
+                # next to the portfolio briefing and the library of saved notes.
                 st.markdown(section_header("Deep Dive", "research prompt for your annual report / concall PDFs"),
                             unsafe_allow_html=True)
-
-                @st.fragment
-                def _frag_deep_dive():
-                    from dashboard.shared.deep_dive_tab import render_deep_dive_tab
-                    render_deep_dive_tab(ticker)
-                if st.toggle("Build the Deep Dive research prompt", key=f"_dd_open_{ticker}"):
-                    _frag_deep_dive()
+                if st.button(f"📝 Open {ticker.replace('.NS', '')} in Research Notes",
+                             key=f"_dd_goto_{ticker}",
+                             help="Build the research prompt for Claude and see every note saved for this stock."):
+                    from dashboard.shared.nav import nav_to as _nav_to_rn
+                    st.session_state["rn_ticker"] = ticker.replace(".NS", "")
+                    _nav_to_rn("Research Notes")
 
 
             # ────────────────────────────────────────────────────────────────

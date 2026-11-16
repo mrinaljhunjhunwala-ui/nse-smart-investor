@@ -234,7 +234,7 @@ def test_watchlist_journal_renders_both_tabs():
     at = AppTest.from_file(os.path.join(_PAGES_DIR, "08_watchlist_journal.py"),
                            default_timeout=240).run()
     assert not at.exception, at.exception
-    assert [t.label for t in at.tabs][:2] == ["⭐ My Watchlist", "📓 Stock Journal"]
+    assert [t.label for t in at.tabs][:2] == ["⭐ My Watchlist", "📝 Research Notes"]
 
 
 @pytest.mark.smoke
