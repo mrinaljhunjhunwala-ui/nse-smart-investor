@@ -562,14 +562,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         _uni_warn = None
     if _uni_warn:
         st.caption(f"⚠ {_uni_warn}")
-    # Price source for the scan: nightly Angel One store (data/price_store.py)
-    # or Yahoo. Silent if the status read itself fails.
-    try:
-        from dashboard.shared.cache import get_price_store_status, price_source_caption
-        st.caption(price_source_caption(get_price_store_status()))
-    except Exception as _ps_e:
-        import logging
-        logging.getLogger("dashboard.command_centre").debug("price-store caption skipped: %s", _ps_e)
+    # The scan's price source (store / Yahoo) is listed under Data health details at the
+    # bottom of the page (owner 2026-11-17: keep the picks area to picks).
 
     # ── FIX TP-VIX1: warn on regime mismatch ──
     # If VIX has flipped between when the snapshot was scored and now, the
@@ -644,9 +638,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             "remaining cards below are watchlist-grade backfill, marked accordingly."
         )
     from dashboard.shared.edge_flags_ui import excluded_note as _cc_excluded_note
-    _cc_excl = _cc_excluded_note(_picks_meta.get("excluded"))
-    if _cc_excl:
-        st.caption(_cc_excl)
+    # Shown under Data health details (bottom of page), not above the cards.
+    st.session_state["_cc_excluded_note"] = _cc_excluded_note(_picks_meta.get("excluded"))
 
     # FIX CC-LOAD1 (original): this section used to batch-fetch live price,
     # re-anchor entry/SL/TP AND compute suggested qty for every buy+sell
@@ -912,6 +905,26 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
 
 _sec_tuple = _sector_ranks_tuple()
 st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
+# ── Open paper trades: one compact line, no P&L (owner 2026-11-17) ──────────
+def _render_open_trades_line() -> None:
+    try:
+        from dashboard.shared.trade_utils import load_open_trades_line
+        txt, n = load_open_trades_line()
+    except Exception as _ot_e:
+        import logging
+        logging.getLogger("dashboard.command_centre").debug("open trades line failed: %s", _ot_e)
+        return
+    _ot1, _ot2 = st.columns([6, 1], vertical_alignment="center")
+    _ot1.markdown(
+        f'<div style="font-size:13px;color:var(--ink-mid)"><b>📂 Open paper trades · {n}</b>'
+        f'{" · " + txt if txt else " · none"}</div>', unsafe_allow_html=True)
+    if _ot2.button("Paper Trades", key="cc_open_paper", width="stretch"):
+        from dashboard.shared.nav import nav_to
+        nav_to("Paper Trades")
+
+
+_render_open_trades_line()
+
 _render_top_picks_section(_cc_vix_r, _sec_tuple)
 
 
@@ -934,6 +947,14 @@ try:
     )
     with st.expander("Data health details", expanded=False):
         st.markdown(_dh_render(_dh_checks), unsafe_allow_html=True)
+        try:
+            from dashboard.shared.cache import get_price_store_status, price_source_caption
+            st.caption(price_source_caption(get_price_store_status()))
+        except Exception as _ps_e:
+            import logging
+            logging.getLogger("dashboard.command_centre").debug("price-store caption skipped: %s", _ps_e)
+        if st.session_state.get("_cc_excluded_note"):
+            st.caption(st.session_state["_cc_excluded_note"])
 except Exception as _dh_err:
     import logging
     logging.getLogger("dashboard.command_centre").debug("data_health strip render failed: %s", _dh_err)

@@ -128,7 +128,7 @@ def list_moves(sources: Mapping[str, Mapping[str, str]], quotes: Mapping[str, Ma
             if label not in row["sources"]:
                 row["sources"].append(label)
             if detail:
-                row["details"].append(f"{label}: {detail}")
+                row["details"].append(str(detail))      # "From" already names the list
     out = []
     for b, row in merged.items():
         q = quotes.get(b) or quotes.get(f"{b}.NS") or {}
