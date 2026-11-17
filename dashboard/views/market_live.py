@@ -482,8 +482,13 @@ def render() -> None:
                 from dashboard.shared.ui_components import data_as_of as _ml_asof
                 from utils.snapshot_time import ist_now as _ist_now_
                 _ml_when = _ist_now_().strftime("%H:%M IST")
+                # Name the feed the rows really came from (Angel One when the
+                # broker session is live), not a hard-coded "Yahoo".
+                _ml_src = (str(snap["_source"].iloc[0])
+                           if "_source" in snap.columns and len(snap)
+                           else "yfinance")
                 st.markdown(
-                    _ml_asof(_ml_when, source="yfinance",
+                    _ml_asof(_ml_when, source=_ml_src,
                              ttl_hint="live-price cache 60 s"),
                     unsafe_allow_html=True,
                 )

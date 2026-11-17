@@ -89,7 +89,8 @@ def render() -> None:
     _days_choice = st.select_slider(
         "History window",
         options=[10, 30, 60, 90, 180, 365],
-        value=60, format_func=lambda d: f"{d}d",
+        value=60, format_func=lambda d: f"{d} sessions",
+        help="Counted in trading sessions (rows in the ledger), not calendar days.",
     )
     _df = _fd.load_history(days=_days_choice)
 
