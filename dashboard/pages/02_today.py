@@ -93,12 +93,12 @@ with tab_mv:
                 "45 minutes in market hours.", icon="📡")
     else:
         try:   # the last scan stays on screen after the close and over weekends: say which one
-            from utils.snapshot_time import ist_label
+            from utils.snapshot_time import scan_move_caption
             import trade_store as _ts
-            _when = ist_label((_ts.kv_get("all_scored_snapshot", None, user_id="_system") or {})
-                              .get("generated_at"))
-            if _when:
-                st.caption(f"Day's move (1-session return) as of the scan at {_when}.")
+            _cap = scan_move_caption((_ts.kv_get("all_scored_snapshot", None, user_id="_system") or {})
+                                     .get("generated_at"))
+            if _cap:
+                st.caption(_cap)
         except Exception:
             pass
         sec = sector_moves(scored)
