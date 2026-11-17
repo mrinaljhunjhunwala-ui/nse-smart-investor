@@ -508,3 +508,41 @@ def test_bad_symboltoken_is_not_a_session_expiry(monkeypatch, _clean_rate_state)
     af._SESSION["jwt"] = "KEEP"
     af.fetch_historical("TCS.NS", period="1mo")
     assert af._SESSION["jwt"] == "KEEP" and not af.last_candle_error().startswith("session")
+
+
+# ── Angel One holdings: series suffixes and T+1 quantity (owner go-ahead, 17 Nov) ──────────
+def test_series_suffixes_are_stripped_but_symbol_hyphens_stay():
+    assert af.base_symbol("RELIANCE-EQ") == "RELIANCE"
+    assert af.base_symbol("ABCLTD-BE") == "ABCLTD" and af.series_of("ABCLTD-BE") == "BE"   # kept "-BE"
+    assert af.base_symbol("XYZ-SM") == "XYZ" and af.base_symbol("PQR-BZ") == "PQR"
+    assert af.base_symbol("BAJAJ-AUTO") == "BAJAJ-AUTO" and af.series_of("BAJAJ-AUTO") == ""
+    assert af.base_symbol("MCDOWELL-N-EQ") == "MCDOWELL-N"
+    assert af.base_symbol("M&M") == "M&M" and af.base_symbol("") == ""
+    assert af.base_symbol("EMBASSY-RR") == "EMBASSY" and af.base_symbol("INDIGRID-IV") == "INDIGRID"
+
+
+def test_t1_quantity_is_read_and_counted_once():
+    # bought 50 more yesterday: right whether "quantity" includes the T+1 shares or not
+    assert af.holding_quantities({"quantity": 100, "realisedquantity": 100, "t1quantity": 50}) == (150, 50)
+    assert af.holding_quantities({"quantity": 150, "realisedquantity": 100, "t1quantity": 50}) == (150, 50)
+    # first purchase, not settled yet: used to be skipped (quantity 0)
+    assert af.holding_quantities({"quantity": 0, "realisedquantity": 0, "t1quantity": 50}) == (50, 50)
+    assert af.holding_quantities({"quantity": 10}) == (10, 0)
+    assert af.holding_quantities({"quantity": "7", "t1qty": "3", "realisedquantity": 7}) == (10, 3)
+
+
+def test_get_holdings_keeps_be_series_and_unsettled_buys(monkeypatch):
+    rows = [{"tradingsymbol": "ABCLTD-BE", "exchange": "NSE", "quantity": 20, "realisedquantity": 20,
+             "t1quantity": 0, "averageprice": 100, "ltp": 110},
+            {"tradingsymbol": "NEWBUY-EQ", "exchange": "NSE", "quantity": 0, "realisedquantity": 0,
+             "t1quantity": 5, "averageprice": 200, "ltp": 210}]
+
+    class _S:
+        def get(self, url, headers=None, timeout=None):
+            return FakeResponse(200, {"data": rows})
+    monkeypatch.setattr(af, "_http", _S())
+    monkeypatch.setattr(af, "_get_session", lambda: {"jwt": "J", "api_key": "K"})
+    got = {h["symbol"]: h for h in af.get_holdings()}
+    assert set(got) == {"ABCLTD", "NEWBUY"}                           # was {"ABCLTD-BE"}, NEWBUY missing
+    assert got["ABCLTD"]["series"] == "BE"
+    assert got["NEWBUY"]["qty"] == 5 and got["NEWBUY"]["t1_qty"] == 5 and got["NEWBUY"]["value_rs"] == 1050

@@ -1174,6 +1174,50 @@ def get_market_depth(ticker: str) -> Optional[Dict]:
         return None
 
 
+# ── Angel One symbols and holdings quantities (audit 2026-11, owner go-ahead 17 Nov) ──────────
+# NSE series suffixes Angel One puts on a tradingsymbol. Only "-EQ" used to be stripped, so a
+# holding in trade-for-trade (BE / BZ), SME (SM / ST) or other series kept its suffix
+# ("ABCLTD-BE") and every price, score and P&L lookup for it failed. Only these exact two-letter
+# series (RR = REIT units, IV = InvIT units) are stripped: hyphens that belong to the symbol
+# itself (BAJAJ-AUTO, MCDOWELL-N) stay.
+NSE_SERIES = frozenset({"EQ", "BE", "BZ", "BL", "SM", "ST", "IL", "GB", "GS", "TB", "RR", "IV"})
+
+
+def series_of(tradingsymbol: Any) -> str:
+    """'BE' for 'ABCLTD-BE', '' when there is no known series suffix."""
+    sym = str(tradingsymbol or "").strip().upper()
+    head, sep, tail = sym.rpartition("-")
+    return tail if sep and head and tail in NSE_SERIES else ""
+
+
+def base_symbol(tradingsymbol: Any) -> str:
+    """'ABCLTD' for 'ABCLTD-BE' / 'ABCLTD-EQ'; anything else unchanged (upper-cased)."""
+    sym = str(tradingsymbol or "").strip().upper()
+    ser = series_of(sym)
+    return sym[: -len(ser) - 1] if ser else sym
+
+
+def _int(x: Any) -> int:
+    try:
+        return int(float(x or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def holding_quantities(h: Dict) -> Tuple[int, int]:
+    """(total quantity held, part of it bought but not yet settled, T+1).
+
+    The code read "t1qty", which SmartAPI does not send (its field is "t1quantity"), so the
+    T+1 part was always 0, and a stock bought for the first time (quantity 0 until it
+    settles) was skipped: it vanished from the Angel One page for a day. Whether "quantity"
+    already includes the T+1 shares is not documented, so the total is the larger of
+    "quantity" and settled + T+1 ("realisedquantity" + "t1quantity"); that is right either way."""
+    qty = _int(h.get("quantity"))
+    t1 = _int(h.get("t1quantity", h.get("t1qty")))
+    settled = _int(h.get("realisedquantity", qty if t1 == 0 else 0))
+    return max(qty, settled + t1), t1
+
+
 def get_holdings() -> Optional[List[Dict]]:
     session = _get_session()
     if session is None:
@@ -1192,7 +1236,7 @@ def get_holdings() -> Optional[List[Dict]]:
 
         holdings = []
         for h in raw:
-            qty = int(h.get("quantity", 0) or 0)
+            qty, t1 = holding_quantities(h)
             if qty <= 0:
                 continue
             avg = float(h.get("averageprice", 0) or 0)
@@ -1200,11 +1244,12 @@ def get_holdings() -> Optional[List[Dict]]:
             pnl = (ltp - avg) * qty
             pnl_p = ((ltp / avg) - 1) * 100 if avg > 0 else 0.0
             holdings.append({
-                "symbol": h.get("tradingsymbol", "").replace("-EQ", ""),
+                "symbol": base_symbol(h.get("tradingsymbol", "")),
+                "series": series_of(h.get("tradingsymbol", "")),
                 "exchange": h.get("exchange", "NSE"),
                 "isin": h.get("isin", ""),
                 "qty": qty,
-                "t1_qty": int(h.get("t1qty", 0) or 0),
+                "t1_qty": t1,
                 "avg_price": round(avg, 2),
                 "ltp": round(ltp, 2),
                 "pnl": round(pnl, 2),
@@ -1264,7 +1309,7 @@ def get_positions() -> Optional[Dict]:
             exch = str(p.get("exchange") or "")
             pnl = _f(p, "pnl") if p.get("pnl") not in (None, "") else (ltp - avg) * qty
             row = {
-                "symbol": str(p.get("tradingsymbol") or "").replace("-EQ", ""),
+                "symbol": base_symbol(str(p.get("tradingsymbol") or "")),
                 "exchange": exch,
                 "segment": "F&O" if exch in ("NFO", "BFO", "MCX", "CDS") else "Equity",
                 "instrument": str(p.get("instrumenttype") or ""),
@@ -1334,7 +1379,7 @@ def get_order_book() -> Optional[List[Dict]]:
         return [
             {
                 "order_id": o.get("orderid", ""),
-                "symbol": o.get("tradingsymbol", "").replace("-EQ", ""),
+                "symbol": base_symbol(o.get("tradingsymbol", "")),
                 "side": o.get("transactiontype", ""),
                 "qty": int(o.get("quantity", 0) or 0),
                 "filled_qty": int(o.get("filledshares", 0) or 0),
@@ -1371,7 +1416,7 @@ def get_trade_book() -> Optional[List[Dict]]:
             {
                 "order_id": t.get("orderid", ""),
                 "trade_id": t.get("tradeid", ""),
-                "symbol": t.get("tradingsymbol", "").replace("-EQ", ""),
+                "symbol": base_symbol(t.get("tradingsymbol", "")),
                 "side": t.get("transactiontype", ""),
                 "qty": int(t.get("fillsize", 0) or 0),
                 "price": float(t.get("fillprice", 0) or 0),
@@ -1630,7 +1675,7 @@ def get_gtt_list() -> Optional[List[Dict]]:
         return [
             {
                 "rule_id": str(g.get("id", "")),
-                "symbol": g.get("tradingsymbol", "").replace("-EQ", ""),
+                "symbol": base_symbol(g.get("tradingsymbol", "")),
                 "side": g.get("transactiontype", ""),
                 "qty": int(g.get("qty", 0) or 0),
                 "trigger": float(g.get("triggerprice", 0) or 0),
