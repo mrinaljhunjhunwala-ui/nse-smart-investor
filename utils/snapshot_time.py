@@ -109,3 +109,16 @@ def ist_label(gen_at: Any, fmt: str = "%a %d %b %H:%M IST") -> str:
     Slicing the ISO string showed the UTC clock (a 10:20 IST scan read "04:50")."""
     ts = parse_snapshot_timestamp(gen_at)
     return ts.astimezone(_IST).strftime(fmt) if ts else ""
+
+
+def scan_move_caption(gen_at: Any) -> str:
+    """Caption for moves read from a scan snapshot. The 08:40 pre-open scan's 1-session
+    return is the PREVIOUS session's move, and it stays current until the 09:15 run lands."""
+    ts = parse_snapshot_timestamp(gen_at)
+    if ts is None:
+        return ""
+    n = ts.astimezone(_IST)
+    from utils.nse_holidays import is_trading_day
+    pre_open = is_trading_day(n.date()) and n.time() < _OPEN
+    what = "Previous session's move" if pre_open else "Day's move"
+    return f"{what} (1-session return) as of the scan at {ist_label(gen_at)}."

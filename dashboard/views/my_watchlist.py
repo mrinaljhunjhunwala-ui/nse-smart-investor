@@ -41,45 +41,7 @@ def render() -> None:
 
     st.markdown("Save stocks you're tracking. Scores and prices update automatically.")
 
-    # SQLite-backed watchlist (same DB as paper trades)
-    import sqlite3 as _sql
-    from utils.sql import read_sql_df  # noqa: E402
-    _WL_DB = os.path.join(_ROOT, "dashboard", "paper_trades.db")
-
-    def _wl_init():
-        with _sql.connect(_WL_DB) as con:
-            con.execute("""
-            CREATE TABLE IF NOT EXISTS watchlist (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker   TEXT NOT NULL UNIQUE,
-                notes    TEXT DEFAULT '',
-                added_at TEXT DEFAULT (datetime('now','localtime')),
-                target_price REAL DEFAULT NULL,
-                alert_sl     REAL DEFAULT NULL
-            )
-        """)
-        return _sql.connect(_WL_DB)
-
-    _wl_con = _wl_init()
-
-    def _wl_add(ticker: str, notes: str = "", target: float = None, sl: float = None):
-        try:
-            _wl_con.execute(
-                "INSERT OR IGNORE INTO watchlist(ticker, notes, target_price, alert_sl) VALUES(?,?,?,?)",
-                (ticker.upper(), notes, target, sl)
-            )
-            _wl_con.commit()
-            return True
-        except Exception as e:
-            _log.warning("watchlist DB write failed for %s: %s", ticker, e)
-            return False
-
-    def _wl_remove(ticker: str):
-        _wl_con.execute("DELETE FROM watchlist WHERE ticker=?", (ticker.upper(),))
-        _wl_con.commit()
-
-    def _wl_get_all():
-        return read_sql_df("SELECT * FROM watchlist ORDER BY added_at DESC", _wl_con)
+    _wl_add, _wl_remove, _wl_get_all = add_row, remove_row, load_rows
 
     # Add to watchlist form
     # FIX WL2 — none of these four fields cleared after a successful add.
@@ -106,9 +68,10 @@ def render() -> None:
         with _wl_f2:
             _new_notes = st.text_input("Notes (optional)", key="wl_new_notes")
         with _wl_f3:
-            _new_target = st.number_input("Target ₹", 0.0, 100000.0, 0.0, key="wl_target", format="%.1f") or None
+            _new_target = st.number_input("Target ₹", 0.0, 1000000.0, 0.0, key="wl_target", format="%.1f") or None
         with _wl_f4:
-            _new_sl = st.number_input("Alert SL ₹", 0.0, 100000.0, 0.0, key="wl_sl", format="%.1f") or None
+            _new_sl = st.number_input("Stop ₹", 0.0, 1000000.0, 0.0, key="wl_sl", format="%.1f",
+                                      help="For your reference in the table; no alert is sent on it.") or None
         if st.button("⭐ Add", key="wl_page_add_btn") and _new_tkr:
             _sym = _new_tkr if _new_tkr.endswith(".NS") else _new_tkr + ".NS"
             if _wl_add(_sym, _new_notes, _new_target, _new_sl):
@@ -204,8 +167,8 @@ def render() -> None:
                 "Score":        f"{sc.get('score',0):.0f}" if sc.get("score") is not None else "—",
                 "Action":       _display_label(sc.get("action", "—")),
                 "RSI":          sc.get("rsi","—"),
-                "Target ₹":     f"₹{row['target_price']:.1f}" if row["target_price"] else "—",
-                "Alert SL ₹":   f"₹{row['alert_sl']:.1f}"   if row["alert_sl"]     else "—",
+                "Target ₹":     f"₹{row['target_price']:.1f}" if pd.notna(row["target_price"]) and row["target_price"] else "—",
+                "Stop ₹":       f"₹{row['alert_sl']:.1f}" if pd.notna(row["alert_sl"]) and row["alert_sl"] else "—",
                 "Notes":        row["notes"] or "",
                 "Added":        str(row["added_at"])[:10],
             })
@@ -265,3 +228,66 @@ def render() -> None:
     # ═══════════════════════════════════════════════════════════════════════════════
     # PAGE 11 — INVESTOR GUIDE (SOP)
     # ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ── storage ───────────────────────────────────────────────────────────────────────────────
+# FIX WL-STORE (audit 2026-11): this list lived in a raw sqlite3 file
+# (dashboard/paper_trades.db) that trade_store never sees, so on Streamlit Cloud every
+# entry, target and stop vanished on each reboot / redeploy even with Postgres set up.
+# It now lives in trade_store KV (Postgres when DATABASE_URL is set); rows left in the
+# old file are imported once.
+import os as _os  # noqa: E402
+
+WL_KV_KEY = "my_watchlist_rows"
+_COLS = ["ticker", "notes", "added_at", "target_price", "alert_sl"]
+
+
+_LEGACY_DB = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "paper_trades.db")
+
+
+def _legacy_rows() -> list:
+    import os
+    import sqlite3
+    path = _LEGACY_DB
+    if not os.path.exists(path):
+        return []
+    try:
+        with sqlite3.connect(path) as con:
+            cur = con.execute("SELECT ticker, notes, added_at, target_price, alert_sl FROM watchlist")
+            return [dict(zip(_COLS, r)) for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
+def _rows() -> list:
+    import trade_store as store
+    rows = store.kv_get(WL_KV_KEY, None)
+    if rows is None:                          # first run on this store: bring over the old file
+        rows = _legacy_rows()
+        if rows:
+            store.kv_set(WL_KV_KEY, rows)
+    return [r for r in (rows or []) if isinstance(r, dict) and r.get("ticker")]
+
+
+def load_rows():
+    import pandas as pd
+    rows = sorted(_rows(), key=lambda r: str(r.get("added_at") or ""), reverse=True)
+    return pd.DataFrame(rows, columns=_COLS)
+
+
+def add_row(ticker: str, notes: str = "", target: float = None, sl: float = None) -> bool:
+    import trade_store as store
+    from utils.snapshot_time import ist_now
+    t = ticker.upper()
+    rows = _rows()
+    if any(r["ticker"] == t for r in rows):
+        return True
+    rows.append({"ticker": t, "notes": notes or "", "added_at": ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                 "target_price": target, "alert_sl": sl})
+    return bool(store.kv_set(WL_KV_KEY, rows))
+
+
+def remove_row(ticker: str) -> bool:
+    import trade_store as store
+    rows = [r for r in _rows() if r["ticker"] != ticker.upper()]
+    return bool(store.kv_set(WL_KV_KEY, rows))
