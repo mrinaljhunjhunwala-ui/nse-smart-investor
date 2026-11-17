@@ -19,7 +19,9 @@ name: Market Alerts
 # (cron-job.org) calling workflow_dispatch every 15 min — see
 # alerts/README.md "Reliable 15-minute cadence". The schedule below is kept
 # only as a best-effort fallback; duplicate fires are harmless because the
-# concurrency group serialises runs and alert_state.json de-dups per day.
+# concurrency group serialises runs and alert_state.json de-dups per day. Other
+# workflows (market-digest, warm jobs) share that state through the cache but run
+# in their own groups, so check_alerts also merges it through KV "alert_state".
 
 on:
   # No GitHub schedule (removed 2026-10-02): cron-job.org triggers this via
@@ -53,7 +55,7 @@ jobs:
       # whenever the NSE results list came back empty.
       - name: Install minimal deps
         run: >-
-          pip install --quiet pandas numpy requests "pyotp>=2.8.0,<3.0" "psycopg2-binary>=2.9.0,<3.0"
+          pip install --quiet pandas numpy requests "pyotp>=2.8.0,<2.12" "psycopg2-binary>=2.9.0,<3.0"
           "yfinance>=1.0,<2" "beautifulsoup4>=4.12.0,<5.0" "lxml>=4.9.0,<7.0"
 
       # Persist the de-dup state file between runs so the same alert
