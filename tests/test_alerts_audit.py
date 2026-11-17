@@ -121,3 +121,15 @@ def test_paced_run_holds_plain_movers_but_not_watchlist_names(monkeypatch):
     assert MA.check_movers_radar(state, "2026-11-17", now=dt.datetime(2026, 11, 17, 10, 30)) == 1
     plain[0].update(symbol="WLX", watchlist=("Bullish breakout", 3, 1))
     assert MA.check_movers_radar(state, "2026-11-17", now=dt.datetime(2026, 11, 17, 10, 45)) == 1
+
+
+def test_market_alerts_installs_the_bse_fallback():
+    """17 Nov: every 15-minute run logged "`bse` package unavailable — BSE fallback disabled", so when
+    NSE's announcements API and RSS both returned 403 the catalyst / holding-guard checks had no
+    filings at all. The job installs a hand-picked list, not requirements.txt; bse must be on it."""
+    import pathlib
+    import re
+    wf = pathlib.Path(".github/workflows/market-alerts.yml").read_text(encoding="utf-8")
+    step = wf[wf.index("name: Install minimal deps"):]
+    step = step[:step.index("- name:", 10)]
+    assert re.search(r'"bse[<>=]', step), "market-alerts.yml must install the bse package"
