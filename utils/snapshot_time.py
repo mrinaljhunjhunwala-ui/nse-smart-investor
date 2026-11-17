@@ -56,3 +56,56 @@ def scan_too_degraded(n_universe: Any, n_scored_ok: Any,
 def ist_now() -> datetime.datetime:
     """Aware current time in IST (runners are UTC; the owner reads IST)."""
     return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+
+
+# FIX SCAN-CADENCE (2026-11-17): the Top Picks warmer is triggered every 45 min
+# (09:15-15:15 IST, cron-job.org, alerts/README.md) but readers dropped its
+# snapshot after 20 min. For ~25 of every 45 market minutes, and every evening,
+# weekend and holiday, the app threw away a current scan: Command Centre paid
+# a ~2-min live scan, watchlists live-scored every name, and readers without a
+# fallback showed "n/a". A scan snapshot is current while it is under
+# SCAN_MAX_AGE_SECONDS old, or while the market is shut and no session has
+# opened since it was taken (prices have not moved since).
+SCAN_MAX_AGE_SECONDS = 60 * 60          # 45-min cadence + a ~5-min run + slack
+_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+_OPEN, _CLOSE = datetime.time(9, 15), datetime.time(15, 30)
+
+
+def _session_of(ts: datetime.datetime) -> datetime.date:
+    """The NSE session whose prices a scan at ts saw (today once open, else the previous one)."""
+    from utils.nse_holidays import is_trading_day
+    n = ts.astimezone(_IST)
+    d = n.date()
+    if is_trading_day(d) and n.time() >= _OPEN:
+        return d
+    d -= datetime.timedelta(days=1)
+    while not is_trading_day(d):
+        d -= datetime.timedelta(days=1)
+    return d
+
+
+def market_open_at(ts: datetime.datetime) -> bool:
+    """True during the NSE cash session (09:15-15:30 IST on a trading day)."""
+    from utils.nse_holidays import is_trading_day
+    n = ts.astimezone(_IST)
+    return is_trading_day(n.date()) and _OPEN <= n.time() < _CLOSE
+
+
+def scan_snapshot_current(gen_at: Any, now: Optional[datetime.datetime] = None,
+                          max_age_seconds: float = SCAN_MAX_AGE_SECONDS) -> bool:
+    """True when an intraday scan snapshot still describes the market (see FIX SCAN-CADENCE)."""
+    ts = parse_snapshot_timestamp(gen_at)
+    if ts is None:
+        return False
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    age = (now - ts).total_seconds()
+    if age <= max_age_seconds:          # a future stamp (clock skew) counts as fresh, as before
+        return True
+    return not market_open_at(now) and _session_of(ts) == _session_of(now)
+
+
+def ist_label(gen_at: Any, fmt: str = "%a %d %b %H:%M IST") -> str:
+    """A generated_at (aware UTC, or legacy naive UTC) as IST display text; '' if unparseable.
+    Slicing the ISO string showed the UTC clock (a 10:20 IST scan read "04:50")."""
+    ts = parse_snapshot_timestamp(gen_at)
+    return ts.astimezone(_IST).strftime(fmt) if ts else ""

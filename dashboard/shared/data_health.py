@@ -303,7 +303,7 @@ def probe_nse_delivery() -> ProviderCheck:
 
 
 def _probe_warmer_snapshot(name: str, kv_key: str, kv_user: str,
-                           max_age_seconds: int) -> ProviderCheck:
+                           max_age_seconds: int, is_current=None) -> ProviderCheck:
     """Task 2.4 F1: read a trade_store snapshot's generated_at and report
     whether the scheduled warmer is keeping it fresh.
 
@@ -339,7 +339,11 @@ def _probe_warmer_snapshot(name: str, kv_key: str, kv_user: str,
     if age is None:
         return ProviderCheck(name, group, STATUS_IDLE, gen_at, 0,
                              note=f"unparseable generated_at: {gen_at!r}")
-    if age <= max_age_seconds:
+    # is_current(gen_at) -> bool is the same rule the app's reader applies, so
+    # this row says "stale" exactly when the app would discard the snapshot
+    # (age alone flagged every evening, weekend and Monday morning).
+    current = is_current(gen_at) if is_current is not None else age <= max_age_seconds
+    if current:
         return ProviderCheck(name, group, STATUS_HEALTHY, gen_at, 0,
                              note="warmer on schedule")
     # Older than the app's max-age tolerance: on the next visit the app
@@ -347,6 +351,27 @@ def _probe_warmer_snapshot(name: str, kv_key: str, kv_user: str,
     hours_late = int(age // 3600)
     return ProviderCheck(name, group, STATUS_STALE, gen_at, 1,
                          note=f"snapshot {hours_late}h+ old, cold scan risk")
+
+
+def _scan_current(gen_at) -> bool:
+    from utils.snapshot_time import scan_snapshot_current
+    return scan_snapshot_current(gen_at)
+
+
+def _tw_current(gen_at) -> bool:
+    """Mirror of cache._tw_snapshot_current (that module imports Streamlit): the
+    snapshot is current while it is under 6h old or priced the latest closed
+    session (3h grace after the close for the post-close warm job)."""
+    import datetime as _dt
+    from analysis.verdict_ledger import last_closed_session
+    from utils.snapshot_time import parse_snapshot_timestamp
+    ts = parse_snapshot_timestamp(gen_at)
+    if ts is None:
+        return False
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if 0 <= (now - ts).total_seconds() <= 6 * 3600:
+        return True
+    return last_closed_session(ts) >= last_closed_session(now - _dt.timedelta(hours=3))
 
 
 def probe_warmer_top_picks() -> ProviderCheck:
@@ -357,7 +382,8 @@ def probe_warmer_top_picks() -> ProviderCheck:
     # duplication is acceptable in return for module-purity guardrail.
     return _probe_warmer_snapshot(
         "Warmer: Top Picks", "top_picks_snapshot", "_system",
-        max_age_seconds=1800,   # 30 min: covers the 15-min cron cadence + one miss
+        max_age_seconds=3600,
+        is_current=_scan_current,   # same rule as cache._persisted_top_picks_snapshot
     )
 
 
@@ -365,7 +391,8 @@ def probe_warmer_tomorrow_watchlist() -> ProviderCheck:
     """Task 2.4 F1: freshness of the Tomorrow's Watchlist warmer snapshot."""
     return _probe_warmer_snapshot(
         "Warmer: Tomorrow's Watchlist", "tomorrow_watchlist_snapshot", "_system",
-        max_age_seconds=24 * 3600,   # 24h: post-close daily, pre-open retry, and pre-open scan
+        max_age_seconds=24 * 3600,
+        is_current=_tw_current,     # same rule as cache._tw_snapshot_current
     )
 
 
