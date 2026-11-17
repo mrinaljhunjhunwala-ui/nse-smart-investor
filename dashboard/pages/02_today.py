@@ -245,6 +245,42 @@ with tab_picks:
 
 # ── 🔔 Changes & alerts ────────────────────────────────────────────────────────────────────────
 with tab_log:
+    # End-of-day check of the day's BUY calls (alerts eod-scorecard, after the close).
+    eod, eod_day = None, None
+    for back in range(0, 5):
+        d = _TODAY - _dt.timedelta(days=back)
+        got = _kv(f"eod_scorecard:{d.isoformat()}")
+        if isinstance(got, dict) and (got.get("calls") or got.get("levels")):
+            eod, eod_day = got, d
+            break
+    st.markdown("**🧾 Today's calls — end-of-day check**"
+                + ("" if eod_day in (None, _TODAY) else f" · last on {eod_day:%a %d %b}"))
+    if not eod:
+        st.caption("Sent after the close (about 16:00 IST): every BUY call made that day, graded on day 1. "
+                   "The same calls are graded again at 5 and 20 sessions in the Friday report card.")
+    else:
+        from analysis.calls_scorecard import summary_line
+        st.caption(summary_line(eod.get("summary") or {}))
+        if eod.get("calls"):
+            st.dataframe(pd.DataFrame([{
+                "Stock": c.get("symbol"),
+                "From": {"digest": "Delivery Digest", "buy_call": "BUY call"}.get(c.get("group"), c.get("group")),
+                "At": c.get("when") or "", "Called ₹": c.get("entry"), "Close ₹": c.get("close"),
+                "Move": c.get("pct"), "vs Nifty (pts)": c.get("vs_nifty"),
+                "Day low": c.get("worst_pct"), "Day high": c.get("best_pct"),
+                "Stop hit": "yes" if c.get("stop_hit") else "", "Target hit": "yes" if c.get("target_hit") else "",
+            } for c in eod["calls"]]), hide_index=True, use_container_width=True,
+                column_config={"Called ₹": st.column_config.NumberColumn("Called ₹", format="₹%.2f"),
+                               "Close ₹": st.column_config.NumberColumn("Close ₹", format="₹%.2f"),
+                               "Move": _pct("Move"),
+                               "vs Nifty (pts)": st.column_config.NumberColumn("vs Nifty (pts)", format="%+.1f"),
+                               "Day low": _pct("Day low"), "Day high": _pct("Day high")})
+        if eod.get("levels"):
+            from analysis.calls_scorecard import levels_line
+            st.caption("⚡ Intraday Watchlist levels")
+            for lv in eod["levels"]:
+                st.caption(levels_line(lv.get("symbol", ""), lv))
+    st.divider()
     st.markdown("**Posture changes** · latest change per stock (verdict ledger)")
     try:
         from dashboard.shared.cache import get_recent_posture_changes
