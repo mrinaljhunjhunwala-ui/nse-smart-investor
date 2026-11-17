@@ -45,7 +45,8 @@ def render_momentum_leaders(data: "dict | None", title: str = "🏃 Momentum lea
             st.info("Momentum leaders appear after the next scheduled scan.")
             return
         st.dataframe(_table(leaders), hide_index=True, width="stretch")
-        gen = (data or {}).get("generated_at") or (data or {}).get("scan_time")
+        from utils.snapshot_time import ist_label
+        gen = ist_label((data or {}).get("generated_at")) or (data or {}).get("scan_time")
         st.caption(f"{data.get('n_ranked', len(leaders))} names passed the filters"
                    + (f" · scan {gen}" if gen else ""))
     except Exception as _e:

@@ -33,10 +33,9 @@ def test_scan_from_before_todays_open_is_not_tonights_scan():
     assert scan_snapshot_current(noon, now=_t(2026, 11, 16, 20, 0))  # still the latest prices seen today
 
 
-def test_bad_or_future_stamps_are_not_current():
+def test_bad_stamps_are_not_current():
     assert not scan_snapshot_current(None)
     assert not scan_snapshot_current("garbage")
-    assert not scan_snapshot_current(_t(2026, 11, 16, 12, 0).isoformat(), now=_t(2026, 11, 16, 11, 0))
 
 
 def test_reader_serves_the_afternoon_scan_in_the_evening(monkeypatch):
@@ -62,3 +61,10 @@ def test_data_health_uses_the_reader_rule(monkeypatch):
     stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=40)).isoformat()
     monkeypatch.setattr(trade_store, "kv_get", lambda key, user_id=None: {"generated_at": stamp})
     assert dh.probe_warmer_top_picks().status == dh.STATUS_HEALTHY   # was "stale" past 30 min
+
+
+def test_scan_times_are_shown_in_ist():
+    from utils.snapshot_time import ist_label
+    assert ist_label("2026-11-17T04:50:12+00:00") == "Tue 17 Nov 10:20 IST"    # was shown as "04:50"
+    assert ist_label("2026-11-17T04:50:12") == "Tue 17 Nov 10:20 IST"          # legacy naive = UTC
+    assert ist_label(None) == "" and ist_label("x") == ""

@@ -92,6 +92,15 @@ with tab_mv:
         st.info("No recent scan to read sector and cap-size moves from. The scan refreshes every "
                 "45 minutes in market hours.", icon="📡")
     else:
+        try:   # the last scan stays on screen after the close and over weekends: say which one
+            from utils.snapshot_time import ist_label
+            import trade_store as _ts
+            _when = ist_label((_ts.kv_get("all_scored_snapshot", None, user_id="_system") or {})
+                              .get("generated_at"))
+            if _when:
+                st.caption(f"Day's move (1-session return) as of the scan at {_when}.")
+        except Exception:
+            pass
         sec = sector_moves(scored)
         if sec:
             st.markdown("**Sectors** · median move of the scanned names")
@@ -226,8 +235,9 @@ with tab_picks:
         df = pd.DataFrame(rows)
         df["_k"] = df["Flag"].eq("")
         df = df.sort_values(["_k", "#"]).drop(columns="_k")
+        from utils.snapshot_time import ist_label
         st.caption(f"Today's {len(buys)} Top Picks, flagged ones first · scan "
-                   f"{str(tp.get('generated_at', ''))[11:16] or '—'}. Command Centre shows the top 10.")
+                   f"{ist_label(tp.get('generated_at')) or '—'}. Command Centre shows the top 10.")
         st.dataframe(df, hide_index=True, use_container_width=True,
                      column_config={"Move": _pct("Move"), "Price ₹": _RUPEE,
                                     "Stop ₹": st.column_config.NumberColumn(format="₹%.2f"),

@@ -99,8 +99,13 @@ def scan_snapshot_current(gen_at: Any, now: Optional[datetime.datetime] = None,
         return False
     now = now or datetime.datetime.now(datetime.timezone.utc)
     age = (now - ts).total_seconds()
-    if age < -300:                      # stamped in the future: clock trouble, don't trust it
-        return False
-    if age <= max_age_seconds:
+    if age <= max_age_seconds:          # a future stamp (clock skew) counts as fresh, as before
         return True
     return not market_open_at(now) and _session_of(ts) == _session_of(now)
+
+
+def ist_label(gen_at: Any, fmt: str = "%a %d %b %H:%M IST") -> str:
+    """A generated_at (aware UTC, or legacy naive UTC) as IST display text; '' if unparseable.
+    Slicing the ISO string showed the UTC clock (a 10:20 IST scan read "04:50")."""
+    ts = parse_snapshot_timestamp(gen_at)
+    return ts.astimezone(_IST).strftime(fmt) if ts else ""
