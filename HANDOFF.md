@@ -3,6 +3,13 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Command Centre paper-trades box (17 Nov, owner):** the one-line entry-price strip from #362
+  went unused. It is now a small bordered box: "📂 Open paper trades · N", overall P&L in ₹ and %,
+  today's ₹ move (since previous close, or since entry for a trade opened today; shorts gain on a
+  fall), one chip per stock with its P&L % (hover shows qty @ entry → now), and an "Open Paper
+  Trades" button. Pure maths in `trade_utils.open_trades_summary`; quotes cached 60 s. The Market
+  breadth line went from 13px dim to 16px. A separate cloud session is running a full bug audit
+  (report: AUDIT_2026-11.md when it lands).
 - **Unlock in place (17 Nov, owner):** every place that only *reads* PIN-locked data now shows its
   own PIN box instead of "go unlock it on My Portfolio / Angel One": Today → My lists (My Portfolio
   and Angel One, each in a collapsed "🔒 Unlock … to include it here" expander), Research Notes'

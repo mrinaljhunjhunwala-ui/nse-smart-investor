@@ -152,3 +152,37 @@ def test_my_lists_unlocks_in_place(no_network, monkeypatch):
     assert "_pin_unlocked_at_my_portfolio" in at.session_state
     assert not any("Unlock My Portfolio" in e.label for e in at.expander)
     assert "_pin_unlocked_at_angel_one" not in at.session_state      # one PIN box unlocks one scope
+
+
+def test_open_trades_summary_pnl_and_today():
+    import pandas as pd
+    from dashboard.shared.trade_utils import open_trades_summary
+    rows = pd.DataFrame([
+        {"ticker": "TCS.NS", "quantity": 10, "price": 3000.0, "action": "BUY", "timestamp": "2026-11-10T10:00"},
+        {"ticker": "INFY.NS", "quantity": 5, "price": 1500.0, "action": "SELL", "timestamp": "2026-11-12T10:00"},
+        {"ticker": "DHANBANK.NS", "quantity": 100, "price": 40.0, "action": "BUY", "timestamp": "2026-11-17T09:30"},
+        {"ticker": "NOQUOTE.NS", "quantity": 1, "price": 10.0, "action": "BUY", "timestamp": "2026-11-11T10:00"}])
+    quotes = {"TCS.NS": {"price": 3100.0, "prev_close": 3050.0},
+              "INFY.NS": {"price": 1450.0, "prev_close": 1460.0},
+              "DHANBANK": {"price": 42.0, "prev_close": 30.0}}
+    sm = open_trades_summary(rows, quotes, today=dt.date(2026, 11, 17))
+    by = {r["symbol"]: r for r in sm["rows"]}
+    assert by["TCS"]["pnl"] == 1000 and round(by["TCS"]["pnl_pct"], 2) == 3.33 and by["TCS"]["day"] == 500
+    assert by["INFY"]["pnl"] == 250 and by["INFY"]["side"] == "SHORT" and by["INFY"]["day"] == 50   # short gains on a fall
+    assert by["DHANBANK"]["day"] == 200                    # opened today: measured from entry, not prev close
+    assert by["NOQUOTE"]["pnl"] is None and sm["n_unpriced"] == 1
+    assert sm["n"] == 4 and sm["pnl"] == 1450 and sm["day"] == 750
+    assert round(sm["pnl_pct"], 3) == round(1450 / (30000 + 7500 + 4000) * 100, 3)
+    empty = open_trades_summary(pd.DataFrame(), {})
+    assert empty["n"] == 0 and empty["pnl"] is None and empty["day"] is None
+
+
+def test_command_centre_paper_box_renders(no_network):
+    import trade_store as store
+    store.open_trade("TCS.NS", 3000.0, 10, 2900.0, 3300.0, reason="t")
+    at = AppTest.from_file(os.path.join(os.path.dirname(_PAGE), "01_command_centre.py"), default_timeout=180).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    text = " ".join(str(m.value) for m in at.markdown)
+    assert "📂 Open paper trades ·" in text
+    assert any(b.label == "📂 Open Paper Trades" for b in at.button)
+    assert "font-size:16px" in text and "Market breadth" in text

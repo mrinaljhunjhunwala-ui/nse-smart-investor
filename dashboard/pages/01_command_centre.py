@@ -213,8 +213,8 @@ def _render_market_summary() -> None:
     from dashboard.shared.nav import nav_to
     _ms1, _ms2 = st.columns([5, 1], vertical_alignment="center")
     _ms1.markdown(
-        f'<div class="cc-market-line" style="font-size:13px;color:var(--dim)">'
-        f'<b>Market breadth</b> · {summary_line(load_breadth(), _cc_idx)}</div>',
+        f'<div class="cc-market-line" style="font-size:16px;line-height:1.5;color:var(--ink-mid)">'
+        f'<b style="color:var(--ink)">Market breadth</b> · {summary_line(load_breadth(), _cc_idx)}</div>',
         unsafe_allow_html=True,
     )
     if _ms2.button("📊 Open Markets", key="cc_open_markets", width="stretch",
@@ -905,22 +905,71 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
 
 _sec_tuple = _sector_ranks_tuple()
 st.session_state["_sec_ranks_cache"] = _sec_tuple   # share with watchlist
-# ── Open paper trades: one compact line, no P&L (owner 2026-11-17) ──────────
+# ── Open paper trades: a small box with names, overall P&L and today's move ──
+# Owner 2026-11-17: the one-line entry-price strip went unused; they want a small
+# box with the stock names, overall P&L, today's gain where a quote allows, and a
+# button straight to Paper Trades.
+@st.cache_data(ttl=60, show_spinner=False)
+def _cc_paper_quotes(symbols: tuple) -> dict:
+    if not symbols:
+        return {}
+    try:
+        from utils.live_price import get_live_prices_batch
+        return get_live_prices_batch([f"{s}.NS" for s in symbols], max_workers=8) or {}
+    except Exception:
+        return {}
+
+
+def _signed_inr(v) -> str:
+    if v is None:
+        return "–"
+    return f"{'+' if v >= 0 else '−'}₹{abs(v):,.0f}"
+
+
+def _tone(v) -> str:
+    return "dim" if v is None or abs(v) < 0.005 else ("bull" if v > 0 else "bear")
+
+
 def _render_open_trades_line() -> None:
     try:
-        from dashboard.shared.trade_utils import load_open_trades_line
-        txt, n = load_open_trades_line()
+        import trade_store as _ts
+        from dashboard.shared.trade_utils import open_trades_summary
+        rows = _ts.fetch_open()
+        syms = tuple(sorted({str(t).upper().replace(".NS", "") for t in
+                             (rows["ticker"] if rows is not None and len(rows) else [])}))
+        sm = open_trades_summary(rows, _cc_paper_quotes(syms))
     except Exception as _ot_e:
         import logging
-        logging.getLogger("dashboard.command_centre").debug("open trades line failed: %s", _ot_e)
+        logging.getLogger("dashboard.command_centre").debug("open trades box failed: %s", _ot_e)
         return
-    _ot1, _ot2 = st.columns([6, 1], vertical_alignment="center")
-    _ot1.markdown(
-        f'<div style="font-size:13px;color:var(--ink-mid)"><b>📂 Open paper trades · {n}</b>'
-        f'{" · " + txt if txt else " · none"}</div>', unsafe_allow_html=True)
-    if _ot2.button("Paper Trades", key="cc_open_paper", width="stretch"):
-        from dashboard.shared.nav import nav_to
-        nav_to("Paper Trades")
+    with st.container(border=True):
+        _ot1, _ot2 = st.columns([5, 1], vertical_alignment="center")
+        if sm["n"]:
+            tot = (f'Overall P&L <b style="color:var(--{_tone(sm["pnl"])})">{_signed_inr(sm["pnl"])}'
+                   + (f' ({sm["pnl_pct"]:+.2f}%)' if sm["pnl_pct"] is not None else "") + "</b>"
+                   + f' · Today <b style="color:var(--{_tone(sm["day"])})">{_signed_inr(sm["day"])}</b>')
+            if sm["n_unpriced"]:
+                tot += f' <span style="color:var(--dim)">· {sm["n_unpriced"]} without a live price</span>'
+        else:
+            tot = '<span style="color:var(--dim)">No open paper trades.</span>'
+        _ot1.markdown(
+            f'<div style="font-size:16px;color:var(--ink)"><b>📂 Open paper trades · {sm["n"]}</b>'
+            f'<span style="font-size:15px"> &nbsp;{tot}</span></div>', unsafe_allow_html=True)
+        if _ot2.button("📂 Open Paper Trades", key="cc_open_paper", width="stretch"):
+            from dashboard.shared.nav import nav_to
+            nav_to("Paper Trades")
+        if sm["rows"]:
+            chips = []
+            for r in sm["rows"]:
+                pct = f'{r["pnl_pct"]:+.1f}%' if r["pnl_pct"] is not None else "n/a"
+                tip = _html.escape(f'{r["side"].lower()} {r["qty"]:.0f} @ ₹{r["entry"]:,.2f}'
+                                   + (f' → ₹{float(r["price"]):,.2f}' if r["price"] else "")
+                                   + (f' · today {_signed_inr(r["day"])}' if r["day"] is not None else ""))
+                chips.append(
+                    f'<span title="{tip}" style="display:inline-block;margin:2px 10px 2px 0;font-size:15px">'
+                    f'<b>{_html.escape(r["symbol"])}</b> '
+                    f'<span style="color:var(--{_tone(r["pnl_pct"])})">{pct}</span></span>')
+            st.markdown(f'<div style="line-height:1.7">{"".join(chips)}</div>', unsafe_allow_html=True)
 
 
 _render_open_trades_line()
