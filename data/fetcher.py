@@ -963,10 +963,16 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
                 _record_provider_diagnostic("AngelOne", ok=True, symbol=ticker)
                 df = _hold_if_suspect(df, "AngelOne")
             else:
-                _log.warning("data fallback: provider=AngelOne symbol=%s returned no data",
-                             ticker)
+                _why = ""
+                try:
+                    _why = _af.last_candle_error() if hasattr(_af, "last_candle_error") else ""
+                    _af._LAST_CANDLE_ERROR.update(reason="", detail="")
+                except Exception:
+                    _why = ""
+                _log.warning("data fallback: provider=AngelOne symbol=%s returned no data%s",
+                             ticker, f" ({_why})" if _why else "")
                 _record_provider_diagnostic("AngelOne", ok=False, symbol=ticker,
-                                            reason="returned no data")
+                                            reason=f"returned no data ({_why})" if _why else "returned no data")
     except _SkipAngel:
         pass
     except Exception as e:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 import threading
 import datetime
@@ -612,6 +613,9 @@ def fetch_historical(
         # FIX AO-BULK: a known-open breaker is a skip, not a fresh failure —
         # callers fall through quietly instead of logging one WARNING per ticker.
         raise AngelBusy("circuit breaker open")
+    _wait = _rate_cooldown_left()
+    if _wait > 0:
+        raise AngelBusy(f"Angel One rate limit: backing off {_wait:.0f}s")
     token = _get_token(symbol, session)
     if token is None:
         return None
@@ -712,8 +716,10 @@ def _fetch_candles_window(
     )
     status = getattr(resp, "status_code", None)
     if status and status >= 400:
-        _log.warning("angel_fetcher._fetch_candles_window: API returned %s (%s -> %s)",
-                     status, fromdate, todate)
+        reason, detail = _classify_candle_error(status, resp)
+        _note_candle_error(reason, detail)
+        _log.warning("angel_fetcher._fetch_candles_window: API returned %s (%s%s) (%s -> %s)",
+                     status, reason, f": {detail}" if detail else "", fromdate, todate)
         # FIX AO-403 (2026-09-28): an HTTP error is a failure. It used to record
         # nothing, so from GitHub's runners (403 on every call) the breaker
         # tripped once in 333 rejections and every ticker kept paying for
@@ -728,6 +734,8 @@ def _fetch_candles_window(
     if not candles:
         return None        # a 200 with no candles is legitimate (illiquid / new listing)
     _breaker_record_success()
+    _RATE_STRIKES[0] = 0
+    _LAST_CANDLE_ERROR.update(reason="", detail="")
 
     df = pd.DataFrame(candles, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
     df["Date"] = pd.to_datetime(df["Date"])
@@ -735,6 +743,64 @@ def _fetch_candles_window(
     df = df.apply(pd.to_numeric, errors="coerce")
     df.dropna(subset=["Close"], inplace=True)
     return df if not df.empty else None
+
+
+# FIX AO-403-REASON (audit 2026-11): a candle 403 was logged as a bare status, so a
+# rate limit, an expired token and a permission problem all read the same, and every
+# symbol in the run paid for its own failing call. Angel One's getCandleData limit is
+# per API key, so a concurrent job on the same key (Warm Top Picks scanning ~750 names
+# at 15:15 IST while Market Alerts ran, 17 Nov) gets 403 "access rate" for everything.
+# The reason now comes from the body; a rate limit backs off (60 s, doubling to 5 min)
+# so the rest of the run goes straight to the next tier; an auth error forces a re-login.
+_RATE_COOLDOWN_UNTIL = [0.0]
+_RATE_STRIKES = [0]
+_RATE_COOLDOWN_BASE, _RATE_COOLDOWN_MAX = 60.0, 300.0
+_LAST_CANDLE_ERROR: Dict[str, str] = {"reason": "", "detail": ""}
+
+
+def _classify_candle_error(status: int, resp) -> Tuple[str, str]:
+    """('rate limit' | 'session expired' | 'forbidden' | 'HTTP n', short body text)."""
+    parsed = None
+    try:
+        parsed = _safe_parse_json_response(resp)
+    except Exception:
+        parsed = None
+    detail = ""
+    if isinstance(parsed, dict):
+        detail = " ".join(str(parsed.get(k) or "") for k in ("errorcode", "message")).strip()
+    if not detail:
+        detail = str(getattr(resp, "text", "") or "").strip()
+    detail = " ".join(detail.split())[:160]
+    low = detail.lower()
+    if _is_rate_limited(resp, parsed) or "access rate" in low or "too many" in low or status == 429:
+        return "rate limit", detail
+    if (status == 401 or re.search(r"\bag800[1-3]\b", low)
+            or "invalid token" in low or "token expired" in low or "token is expired" in low):
+        return "session expired", detail
+    if status == 403:
+        return "forbidden", detail
+    return f"HTTP {status}", detail
+
+
+def _note_candle_error(reason: str, detail: str) -> None:
+    _LAST_CANDLE_ERROR.update(reason=reason, detail=detail)
+    if reason == "rate limit":
+        wait = min(_RATE_COOLDOWN_MAX, _RATE_COOLDOWN_BASE * (2 ** _RATE_STRIKES[0]))
+        _RATE_STRIKES[0] += 1
+        _RATE_COOLDOWN_UNTIL[0] = time.time() + wait
+        _event("Angel One", f"rate-limited · next {wait:.0f}s go to the next source", "bad")
+    elif reason == "session expired":
+        _SESSION["jwt"] = None             # next call logs in again
+
+
+def _rate_cooldown_left() -> float:
+    return max(0.0, _RATE_COOLDOWN_UNTIL[0] - time.time())
+
+
+def last_candle_error() -> str:
+    """Why the last candle call failed, e.g. 'rate limit: AB1004 Access denied …'."""
+    r, d = _LAST_CANDLE_ERROR["reason"], _LAST_CANDLE_ERROR["detail"]
+    return f"{r}: {d}" if r and d else r
 
 
 # Angel One NSE index tokens (instrument master, exch_seg NSE, instrumenttype

@@ -439,3 +439,72 @@ def test_batch_quote_null_field_does_not_drop_the_batch(clean_breaker, monkeypat
     res = af.get_batch_quotes(["A.NS", "B.NS"])
     assert res["A.NS"] is None
     assert res["B.NS"]["price"] == 50 and res["B.NS"]["prev_close"] == 50
+
+
+# ── FIX AO-403-REASON: say why, and back off on a rate limit ────────────────
+class _BodySession(_CandleSession):
+    def __init__(self, status, body):
+        super().__init__(status=status)
+        self.body = body
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        if "getCandleData" in url:
+            self.candle_calls += 1
+            return FakeResponse(self.status, self.body)
+        return super().post(url, json=json, headers=headers, timeout=timeout)
+
+
+@pytest.fixture
+def _clean_rate_state():
+    af._RATE_COOLDOWN_UNTIL[0] = 0.0
+    af._RATE_STRIKES[0] = 0
+    af._LAST_CANDLE_ERROR.update(reason="", detail="")
+    yield
+    af._RATE_COOLDOWN_UNTIL[0] = 0.0
+    af._RATE_STRIKES[0] = 0
+    af._BREAKER_FAILS[0] = 0
+    af._BREAKER_TRIPPED_AT[0] = 0.0
+
+
+def test_rate_limit_403_backs_off_instead_of_retrying_every_symbol(monkeypatch, caplog, _clean_rate_state):
+    """17 Nov 15:15: Warm Top Picks used the same API key; LENSKART, SGMART and MCX each paid for a
+    403 and the log said only 'API returned 403'."""
+    sess = _BodySession(403, {"message": "Access denied because of exceeding access rate",
+                              "errorcode": "AB1004"})
+    _candle_setup(monkeypatch, sess)
+    with caplog.at_level("WARNING"):
+        assert af.fetch_historical("LENSKART.NS", period="1mo") is None
+    assert "rate limit" in caplog.text and "access rate" in caplog.text
+    assert af.last_candle_error().startswith("rate limit")
+    for t in ("SGMART.NS", "MCX.NS"):
+        with pytest.raises(af.AngelBusy):           # quiet skip to the next source, no call
+            af.fetch_historical(t, period="1mo")
+    assert sess.candle_calls == 1
+    first = af._rate_cooldown_left()
+    af._RATE_COOLDOWN_UNTIL[0] = 0.0                 # cooldown over, still limited: wait doubles
+    af.fetch_historical("MCX.NS", period="1mo")
+    assert af._rate_cooldown_left() > first
+
+
+def test_expired_session_403_forces_a_fresh_login(monkeypatch, _clean_rate_state):
+    sess = _BodySession(403, {"message": "Invalid Token", "errorcode": "AG8001"})
+    _candle_setup(monkeypatch, sess)
+    af._SESSION["jwt"] = "OLD"
+    af.fetch_historical("TCS.NS", period="1mo")
+    assert af._SESSION["jwt"] is None and af.last_candle_error().startswith("session expired")
+    assert af._rate_cooldown_left() == 0
+
+
+def test_plain_403_is_reported_as_forbidden(monkeypatch, _clean_rate_state):
+    sess = _BodySession(403, {})
+    _candle_setup(monkeypatch, sess)
+    af.fetch_historical("TCS.NS", period="1mo")
+    assert af.last_candle_error() == "forbidden" and af._rate_cooldown_left() == 0
+
+
+def test_bad_symboltoken_is_not_a_session_expiry(monkeypatch, _clean_rate_state):
+    sess = _BodySession(400, {"message": "Invalid symboltoken", "errorcode": "AB1018"})
+    _candle_setup(monkeypatch, sess)
+    af._SESSION["jwt"] = "KEEP"
+    af.fetch_historical("TCS.NS", period="1mo")
+    assert af._SESSION["jwt"] == "KEEP" and not af.last_candle_error().startswith("session")
