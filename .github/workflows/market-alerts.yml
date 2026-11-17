@@ -53,10 +53,13 @@ jobs:
       # fetch_quarterly_figures. Without them every intraday results read
       # failed ("beautifulsoup4 not installed" / "No module named 'yfinance'")
       # whenever the NSE results list came back empty.
+      # bse: the BSE tier of nse_announcements / bse_corp_info. Without it every run
+      # logged "`bse` package unavailable", so when NSE's API and RSS both returned
+      # 403 (17 Nov) the catalyst and holding-guard checks saw no filings at all.
       - name: Install minimal deps
         run: >-
           pip install --quiet pandas numpy requests "pyotp>=2.8.0,<2.12" "psycopg2-binary>=2.9.0,<3.0"
-          "yfinance>=1.0,<2" "beautifulsoup4>=4.12.0,<5.0" "lxml>=4.9.0,<7.0"
+          "yfinance>=1.0,<2" "beautifulsoup4>=4.12.0,<5.0" "lxml>=4.9.0,<7.0" "bse>=3.3.3,<4.0"
 
       # Persist the de-dup state file between runs so the same alert
       # isn't re-sent every 15 minutes. New cache each run, restore latest.

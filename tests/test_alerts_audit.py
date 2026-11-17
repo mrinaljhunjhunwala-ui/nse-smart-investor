@@ -91,3 +91,15 @@ def test_overlapping_runs_union_their_dedupe_stamps(tmp_path, monkeypatch):
     assert CA._load_state() == {"x": "2026-11-18"}
     CA._save_state({}, merge=False)                 # --clear-today writes exactly
     assert kv[("_system", "alert_state")] == {}
+
+
+def test_market_alerts_installs_the_bse_fallback():
+    """17 Nov: every 15-minute run logged "`bse` package unavailable — BSE fallback disabled", so when
+    NSE's announcements API and RSS both returned 403 the catalyst / holding-guard checks had no
+    filings at all. The job installs a hand-picked list, not requirements.txt; bse must be on it."""
+    import pathlib
+    import re
+    wf = pathlib.Path(".github/workflows/market-alerts.yml").read_text(encoding="utf-8")
+    step = wf[wf.index("name: Install minimal deps"):]
+    step = step[:step.index("- name:", 10)]
+    assert re.search(r'"bse[<>=]', step), "market-alerts.yml must install the bse package"
