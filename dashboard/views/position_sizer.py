@@ -6,6 +6,12 @@ unchanged apart from being wrapped in render() and st.stop() becoming return.
 Position Sizer - NSE Smart Investor (multipage page; body verbatim from app.py)."""
 
 
+# Inputs above their max_value are silently reset to the minimum (₹1): MRF (~₹1.4 lakh),
+# prefilled from "Use live price" or Analyze Stock, came back as entry 1 / stop 1 and the
+# page said "Entry price must be greater than stop-loss price" (audit 2026-11).
+_PS_MAX_PRICE = 1_000_000.0
+
+
 def render() -> None:
     """Render the Position Sizer view (body moved verbatim from its old page)."""
     import os
@@ -79,15 +85,15 @@ def render() -> None:
             _ps_risk_pct  = st.slider("Risk per trade (%)", 0.5, 3.0, 1.0, 0.25, key="ps_risk_pct")
             st.markdown(f'<div class="quiet-hint">of ₹{fmt_inr(_ps_capital)} · risk budget '
                         f'₹{fmt_inr(_ps_capital * _ps_risk_pct / 100)}</div>', unsafe_allow_html=True)
-            _ps_entry     = st.number_input("Entry price (₹)", min_value=1.0, max_value=100_000.0,
+            _ps_entry     = st.number_input("Entry price (₹)", min_value=1.0, max_value=_PS_MAX_PRICE,
                                             step=0.5, key="ps_entry", format="%.2f")
             st.markdown('<div class="quiet-hint">live price if loaded · adjust for expected fill</div>',
                         unsafe_allow_html=True)
-            _ps_sl        = st.number_input("Stop-loss price (₹)", min_value=1.0, max_value=100_000.0,
+            _ps_sl        = st.number_input("Stop-loss price (₹)", min_value=1.0, max_value=_PS_MAX_PRICE,
                                             step=0.5, key="ps_sl", format="%.2f")
             st.markdown(f'<div class="quiet-hint">{(_ps_entry - _ps_sl) / _ps_entry * 100:.2f}% below entry</div>',
                         unsafe_allow_html=True)
-            _ps_tp        = st.number_input("Target price (₹)", min_value=1.0, max_value=200_000.0,
+            _ps_tp        = st.number_input("Target price (₹)", min_value=1.0, max_value=2 * _PS_MAX_PRICE,
                                             step=0.5, key="ps_tp", format="%.2f")
             st.markdown('<div class="quiet-hint">a scenario level for the R:R maths, not a call</div>',
                         unsafe_allow_html=True)

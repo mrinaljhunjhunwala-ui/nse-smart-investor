@@ -986,9 +986,22 @@ def add_pivot_points(df: pd.DataFrame) -> pd.DataFrame:
         CPR_Width_Pct : CPR_Width / Pivot × 100
         Price_vs_CPR : 'above', 'inside', 'below'
     """
-    ph = df["High"].shift(1)
-    pl = df["Low"].shift(1)
-    pc = df["Close"].shift(1)
+    idx = df.index
+    if isinstance(idx, pd.DatetimeIndex) and len(idx) and idx.normalize().duplicated().any():
+        # Intraday bars (several per day): the pivot comes from the PREVIOUS SESSION's
+        # high / low / close and is constant through the day. shift(1) used the previous
+        # 5-minute bar, so "Pivot / CPR / R1 / S1" trailed price and the CPR was always
+        # "narrow" (audit 2026-11).
+        day = idx.normalize()
+        daily = df.groupby(day).agg(High=("High", "max"), Low=("Low", "min"), Close=("Close", "last"))
+        prev = daily.shift(1).reindex(day)
+        ph = pd.Series(prev["High"].to_numpy(), index=idx)
+        pl = pd.Series(prev["Low"].to_numpy(), index=idx)
+        pc = pd.Series(prev["Close"].to_numpy(), index=idx)
+    else:
+        ph = df["High"].shift(1)
+        pl = df["Low"].shift(1)
+        pc = df["Close"].shift(1)
 
     pivot = (ph + pl + pc) / 3
     bc    = (ph + pl) / 2
