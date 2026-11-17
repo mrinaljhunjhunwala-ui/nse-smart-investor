@@ -93,6 +93,36 @@ def test_overlapping_runs_union_their_dedupe_stamps(tmp_path, monkeypatch):
     assert kv[("_system", "alert_state")] == {}
 
 
+def test_radar_budget_is_paced_through_the_session():
+    """17 Nov: all 6 radar messages were gone by ~11:00 IST; nothing after."""
+    t = dt.time
+    assert MA.radar_allowance(t(9, 45)) == 1 and MA.radar_allowance(t(10, 15)) == 1
+    assert MA.radar_allowance(t(11, 0)) == 2 and MA.radar_allowance(t(14, 45)) == 6
+    assert MA.radar_allowance(t(9, 30)) == 0
+
+
+def test_paced_run_holds_plain_movers_but_not_watchlist_names(monkeypatch):
+    import alerts.check_alerts as CA
+    import analysis.catalysts as C
+    import data.nse_movers as NM
+    sent = []
+    monkeypatch.setattr(CA, "dispatch", lambda text, subject=None: sent.append(text) or True)
+    monkeypatch.setattr(NM, "fetch_gainers", lambda scan: [{"source": "NSE"}])
+    monkeypatch.setattr(AM, "watchlist_ranks", lambda d: {})
+    monkeypatch.setattr(C, "explain_move", lambda *a, **k: ["filing"])
+    monkeypatch.setattr(MA, "_kv", lambda *a, **k: None)
+    monkeypatch.setattr(MA, "_kv_set", lambda *a, **k: True)
+    monkeypatch.setattr(MA, "_events_by_symbol", lambda n: {})
+    plain = [{"symbol": "ABC", "band": "Large", "pct": 4.0, "price": 100.0, "vol_ratio": 2.0, "watchlist": None}]
+    monkeypatch.setattr(AM, "select_movers", lambda rows, **k: [dict(m) for m in plain])
+    state = {"movers_msg_1": "2026-11-17"}                    # 09:45 message already out
+    assert MA.check_movers_radar(state, "2026-11-17", now=dt.datetime(2026, 11, 17, 10, 0)) == 0
+    assert "mover_ABC" not in state and not sent               # held, still eligible later
+    assert MA.check_movers_radar(state, "2026-11-17", now=dt.datetime(2026, 11, 17, 10, 30)) == 1
+    plain[0].update(symbol="WLX", watchlist=("Bullish breakout", 3, 1))
+    assert MA.check_movers_radar(state, "2026-11-17", now=dt.datetime(2026, 11, 17, 10, 45)) == 1
+
+
 def test_market_alerts_installs_the_bse_fallback():
     """17 Nov: every 15-minute run logged "`bse` package unavailable — BSE fallback disabled", so when
     NSE's announcements API and RSS both returned 403 the catalyst / holding-guard checks had no

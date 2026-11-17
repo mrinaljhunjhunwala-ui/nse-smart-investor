@@ -29,6 +29,13 @@ EVIDENCE_KEY = "movers_evidence"
 RADAR_START = _dt.time(9, 45)
 RADAR_END = _dt.time(15, 25)
 RADAR_MAX_MSGS = 6
+# FIX RADAR-PACING (audit 2026-11): one message per 15-minute run spent all 6 by ~11:00 IST
+# (17 Nov: "daily cap reached" from 11:30 on), so afternoon moves were never alerted. The same
+# 6 are now released one per window; a window's unused message carries forward, and a batch
+# with a bullish Tomorrow's Watchlist name is never held back by the pacing (the daily cap
+# still applies).
+RADAR_WINDOWS = (_dt.time(9, 45), _dt.time(10, 30), _dt.time(11, 30), _dt.time(12, 30),
+                 _dt.time(13, 30), _dt.time(14, 30))
 RADAR_MAX_ITEMS = 15
 TW_MAX_AGE_H = 30            # last evening's Tomorrow's Watchlist is the one that applies today
 SCAN_MAX_AGE_H = 3
@@ -109,6 +116,11 @@ def _score_part(scan: Optional[dict], sym: str) -> str:
     return f"score {score:.0f} · WATCH"
 
 
+def radar_allowance(t: _dt.time) -> int:
+    """Messages the radar may have sent by time ``t`` (one per window started so far)."""
+    return min(RADAR_MAX_MSGS, sum(1 for w in RADAR_WINDOWS if t >= w))
+
+
 def build_radar(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, List[str]],
                 evidence: Optional[dict], scan: Optional[dict], source: str) -> tuple:
     """(message lines, movers that fit). Movers are added in order while the message stays
@@ -173,6 +185,11 @@ def check_movers_radar(state: dict, today: str, now: Optional[_dt.datetime] = No
         movers = select_movers(rows, bands=_bands(), ranks=ranks, already=already)[:RADAR_MAX_ITEMS]
         if not movers:
             print(f"[movers] no new movers past their thresholds ({len(rows)} gainers checked)")
+            return 0
+        if (sent_msgs >= radar_allowance(n.time()) and not any(m.get("watchlist") for m in movers)
+                and not _FORCE_SEND):
+            print(f"[movers] pacing: {sent_msgs} of {RADAR_MAX_MSGS} sent; the next is released at "
+                  f"the next window ({len(movers)} mover(s) wait and stay eligible)")
             return 0
         events = _events_by_symbol(n)
         reasons = {m["symbol"]: C.explain_move(m["symbol"], m["pct"], events=events.get(m["symbol"], []),
