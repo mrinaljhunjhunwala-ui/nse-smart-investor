@@ -1099,6 +1099,25 @@ _ACCEPT_STALE = os.environ.get("NSE_ACCEPT_STALE_SNAPSHOTS", "").lower() in ("1"
 # hauling ~745 tickers worth of extended score dicts around every render.
 _ALL_SCORES_KV_KEY = "all_scored_snapshot"
 
+# Neon bills data transfer (5 GB/month on the free plan). The scan snapshots
+# are large and Command Centre re-reads them on a 20-second fragment, so every
+# open tab pulled the full snapshot ~180 times an hour. Reads are now shared
+# per server process for _SNAPSHOT_READ_TTL seconds; the warmers write every
+# 45 minutes, so this costs at most two minutes of freshness.
+_SNAPSHOT_READ_TTL = 120
+_snapshot_reads: dict = {}
+
+
+def _kv_snapshot(key: str, user_id: str):
+    import time as _t
+    hit = _snapshot_reads.get((key, user_id))
+    if hit and _t.monotonic() - hit[0] < _SNAPSHOT_READ_TTL:
+        return hit[1]
+    val = _store.kv_get(key, user_id=user_id)
+    _snapshot_reads[(key, user_id)] = (_t.monotonic(), val)
+    return val
+
+
 def _persisted_top_picks_snapshot() -> dict | None:
     """Cheap peek at the Postgres KV snapshot written by scripts/warm_top_picks.py.
 
@@ -1116,7 +1135,7 @@ def _persisted_top_picks_snapshot() -> dict | None:
     now only needs to happen here.
     """
     try:
-        snap = _store.kv_get(_TOP_PICKS_KV_KEY, user_id=_TOP_PICKS_KV_USER)
+        snap = _kv_snapshot(_TOP_PICKS_KV_KEY, _TOP_PICKS_KV_USER)
     except Exception as _e:
         _log.warning("cache._persisted_top_picks_snapshot: kv_get failed: %s", _e)
         return None
@@ -1159,7 +1178,7 @@ def _persisted_all_scores_snapshot() -> dict | None:
     to live scoring ONLY for tickers not present in the map.
     """
     try:
-        snap = _store.kv_get(_ALL_SCORES_KV_KEY, user_id=_TOP_PICKS_KV_USER)
+        snap = _kv_snapshot(_ALL_SCORES_KV_KEY, _TOP_PICKS_KV_USER)
     except Exception as _e:
         _log.warning("cache._persisted_all_scores_snapshot: kv_get failed: %s", _e)
         return None
@@ -1566,7 +1585,7 @@ def get_tomorrow_watchlist(n: int = 15) -> dict:
     non-blockingly either way).
     """
     try:
-        snap = _store.kv_get(_TW_KV_KEY, user_id=_TW_KV_USER)
+        snap = _kv_snapshot(_TW_KV_KEY, _TW_KV_USER)
         if snap and isinstance(snap, dict):
             _gen_at = snap.get("generated_at")
             if _gen_at and snapshot_age_seconds(_gen_at) is None:
