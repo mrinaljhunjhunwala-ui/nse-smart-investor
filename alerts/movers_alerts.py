@@ -109,31 +109,43 @@ def _score_part(scan: Optional[dict], sym: str) -> str:
     return f"score {score:.0f} · WATCH"
 
 
-def radar_lines(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, List[str]],
-                evidence: Optional[dict], scan: Optional[dict], source: str) -> List[str]:
-    """Message body: header, two lines per mover grouped by tier, footer, trimmed to fit."""
+def build_radar(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, List[str]],
+                evidence: Optional[dict], scan: Optional[dict], source: str) -> tuple:
+    """(message lines, movers that fit). Movers are added in order while the message stays
+    under MSG_CHAR_BUDGET; the rest are left for the next run. The old version trimmed the
+    text but the caller still marked every selected mover as sent, so names cut from the
+    message were never alerted that day (and a trimmed tier could leave an empty header)."""
     from alerts.check_alerts import _h
     from analysis.movers import BAND_LABEL, chase_lookup, evidence_phrase
 
     src = "all NSE stocks" if source == "NSE" else "scan universe only (NSE feed down)"
     lines = [f"📡 <b>Movers radar</b> · {now:%H:%M} IST · {src}"]
+    kept: List[dict] = []
     band = None
     for m in movers:
+        block = []
         if m["band"] != band:
-            band = m["band"]
-            lines.append(f"<b>{BAND_LABEL[band]}</b>")
+            block.append(f"<b>{BAND_LABEL[m['band']]}</b>")
         tag = ""
         if m.get("watchlist"):
             label, rank, _ = m["watchlist"]
             tag = f" · 📋 on Tomorrow's Watchlist #{rank} ({_h(label)})"
-        lines.append(f"▲ <b>{_h(m['symbol'])}</b> {m['pct']:+.1f}% ₹{m['price']:,.2f}{tag}")
+        block.append(f"▲ <b>{_h(m['symbol'])}</b> {m['pct']:+.1f}% ₹{m['price']:,.2f}{tag}")
         why = "; ".join(_h(r) for r in (reasons.get(m["symbol"]) or [])[:2]) or "no filing found"
         stats = chase_lookup((evidence or {}).get("table"), m["band"], m["pct"], m.get("vol_ratio"))
-        lines.append(f"   why: {why} · {_h(evidence_phrase(stats))} · {_h(_score_part(scan, m['symbol']))}")
+        block.append(f"   why: {why} · {_h(evidence_phrase(stats))} · {_h(_score_part(scan, m['symbol']))}")
+        if kept and len("\n".join(lines + block + [RADAR_FOOTER])) > MSG_CHAR_BUDGET:
+            break
+        lines += block
+        kept.append(m)
+        band = m["band"]
     lines.append(RADAR_FOOTER)
-    while len("\n".join(lines)) > MSG_CHAR_BUDGET and len(lines) > 4:
-        del lines[-3:-1]                                    # drop the last mover (2 lines), keep footer
-    return lines
+    return lines, kept
+
+
+def radar_lines(movers: List[dict], **kw) -> List[str]:
+    """Message body only (see build_radar)."""
+    return build_radar(movers, **kw)[0]
 
 
 def check_movers_radar(state: dict, today: str, now: Optional[_dt.datetime] = None) -> int:
@@ -167,8 +179,8 @@ def check_movers_radar(state: dict, today: str, now: Optional[_dt.datetime] = No
                                                reaction={"rel_vol": m.get("vol_ratio")})
                    for m in movers}
         evidence = _kv(EVIDENCE_KEY)
-        lines = radar_lines(movers, now=n, reasons=reasons, evidence=evidence, scan=scan,
-                            source=str(rows[0].get("source") or ""))
+        lines, movers = build_radar(movers, now=n, reasons=reasons, evidence=evidence, scan=scan,
+                                    source=str(rows[0].get("source") or ""))
         if not dispatch("\n".join(lines), subject="Movers radar"):
             return 0
         for m in movers:

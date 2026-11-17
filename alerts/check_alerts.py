@@ -230,26 +230,64 @@ def _log_sent(subject: str, msg: str) -> None:
 # De-dup state (per-day)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# FIX ALERT-STATE-RACE (audit 2026-11): the state file travels between runs in the
+# Actions cache, but market-alerts, market-digest and the warm jobs restore the latest
+# cache and save their own, in different concurrency groups. Two overlapping runs
+# (market-alerts and the momentum digest both fire at 10:00, 10:30 … 14:30) each started
+# from the same file and the last save won, so the other's stamps vanished and movers /
+# verdict / VIX alerts or the AM momentum digest went out twice. The state is now also
+# kept in KV (shared Postgres) and merged on load and on save, so stamps are unioned.
+_STATE_KV_KEY = "alert_state"
+
+
+def _state_kv_get() -> dict:
+    try:
+        import trade_store as store
+        v = store.kv_get(_STATE_KV_KEY, None, user_id="_system")
+        return v if isinstance(v, dict) else {}
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[state] KV read failed: {type(e).__name__}: {e}")
+        return {}
+
+
+def _latest_day_only(state: dict) -> dict:
+    """Entries are stamped with the IST date they fired; keep the newest day only."""
+    days = [v for v in state.values() if isinstance(v, str) and len(v) == 10]
+    if not days:
+        return dict(state)
+    newest = max(days)
+    return {k: v for k, v in state.items() if v == newest}
+
+
 def _load_state() -> dict:
+    file_state: dict = {}
     try:
         with open(_STATE_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
+            file_state = json.load(f)
     except FileNotFoundError:
-        return {}   # normal on first run — no state file yet
+        pass   # normal on first run — no state file yet
     except Exception as e:
         _log.warning(
             "_load_state: %s exists but is unreadable/corrupt, resetting to empty "
             "state (previously-fired alerts may re-fire today): %s", _STATE_JSON, e
         )
-        return {}
+    return {**_state_kv_get(), **(file_state if isinstance(file_state, dict) else {})}
 
 
-def _save_state(state: dict) -> None:
+def _save_state(state: dict, merge: bool = True) -> None:
+    """Write the file and the KV copy. merge=True unions with what other runs stored in
+    KV since this run loaded (only --clear-today writes the state exactly as given)."""
+    out = _latest_day_only({**_state_kv_get(), **state}) if merge else dict(state)
     try:
         with open(_STATE_JSON, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
+            json.dump(out, f, indent=2)
     except Exception as e:
         print(f"[state] could not save: {e}")
+    try:
+        import trade_store as store
+        store.kv_set(_STATE_KV_KEY, out, user_id="_system")
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[state] KV save failed: {type(e).__name__}: {e}")
 
 
 # _FORCE_SEND is set to True by main() when --force is on argv. It makes
@@ -2031,7 +2069,7 @@ def main() -> int:
             _existing = _load_state()
             _wiped    = {k: v for k, v in _existing.items() if v != _today_iso}
             _dropped  = len(_existing) - len(_wiped)
-            _save_state(_wiped)
+            _save_state(_wiped, merge=False)
             print(f"[clear-today] dropped {_dropped} state entries for {_today_iso}")
         except Exception as _e:
             print(f"[clear-today] failed: {_e}")
