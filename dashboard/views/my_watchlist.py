@@ -41,7 +41,17 @@ def render() -> None:
 
     st.markdown("Save stocks you're tracking. Scores and prices update automatically.")
 
-    _wl_add, _wl_remove, _wl_get_all = add_row, remove_row, load_rows
+    # One list with the sidebar: st.session_state["watchlist"] (persisted to KV "watchlist" by
+    # nav._persist_user_state). Load it here too in case the sidebar has not run yet.
+    if "watchlist" not in st.session_state:
+        try:
+            import trade_store as _wl_ts
+            st.session_state["watchlist"] = list(_wl_ts.kv_get("watchlist", None) or [])
+        except Exception:
+            st.session_state["watchlist"] = []
+    _wl_list = st.session_state["watchlist"]
+    merge_into(_wl_list)
+    st.caption("The same list as the sidebar's 👀 My Watchlist; notes, target and stop are optional.")
 
     # Add to watchlist form
     # FIX WL2 — none of these four fields cleared after a successful add.
@@ -74,13 +84,15 @@ def render() -> None:
                                       help="For your reference in the table; no alert is sent on it.") or None
         if st.button("⭐ Add", key="wl_page_add_btn") and _new_tkr:
             _sym = _new_tkr if _new_tkr.endswith(".NS") else _new_tkr + ".NS"
-            if _wl_add(_sym, _new_notes, _new_target, _new_sl):
+            if add_row(_wl_list, _sym, _new_notes, _new_target, _new_sl):
                 st.success(f"Added {_sym} to watchlist!")
                 st.session_state["_wl_page_add_clear_pending"] = True
                 st.rerun()
+            else:
+                st.warning(f"The watchlist is full ({WL_MAX} stocks); remove one first.")
 
     # Display watchlist with live scores
-    _wl_data = _wl_get_all()
+    _wl_data = load_rows(_wl_list)
     if _wl_data.empty:
         # F5 empty-state kit -- soft neutral panel reads as "empty by design"
         # rather than the blue "info" tone st.info carries.
@@ -220,7 +232,7 @@ def render() -> None:
             st.write("")
             st.write("")
             if st.button("🗑️ Remove", key="wl_remove_btn") and _rm_tkr != "— select —":
-                _wl_remove(_rm_tkr)
+                remove_row(_wl_list, _rm_tkr)
                 st.success(f"Removed {_rm_tkr}")
                 st.rerun()
 
@@ -269,25 +281,56 @@ def _rows() -> list:
     return [r for r in (rows or []) if isinstance(r, dict) and r.get("ticker")]
 
 
-def load_rows():
+# FIX ONE-WATCHLIST (owner, 17 Nov): the sidebar list (KV "watchlist", the list every page adds
+# to through st.session_state["watchlist"]) and this page were two separate lists. There is now
+# one list: the sidebar's. This page shows exactly those stocks; notes / target / stop are
+# optional details per stock kept in WL_KV_KEY. Stocks that were only on this page are merged
+# into the list, and removing a stock anywhere removes its details too.
+WL_MAX = 30                     # list size cap (the sidebar used to stop at 12)
+
+
+def details() -> dict:
+    """{ticker: {"notes", "added_at", "target_price", "alert_sl"}} for stocks with details."""
+    return {r["ticker"].upper(): r for r in _rows()}
+
+
+def merge_into(wl: list) -> list:
+    """Add stocks that only had details here to the shared list ``wl`` (in place)."""
+    for t in sorted(details(), key=lambda k: str(details()[k].get("added_at") or "")):
+        if t not in wl and len(wl) < WL_MAX:
+            wl.append(t)
+    return wl
+
+
+def load_rows(wl: list):
+    """One row per stock in the shared list, newest first, with any saved details."""
     import pandas as pd
-    rows = sorted(_rows(), key=lambda r: str(r.get("added_at") or ""), reverse=True)
+    det = details()
+    rows = [{**{"notes": "", "added_at": "", "target_price": None, "alert_sl": None},
+             **det.get(t.upper(), {}), "ticker": t.upper()} for t in reversed(list(wl))]
     return pd.DataFrame(rows, columns=_COLS)
 
 
-def add_row(ticker: str, notes: str = "", target: float = None, sl: float = None) -> bool:
+def add_row(wl: list, ticker: str, notes: str = "", target: float = None, sl: float = None) -> bool:
+    """Add to the shared list (in place) and save the details. False when the list is full."""
     import trade_store as store
     from utils.snapshot_time import ist_now
     t = ticker.upper()
-    rows = _rows()
-    if any(r["ticker"] == t for r in rows):
-        return True
+    if t not in wl:
+        if len(wl) >= WL_MAX:
+            return False
+        wl.append(t)
+    rows = [r for r in _rows() if r["ticker"].upper() != t]
     rows.append({"ticker": t, "notes": notes or "", "added_at": ist_now().strftime("%Y-%m-%d %H:%M:%S"),
                  "target_price": target, "alert_sl": sl})
     return bool(store.kv_set(WL_KV_KEY, rows))
 
 
-def remove_row(ticker: str) -> bool:
+def remove_row(wl: list, ticker: str) -> bool:
+    """Remove from the shared list (in place) and drop its details."""
     import trade_store as store
-    rows = [r for r in _rows() if r["ticker"] != ticker.upper()]
+    t = ticker.upper()
+    if t in wl:
+        wl.remove(t)
+    rows = [r for r in _rows() if r["ticker"].upper() != t]
     return bool(store.kv_set(WL_KV_KEY, rows))

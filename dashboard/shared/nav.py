@@ -840,6 +840,11 @@ def render_sidebar(current: str = None) -> None:
             st.session_state["watchlist"] = _saved_wl if _saved_wl else [
                 "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS"
             ]
+            try:   # one list: stocks that were only on Watchlist & Notes join the sidebar's
+                from dashboard.views.my_watchlist import merge_into as _wl_merge
+                _wl_merge(st.session_state["watchlist"])
+            except Exception as _e:
+                _log.debug("nav watchlist merge: %s", _e)
             st.session_state["trade_capital"] = float(_ts_init.kv_get("trade_capital", 500_000))
             st.session_state["risk_pct"]      = float(_ts_init.kv_get("risk_pct", 1.0))
         except Exception as _e:
@@ -883,7 +888,8 @@ def render_sidebar(current: str = None) -> None:
 
     if _wl_add_clicked and _wl_input:
         _sym = _wl_input if _wl_input.endswith(".NS") else f"{_wl_input}.NS"
-        if _sym not in st.session_state["watchlist"] and len(st.session_state["watchlist"]) < 12:
+        from dashboard.views.my_watchlist import WL_MAX as _WL_MAX
+        if _sym not in st.session_state["watchlist"] and len(st.session_state["watchlist"]) < _WL_MAX:
             st.session_state["watchlist"].append(_sym)
         # Clear the box regardless of whether the add actually happened
         # (duplicate ticker / list already at its 12-symbol cap) — the
@@ -893,7 +899,7 @@ def render_sidebar(current: str = None) -> None:
         st.rerun()
 
     # Fetch live prices for watchlist tickers
-    _wl_tickers = tuple(st.session_state["watchlist"])
+    _wl_tickers = tuple(st.session_state["watchlist"][:12])
     try:
         _wl_prices = _watchlist_prices(_wl_tickers)
     except Exception as _e:
@@ -901,7 +907,9 @@ def render_sidebar(current: str = None) -> None:
         _wl_prices = {}
 
     _wl_to_remove = None
-    for _wl_sym in list(st.session_state["watchlist"]):
+    _WL_SIDEBAR_ROWS = 12          # the full list (up to 30) is on Watchlist & Notes
+    _wl_all = list(st.session_state["watchlist"])
+    for _wl_sym in _wl_all[:_WL_SIDEBAR_ROWS]:
         _wl_q   = _wl_prices.get(_wl_sym)
         _wl_label = _wl_sym.replace(".NS", "")
         _wl_c1, _wl_c2, _wl_c3 = st.sidebar.columns([2, 2, 1])
@@ -923,8 +931,15 @@ def render_sidebar(current: str = None) -> None:
         if _wl_c3.button("✕", key=f"wl_rm_{_wl_sym}", use_container_width=True):
             _wl_to_remove = _wl_sym
 
+    if len(_wl_all) > _WL_SIDEBAR_ROWS:
+        st.sidebar.caption(f"+{len(_wl_all) - _WL_SIDEBAR_ROWS} more on Watchlist & Notes")
     if _wl_to_remove and _wl_to_remove in st.session_state["watchlist"]:
-        st.session_state["watchlist"].remove(_wl_to_remove)
+        try:   # one list with Watchlist & Notes: drop its notes / target / stop too
+            from dashboard.views.my_watchlist import remove_row as _wl_rm
+            _wl_rm(st.session_state["watchlist"], _wl_to_remove)
+        except Exception as _e:
+            _log.debug("nav watchlist remove details: %s", _e)
+            st.session_state["watchlist"].remove(_wl_to_remove)
         st.rerun()
 
     # ── Notification bell (sidebar — visible on every page) ───────────────────────

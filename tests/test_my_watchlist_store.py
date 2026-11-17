@@ -11,13 +11,36 @@ def test_rows_persist_through_trade_store(monkeypatch):
     monkeypatch.setattr(trade_store, "kv_get", lambda k, d=None, user_id="default": kv.get(k, d))
     monkeypatch.setattr(trade_store, "kv_set", lambda k, v, user_id="default": kv.__setitem__(k, v) or True)
     monkeypatch.setattr(W, "_legacy_rows", lambda: [])
-    assert W.add_row("infy.ns", "watch results", 1800.0, None)
-    assert W.add_row("INFY.NS")                         # no duplicate
-    W.add_row("TCS.NS")
-    df = W.load_rows()
-    assert sorted(df["ticker"]) == ["INFY.NS", "TCS.NS"] and kv[W.WL_KV_KEY]
-    W.remove_row("INFY.NS")
-    assert list(W.load_rows()["ticker"]) == ["TCS.NS"]
+    wl = []
+    assert W.add_row(wl, "infy.ns", "watch results", 1800.0, None)
+    assert W.add_row(wl, "INFY.NS")                     # no duplicate
+    W.add_row(wl, "TCS.NS")
+    assert wl == ["INFY.NS", "TCS.NS"] and kv[W.WL_KV_KEY]
+    df = W.load_rows(wl)
+    assert list(df["ticker"]) == ["TCS.NS", "INFY.NS"]
+    W.remove_row(wl, "INFY.NS")
+    assert wl == ["TCS.NS"] and list(W.load_rows(wl)["ticker"]) == ["TCS.NS"]
+
+
+def test_one_list_with_the_sidebar(monkeypatch):
+    """Owner, 17 Nov: the sidebar watchlist and this page were two lists. Now one: the sidebar's."""
+    import trade_store
+    kv = {}
+    monkeypatch.setattr(trade_store, "kv_get", lambda k, d=None, user_id="default": kv.get(k, d))
+    monkeypatch.setattr(trade_store, "kv_set", lambda k, v, user_id="default": kv.__setitem__(k, v) or True)
+    monkeypatch.setattr(W, "_legacy_rows", lambda: [])
+    kv[W.WL_KV_KEY] = [{"ticker": "PFC.NS", "notes": "dividend", "added_at": "2026-10-01"}]
+    sidebar = ["RELIANCE.NS", "TCS.NS"]                 # added from the sidebar / Analyze Stock
+    W.merge_into(sidebar)
+    assert sidebar == ["RELIANCE.NS", "TCS.NS", "PFC.NS"]          # page-only stock joins the list
+    df = W.load_rows(sidebar)
+    assert set(df["ticker"]) == {"RELIANCE.NS", "TCS.NS", "PFC.NS"}
+    assert df.set_index("ticker").loc["PFC.NS", "notes"] == "dividend"
+    W.remove_row(sidebar, "PFC.NS")                     # removed anywhere -> gone, details too
+    W.merge_into(sidebar)
+    assert "PFC.NS" not in sidebar
+    full = [f"S{i}.NS" for i in range(W.WL_MAX)]
+    assert W.add_row(full, "NEW.NS") is False and len(full) == W.WL_MAX
 
 
 def test_old_local_rows_are_imported_once(monkeypatch, tmp_path):
@@ -31,7 +54,7 @@ def test_old_local_rows_are_imported_once(monkeypatch, tmp_path):
                     " target_price REAL, alert_sl REAL)")
         con.execute("INSERT INTO watchlist(ticker, notes, added_at) VALUES ('PFC.NS', 'dividend', '2026-10-01')")
     monkeypatch.setattr(W, "_LEGACY_DB", str(db))
-    assert list(W.load_rows()["ticker"]) == ["PFC.NS"] and kv[W.WL_KV_KEY][0]["notes"] == "dividend"
+    assert list(W.details()) == ["PFC.NS"] and kv[W.WL_KV_KEY][0]["notes"] == "dividend"
 
 
 def test_view_no_longer_writes_a_private_sqlite_file():
