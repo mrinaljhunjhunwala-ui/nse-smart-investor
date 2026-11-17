@@ -454,6 +454,7 @@ def build_fit_inputs(candidate_ticker: str,
             inp.portfolio_beta = None
 
         # Candidate vs holdings correlation + candidate vol
+        cdf = None                     # a raising loader left cdf unbound (NameError below)
         try:
             cdf = price_loader(candidate_ticker, period=period)
             cs = cdf["Close"].dropna() if cdf is not None and not cdf.empty else None
@@ -473,7 +474,12 @@ def build_fit_inputs(candidate_ticker: str,
             cret = _pct_returns(cs)
             inp.candidate_vol_pct = round(float(cret.std()) * math.sqrt(TRADING_DAYS) * 100, 2)
             corrs = {}
+            _cand = str(candidate_ticker).upper().replace(".NS", "")
             for tkr, s in closes.items():
+                # A stock already held is not "correlated with" itself (it read 1.0 and
+                # dragged the average up whenever you opened a holding).
+                if str(tkr).upper().replace(".NS", "") == _cand:
+                    continue
                 joined = pd.concat([cs, s], axis=1).dropna()
                 if len(joined) >= 5:
                     r = joined.pct_change().dropna()

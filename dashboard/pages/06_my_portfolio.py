@@ -1498,10 +1498,18 @@ if _csv_source is not None:
                 '🔬 Fundamental Quality Scores</div>',
                 unsafe_allow_html=True,
             )
-            st.caption("Quality score (0–100) from ROE/ROCE, revenue & EPS CAGR, "
-                       "leverage, and FCF health. Fetches live fundamentals — opt-in.")
+            st.caption("Quality score (0–100) from ROE, ROCE, revenue CAGR and EPS CAGR. "
+                       "Fetches live fundamentals — opt-in.")
             if st.button("📊 Score my holdings on fundamentals", key="pf_fund_btn"):
                 _fund_tickers = [h.ticker for h in summary.holdings]
+
+                def _is_lender(tk) -> bool:
+                    try:
+                        from analysis.sector_classification import classify_sector
+                        from data.universe import get_sector
+                        return classify_sector(get_sector(str(tk or ""))).is_financial
+                    except Exception:
+                        return False
 
                 @st.cache_data(ttl=86400, show_spinner=False)
                 def _cached_fundamentals(tickers_tuple: tuple):
@@ -1527,12 +1535,20 @@ if _csv_source is not None:
                             "ROCE %":     _f.get("roce"),
                             "Rev CAGR %": _f.get("revenue_cagr_5y") or _f.get("revenue_cagr_3y"),
                             "EPS CAGR %": _f.get("eps_cagr_5y") or _f.get("eps_cagr_3y"),
-                            "D/E":        _f.get("debt_to_equity"),
+                            # Lenders: leverage is the business, not a risk signal (CLAUDE.md
+                            # rule 3); judge them on ROE and P/B instead.
+                            "D/E":        (None if _is_lender(_f.get("ticker"))
+                                           else _f.get("debt_to_equity")),
                         })
                     return rows
 
                 with st.spinner("Fetching fundamentals for your holdings…"):
                     _fund_rows = _cached_fundamentals(tuple(_fund_tickers))
+                # A rate-limited fetch returns rows with every metric missing; don't keep
+                # that for 24h, and say so instead of a table of dashes (audit 2026-11).
+                if _fund_rows and all(str(r.get("Coverage", "")).startswith("0/") for r in _fund_rows):
+                    _cached_fundamentals.clear()
+                    _fund_rows = []
 
                 if _fund_rows:
                     _fdf = pd.DataFrame(_fund_rows).sort_values(
@@ -1551,6 +1567,8 @@ if _csv_source is not None:
                     if pd.notna(_avg_q):
                         st.caption(f"Average portfolio quality: **{_avg_q:.0f}/100** "
                                    f"across {_fdf['Quality'].notna().sum()} scored holdings.")
+                    st.caption("D/E is left blank for banks, NBFCs and insurers: borrowing is "
+                               "their business; read them on ROE and P/B.")
                     st.caption("**Coverage** = how many of the 4 metrics behind the Quality "
                                "score (ROE, ROCE, Revenue CAGR, EPS CAGR) were actually "
                                "available — Yahoo's fundamentals coverage is patchy for "

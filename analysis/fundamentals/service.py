@@ -36,6 +36,9 @@ from .provider import FundamentalProvider
 _log = logging.getLogger("fundamentals.service")
 
 
+EMPTY_TTL_SECONDS = 10 * 60
+
+
 class FundamentalsService:
     def __init__(self, providers: Optional[List[FundamentalProvider]] = None,
                  cache: Optional[TTLCache] = None, ttl_hours: int = 24,
@@ -58,7 +61,11 @@ class FundamentalsService:
         if cached is not None:
             return cached
         cf = self._build(symbol, period, years)
-        self.cache.set(key, cf)
+        # An all-empty result is usually a provider outage (Yahoo 429 on Cloud's shared
+        # IP), not a fact about the company: caching it showed n/a for 24h after the
+        # provider recovered (audit 2026-11). It is kept for EMPTY_TTL_SECONDS only, so a
+        # rate-limited provider is not asked again on every call.
+        self.cache.set(key, cf, None if cf.has_any_data() else EMPTY_TTL_SECONDS)
         return cf
 
     def forget(self, symbol: str) -> None:
