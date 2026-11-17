@@ -1025,6 +1025,8 @@ if _csv_source is not None:
                 with st.spinner("Reconstructing NAV & computing risk metrics…"):
                     _rr = _pf_risk(_risk_holds, _risk_period)
                 if _rr.error:
+                    # One failed fetch kept this error on screen for the 15-minute cache life.
+                    _pf_risk.clear()
                     # DT3 degraded-mode banner -- consistent look across the app.
                     from dashboard.shared.ui_components import degraded_banner as _degraded
                     st.markdown(

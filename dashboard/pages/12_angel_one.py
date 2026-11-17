@@ -248,6 +248,10 @@ with tab_ao2:
         _total_value    = sum(h["value_rs"] for h in _holdings)
         _total_pnl      = _total_value - _total_invested
         _total_pnl_pct  = (_total_pnl / _total_invested * 100) if _total_invested > 0 else 0
+        _no_px = [h["symbol"] for h in _holdings if h.get("ltp_missing")]
+        if _no_px:
+            st.warning(f"Angel One sent no last price for {', '.join(_no_px)}: shown at your average "
+                       "cost (P&L ₹0) until a price comes through.")
 
         _pnl_clr = "var(--bull)" if _total_pnl >= 0 else "var(--bear)"
         st.markdown(gate_strip([
