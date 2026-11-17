@@ -546,3 +546,63 @@ def test_get_holdings_keeps_be_series_and_unsettled_buys(monkeypatch):
     assert set(got) == {"ABCLTD", "NEWBUY"}                           # was {"ABCLTD-BE"}, NEWBUY missing
     assert got["ABCLTD"]["series"] == "BE"
     assert got["NEWBUY"]["qty"] == 5 and got["NEWBUY"]["t1_qty"] == 5 and got["NEWBUY"]["value_rs"] == 1050
+
+
+# ── Orders send the series the token belongs to (owner, 17 Nov) ─────────────────────────────
+def _master():
+    rows = [{"exch_seg": "NSE", "instrumenttype": "", "symbol": f"S{i}-EQ", "token": str(i)} for i in range(600)]
+    rows += [{"exch_seg": "NSE", "instrumenttype": "", "symbol": "ABCLTD-BE", "token": "9001"},
+             {"exch_seg": "NSE", "instrumenttype": "", "symbol": "SMEXYZ-SM", "token": "9002"},
+             {"exch_seg": "NSE", "instrumenttype": "", "symbol": "BOTH-EQ", "token": "9003"},
+             {"exch_seg": "NSE", "instrumenttype": "", "symbol": "BOTH-BE", "token": "9004"}]
+    return rows
+
+
+@pytest.fixture
+def _clean_master(monkeypatch):
+    monkeypatch.setattr(af, "_INST_MAP", {})
+    monkeypatch.setattr(af, "_TRADING_SYMBOL", {})
+    monkeypatch.setattr(af, "_INST_MAP_TS", [0.0])
+    monkeypatch.setattr(af, "_TOKEN_CACHE", {})
+
+
+def test_master_maps_be_and_sme_stocks_with_their_series(monkeypatch, _clean_master):
+    class _S:
+        def get(self, url, timeout=None):
+            return FakeResponse(200, _master())
+    monkeypatch.setattr(af, "_http", _S())
+    assert af._load_instrument_master()
+    assert af._INST_MAP["ABCLTD"] == "9001" and af.trading_symbol("ABCLTD.NS") == "ABCLTD-BE"
+    assert af.trading_symbol("SMEXYZ") == "SMEXYZ-SM"
+    assert af._INST_MAP["BOTH"] == "9003" and af.trading_symbol("BOTH") == "BOTH-EQ"   # EQ wins
+    assert af.trading_symbol("S5") == "S5-EQ" and af.trading_symbol("UNKNOWN") == "UNKNOWN-EQ"
+
+
+def test_order_sends_the_tokens_series(monkeypatch, _clean_master):
+    """Order for a BE-series stock: token and tradingsymbol must match (was "ABCLTD-EQ" + BE token)."""
+    sent = {}
+
+    class _S:
+        def get(self, url, timeout=None):
+            return FakeResponse(200, _master())
+
+        def post(self, url, json=None, headers=None, timeout=None):
+            sent.update(json or {})
+            return FakeResponse(200, {"status": True, "data": {"orderid": "1"}})
+    monkeypatch.setattr(af, "_http", _S())
+    monkeypatch.setattr(af, "_get_session", lambda: {"jwt": "J", "api_key": "K"})
+    af.place_order("ABCLTD-BE.NS", 1, "BUY", order_type="LIMIT", price=100.0, product="DELIVERY")
+    assert sent.get("tradingsymbol") == "ABCLTD-BE" and sent.get("symboltoken") == "9001"
+
+
+def test_search_fallback_records_the_matched_series(monkeypatch, _clean_master):
+    monkeypatch.setattr(af, "_INST_MAP", {"DUMMY": "1"})
+    monkeypatch.setattr(af, "_angel_rate_limit", lambda: None)
+
+    class _S:
+        def post(self, url, json=None, headers=None, timeout=None):
+            return FakeResponse(200, {"data": [{"tradingsymbol": "NEWCO-BE", "symboltoken": "77",
+                                                "instrumenttype": ""}]})
+    monkeypatch.setattr(af, "_http", _S())
+    assert af._get_token("NEWCO", {"jwt": "J", "api_key": "K"}) == "77"
+    assert af.trading_symbol("NEWCO") == "NEWCO-BE"
