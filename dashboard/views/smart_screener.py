@@ -27,13 +27,13 @@ def render() -> None:
     if _ROOT not in sys.path:
         sys.path.insert(0, _ROOT)
 
-    import datetime as _dt
     import html
     import logging
 
     import pandas as pd
     import streamlit as st
 
+    from utils.snapshot_time import ist_now as _ist_now_
     from dashboard.shared.cache import get_vix_info, get_display_name
     from dashboard.shared.trade_utils import _display_label, _paper_trade_popover
     from dashboard.shared.ui_components import (
@@ -244,7 +244,7 @@ def render() -> None:
             "screen":   screen_choice,
             "enriched": bool(enrich_scores),
             "excluded": _excluded,
-            "ran_at":   _dt.datetime.now().strftime("%d %b %H:%M"),
+            "ran_at":   _ist_now_().strftime("%d %b %H:%M"),   # IST: Cloud's clock is UTC
         }
         st.session_state.pop("scr_detail", None)
 

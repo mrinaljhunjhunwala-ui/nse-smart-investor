@@ -183,6 +183,8 @@ def render() -> None:
             return rows
 
         _tickers_tuple = tuple(_wl_data["ticker"].tolist())
+        if _refresh_btn:          # the button was never read, so it refreshed nothing
+            _wl_scores.clear()
         with st.spinner("Loading scores…"):
             _score_rows = _wl_scores(_tickers_tuple)
 
@@ -235,8 +237,8 @@ def render() -> None:
         # scan (see commit 5594fd1); surface the cadence + source here.
         try:
             from dashboard.shared.ui_components import data_as_of as _wl_asof
-            import datetime as _wl_dt
-            _wl_when = _wl_dt.datetime.now().strftime("%H:%M IST")
+            from utils.snapshot_time import ist_now as _ist_now_
+            _wl_when = _ist_now_().strftime("%H:%M IST")
             st.markdown(
                 _wl_asof(_wl_when, source="yfinance",
                          ttl_hint="piggyback scan 15 min"),

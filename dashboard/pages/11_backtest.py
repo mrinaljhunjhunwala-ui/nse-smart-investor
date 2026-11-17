@@ -61,7 +61,7 @@ import streamlit as st
 import sys
 
 from dashboard.shared.design import apply_design
-from dashboard.shared.cache import load_ticker_df
+from dashboard.shared.cache import load_close_series
 from dashboard.shared.chart_helpers import _ROOT, render_top_bar
 from dashboard.shared.table_styles import arrow_fmt, pnl_styler
 from backtest.display import integer_columns, signed_columns  # noqa: E402
@@ -533,8 +533,8 @@ if "bt_result" in st.session_state and not st.session_state.get("bt_running", Fa
         # for daily history). Backtests run per invocation — no cache hint.
         try:
             from dashboard.shared.ui_components import data_as_of as _bt_asof
-            import datetime as _bt_dt
-            _bt_when = _bt_dt.datetime.now().strftime("%H:%M IST")
+            from utils.snapshot_time import ist_now as _ist_now_
+            _bt_when = _ist_now_().strftime("%H:%M IST")
             st.markdown(
                 _bt_asof(_bt_when, source="yfinance",
                          ttl_hint="daily-bars history · no cache"),
@@ -602,9 +602,9 @@ if st.button("📊 Show Normalised Performance", key="compare_btn"):
     with st.spinner("Loading price data…"):
         for t in tickers_list:
             try:
-                d = load_ticker_df(t, period=comp_period)
-                if not d.empty and "Close" in d.columns:
-                    _raw_series[t] = d["Close"]
+                _cl = load_close_series(t, period=comp_period)
+                if not _cl.empty:
+                    _raw_series[t] = _cl
             except Exception as _e:
                 st.caption(
                     f"⚠️ Couldn't load {t.replace('.NS','')} for comparison: {_e}"

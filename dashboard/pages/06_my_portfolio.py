@@ -717,7 +717,8 @@ if _csv_source is not None:
                 # → Yahoo); scores come out of PortfolioManager's per-run pass.
                 try:
                     from dashboard.shared.ui_components import data_as_of as _mp_asof
-                    _mp_when = _dt.datetime.now().strftime("%H:%M IST")
+                    from utils.snapshot_time import ist_now as _ist_now_
+                    _mp_when = _ist_now_().strftime("%H:%M IST")
                     st.markdown(
                         _mp_asof(_mp_when, source="yfinance",
                                  ttl_hint="live-price cache 60 s · score cache 5 min"),

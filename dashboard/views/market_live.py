@@ -29,7 +29,6 @@ def render() -> None:
     _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if _ROOT not in sys.path:
         sys.path.insert(0, _ROOT)
-    import datetime as _dt
     import logging
 
     import pandas as pd
@@ -259,7 +258,8 @@ def render() -> None:
                 st.markdown(mini_index(_i["label"], _i["price"], _i["chg"], _i["chg_pct"],
                                        _i.get("spark"), invert=_i["label"] == "India VIX"),
                             unsafe_allow_html=True)
-            _now = _dt.datetime.now().strftime("%H:%M:%S")
+            from utils.snapshot_time import ist_now as _ist_now_
+            _now = _ist_now_().strftime("%H:%M:%S")
             _cad = f"every {_TICK_S} s" if _LIVE else "paused · closed"
             st.markdown(
                 '<div class="mini-index sunk"><div class="mi-name">Feed</div>'
@@ -478,8 +478,8 @@ def render() -> None:
             # DT1 + DT2 · movers table attribution.
             try:
                 from dashboard.shared.ui_components import data_as_of as _ml_asof
-                import datetime as _ml_dt
-                _ml_when = _ml_dt.datetime.now().strftime("%H:%M IST")
+                from utils.snapshot_time import ist_now as _ist_now_
+                _ml_when = _ist_now_().strftime("%H:%M IST")
                 st.markdown(
                     _ml_asof(_ml_when, source="yfinance",
                              ttl_hint="live-price cache 60 s"),

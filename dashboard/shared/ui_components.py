@@ -1652,7 +1652,8 @@ def activity_log(events: list, empty: str = "No activity recorded yet.") -> str:
     label = {"good": "OK", "bad": "Failed", "warn": "Warn"}
     rows = []
     for e in events:
-        when = _dt.datetime.fromtimestamp(float(e.get("ts") or 0)).strftime("%H:%M")
+        when = _dt.datetime.fromtimestamp(float(e.get("ts") or 0),
+                                      _dt.timezone(_dt.timedelta(hours=5, minutes=30))).strftime("%H:%M")
         tone = e.get("tone", "neutral")
         rows.append(
             f'<li><span class="ao-lt">{when}</span><div><span class="ao-lk">{e.get("kind", "")}</span>'
