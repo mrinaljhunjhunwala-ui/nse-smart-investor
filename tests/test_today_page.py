@@ -176,3 +176,23 @@ def test_open_trades_summary_pnl_and_today():
     empty = open_trades_summary(pd.DataFrame(), {})
     assert empty["n"] == 0 and empty["pnl"] is None and empty["day"] is None
 
+
+
+def test_changes_tab_shows_the_eod_check(no_network):
+    import trade_store as store
+    day = dt.datetime.now(IST).date().isoformat()
+    store.kv_set(f"eod_scorecard:{day}", {
+        "date": day, "nifty_pct": 0.4,
+        "summary": {"n": 1, "up": 1, "avg_pct": 3.0, "avg_vs_nifty": 2.6, "beat_nifty": 1,
+                    "stops_hit": 0, "targets_hit": 0, "nifty_pct": 0.4},
+        "calls": [{"symbol": "SGMART", "group": "digest", "when": "08:43", "entry": 983.4, "close": 1013.35,
+                   "pct": 3.05, "vs_nifty": 2.65, "best_pct": 3.9, "worst_pct": -0.7,
+                   "stop_hit": False, "target_hit": False}],
+        "levels": [{"symbol": "DHANBANK", "up": 43.65, "down": 41.35, "next_up": 47.11, "close": 43.19,
+                    "broke_up": True, "reached_next": False, "broke_down": True, "closed": "inside"}]},
+        user_id="_system")
+    at = AppTest.from_file(_PAGE, default_timeout=120).run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    text = " ".join(str(m.value) for m in at.markdown) + " ".join(str(c.value) for c in at.caption)
+    assert "end-of-day check" in text and "1 call · 1 up" in text and "broke ▲ ₹43.65" in text
+    assert any("SGMART" in df.value.to_string() for df in at.dataframe)

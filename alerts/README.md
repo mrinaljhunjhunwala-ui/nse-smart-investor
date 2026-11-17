@@ -140,9 +140,9 @@ needs an external trigger. All share the same settings:
 | 2 | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"intraday-watchlist","force":"false"}}` | `20 9 * * 1-5` | 09:20 | Intraday framing of the top picks |
 | 3 | `market-alerts.yml` | `{"ref":"main"}` | `*/15 9-15 * * 1-5` | every 15 min, 09:00–15:45 | Price alerts, India VIX regime, Nifty trend |
 | 4 | `warm-top-picks.yml` | `{"ref":"main"}` | 3 jobs: `15 9,12,15 * * 1-5` · `0,45 10,13 * * 1-5` · `30 11,14 * * 1-5` | every 45 min, 09:15–15:15 | Keeps the dashboard's Top Picks snapshot fresh (~5 min per run) |
-| 5 | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"momentum","force":"false"}}` | `0,30 10-14 * * 1-5` | every 30 min, 10:00–14:30 | Momentum-scan digest (max one AM + one PM) |
+| ~~5~~ | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"momentum","force":"false"}}` | `0,30 10-14 * * 1-5` | every 30 min, 10:00–14:30 | **Retired 17 Nov — switch this cron-job.org job off.** The momentum digest now sends nothing; keep jobs 2, 6 and 8, which use the same workflow |
 | 6 *(optional — holdings)* | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"portfolio-posture","force":"false"}}` | `0 14 * * 1-5` | 14:00 | Angel One holdings posture |
-| 7 | `warm_tomorrow_watchlist.yml` | `{"ref":"main"}` | `50 15 * * 1-5` | 15:50 | Tomorrow's Watchlist after close |
+| 7 | `warm_tomorrow_watchlist.yml` | `{"ref":"main"}` | `50 15 * * 1-5` | 15:50 | Tomorrow's Watchlist after close, then the end-of-day check of the day's BUY calls and the portfolio posture |
 | 8 | `market-digest.yml` | `{"ref":"main","inputs":{"mode":"weekly-digest","force":"false"}}` | `0 9 * * 0` | Sunday 09:00 | Week-ahead summary |
 | 9 | `refresh_universe.yml` | `{"ref":"main"}` | `0 10 * * 0` | Sunday 10:00 | Checks the scan universe against NSE's index lists; opens an `automerge` PR when names were added / removed / renamed; Telegram summary |
 | 10 | `provider_canary.yml` | `{"ref":"main"}` | `0 9 * * 0` | Sunday 09:00 | Live check of every data provider; 🟢/🔴 table on Telegram |

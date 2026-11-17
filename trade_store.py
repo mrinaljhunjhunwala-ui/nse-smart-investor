@@ -348,8 +348,12 @@ def open_trade(
         raise ValueError(f"Invalid entry price: {price}")
     if qty <= 0:
         raise ValueError(f"Invalid quantity: {qty}")
-    if sl > 0 and action.upper() == "BUY" and sl >= price:
+    if sl is not None and sl < 0:
+        raise ValueError(f"Invalid stop loss: {sl}")
+    if sl and action.upper() == "BUY" and sl >= price:
         raise ValueError(f"Stop loss ({sl}) must be below entry price ({price}) for a BUY trade")
+    if sl and action.upper() in ("SELL", "SHORT") and sl <= price:
+        raise ValueError(f"Stop loss ({sl}) must be above entry price ({price}) for a {action.upper()} trade")
 
     ensure_schema()
     now  = _now_ist_iso()

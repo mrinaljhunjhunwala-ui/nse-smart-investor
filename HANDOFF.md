@@ -8,6 +8,28 @@ This section is the running memory between sessions; older sections below are hi
   insurers (Valuation E1-v2 and Quality Watch already did). The PIN unlock stays strict (15 min from
   unlock, even under auto-refresh) because it may have to guard holdings between users later. The
   sidebar watchlist and Watchlist & Notes are now one list. Movers radar cap: left at 6.
+- **Message pass (17 Nov, owner "go all four"):** (1) BUY-call alerts capped at 3 from the
+  opening scan + 2 that turn BUY later (was 10 + 10, ~18 by 09:30); 3 per run. (2) Portfolio
+  posture: under the 50-day average by less than one ATR is HOLD with "SELL on a close below
+  ₹X"; further under is TRIM (longer trend up) or SELL (down), each with a stop
+  (`_classify_delivery`; 7 of 10 holdings read SELL on 17 Nov, ONGC only 1.6% under). (3) The
+  15:15 "Digest picks today" recap left the 15-minute run; the 16:00 end-of-day check covers
+  it (`check_picks_recap` kept, unscheduled). (4) Every BUY / digest line carries its plan:
+  risk / reward %, hold period (from the pick's horizon, else 2–6 weeks) and "skip above ₹X"
+  (+2%, `_plan_bits`); every radar mover ends with "→ no action …" or the watchlist note
+  (`movers_alerts.radar_action`). Cron-job.org job #6 (14:00 posture) is off by the owner;
+  the 16:00 posture still runs. No score, verdict or ledger change.
+- **End-of-day check of the day's BUY calls; momentum digest and "why they moved" retired
+  (17 Nov, owner):** a new `--mode=eod-scorecard` runs in the post-close Tomorrow's Watchlist
+  job (16:00 IST, in place of the why-moved step) and grades every BUY call made that day on
+  day 1: Delivery Digest picks (price at the 08:43 scan), BUY calls sent during the day (KV
+  `buy_calls:<date>`, now written by `check_verdict_alerts` on each send) and the Intraday
+  Watchlist levels (broke ▲ / ▼, closed where). Move to close, vs Nifty, day range, stop /
+  target touched; pure maths in `analysis/calls_scorecard.py`. Saved to KV
+  `eod_scorecard:<date>` and shown first on Today → Changes & alerts. The 5- and 20-session
+  grading stays in the ledger / Friday card. `--mode=momentum` now sends nothing (the
+  every-30-minute Market Digest trigger still fires it: the owner can switch that
+  cron-job.org job off); `--mode=why-moved` still exists but is no longer scheduled.
 - **Audit, 17 Nov (owner: "earlier rounds said fine, then real bugs showed up"). Full report:
   `AUDIT_2026-11.md`, with a status for every page, view and alert job.** The bug hunted for:
   features that silently show n/a / empty / stale data in real conditions while tests pass.

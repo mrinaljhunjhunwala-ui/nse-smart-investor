@@ -212,8 +212,9 @@ def _classify_delivery(
     """Turn six-filter state + P&L into a descriptive posture label.
 
     Priority order:
-      1. If trend has broken (price < SMA50 < SMA200 zone) — EXIT_WATCH
-      2. If price below SMA50 but SMA50 still > SMA200 — TRIM_WATCH
+      1. Price under SMA50 by less than one ATR — HOLD (with the exit level)
+      2. Further under SMA50, SMA50 still > SMA200 — TRIM_WATCH
+      3. Further under SMA50, SMA50 < SMA200 (trend broken) — EXIT_WATCH
       3. If 5–6 filters pass AND positive P&L — ADD_WATCH
       4. If 3–4 filters pass — HOLD
       5. If 0–2 filters pass — TRIM_WATCH (setup decayed)
@@ -221,13 +222,22 @@ def _classify_delivery(
     n_pass = sum(1 for v in filters.values() if v)
 
     if not filters["trend"] and ltp < sma50:
-        # Under the 50-day average. With the longer trend still up (50-day above
-        # the 200-day) that is a pullback: TRIM. Only with the longer trend
-        # broken too is it SELL. Until 16 Nov both read SELL, so 10 of 11
-        # holdings said SELL on one day, a +684% holding next to a -76% one.
+        # Under the 50-day average. 17 Nov (owner): 7 of 10 holdings read SELL, several
+        # only 1-2% under the line (ONGC 1.6%) — a normal wobble, not a broken trend.
+        # Within one typical day's move (ATR) of the 50-day it is HOLD with the level that
+        # would change it; further below, TRIM while the longer trend is up, SELL when the
+        # 50-day is under the 200-day too. Every row names its exit level.
+        gap = sma50 - ltp
+        below_pct = gap / sma50 * 100 if sma50 else 0.0
+        line = max(sma50 - atr, 0.0)
+        if atr > 0 and gap < atr:
+            return ("HOLD", f"just under 50-day average ₹{sma50:,.2f} ({below_pct:.1f}%) · "
+                            f"SELL on a close below ₹{line:,.2f}")
         if long_trend_up:
-            return ("TRIM_WATCH", f"below 50-day average (₹{sma50:,.2f}), longer trend still up")
-        return ("EXIT_WATCH", f"below 50-day average (₹{sma50:,.2f})")
+            return ("TRIM_WATCH", f"{below_pct:.1f}% below 50-day average ₹{sma50:,.2f}, longer trend "
+                                  f"still up · trim, or stop ₹{max(ltp - atr, 0.0):,.2f}")
+        return ("EXIT_WATCH", f"{below_pct:.1f}% below 50-day average ₹{sma50:,.2f}, longer trend down · "
+                              f"exit, or stop ₹{max(ltp - atr, 0.0):,.2f}")
     if n_pass >= 5 and pnl_pct >= 0:
         return ("ADD_WATCH", f"{n_pass}/6 filters passing, in profit — trend extending")
     if n_pass <= 2:

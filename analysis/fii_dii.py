@@ -272,3 +272,18 @@ def refresh(*, force: bool = False) -> Dict:
     n = _persist(rows, source=src)
     latest = max((r["date"] for r in rows), default=None)
     return {"rows_written": n, "source": src, "latest_date": latest}
+
+
+FLOWS_MAX_AGE_DAYS = 9      # 5 sessions + a weekend + a holiday or two (same as analysis/score.py)
+
+
+def recent_flows(df: pd.DataFrame, today: Optional[_dt.date] = None,
+                 max_age_days: int = FLOWS_MAX_AGE_DAYS) -> pd.DataFrame:
+    """Rows from the last ``max_age_days`` calendar days only. Analyze Stock summed the last 5
+    stored rows and called them "this week" with no date check, so if the EOD job stopped it
+    kept showing weeks-old flows (audit 2026-11)."""
+    if df is None or df.empty or "date" not in df.columns:
+        return pd.DataFrame(columns=getattr(df, "columns", []))
+    today = today or _last_closed_session()
+    dates = pd.to_datetime(df["date"], errors="coerce").dt.date
+    return df[dates >= today - _dt.timedelta(days=max_age_days)]

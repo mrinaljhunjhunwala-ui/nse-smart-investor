@@ -357,6 +357,7 @@ _SEND_WINDOWS = {
     "intraday-watchlist": (datetime.time(9, 15), datetime.time(10, 30)),
     "catalyst-preopen":   (datetime.time(8, 0),  datetime.time(9, 20)),
     "why-moved":          (datetime.time(15, 35), datetime.time(21, 0)),
+    "eod-scorecard":      (datetime.time(15, 35), datetime.time(23, 0)),
 }
 
 
@@ -744,16 +745,20 @@ def check_pick_moves(state: dict, today: str) -> int:
 
 _VERDICT_ALERT_TIERS = ("STRONG BUY", "BUY")
 _VERDICT_MAX_SNAPSHOT_AGE_H = 2      # the warmer refreshes every 45 min in market hours
-_VERDICT_MAX_PER_RUN = 8
+_VERDICT_MAX_PER_RUN = 3
 # Per-day ceiling across all runs. In a rising market the full scan held 70-84
 # BUY / STRONG BUY names (9 Nov), and 8 per 15-min run became ~40 messages by
 # 10:30 IST. Strongest names go first, so the cap keeps the best reads.
-_VERDICT_MAX_PER_DAY = 10
+# 17 Nov (owner): ~18 BUY calls by 09:30 on top of the 5 digest picks was more than
+# anyone can act on. Now 3 from the opening scan + 2 that turn BUY later = at most 5
+# beyond the digest; the rest stay on Top Picks and are graded in the end-of-day check
+# only when sent.
+_VERDICT_MAX_PER_DAY = 3
 # Names that reach BUY at 70+ only after the day's first run get their own
 # allowance. On 16 Nov the first run spent the whole day cap on the pre-open
 # scan (five of the eight were the digest's own names, sent 30 min earlier), so
 # nothing that turned BUY during the session could be sent.
-_VERDICT_FRESH_MAX_PER_DAY = 10
+_VERDICT_FRESH_MAX_PER_DAY = 2
 _VSEEN, _VFRESH = "vseen_", "vfresh_"
 _TOMORROW_MAX_SNAPSHOT_AGE_H = 3             # caps a burst now that the whole scan is read
 
@@ -780,6 +785,32 @@ def _regime_note() -> str:
     return _MARKET_DOWN if lbl and str(lbl).lower() in _BEAR_REGIMES else ""
 
 
+_CHASE_PCT = 2.0     # a delivery entry is fine up to this far above the call price
+
+
+def _plan_bits(b: dict, price=None) -> list:
+    """The trade plan behind a BUY line (owner, 17 Nov: alerts must say what to do):
+    risk to the stop and reward to the target in %, the holding period, and the price
+    above which the entry is no longer the one the call was made at."""
+    def num(x):
+        try:
+            v = float(x)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+    p = num(price if price is not None else (b.get("price") or b.get("last_price")))
+    sl = num(b.get("sl") or b.get("stop_loss") or b.get("stop"))
+    tp = num(b.get("tp") or b.get("target"))
+    bits = []
+    if p and sl and tp:
+        bits.append(f"risk {(sl / p - 1) * 100:+.1f}% / reward {(tp / p - 1) * 100:+.1f}%")
+    hz = str(b.get("horizon") or "").strip()
+    bits.append(f"hold {hz.split('(')[-1].rstrip(')') if '(' in hz else '2–6 weeks'}")
+    if p:
+        bits.append(f"skip above {_rs(round(p * (1 + _CHASE_PCT / 100), 2))}")
+    return bits
+
+
 def _verdict_pick_lines(verdict: str, b: dict, *, reason: bool = True) -> list:
     """'STRONG BUY  <b>PNB</b>  ₹118.40 · stop ₹112.10 · target ₹131.00' + optional reason line."""
     price = b.get("price")
@@ -789,7 +820,7 @@ def _verdict_pick_lines(verdict: str, b: dict, *, reason: bool = True) -> list:
     why = " · ".join(x for x in (_h(sector[:30]) if sector else "", f"score {b.get('score')}/90") if x)
     if not reason:
         return [f"{line} · score {b.get('score')}/90"]
-    return [line, f"   {why}"]
+    return [line, "   " + " · ".join([why] + [_h(x) for x in _plan_bits(b, price)])]
 
 
 def _format_verdict_alert(verdict: str, b: dict, fv, regime: str, gen_at) -> list:
@@ -912,8 +943,31 @@ def check_verdict_alerts(state: dict, today: str) -> int:
     if dispatch("\n".join(lines), subject=f"{len(batch)} new BUY call(s) — NSE Smart Investor"):
         for key, *_ in batch:
             _mark_fired(state, key, today)
+        _record_buy_calls(store, today, [(v, b) for _k, v, b, _fv in batch])
         return len(batch)
     return 0
+
+
+_BUY_CALLS_PREFIX = "buy_calls:"
+
+
+def _record_buy_calls(store, today: str, calls: list) -> None:
+    """Keep each sent BUY call (time, price, stop, target) so the end-of-day scorecard can grade
+    it. KV buy_calls:<date>, user _system. Never raises."""
+    if _FORCE_SEND:
+        return
+    try:
+        key = _BUY_CALLS_PREFIX + today
+        rows = store.kv_get(key, None, user_id="_system")
+        rows = rows if isinstance(rows, list) else []
+        at = datetime.datetime.now(_IST).strftime("%H:%M")
+        for verdict, b in calls:
+            rows.append({"symbol": _base_symbol(b.get("ticker")), "verdict": verdict, "time": at,
+                         "price": b.get("price"), "sl": b.get("sl"), "tp": b.get("tp"),
+                         "score": b.get("score")})
+        store.kv_set(key, rows, user_id="_system")
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[verdicts] could not record today's calls: {e}")
 
 
 def _format_verdict_batch(batch: list, regime: str, gen_at) -> list:
@@ -986,6 +1040,125 @@ def check_picks_recap(state: dict, today: str, now: datetime.datetime | None = N
         avg_move = round(sum(moves) / len(moves), 1) + 0.0     # + 0.0 turns -0.0 into 0.0
         lines += [f"Average {avg_move:+.1f}% · {up} up / {len(moves) - up} down or flat"]
     if dispatch("\n".join(lines), subject="Digest picks recap — NSE Smart Investor"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+_EOD_KEY_PREFIX = "eod_scorecard:"
+
+
+def _nifty_day_pct(today: str) -> float | None:
+    """Nifty 50's move today (last close vs the one before), or None if today's bar is missing."""
+    try:
+        import pandas as pd
+        from data.fetcher import fetch_single
+        df = fetch_single("^NSEI", period="1mo")
+        closes = df["Close"].dropna()
+        if len(closes) < 2 or pd.to_datetime(closes.index[-1]).strftime("%Y-%m-%d") != today:
+            return None
+        return (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
+    except Exception as e:                                  # noqa: BLE001
+        _log.debug("nifty day move failed: %s", e)
+        return None
+
+
+def _day_prices(base: str, today: str) -> dict:
+    """{'close', 'high', 'low'} for today from 5-min bars, else the live quote's price only."""
+    ss = _pick_session(base, today) or {}
+    close = ss.get("last")
+    if not close:
+        q = _quote(base) or {}
+        close = q.get("price")
+    return {"close": close, "high": ss.get("high"), "low": ss.get("low")}
+
+
+def check_eod_scorecard(state: dict, today: str) -> int:
+    """After the close: every BUY call the app made today, graded on its first day.
+
+    Three groups: the Delivery Digest picks (price at the 08:43 scan), the BUY calls sent during
+    the day (price when sent, from KV buy_calls:<date>), and the Intraday Watchlist levels
+    (broke ▲ / ▼, closed where). Day 1 only — the ledger grades the same calls at 5 and 20
+    sessions. The graded rows are saved to KV eod_scorecard:<date> for the Today page."""
+    key = "eod_scorecard"
+    if _already_fired(state, key, today):
+        return 0
+    try:
+        import trade_store as store
+        from analysis import calls_scorecard as CS
+    except Exception as e:
+        print(f"[eod] import failed: {e}")
+        return 0
+    nifty = _nifty_day_pct(today)
+    cache: dict = {}
+
+    def prices(base):
+        if base not in cache:
+            cache[base] = _day_prices(base, today)
+        return cache[base]
+
+    graded = []
+    morning = _today_picks(store, today) or {}
+    scan_at = _snapshot_ist_label(morning.get("generated_at")).replace(" IST", "") if morning else ""
+    for b in (morning.get("buys") or []):
+        base = _base_symbol(b.get("ticker"))
+        g = CS.grade_call(entry=b.get("price") or b.get("last_price"), stop=b.get("sl"), target=b.get("tp"),
+                          nifty_pct=nifty, **prices(base))
+        graded.append({**g, "symbol": base, "group": "digest", "when": scan_at,
+                       "verdict": str(b.get("action") or "BUY"), "score": b.get("score")})
+    try:
+        calls = store.kv_get(_BUY_CALLS_PREFIX + today, None, user_id="_system")
+    except Exception:
+        calls = None
+    seen = {c["symbol"] for c in graded}
+    for c in calls if isinstance(calls, list) else []:
+        base = _base_symbol(c.get("symbol"))
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        g = CS.grade_call(entry=c.get("price"), stop=c.get("sl"), target=c.get("tp"),
+                          nifty_pct=nifty, **prices(base))
+        graded.append({**g, "symbol": base, "group": "buy_call", "when": c.get("time") or "",
+                       "verdict": c.get("verdict"), "score": c.get("score")})
+    try:
+        saved = store.kv_get(_LEVELS_KEY, None, user_id="_system")
+    except Exception:
+        saved = None
+    levels = (saved.get("levels") or {}) if isinstance(saved, dict) and saved.get("date") == today else {}
+    lv_graded = {base: CS.grade_levels(lv, **prices(base)) for base, lv in levels.items()}
+
+    if not graded and not lv_graded:
+        print("[eod] no BUY calls or watchlist levels today — nothing to grade")
+        return 0
+
+    lines = [f"🧾 <b>Today's calls — end-of-day check</b> · {today}",
+             "<i>Day 1 only. The same calls are graded again at 5 and 20 sessions "
+             "(Friday report card).</i>"]
+    for group, title in (("digest", "☀️ Delivery Digest picks"), ("buy_call", "🟢 BUY calls during the day")):
+        rows = [g for g in graded if g["group"] == group]
+        if not rows:
+            continue
+        lines.append(f"<b>{title}</b>")
+        rows.sort(key=lambda g: -(g["pct"] if g["pct"] is not None else -1e9))
+        lines += [_h(CS.call_line(g["symbol"], g, when=g["when"] if group == "buy_call" else ""))
+                  for g in rows]
+    summary = CS.summarize(graded, nifty)
+    if graded:
+        lines.append("<b>All BUY calls:</b> " + _h(CS.summary_line(summary)))
+    if lv_graded:
+        lines.append("<b>⚡ Intraday Watchlist levels</b>")
+        lines += [_h(CS.levels_line(base, g)) for base, g in lv_graded.items()]
+    lines.append(_FOOTER)
+
+    try:
+        store.kv_set(_EOD_KEY_PREFIX + today,
+                     {"date": today, "nifty_pct": nifty, "summary": summary,
+                      "calls": CS.scorecard_rows(graded),
+                      "levels": [{"symbol": b, **g} for b, g in lv_graded.items()]},
+                     user_id="_system")
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[eod] could not save the scorecard: {e}")
+    if dispatch("\n".join(lines), subject="Today's calls — end-of-day check"):
         _mark_fired(state, key, today)
         return 1
     return 0
@@ -1186,7 +1359,8 @@ def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = Non
             word = (verdict_display_label(v[0]) if v
                     else action_display_label(str(b.get("action", "")).replace("_", " ")))
             lines.append(_stock_line(word, tk, price, stop, tgt))
-        lines.append("   " + " · ".join(x for x in (sec, f"score {b.get('score', 0)}/90") if x))
+        plan = [] if _under(b) else [_h(x) for x in _plan_bits(b, price)]
+        lines.append("   " + " · ".join(x for x in (sec, f"score {b.get('score', 0)}/90", *plan) if x))
 
     # BUY / STRONG BUY verdicts further down the scan than the top max_picks
     extra = []
@@ -2082,7 +2256,7 @@ def main() -> int:
         "morning-digest", "portfolio-posture", "test", "test-verdict", "test-digest",
         "test-posture",
         "weekly-digest", "intraday-watchlist", "tomorrow-watchlist", "weekly-scorecard",
-        "catalyst-preopen", "why-moved",
+        "catalyst-preopen", "why-moved", "eod-scorecard",
     )
     if mode not in _bypass_market_hours and not force and not _is_market_hours():
         print(f"[main mode={mode}] outside NSE market hours — nothing to do.")
@@ -2102,7 +2276,12 @@ def main() -> int:
     elif mode == "intraday-watchlist":
         total += check_intraday_watchlist(state, today)
     elif mode == "momentum":
-        total += check_momentum_opportunities(state, today)
+        # Retired 17 Nov (owner: "momentum leaders are not needed"). The every-30-minute
+        # trigger still calls this mode; it now sends nothing. check_momentum_opportunities
+        # stays for the Markets page's own scan.
+        print("[momentum] digest retired — nothing sent")
+    elif mode == "eod-scorecard":
+        total += check_eod_scorecard(state, today)
     elif mode == "portfolio-posture":
         total += check_portfolio_posture(state, today, always="--always" in sys.argv)
     elif mode == "weekly-digest":
@@ -2131,7 +2310,8 @@ def main() -> int:
             "portfolio": check_portfolio_alerts(state, today) if _holding_alerts_on() else 0,
             "opening":   check_opening_update(state, today),
             "moves":     check_pick_moves(state, today),
-            "recap":     check_picks_recap(state, today),
+            # 15:15 "Digest picks today" retired 17 Nov: the 16:00 end-of-day check
+            # (--mode=eod-scorecard) covers the digest picks plus every BUY call.
             "verdicts":  check_verdict_alerts(state, today),
             "vix":       check_vix_regime(state, today),
             "nifty":     check_nifty_trend(state, today),

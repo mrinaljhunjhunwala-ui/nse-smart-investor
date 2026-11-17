@@ -357,16 +357,18 @@ def render() -> None:
             logging.getLogger("dashboard.market_live").debug("sector heatmap failed: %s", _hm_e)
 
         @st.cache_data(ttl=300, show_spinner=False)
-        def _explain_mover(ticker: str, chg_pct: float, vol_ratio: float) -> list:
+        def _explain_mover(ticker: str, chg_pct: float, live_volume=None) -> list:
             """Generate 2-4 plain-English reasons why a stock is moving."""
             reasons = []
             try:
                 import math
                 from data.fetcher import fetch_single
+                from utils.indicators import volume_ratio_today
                 df = fetch_single(ticker, period="3mo")
                 df = df.dropna(subset=["Close"])
                 if len(df) < 20:
                     return reasons
+                vol_ratio = volume_ratio_today(df, live_volume) or 0.0
 
                 last    = df.iloc[-1]
                 close   = float(last["Close"])
@@ -444,7 +446,7 @@ def render() -> None:
                 _dd2.metric("Prev Close", f"₹{_dr.get('prev_close', _dr['price']):,.2f}")
                 _dd3.metric("Company", str(_dr.get("name", ""))[:20])
                 with st.spinner("Reading the chart…"):
-                    for _rs in _explain_mover(_dt_full, _dchg, 1.0):
+                    for _rs in _explain_mover(_dt_full, _dchg, _dr.get("volume")):
                         st.markdown(f"• {_rs}")
                 _da, _db, _dc = st.columns(3)
                 if _da.button("📊 Analyze", key=f"ml_an_{_dt_full}", width="stretch"):

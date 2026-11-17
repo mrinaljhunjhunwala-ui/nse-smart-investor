@@ -121,6 +121,17 @@ def radar_allowance(t: _dt.time) -> int:
     return min(RADAR_MAX_MSGS, sum(1 for w in RADAR_WINDOWS if t >= w))
 
 
+def radar_action(m: dict) -> str:
+    """What to do with a radar mover (owner, 17 Nov: every alert says what to do). The radar
+    reports a move already made, so it never says BUY: a big up-day is a poor entry."""
+    pct = m.get("pct") or 0.0
+    if m.get("watchlist"):
+        label, rank, _ = m["watchlist"]
+        return (f"on your watchlist ({label} #{rank}): don't chase {pct:+.1f}%; "
+                "buy only if it holds the gain into the close or pulls back")
+    return f"no action: not on your lists, and a {pct:+.1f}% day is a poor entry"
+
+
 def build_radar(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, List[str]],
                 evidence: Optional[dict], scan: Optional[dict], source: str) -> tuple:
     """(message lines, movers that fit). Movers are added in order while the message stays
@@ -146,6 +157,7 @@ def build_radar(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, Lis
         why = "; ".join(_h(r) for r in (reasons.get(m["symbol"]) or [])[:2]) or "no filing found"
         stats = chase_lookup((evidence or {}).get("table"), m["band"], m["pct"], m.get("vol_ratio"))
         block.append(f"   why: {why} · {_h(evidence_phrase(stats))} · {_h(_score_part(scan, m['symbol']))}")
+        block.append("   → " + _h(radar_action(m)))
         if kept and len("\n".join(lines + block + [RADAR_FOOTER])) > MSG_CHAR_BUDGET:
             break
         lines += block
