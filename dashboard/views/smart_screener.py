@@ -231,8 +231,8 @@ def render() -> None:
                 _rr = _sg.get("rr_ratio")
                 if _rr is None:
                     _px = _sg.get("price", 0) or 0
-                    _sl = _sg.get("sl", _sg.get("stop_loss", 0)) or 0
-                    _tp = _sg.get("tp", _sg.get("target", None))
+                    _sl = signal_stop(_sg)
+                    _tp = _sg.get("tp") or _sg.get("target")
                     _risk = _px - _sl
                     _rr = round((_tp - _px) / _risk, 1) if (_tp and _risk > 0.01) else None
                 _sg["_rr"] = _rr
@@ -270,8 +270,8 @@ def render() -> None:
     def _render_detail(sig: dict, rank: int, enriched: bool) -> None:
         t = sig["ticker"].replace(".NS", "")
         price = sig.get("price", 0) or 0
-        sl = sig.get("sl", sig.get("stop_loss", 0)) or 0
-        tp = sig.get("tp", sig.get("target", None))
+        sl = signal_stop(sig)
+        tp = sig.get("tp") or sig.get("target")
         rr = sig.get("_rr")
         rg = sig.get("rev_growth")
         sector = sig.get("sector", "") or ""
@@ -431,3 +431,17 @@ def render() -> None:
                             unsafe_allow_html=True)
             except Exception:
                 pass
+
+
+def signal_stop(sig: dict) -> float:
+    """The screen's own stop, else the composite stop added when results are scored.
+    `sig.get("sl", sig.get("stop_loss", 0)) or 0` returned 0 whenever the screen set sl to
+    0 / None, so a scored BUY could show "–" for its stop (audit 2026-11)."""
+    for k in ("sl", "stop_loss"):
+        try:
+            v = float(sig.get(k) or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        if v > 0:
+            return v
+    return 0.0

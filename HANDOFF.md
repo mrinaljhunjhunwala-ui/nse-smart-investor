@@ -29,10 +29,10 @@ This section is the running memory between sessions; older sections below are hi
   - **#373:** My Watchlist lived in a local sqlite file wiped on every redeploy (now KV
     `my_watchlist_rows`, old rows imported once); "Alert SL" is now "Stop" (nothing alerts on
     it); pre-open scan moves are labelled as the previous session's.
+  - **#PRNUM:** a scored Smart Screener BUY could show no stop (no fallback to the composite stop).
 
   No score, verdict or threshold changed (reviewer: golden snapshots identical).
   **Open (owner decisions or unverified):**
-  - a Smart Screener BUY may show no stop (check first);
   - Angel One `-BE` / `-SM` symbols and the T+1 quantity field (need a broker login);
   - one watchlist or two;
   - the bank quality score uses ROCE;
