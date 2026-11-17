@@ -3,6 +3,17 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **End-of-day check of the day's BUY calls; momentum digest and "why they moved" retired
+  (17 Nov, owner):** a new `--mode=eod-scorecard` runs in the post-close Tomorrow's Watchlist
+  job (16:00 IST, in place of the why-moved step) and grades every BUY call made that day on
+  day 1: Delivery Digest picks (price at the 08:43 scan), BUY calls sent during the day (KV
+  `buy_calls:<date>`, now written by `check_verdict_alerts` on each send) and the Intraday
+  Watchlist levels (broke ▲ / ▼, closed where). Move to close, vs Nifty, day range, stop /
+  target touched; pure maths in `analysis/calls_scorecard.py`. Saved to KV
+  `eod_scorecard:<date>` and shown first on Today → Changes & alerts. The 5- and 20-session
+  grading stays in the ledger / Friday card. `--mode=momentum` now sends nothing (the
+  every-30-minute Market Digest trigger still fires it: the owner can switch that
+  cron-job.org job off); `--mode=why-moved` still exists but is no longer scheduled.
 - **Audit, 17 Nov (owner: "earlier rounds said fine, then real bugs showed up"). Full report:
   `AUDIT_2026-11.md`, with a status for every page, view and alert job.** The bug hunted for:
   features that silently show n/a / empty / stale data in real conditions while tests pass.

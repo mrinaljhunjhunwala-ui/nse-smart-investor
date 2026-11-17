@@ -101,9 +101,12 @@ jobs:
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
         run: python alerts/check_alerts.py --mode=weekly-scorecard
 
-      # Why today's biggest gainers and losers moved (results, announcements,
-      # sector, volume) and whether each was on the app's lists beforehand.
-      - name: Send why the top movers moved
+      # End-of-day check of every BUY call the app made today: Delivery Digest picks,
+      # BUY calls sent during the day and the Intraday Watchlist levels, graded on
+      # day 1 (the ledger grades them again at 5 and 20 sessions). Replaced the
+      # "why the top movers moved" message on 17 Nov (owner: not needed); that
+      # mode still exists (--mode=why-moved) but nothing schedules it.
+      - name: Send today's calls end-of-day check
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -112,7 +115,11 @@ jobs:
           ALERT_GMAIL_APP_PASSWORD: ${{ secrets.ALERT_GMAIL_APP_PASSWORD }}
           ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
-        run: python alerts/check_alerts.py --mode=why-moved
+          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
+          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
+          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: python alerts/check_alerts.py --mode=eod-scorecard
 
       # After-close portfolio posture from the Angel One holdings. Used to need
       # its own cron-job.org trigger at 14:00 (never set up); it rides this
