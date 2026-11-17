@@ -80,7 +80,10 @@ _cr = _ao_credentials()
 
 
 def _hhmm(ts) -> str:
-    return _dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M") if ts else "—"
+    if not ts:
+        return "—"
+    ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))     # Cloud's clock is UTC
+    return _dt.datetime.fromtimestamp(float(ts), ist).strftime("%H:%M")
 
 
 _cool_min = _st["breaker_cooldown_s"] // 60

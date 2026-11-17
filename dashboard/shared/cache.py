@@ -477,6 +477,20 @@ def load_ticker_df(ticker: str, period: str = "2y") -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=300)
+def load_close_series(ticker: str, period: str = "6m") -> pd.Series:
+    """Daily closes for exactly ``period`` (no indicators, no warm-up trimming).
+
+    The Backtest page's normalised-performance chart used load_ticker_df, which
+    drops the first ~200 rows as SMA_200 warm-up: 1M and 6M (the default) came
+    back empty and YTD / 1Y lost most of their window."""
+    from data.fetcher import fetch_single
+    df = fetch_single(ticker, period=period)
+    if df is None or df.empty or "Close" not in df.columns:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(df["Close"], errors="coerce").dropna()
+
+
 def _trim_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     """
     Return a date-sliced copy of df matching the UI display period.

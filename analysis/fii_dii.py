@@ -37,6 +37,7 @@ to render, and a status banner explains the freshness.
 from __future__ import annotations
 
 import datetime as _dt
+import time as _time
 import logging
 import re
 from typing import Dict, List, Optional
@@ -217,6 +218,15 @@ def _fetch_nse_exchange_only() -> List[Dict]:
     return _parse_nse_payload(_nse_get_json(_NSE_EXCH_ONLY))
 
 
+_RETRY_S = 15 * 60
+_LAST_ATTEMPT = {"t": 0.0}
+
+
+def _last_closed_session() -> _dt.date:
+    from analysis.verdict_ledger import last_closed_session
+    return last_closed_session()
+
+
 def refresh(*, force: bool = False) -> Dict:
     """
     Fetch latest FII/DII, persist, and report status. Idempotent — if today's
@@ -226,13 +236,22 @@ def refresh(*, force: bool = False) -> Dict:
     "latest_date": …}.
     """
     ensure_schema()
-    today = _dt.date.today().isoformat()
-
+    # FIX FII-REFETCH (audit 2026-11): this compared against UTC date.today(), but NSE
+    # publishes a session's figures only that evening and never for weekends or
+    # holidays, so the check almost never passed and every rerun of the view (even
+    # moving the History slider) re-hit NSE, up to 4 x 12 s when NSE blocks Cloud.
+    # Stored data is current once it covers the last closed session; between
+    # attempts that found nothing new, wait _RETRY_S before asking NSE again.
+    now = _time.time()
     if not force:
         existing = load_history(days=3)
-        if not existing.empty and existing["date"].iloc[0] >= today:
-            return {"rows_written": 0, "source": "cache",
-                    "latest_date": existing["date"].iloc[0]}
+        latest = str(existing["date"].iloc[0]) if not existing.empty else ""
+        if latest and latest >= _last_closed_session().isoformat():
+            return {"rows_written": 0, "source": "cache", "latest_date": latest}
+        if now - _LAST_ATTEMPT["t"] < _RETRY_S:
+            return {"rows_written": 0, "source": "cache" if latest else "unavailable",
+                    "latest_date": latest or None}
+    _LAST_ATTEMPT["t"] = now
 
     rows = _fetch_nse()
     src = "nse"

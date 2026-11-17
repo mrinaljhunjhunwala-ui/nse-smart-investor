@@ -72,7 +72,7 @@ def render() -> None:
     _src_labels = {
         "nse":          "NSE India (live)",
         "nse_exchange_only": "NSE exchange-only figures (fallback)",
-        "cache":        "Local cache (today already stored)",
+        "cache":        "Stored data (NSE not asked again yet)",
         "unavailable":  "⚠️ Both sources unreachable — showing last known data",
     }
     with _c2:
@@ -232,7 +232,8 @@ def render() -> None:
             _fd_when = _fd_dt.datetime.fromisoformat(
                 str(_latest["date"])).strftime("%d %b %Y")
         else:
-            _fd_when = _fd_dt.datetime.now().strftime("%H:%M IST")
+            from utils.snapshot_time import ist_now as _ist_now_
+            _fd_when = _ist_now_().strftime("%H:%M IST")
         st.markdown(
             _fd_asof(_fd_when, source="nse",
                      ttl_hint="daily provisional · updated after close"),
