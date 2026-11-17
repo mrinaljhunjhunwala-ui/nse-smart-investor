@@ -590,9 +590,37 @@ def refresh_all_flags(
     fresh.extend(build_auto_flags(ticker, corp_info, news_items, rss_items_by_category,
                                   corp_info_source_label=corp_info_source_label))
 
+    # FIX FLAGS-OUTAGE (audit 2026-11): a source that came back empty (NSE/BSE WAF-blocked
+    # on Cloud, Google News or the RSS feeds down) used to wipe that source's stored flags,
+    # e.g. a 60-day "Promoter pledge" RED flag, and the empty list then read as "checked,
+    # nothing active". Unexpired flags from a source that returned nothing this time are
+    # carried over; a source that answered replaces its own flags as before.
+    returned = {"corp": bool(corp_info), "news": bool(news_items),
+                "rss": any(bool(v) for v in (rss_items_by_category or {}).values())}
+    seen = {(f.category, f.headline) for f in fresh}
+    for f in existing:
+        fam = _source_family(f.source)
+        if (not f.is_manual and fam in returned and not returned[fam]
+                and (f.category, f.headline) not in seen):
+            fresh.append(f)
+            seen.add((f.category, f.headline))
+
     merged = manual + fresh
     save_flags(ticker, merged, kv_set, user_id=user_id)
     return merged
+
+
+def _source_family(source: str) -> str:
+    """Which fetch produced an auto flag: 'corp' (NSE / BSE corp info), 'news', 'rss', or
+    'other' (rebuilt locally on every refresh, e.g. the regulatory watchlist)."""
+    s = str(source or "")
+    if s.startswith("NSE RSS"):
+        return "rss"
+    if s.startswith("News:"):
+        return "news"
+    if s.startswith("NSE top-corp-info") or s.startswith("BSE"):
+        return "corp"
+    return "other"
 
 
 _RSS_FEED_LABELS = {
