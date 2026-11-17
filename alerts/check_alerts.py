@@ -745,16 +745,20 @@ def check_pick_moves(state: dict, today: str) -> int:
 
 _VERDICT_ALERT_TIERS = ("STRONG BUY", "BUY")
 _VERDICT_MAX_SNAPSHOT_AGE_H = 2      # the warmer refreshes every 45 min in market hours
-_VERDICT_MAX_PER_RUN = 8
+_VERDICT_MAX_PER_RUN = 3
 # Per-day ceiling across all runs. In a rising market the full scan held 70-84
 # BUY / STRONG BUY names (9 Nov), and 8 per 15-min run became ~40 messages by
 # 10:30 IST. Strongest names go first, so the cap keeps the best reads.
-_VERDICT_MAX_PER_DAY = 10
+# 17 Nov (owner): ~18 BUY calls by 09:30 on top of the 5 digest picks was more than
+# anyone can act on. Now 3 from the opening scan + 2 that turn BUY later = at most 5
+# beyond the digest; the rest stay on Top Picks and are graded in the end-of-day check
+# only when sent.
+_VERDICT_MAX_PER_DAY = 3
 # Names that reach BUY at 70+ only after the day's first run get their own
 # allowance. On 16 Nov the first run spent the whole day cap on the pre-open
 # scan (five of the eight were the digest's own names, sent 30 min earlier), so
 # nothing that turned BUY during the session could be sent.
-_VERDICT_FRESH_MAX_PER_DAY = 10
+_VERDICT_FRESH_MAX_PER_DAY = 2
 _VSEEN, _VFRESH = "vseen_", "vfresh_"
 _TOMORROW_MAX_SNAPSHOT_AGE_H = 3             # caps a burst now that the whole scan is read
 
@@ -781,6 +785,32 @@ def _regime_note() -> str:
     return _MARKET_DOWN if lbl and str(lbl).lower() in _BEAR_REGIMES else ""
 
 
+_CHASE_PCT = 2.0     # a delivery entry is fine up to this far above the call price
+
+
+def _plan_bits(b: dict, price=None) -> list:
+    """The trade plan behind a BUY line (owner, 17 Nov: alerts must say what to do):
+    risk to the stop and reward to the target in %, the holding period, and the price
+    above which the entry is no longer the one the call was made at."""
+    def num(x):
+        try:
+            v = float(x)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+    p = num(price if price is not None else (b.get("price") or b.get("last_price")))
+    sl = num(b.get("sl") or b.get("stop_loss") or b.get("stop"))
+    tp = num(b.get("tp") or b.get("target"))
+    bits = []
+    if p and sl and tp:
+        bits.append(f"risk {(sl / p - 1) * 100:+.1f}% / reward {(tp / p - 1) * 100:+.1f}%")
+    hz = str(b.get("horizon") or "").strip()
+    bits.append(f"hold {hz.split('(')[-1].rstrip(')') if '(' in hz else '2–6 weeks'}")
+    if p:
+        bits.append(f"skip above {_rs(round(p * (1 + _CHASE_PCT / 100), 2))}")
+    return bits
+
+
 def _verdict_pick_lines(verdict: str, b: dict, *, reason: bool = True) -> list:
     """'STRONG BUY  <b>PNB</b>  ₹118.40 · stop ₹112.10 · target ₹131.00' + optional reason line."""
     price = b.get("price")
@@ -790,7 +820,7 @@ def _verdict_pick_lines(verdict: str, b: dict, *, reason: bool = True) -> list:
     why = " · ".join(x for x in (_h(sector[:30]) if sector else "", f"score {b.get('score')}/90") if x)
     if not reason:
         return [f"{line} · score {b.get('score')}/90"]
-    return [line, f"   {why}"]
+    return [line, "   " + " · ".join([why] + [_h(x) for x in _plan_bits(b, price)])]
 
 
 def _format_verdict_alert(verdict: str, b: dict, fv, regime: str, gen_at) -> list:
@@ -1329,7 +1359,8 @@ def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = Non
             word = (verdict_display_label(v[0]) if v
                     else action_display_label(str(b.get("action", "")).replace("_", " ")))
             lines.append(_stock_line(word, tk, price, stop, tgt))
-        lines.append("   " + " · ".join(x for x in (sec, f"score {b.get('score', 0)}/90") if x))
+        plan = [] if _under(b) else [_h(x) for x in _plan_bits(b, price)]
+        lines.append("   " + " · ".join(x for x in (sec, f"score {b.get('score', 0)}/90", *plan) if x))
 
     # BUY / STRONG BUY verdicts further down the scan than the top max_picks
     extra = []
@@ -2279,7 +2310,8 @@ def main() -> int:
             "portfolio": check_portfolio_alerts(state, today) if _holding_alerts_on() else 0,
             "opening":   check_opening_update(state, today),
             "moves":     check_pick_moves(state, today),
-            "recap":     check_picks_recap(state, today),
+            # 15:15 "Digest picks today" retired 17 Nov: the 16:00 end-of-day check
+            # (--mode=eod-scorecard) covers the digest picks plus every BUY call.
             "verdicts":  check_verdict_alerts(state, today),
             "vix":       check_vix_regime(state, today),
             "nifty":     check_nifty_trend(state, today),
