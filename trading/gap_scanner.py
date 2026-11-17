@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 _log = logging.getLogger("trading.gap_scanner")
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, as_completed
 from typing import Dict, List, Optional
 
 from data.fetcher import fetch_single, NIFTY50_TICKERS
@@ -148,23 +148,36 @@ def scan_gaps(
             vol_ratio, category, emoji, bias, strategy
     """
     rows = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    checked = 0
+    # Audit 2026-11: the 45 s as_completed timeout sat outside any try, so a slow network
+    # raised TimeoutError into the tab, and a scan where no price came back looked exactly
+    # like a flat open. df.attrs now says how many stocks were actually checked.
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futs = {pool.submit(_single_gap, t): t for t in tickers}
-        for fut in as_completed(futs, timeout=45):
-            try:
-                result = fut.result(timeout=0)
-                if result and abs(result["gap_pct"]) >= min_gap_pct:
-                    rows.append(result)
-            except Exception as e:
-                _log.debug("scan_gaps: %s failed in pool: %s", futs[fut], e)
+        try:
+            for fut in as_completed(futs, timeout=45):
+                try:
+                    result = fut.result(timeout=0)
+                    if result:
+                        checked += 1
+                        if abs(result["gap_pct"]) >= min_gap_pct:
+                            rows.append(result)
+                except Exception as e:
+                    _log.debug("scan_gaps: %s failed in pool: %s", futs[fut], e)
+        except FuturesTimeout:
+            _log.warning("scan_gaps: timed out after 45 s with %d of %d checked", checked, len(futs))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     if not rows:
-        return pd.DataFrame(columns=[
+        df = pd.DataFrame(columns=[
             "ticker", "prev_close", "today_open", "today_close",
             "gap_pct", "change_pct", "vol_ratio", "category", "emoji", "bias", "strategy"
         ])
-
-    df = pd.DataFrame(rows).sort_values("gap_pct", ascending=False).reset_index(drop=True)
+    else:
+        df = pd.DataFrame(rows).sort_values("gap_pct", ascending=False).reset_index(drop=True)
+    df.attrs["checked"], df.attrs["total"] = checked, len(tickers)
     return df
 
 

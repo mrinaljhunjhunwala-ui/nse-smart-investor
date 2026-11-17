@@ -111,14 +111,23 @@ def render() -> None:
         @st.cache_data(ttl=600, show_spinner=False)
         def _cached_gaps(min_pct: float):
             from trading.gap_scanner import get_nifty50_gaps
-            return get_nifty50_gaps(min_gap_pct=min_pct)
+            _df = get_nifty50_gaps(min_gap_pct=min_pct)
+            return _df, int(_df.attrs.get("checked", 0)), int(_df.attrs.get("total", 0))
 
         if _run_gap or st.session_state.get("gap_scanned"):
             st.session_state["gap_scanned"] = True
             with st.spinner("Scanning Nifty 50 for gaps…"):
-                _gap_df = _cached_gaps(_gap_min)
+                _gap_df, _gap_checked, _gap_total = _cached_gaps(_gap_min)
+            if _gap_checked == 0:
+                _cached_gaps.clear()          # nothing reached us: don't keep that for 10 min
+            elif _gap_checked < _gap_total:
+                st.caption(f"{_gap_total - _gap_checked} of {_gap_total} stocks could not be checked "
+                           "(no price data); the list below covers the rest.")
 
-            if _gap_df.empty:
+            if _gap_checked == 0:
+                st.warning("No price data reached the gap scanner (data source or network down), so "
+                           "this is not a flat open. Try Scan Gaps again in a minute.")
+            elif _gap_df.empty:
                 # F5 empty-state kit -- soft neutral panel reads as "empty by
                 # design" rather than the blue "info" tone st.info carries.
                 from dashboard.shared.ui_components import empty_state as _empty

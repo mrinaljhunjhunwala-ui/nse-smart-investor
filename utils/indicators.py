@@ -1177,3 +1177,23 @@ def sma_crossover_signal(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> pd
     signal[golden] = 1
     signal[death]  = -1
     return signal
+
+
+def volume_ratio_today(df: pd.DataFrame, today_volume: Optional[float] = None,
+                       lookback: int = 20) -> Optional[float]:
+    """Today's volume over the average of the previous ``lookback`` sessions' volume.
+
+    ``today_volume`` is the live day's volume when known; otherwise the last bar's. If the
+    last bar is today's (possibly partial) bar it is left out of the average. None when there
+    is not enough history or no volume. (Market Live passed a fixed 1.0, so its "why it moved"
+    never mentioned volume; audit 2026-11.)"""
+    if df is None or df.empty or "Volume" not in df.columns:
+        return None
+    vol = pd.to_numeric(df["Volume"], errors="coerce").dropna()
+    if len(vol) < lookback + 1:
+        return None
+    today = float(today_volume) if today_volume else float(vol.iloc[-1])
+    avg = float(vol.iloc[-lookback - 1:-1].mean())
+    if not avg or avg <= 0 or not today or today <= 0:
+        return None
+    return round(today / avg, 2)

@@ -41,7 +41,6 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _STANDALONE_SCRIPTS = [
     ("alerts.check_alerts",                 "alerts/check_alerts.py",
      ["main", "send_telegram", "_load_state", "_save_state"]),
-    ("alerts.check_alerts_v2",              "alerts/check_alerts_v2.py", []),
     ("research.score_efficacy",             "research/score_efficacy.py", ["main"]),
     ("research.portfolio_fit_efficacy",     "research/portfolio_fit_efficacy.py", ["main"]),
     ("research.regime_study",               "research/regime_study.py", ["main"]),
