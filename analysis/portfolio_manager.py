@@ -58,6 +58,17 @@ _log = logging.getLogger("portfolio_manager")
 # Result dataclasses
 # ─────────────────────────────────────────────────────────────────────────────
 
+NO_DATA = "NO DATA"          # action of a holding that could not be scored
+
+
+def today_rupees(price: float, qty: float, chg_pct: Optional[float]) -> Optional[float]:
+    """Today's ₹ move: qty x (price - previous close). chg_pct is measured against the
+    previous close, so price x chg% overstated it by price/prev (audit 2026-11)."""
+    if chg_pct is None or not price or chg_pct <= -100:
+        return None
+    return qty * price * chg_pct / (100.0 + chg_pct)
+
+
 @dataclass
 class HoldingResult:
     ticker:         str
@@ -69,7 +80,7 @@ class HoldingResult:
     current_value:  float           # quantity × current_price
     pnl:            float           # current_value - invested
     pnl_pct:        float           # pnl / invested × 100
-    today_chg_pct:  float           # PM1: intraday % change vs prev close (0.0 if unavailable)
+    today_chg_pct:  Optional[float]  # PM1: % change vs prev close; None when no quote (was 0.0)
     days_held:      int
     score:          float           # 0–100 composite score
     grade:          str             # A+…F
@@ -405,16 +416,17 @@ class PortfolioManager:
 
             # PM2: use get_live_quote so we get price AND chg_pct in one call
             current_price  = cs.price
-            today_chg_pct  = 0.0
+            today_chg_pct  = None          # unknown, not 0.00% (audit 2026-11)
             try:
                 from utils.live_price import get_live_quote
                 _q = get_live_quote(ticker)
                 if _q and isinstance(_q, dict) and _q.get("price"):
                     current_price = float(_q["price"])
-                    today_chg_pct = float(_q.get("chg_pct") or 0.0)
+                    if _q.get("chg_pct") is not None:
+                        today_chg_pct = float(_q["chg_pct"])
             except Exception as _lq_err:
                 _log.debug("_score_holding live quote failed for %s: %s", ticker, _lq_err)
-                # keep cs.price and today_chg_pct=0.0
+                # keep cs.price and today_chg_pct=None
 
             current_value = qty * current_price
             pnl           = current_value - invested
@@ -458,12 +470,15 @@ class PortfolioManager:
                 current_value = invested,   # assume break-even on error
                 pnl           = 0.0,
                 pnl_pct       = 0.0,
-                today_chg_pct = 0.0,        # PM1: safe default
+                today_chg_pct = None,
                 days_held     = days_held,
-                score         = 50.0,
-                grade         = "C",
-                action        = "HOLD",
-                signal        = "🟡 HOLD",
+                # Not a HOLD call: no data. A fake "HOLD 50/90" was counted in the posture
+                # strip and saved to the signal monitor, then raised a "HOLD → BUY" flip
+                # on the next good run (audit 2026-11).
+                score         = 0.0,
+                grade         = "—",
+                action        = NO_DATA,
+                signal        = "⚪ NO DATA",
                 headline      = f"Data unavailable for {ticker}",
                 narrative     = (
                     f"Could not fetch live data for {ticker}. "
@@ -502,7 +517,7 @@ class PortfolioManager:
               f"{'TODAY%':>7} {'P&L%':>7} {'SCORE':>6} {'SIGNAL':<28}")
         print("─" * 60)
         for h in summary.holdings:
-            today_str = f"{h.today_chg_pct:+.1f}%"
+            today_str = f"{h.today_chg_pct:+.1f}%" if h.today_chg_pct is not None else "—"
             pnl_str   = f"{'+' if h.pnl_pct >= 0 else ''}{h.pnl_pct:.1f}%"
             score_str = f"{h.score:.0f} [{h.grade}]"
             print(

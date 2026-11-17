@@ -404,7 +404,7 @@ if _csv_source is not None:
     _pm_tmp_csv_path = None
     with st.spinner("Scoring your portfolio (parallel)… ~10–20 s for 5–10 stocks"):
         try:
-            from analysis.portfolio_manager import PortfolioManager
+            from analysis.portfolio_manager import PortfolioManager, today_rupees
             _pm_tmp_csv_path = _holdings_csv_tmpfile(_csv_source)
             pm = PortfolioManager(_pm_tmp_csv_path)
             summary = pm.mark_to_market(parallel=True)
@@ -508,7 +508,7 @@ if _csv_source is not None:
             _PV_FILL = {"STRONG BUY": "var(--bull)", "BUY": "var(--bull)",
                         "WATCHLIST": "var(--accent)", "HOLD": "var(--dim)",
                         "CAUTION": "var(--amber)", "EXIT": "var(--bear)"}
-            _pv_hold = list(summary.holdings)
+            _pv_hold = [h for h in summary.holdings if not h.error]   # unscored: no posture
             _pv_tot = sum(max(h.current_value, 0) for h in _pv_hold) or 1.0
             _pv_rows = []
             for _pa in _PV_ORDER + sorted({h.action for h in _pv_hold} - set(_PV_ORDER)):
@@ -534,7 +534,9 @@ if _csv_source is not None:
             # ── Auto-Signal Monitor — signal changes right above the decision cards ─
             _PF_BUY  = {"STRONG BUY", "BUY"}
             _PF_SELL = {"CAUTION", "EXIT", "SELL", "REDUCE"}
-            _pf_cur  = {h.ticker: h.action for h in summary.holdings}
+            # Unscored holdings keep their last known action, so a data gap neither shows
+            # as a posture nor triggers a fake flip on the next good run.
+            _pf_cur  = {h.ticker: h.action for h in summary.holdings if not h.error}
             _pf_prev = load_signal_monitor_state()
             _pf_flips = []
             for _tk, _ac in _pf_cur.items():
@@ -542,7 +544,8 @@ if _csv_source is not None:
                 if _pv and _pv != _ac and (_ac in _PF_BUY or _ac in _PF_SELL):
                     _pf_flips.append((_tk.replace(".NS", ""), _pv, _ac,
                                       "buy" if _ac in _PF_BUY else "sell"))
-            save_signal_monitor_state(_pf_cur)
+            save_signal_monitor_state({**{h.ticker: _pf_prev[h.ticker] for h in summary.holdings
+                                             if h.error and h.ticker in _pf_prev}, **_pf_cur})
 
             _sg1, _sg2 = st.columns([5, 2])
             _sg1.markdown(section_header("Holdings", "same scoring pass as the tiles above"),
@@ -614,7 +617,7 @@ if _csv_source is not None:
                     _hold_sorted.sort(key=lambda h: h.pnl)
                 elif _h_sort == "Today's change":
                     _hold_sorted.sort(
-                        key=lambda h: -getattr(h, "today_chg_pct", getattr(h, "pnl_pct", 0))
+                        key=lambda h: (h.today_chg_pct is None, -(h.today_chg_pct or 0))
                     )
                 elif _h_sort == "Score (best first)":
                     _hold_sorted.sort(key=lambda h: -getattr(h, "score", 0))
@@ -658,22 +661,20 @@ if _csv_source is not None:
                 _tbl_rows = []
                 for _th in _hold_sorted:
                     _th_today = getattr(_th, "today_chg_pct", None)
-                    _th_today_pnl = (
-                        _th.current_price * _th.quantity * (_th_today / 100.0)
-                        if _th_today is not None else None
-                    )
+                    _th_today_pnl = today_rupees(_th.current_price, _th.quantity, _th_today)
+                    _th_px = _th.current_price if not _th.error else None
                     _tbl_rows.append({
                         "Ticker": _th.ticker.replace(".NS", ""),
-                        "Price (₹)": _th.current_price,
+                        "Price (₹)": _th_px,
                         "Today %": _th_today,
                         "Today ₹": _th_today_pnl,
                         "Qty": _th.quantity,
                         "Invested (₹)": _th.avg_buy_price * _th.quantity,
-                        "Value (₹)": _th.current_price * _th.quantity,
+                        "Value (₹)": _th_px * _th.quantity if _th_px else None,
                         "P&L (₹)": _th.pnl,
                         "P&L %": _th.pnl_pct,
                         "Posture": _display_label(_th.action),
-                        "Score": _th.score,
+                        "Score": _th.score if not _th.error else None,
                     })
                 # P2 · P&L table pattern — rows tinted by P&L %, ▲/▼ + sign
                 # colour on the signed columns (bold on big moves), Indian digit
@@ -792,10 +793,7 @@ if _csv_source is not None:
                 # fields HoldingResult already has (current_price, quantity,
                 # today_chg_pct) — no extra fetch, same number the top-line
                 # "Today's Change" box would show if summed across holdings.
-                _h_today_pnl = (
-                    h.current_price * h.quantity * (_h_today / 100.0)
-                    if _h_today is not None else None
-                )
+                _h_today_pnl = today_rupees(h.current_price, h.quantity, _h_today)
                 _h_today_txt = (
                     f"{_h_today:+.2f}% · ₹{_h_today_pnl:+,.0f} today"
                     if _h_today is not None else ""
