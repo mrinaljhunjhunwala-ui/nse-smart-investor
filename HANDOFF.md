@@ -3,6 +3,41 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Audit, 17 Nov (owner: "earlier rounds said fine, then real bugs showed up"). Full report:
+  `AUDIT_2026-11.md`, with a status for every page, view and alert job.** The bug hunted for:
+  features that silently show n/a / empty / stale data in real conditions while tests pass.
+  Fixed, each with a test that failed on the old code:
+  - **#366:** the Top Picks warmer runs every 45 min but readers dropped its snapshot after
+    20 min, so Today → Movers / Picks were empty for about half of market hours and all evening,
+    and Command Centre paid a 2-min live scan. The rule is now `utils.snapshot_time.scan_snapshot_current`:
+    up to 60 min old, or the market is shut and no session has opened since. Data health uses
+    the same rule as the readers.
+  - **#367:** paper trades. Gap stops fill at the market; MIS square-off ends at 15:30; My Portfolio
+    no longer auto-closes with the toggle off; today's P&L counts from entry for trades opened
+    today; one net win rate.
+  - **#368:** the Backtest comparison chart was empty on 1M / 6M; watchlist Refresh did nothing;
+    FII/DII fetched from NSE on every rerun; "IST" clocks printed UTC on Cloud.
+  - **#369:** an outage refresh wiped stored RED flags (now kept per source family); empty
+    fundamentals were cached 24h (now 10 min); Portfolio fit correlated a holding with itself;
+    D/E is blank for lenders.
+  - **#370:** movers radar marked names it had cut from the message as sent; overlapping workflows
+    overwrote the alert dedupe state (now also merged through KV `alert_state`); pyotp pin.
+  - **#371:** an unscored holding showed as "HOLD 50/90"; a missing quote showed 0.00%; "Today ₹"
+    used the wrong denominator.
+  - **#372:** intraday CPR / pivots came from the previous 5-min bar; ORB box drawn on the wrong
+    day; Position Sizer reset prices above ₹1 lakh.
+  - **#373:** My Watchlist lived in a local sqlite file wiped on every redeploy (now KV
+    `my_watchlist_rows`, old rows imported once); "Alert SL" is now "Stop" (nothing alerts on
+    it); pre-open scan moves are labelled as the previous session's.
+
+  No score, verdict or threshold changed (reviewer: golden snapshots identical).
+  **Open (owner decisions or unverified):**
+  - a Smart Screener BUY may show no stop (check first);
+  - Angel One `-BE` / `-SM` symbols and the T+1 quantity field (need a broker login);
+  - one watchlist or two;
+  - the bank quality score uses ROCE;
+  - the PIN expires under My Portfolio auto-refresh;
+  - low-priority items listed in the report.
 - **Command Centre paper-trades box (17 Nov, owner):** the one-line entry-price strip from #362
   went unused. It is now a small bordered box: "📂 Open paper trades · N", overall P&L in ₹ and %,
   today's ₹ move (since previous close, or since entry for a trade opened today; shorts gain on a
