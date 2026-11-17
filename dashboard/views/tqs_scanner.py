@@ -148,7 +148,8 @@ def render() -> None:
             run_scan = st.button("▶ Run Scan", width="stretch", type="primary")
 
         if run_scan:
-            tickers = [t.strip().upper() for t in raw_input.replace("\n", ",").split(",") if t.strip()]
+            from dashboard.shared.deeplink import parse_ticker_list
+            tickers = parse_ticker_list(raw_input)
             if not tickers:
                 st.warning("Enter at least one ticker.")
             else:

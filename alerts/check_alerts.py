@@ -1859,6 +1859,15 @@ def check_tomorrow_watchlist(state: dict, today: str, *, top_n: int = 5) -> int:
     if _already_fired(state, key, today):
         return 0
     try:
+        from utils.nse_holidays import is_trading_day
+        if not is_trading_day(datetime.date.fromisoformat(today)):
+            # The 15:50 warm-up still runs on a holiday and re-scans the last
+            # session, so sending would repeat yesterday's list as "tomorrow".
+            print(f"[tomorrow] {today} is not an NSE trading day — skipping")
+            return 0
+    except Exception as e:
+        print(f"[tomorrow] holiday check failed ({e}) — sending anyway")
+    try:
         import trade_store as store
         from utils.snapshot_time import snapshot_age_seconds
         snap = store.kv_get("tomorrow_watchlist_snapshot", user_id="_system")

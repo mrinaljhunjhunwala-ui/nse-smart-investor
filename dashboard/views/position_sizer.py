@@ -127,6 +127,14 @@ def render() -> None:
                     note="Shares at this risk budget, rounded down to whole lots (minimum one lot). "
                          "Educational sizing maths, not investment advice.",
                 ), unsafe_allow_html=True)
+                if _actual_risk > _risk_rs * 1.0001:
+                    _unit = "one lot" if _ps_lot_size > 1 else "one share"
+                    st.warning(
+                        f"The minimum of {_unit} risks ₹{fmt_inr(_actual_risk)} "
+                        f"({_actual_risk / _ps_capital * 100:.2f}% of capital), above your "
+                        f"₹{fmt_inr(_risk_rs)} budget. Widen the budget, tighten the stop, "
+                        f"or skip this trade."
+                    )
             else:
                 st.warning("Entry price must be greater than stop-loss price.")
 
