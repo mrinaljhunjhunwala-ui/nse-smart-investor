@@ -118,7 +118,8 @@ def test_unlocked_builds_briefing_and_saves_answer(no_network):
     tab.button(key="rn_build").click().run()
     assert not at.exception, [str(e.value) for e in at.exception]
     prompt = at.session_state["rn_prompt"]
-    assert "PFC · sector" in prompt and "COALINDIA" in prompt and "MY QUESTION:" in prompt
+    # The company name may follow the symbol ("PFC (Power Finance…) · sector") when fundamentals load.
+    assert "\n- PFC" in prompt and "\n- COALINDIA" in prompt and "MY QUESTION:" in prompt
     tab = _rn_tab(at)
     tab.text_area(key="rn_answer").input("PFC: HOLD, stop ₹380").run()
     _rn_tab(at).button(key="rn_save_answer").click().run()
