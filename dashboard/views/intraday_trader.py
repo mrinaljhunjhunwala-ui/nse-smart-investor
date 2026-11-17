@@ -520,8 +520,10 @@ def render() -> None:
                     if not pd.isna(_orb.get("orb_high", float("nan"))):
                         try:
                             import datetime as _dt
-                            _first_date = _ic_df.index[0].date()
-                            _orb_start  = _ic_df.index[0]
+                            # The latest session's opening range (compute_orb's), not the
+                            # first day of a 3-5 day frame (audit 2026-11).
+                            _first_date = _ic_df.index[-1].date()
+                            _orb_start  = _ic_df.index[_ic_df.index.date == _first_date][0]
                             _orb_end_t  = _dt.datetime.combine(_first_date, _dt.time(9, 29))
                             _orb_end_t  = _orb_end_t.replace(tzinfo=_orb_start.tzinfo)
                             _orb_end_idx = _ic_df.index[_ic_df.index <= _orb_end_t][-1] if len(_ic_df.index[_ic_df.index <= _orb_end_t]) else _ic_df.index[2]
@@ -626,11 +628,14 @@ def render() -> None:
             for _oi, _ot in enumerate(_orb_tickers):
                 try:
                     from data.fetcher import fetch_intraday
-                    from utils.indicators import add_anchored_vwap
+                    from utils.indicators import add_anchored_vwap, add_pivot_points
                     from trading.intraday_signals import compute_orb
                     _sym = _ot if _ot.endswith(".NS") else _ot + ".NS"
-                    _idf = fetch_intraday(_sym, interval="5m", days=1)
-                    _idf = add_anchored_vwap(_idf)
+                    # 5 days so the CPR has a previous session (the "CPR Zone" column was
+                    # always "?": pivots were never added here). compute_orb and the
+                    # anchored VWAP use the latest session only.
+                    _idf = fetch_intraday(_sym, interval="5m", days=5)
+                    _idf = add_pivot_points(add_anchored_vwap(_idf))
                     _orb_r = compute_orb(_idf, 15)
                     _cz = str(_idf["Price_vs_CPR"].iloc[-1]) if "Price_vs_CPR" in _idf.columns else "?"
                     _av_s = _idf["AVWAP"].where(_idf["AVWAP"] > 0).dropna() if "AVWAP" in _idf.columns else None
