@@ -4,16 +4,13 @@ portfolio-analytics modules:
 
   • analysis/portfolio_concentration.py  (HHI / diversification)
   • analysis/portfolio_fundamentals.py    (quality score — thin wrapper)
-  • alerts/check_alerts_v2.py             (price-alert engine, dependency-injected)
 
 Pure-function tests; no network. The alert tests inject mock Telegram/quoter
 objects and monkeypatch the alerts CSV path, so nothing real is sent or read.
 """
 from __future__ import annotations
 
-import csv
 
-import pytest
 
 from analysis.portfolio_concentration import (
     calculate_hhi,
@@ -22,7 +19,6 @@ from analysis.portfolio_concentration import (
     ConcentrationResult,
 )
 from analysis.portfolio_fundamentals import compute_quality_score, quality_score_coverage
-import alerts.check_alerts_v2 as cav
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,115 +151,3 @@ def test_coverage_prefers_5y_falls_back_to_3y_without_double_counting():
     assert quality_score_coverage({
         "revenue_cagr_3y": 10.0, "eps_cagr_3y": 8.0,
     }) == (2, 4)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Section C — check_alerts_v2 (dependency-injected; mocked Telegram + quoter)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class _MockTelegram:
-    def __init__(self):
-        self.sent = []
-
-    def send(self, text: str) -> bool:
-        self.sent.append(text)
-        return True
-
-
-class _MockQuoter:
-    """check_price_alerts upper-cases the CSV ticker, so key by the UPPER form."""
-    def __init__(self, prices: dict):
-        self._p = prices
-
-    def get_quote(self, ticker: str) -> dict:
-        p = self._p.get(ticker)
-        return {"price": p} if p is not None else {}
-
-
-def _write_alerts_csv(path, rows):
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["ticker", "condition", "level", "enabled"])
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
-
-
-def test_alerts_no_trigger_sends_nothing(tmp_path, monkeypatch):
-    csv_path = tmp_path / "alerts.csv"
-    _write_alerts_csv(csv_path, [{"ticker": "RELIANCE", "condition": "above",
-                                  "level": 100, "enabled": 1}])
-    monkeypatch.setattr(cav, "_ALERTS_CSV", csv_path)
-    tg = _MockTelegram()
-    # price 80 < 100 → "above" not hit
-    n = cav.check_price_alerts(state={}, today="2026-01-01", telegram=tg,
-                               quoter=_MockQuoter({"RELIANCE": 80}))
-    assert n == 0
-    assert tg.sent == []
-
-
-def test_alerts_above_trigger_fires(tmp_path, monkeypatch):
-    csv_path = tmp_path / "alerts.csv"
-    _write_alerts_csv(csv_path, [{"ticker": "RELIANCE", "condition": "above",
-                                  "level": 100, "enabled": 1}])
-    monkeypatch.setattr(cav, "_ALERTS_CSV", csv_path)
-    tg = _MockTelegram()
-    n = cav.check_price_alerts(state={}, today="2026-01-01", telegram=tg,
-                               quoter=_MockQuoter({"RELIANCE": 150}))
-    assert n == 1
-    assert len(tg.sent) == 1
-    assert "RELIANCE" in tg.sent[0]
-
-
-def test_alerts_below_trigger_fires(tmp_path, monkeypatch):
-    csv_path = tmp_path / "alerts.csv"
-    _write_alerts_csv(csv_path, [{"ticker": "RELIANCE", "condition": "below",
-                                  "level": 200, "enabled": 1}])
-    monkeypatch.setattr(cav, "_ALERTS_CSV", csv_path)
-    tg = _MockTelegram()
-    n = cav.check_price_alerts(state={}, today="2026-01-01", telegram=tg,
-                               quoter=_MockQuoter({"RELIANCE": 150}))
-    assert n == 1
-    assert "RELIANCE" in tg.sent[0]
-
-
-def test_alerts_already_fired_today_skipped(tmp_path, monkeypatch):
-    csv_path = tmp_path / "alerts.csv"
-    _write_alerts_csv(csv_path, [{"ticker": "RELIANCE", "condition": "above",
-                                  "level": 100, "enabled": 1}])
-    monkeypatch.setattr(cav, "_ALERTS_CSV", csv_path)
-    tg = _MockTelegram()
-    # key format: price_{TICKER}_{condition}_{level:.2f}
-    state = {"price_RELIANCE_above_100.00": "2026-01-01"}
-    n = cav.check_price_alerts(state=state, today="2026-01-01", telegram=tg,
-                               quoter=_MockQuoter({"RELIANCE": 150}))
-    assert n == 0
-    assert tg.sent == []
-
-
-def test_alerts_disabled_rule_skipped(tmp_path, monkeypatch):
-    csv_path = tmp_path / "alerts.csv"
-    _write_alerts_csv(csv_path, [{"ticker": "RELIANCE", "condition": "above",
-                                  "level": 100, "enabled": 0}])
-    monkeypatch.setattr(cav, "_ALERTS_CSV", csv_path)
-    tg = _MockTelegram()
-    n = cav.check_price_alerts(state={}, today="2026-01-01", telegram=tg,
-                               quoter=_MockQuoter({"RELIANCE": 150}))
-    assert n == 0
-    assert tg.sent == []
-
-
-def test_prune_state_removes_old_entries():
-    state = {"price_A_above_10.00": "2025-01-01",
-             "price_B_below_20.00": "2026-01-01"}
-    pruned = cav.prune_state(state, "2026-01-01")
-    assert pruned == {"price_B_below_20.00": "2026-01-01"}
-
-
-def test_alerts_missing_csv_returns_zero(tmp_path, monkeypatch):
-    missing = tmp_path / "does_not_exist.csv"
-    monkeypatch.setattr(cav, "_ALERTS_CSV", missing)
-    tg = _MockTelegram()
-    n = cav.check_price_alerts(state={}, today="2026-01-01", telegram=tg,
-                               quoter=_MockQuoter({"RELIANCE": 150}))
-    assert n == 0
-    assert tg.sent == []

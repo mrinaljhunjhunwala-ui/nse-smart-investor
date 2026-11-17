@@ -945,9 +945,15 @@ def _paper_trade_popover(
                 f"🛑 SL ₹{(sl_use or 0):,.2f}  ·  🎯 Target ₹{(tp_use or 0):,.2f}"
                 + (f"  ·  R:R {_rr:.1f}x" if _rr else "")
             )
+        # The stop keeps its distance from the analysis entry; an entry edited below that
+        # distance gave a negative stop that was saved as-is (audit 2026-11).
+        _sl_bad = _sl_dist is not None and sl_use <= 0
+        if _sl_bad:
+            st.error(f"With entry ₹{entry_use:,.2f} the stop would be ₹{sl_use:,.2f}. "
+                     "Raise the entry price; the stop sits ₹{:,.2f} below it.".format(_sl_dist))
         if st.button(
             "✅ Confirm & Open", key=f"{key}_confirm",
-            type="primary", width="stretch",
+            type="primary", width="stretch", disabled=_sl_bad,
         ):
             _id = paper_open_trade(
                 ticker, float(entry_use), int(qty),

@@ -138,8 +138,8 @@ def _market_context_row():
     _row = {"fii_5d": None, "dii_5d": None, "regime_msg": None,
             "regime_severity": "neutral"}
     try:
-        from analysis.fii_dii import load_history as _mc_fd
-        _fd_df = _mc_fd(days=5)
+        from analysis.fii_dii import load_history as _mc_fd, recent_flows as _mc_recent
+        _fd_df = _mc_recent(_mc_fd(days=5))       # stale rows (EOD job stopped) are not "this week"
         if not _fd_df.empty and len(_fd_df) >= 3:
             _fii_5 = float(_fd_df["fii_net"].fillna(0).sum())
             _dii_5 = float(_fd_df["dii_net"].fillna(0).sum())
