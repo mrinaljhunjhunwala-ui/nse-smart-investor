@@ -373,6 +373,85 @@ def _in_send_window(mode: str, now: datetime.datetime | None = None) -> bool:
 # Checks
 # ─────────────────────────────────────────────────────────────────────────────
 
+def paper_target_exit(price, high, tp):
+    """Exit price for a long trade whose target was met, else None.
+
+    At or above the target now: filled at the current price (a gap up fills
+    higher). Only the day's high reached it between runs: filled at the target,
+    as a resting target order would have been."""
+    try:
+        tp = float(tp or 0)
+    except (TypeError, ValueError):
+        return None
+    if tp <= 0:
+        return None
+    if price and float(price) >= tp:
+        return float(price)
+    if high and float(high) >= tp:
+        return tp
+    return None
+
+
+def check_paper_targets(state: dict, today: str) -> int:
+    """Close open delivery (CNC) paper BUY trades whose target was met, even
+    with the app closed. Stops are not acted on here (owner, 17 Nov: delivery
+    trades only, close on target). Sends one message listing the closes."""
+    if not _is_market_hours():
+        return 0
+    try:
+        import trade_store as store
+        from utils.live_price import get_live_prices_batch
+        rows = store.fetch_open()
+    except Exception as e:
+        print(f"[paper] open trades unavailable: {e}")
+        return 0
+    if rows is None or rows.empty:
+        return 0
+    recs = [r for r in rows.to_dict("records")
+            if str(r.get("action", "BUY")).upper() == "BUY" and float(r.get("tp") or 0) > 0]
+    _types: dict = {}
+    for r in recs:
+        a = str(r.get("account") or "My Account")
+        if a not in _types:
+            try:
+                _types[a] = str(store.kv_get(f"acct_type:{a}", "CNC") or "CNC").upper()
+            except Exception:
+                _types[a] = "CNC"
+    recs = [r for r in recs if _types.get(str(r.get("account") or "My Account")) != "MIS"]
+    if not recs:
+        return 0
+    try:
+        quotes = get_live_prices_batch(sorted({str(r["ticker"]) for r in recs})) or {}
+    except Exception as e:
+        print(f"[paper] quotes failed: {e}")
+        return 0
+    lines = []
+    for r in recs:
+        q = quotes.get(str(r["ticker"])) or {}
+        # The day's high only counts for trades opened before today: a high made
+        # before a same-day entry was never reachable by that trade.
+        _hi = q.get("high") if str(r.get("timestamp") or "")[:10] < today else None
+        ex = paper_target_exit(q.get("price"), _hi, r.get("tp"))
+        if ex is None:
+            continue
+        try:
+            ok = store.close_trade(int(r["id"]), ex, reason="Target hit (alerts job)")
+        except Exception as e:
+            print(f"[paper] close #{r.get('id')} failed: {e}")
+            continue
+        if ok:
+            ep, qty = float(r.get("price") or 0), int(r.get("quantity") or 0)
+            pct = (ex / ep - 1) * 100 if ep else 0.0
+            lines.append(f"🎯 <b>{str(r['ticker']).replace('.NS', '')}</b>  target ₹{float(r['tp']):,.2f} met · "
+                         f"closed at ₹{ex:,.2f} · {qty} @ ₹{ep:,.2f} · {pct:+.1f}% (₹{(ex - ep) * qty:+,.0f})")
+    if not lines:
+        return 0
+    print(f"[paper] closed {len(lines)} paper trade(s) at target")
+    dispatch("\n".join(["📂 <b>Paper trades closed at target</b>"] + lines),
+             subject="Paper trades closed at target — NSE Smart Investor")
+    return 1
+
+
 def check_price_alerts(state: dict, today: str) -> int:
     """Read data/alerts.csv, fetch live prices, fire on threshold crossings."""
     sent = 0
@@ -2327,6 +2406,7 @@ def main() -> int:
             "catalyst":  _catalyst_live(state, today),
             "movers":    _movers_radar(state, today),
             "guard":     _holding_guard(state, today),
+            "paper":     check_paper_targets(state, today),
         }
         print("[main] per-check: " + ", ".join(f"{k}={v}" for k, v in _counts.items()))
         total += sum(_counts.values())
