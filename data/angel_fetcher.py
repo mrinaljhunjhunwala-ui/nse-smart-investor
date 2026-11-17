@@ -1178,7 +1178,8 @@ def get_market_depth(ticker: str) -> Optional[Dict]:
 # NSE series suffixes Angel One puts on a tradingsymbol. Only "-EQ" used to be stripped, so a
 # holding in trade-for-trade (BE / BZ), SME (SM / ST) or other series kept its suffix
 # ("ABCLTD-BE") and every price, score and P&L lookup for it failed. Only these exact two-letter
-# series (RR = REIT units, IV = InvIT units) are stripped: hyphens that belong to the symbol itself (BAJAJ-AUTO, MCDOWELL-N) stay.
+# series (RR = REIT units, IV = InvIT units) are stripped: hyphens that belong to the symbol
+# itself (BAJAJ-AUTO, MCDOWELL-N) stay.
 NSE_SERIES = frozenset({"EQ", "BE", "BZ", "BL", "SM", "ST", "IL", "GB", "GS", "TB", "RR", "IV"})
 
 
