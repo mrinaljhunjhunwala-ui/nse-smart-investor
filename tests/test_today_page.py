@@ -109,6 +109,7 @@ def test_today_page_tabs_render_stored_data(no_network):
     assert "Sectors" in text and "By market cap" in text and "Movers radar" in text
     assert "Today's 1 Top Picks" in text
     assert "My Portfolio is locked" in text and "Angel One is locked" in text
+    assert "Tomorrow's Watchlist ranks from the scan at" in text   # age of the ranks shown
     assert any("Movers radar" in e.label for e in at.expander)
     frames = [df.value for df in at.dataframe]
     assert any("DHANBANK" in df.to_string() for df in frames)          # radar list
