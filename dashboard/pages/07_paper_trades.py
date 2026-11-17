@@ -59,6 +59,8 @@ from dashboard.shared.nav import render_sidebar
 from dashboard.shared.cache import STOCK_SEARCH_MAP, _validate_ticker
 from dashboard.shared.trade_utils import (
     _auto_close_breached,
+    _net_closed_pnl,
+    day_pnl,
     _ensure_paper_db,
     _is_squareoff_time,
     _portfolio_live_prices,
@@ -761,7 +763,7 @@ else:
         _o_prv = _o_lp.get("prev", _o_cur)
         _pt_deployed   += _o_ep  * _o_qty
         _pt_unrealised += (_o_cur - _o_ep) * _o_qty
-        _pt_today_pnl  += (_o_cur - _o_prv) * _o_qty
+        _pt_today_pnl  += day_pnl(_o_ep, _o_cur, _o_prv, _o_qty, str(_orow.get("timestamp", "")))
 
     # FIX COST-MODEL (audit #23): realised P&L was gross of every charge.
     # Charges are estimated per closed trade with trading.costs (delivery or
@@ -868,7 +870,7 @@ else:
             _prv  = _lp.get("prev",  _cur)
             _unr      = (_cur - _ep) * _qty
             _unr_pct  = (_cur / _ep - 1) * 100 if _ep > 0 else 0
-            _today_pnl = (_cur - _prv) * _qty
+            _today_pnl = day_pnl(_ep, _cur, _prv, _qty, str(_row.get("timestamp", "")))
             _tid      = int(_row["id"])
 
             if _tp and _cur >= _tp:
@@ -1121,7 +1123,9 @@ else:
 
         # Trading Insights
         st.markdown("#### 📊 Trading Insights")
-        _pnl_ins = pd.to_numeric(all_closed.get("pnl", pd.Series()), errors="coerce").dropna()
+        # Net of estimated charges, like the header's "won" count (they disagreed when charges
+        # ate a small gain).
+        _pnl_ins = _net_closed_pnl(all_closed)
         _n_ins   = len(_pnl_ins)
         if _n_ins >= 2:
             _wins_ins = _pnl_ins[_pnl_ins > 0]
@@ -1130,7 +1134,7 @@ else:
             _aw_ins   = float(_wins_ins.mean()) if not _wins_ins.empty else 0
             _al_ins   = float(_loss_ins.mean()) if not _loss_ins.empty else 0
             _pay_ins  = abs(_aw_ins / _al_ins)  if _al_ins != 0 else 0
-            _exp_ins  = (_wr_ins / 100 * _aw_ins) + ((1 - _wr_ins / 100) * _al_ins)
+            _exp_ins  = float(_pnl_ins.mean())   # average result per trade (break-evens count as 0)
             _wr_c     = "var(--bull)" if _wr_ins  >= 50 else "var(--bear)"
             _exp_c    = "var(--bull)" if _exp_ins >= 0  else "var(--bear)"
             _pay_c    = "var(--bull)" if _pay_ins >= 1.5 else "var(--amber)" if _pay_ins >= 1.0 else "var(--bear)"
@@ -1197,7 +1201,7 @@ else:
 
         # Detailed statistics
         with st.expander("📈 Detailed Statistics", expanded=False):
-            _pnl_s = pd.to_numeric(all_closed["pnl"], errors="coerce").dropna()
+            _pnl_s = _net_closed_pnl(all_closed)
             _n     = len(_pnl_s)
             _wins  = _pnl_s[_pnl_s > 0]
             _loss  = _pnl_s[_pnl_s < 0]
@@ -1205,7 +1209,7 @@ else:
             _aw    = float(_wins.mean()) if not _wins.empty else 0.0
             _al    = float(_loss.mean()) if not _loss.empty else 0.0
             _pay   = abs(_aw / _al)      if _al != 0 else 0
-            _exp   = (_wr / 100 * _aw) + ((1 - _wr / 100) * _al) if _n else 0
+            _exp   = float(_pnl_s.mean()) if _n else 0
 
             _st1, _st2, _st3, _st4, _st5 = st.columns(5)
             _st1.metric("Win Rate",     f"{_wr:.1f}%",

@@ -954,6 +954,26 @@ def _is_market_open() -> bool:
     return 555 <= mins <= 930                       # 9:15 – 15:30
 
 
+def day_pnl(entry: float, cur: float, prev: "float | None", qty: int, opened_on: str = "",
+            today: "datetime.date | None" = None) -> float:
+    """Today's P&L on an open position. A position opened today only earns the move since
+    its entry; from the previous close it counted the move before it was bought."""
+    today = today or _ist_now().date()
+    base = entry if str(opened_on or "")[:10] == today.isoformat() else (prev if prev else cur)
+    return (cur - base) * qty
+
+
+def _net_closed_pnl(closed: "pd.DataFrame") -> "pd.Series":
+    """Closed trades' P&L net of the estimated charges column when present (the header's
+    win count uses net; the insights used gross)."""
+    if closed is None or closed.empty or "pnl" not in closed.columns:
+        return pd.Series(dtype=float)
+    pnl = pd.to_numeric(closed["pnl"], errors="coerce")
+    if "charges" in closed.columns:
+        pnl = pnl - pd.to_numeric(closed["charges"], errors="coerce").fillna(0)
+    return pnl.dropna()
+
+
 def _is_squareoff_time() -> bool:
     """True from 15:15 IST onward on trading weekdays — MIS intraday square-off window.
 
@@ -965,7 +985,10 @@ def _is_squareoff_time() -> bool:
     if now.date() in _nse_holidays():              # FIX TU1: holiday check
         return False
     mins = now.hour * 60 + now.minute
-    return mins >= 915                             # 15:15 PM
+    # Up to the 15:30 close only: with no upper bound an MIS trade opened in the
+    # evening was "squared off at 15:15" on the next poll, at its own entry quote.
+    # After the close, reconcile_paper_exits squares MIS at the session close.
+    return 915 <= mins <= 930                      # 15:15 – 15:30
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1068,7 +1091,9 @@ def _auto_close_breached(account: str = None, path: str = "trades.db") -> list:
             if tp and cur >= tp:
                 hit, exit_px, why = "target", tp,  "Auto-closed: target reached"
             elif sl and cur <= sl:
-                hit, exit_px, why = "stop",   sl,  "Auto-closed: stop-loss hit"
+                # A gap through the stop fills at the market, not at the stop
+                # (same rule as trading/paper_exits.find_exit's daily-bar replay).
+                hit, exit_px, why = "stop", min(cur, sl), "Auto-closed: stop-loss hit"
 
             if hit:
                 paper_close_trade(trade_id, exit_px, why)

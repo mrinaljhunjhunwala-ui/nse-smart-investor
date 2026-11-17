@@ -105,6 +105,10 @@ def render_squareoff_monitor(
             # Nothing to do outside trading hours
             if not _open and not _sqoff:
                 return
+            # Same switch as Paper Trades' "Auto-close" toggle (default off): My Portfolio
+            # used to close paper trades every minute even with it off.
+            if not st.session_state.get("auto_close_on", False):
+                return
 
             if _sqoff:
                 st.session_state["_sqoff_active"] = True
