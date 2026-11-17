@@ -290,6 +290,9 @@ def compute_portfolio_risk(holdings: List[Dict], period: str = "1y",
     if len(panel) < 30:
         res.error = "insufficient overlapping price history across holdings"
         return res
+    note = window_note(closes, panel)
+    if note:
+        res.notes.append(note)
 
     # NAV = Σ qty × close  (constant-quantity reconstruction)
     nav = sum(panel[t] * qty[t] for t in panel.columns)
@@ -372,3 +375,21 @@ def _as_date(idx) -> Optional[date]:
     except Exception as e:
         _log.debug("_as_date: could not parse %r as a date: %s", idx, e)
         return None
+
+
+def window_note(closes: Dict[str, pd.Series], panel: pd.DataFrame, slack_days: int = 30) -> str:
+    """Say when the common window is shorter than the longest holding's history. Every metric is
+    measured only over dates all holdings share, so one recent listing silently cut a 1-year
+    window to a few months (audit 2026-11)."""
+    if panel is None or panel.empty or not closes:
+        return ""
+    starts = {t: s.index[0] for t, s in closes.items() if s is not None and len(s)}
+    if not starts:
+        return ""
+    earliest = min(starts.values())
+    common = panel.index[0]
+    if (common - earliest).days <= slack_days:
+        return ""
+    newest = max(starts, key=lambda t: starts[t])
+    return (f"Measured from {common:%d %b %Y} ({len(panel)} trading days), the first date every holding "
+            f"has a price: {str(newest).replace('.NS', '')} has the shortest history.")

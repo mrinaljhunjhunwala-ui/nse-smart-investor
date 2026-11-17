@@ -176,8 +176,10 @@ with tab_lists:
         _open = _ts.fetch_open()
         _pt = {}
         for _r in (_open.to_dict("records") if _open is not None and len(_open) else []):
-            _pt[str(_r.get("ticker", "")).replace(".NS", "")] = (
-                f"qty {int(_r.get('quantity') or 0)} @ ₹{float(_r.get('price') or 0):,.2f}")
+            _k = str(_r.get("ticker", "")).replace(".NS", "")
+            _d = f"qty {int(_r.get('quantity') or 0)} @ ₹{float(_r.get('price') or 0):,.2f}"
+            # Two open trades in one stock: list both (the second used to overwrite the first).
+            _pt[_k] = f"{_pt[_k]} · {_d}" if _k in _pt else _d
         if _pt:
             sources["Paper Trades"] = _pt
     except Exception:

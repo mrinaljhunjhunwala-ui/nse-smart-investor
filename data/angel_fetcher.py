@@ -1255,7 +1255,11 @@ def get_holdings() -> Optional[List[Dict]]:
             if qty <= 0:
                 continue
             avg = float(h.get("averageprice", 0) or 0)
-            ltp = float(h.get("ltp", avg) or avg)
+            _ltp_raw = float(h.get("ltp", 0) or 0)
+            # No last price (0 / missing): valued at cost so totals stay whole, but flagged so the
+            # page can say so instead of showing a silent ₹0 P&L (audit 2026-11).
+            ltp_missing = _ltp_raw <= 0
+            ltp = avg if ltp_missing else _ltp_raw
             pnl = (ltp - avg) * qty
             pnl_p = ((ltp / avg) - 1) * 100 if avg > 0 else 0.0
             holdings.append({
@@ -1270,6 +1274,7 @@ def get_holdings() -> Optional[List[Dict]]:
                 "pnl": round(pnl, 2),
                 "pnl_pct": round(pnl_p, 2),
                 "value_rs": round(ltp * qty, 2),
+                "ltp_missing": ltp_missing,
             })
 
         return sorted(holdings, key=lambda x: x["value_rs"], reverse=True)

@@ -56,6 +56,27 @@ def _num(x) -> Optional[float]:
     return v if v > 0 and v == v else None
 
 
+NSE_CLOSE = _dt.time(15, 30)
+
+
+def mis_session(dates, entry_time) -> Optional[_dt.date]:
+    """The session an intraday (MIS) trade belongs to: the entry day if it was entered before
+    the 15:30 close on a day with a bar, else the next session with a bar. A trade opened in the
+    evening or at the weekend was squared off at a close earlier than its own entry (audit 2026-11)."""
+    try:
+        ts = pd.Timestamp(entry_time)
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    d = ts.date()
+    after_close = ts.time() >= NSE_CLOSE
+    for x in sorted(dates):
+        if x > d or (x == d and not after_close):
+            return x
+    return None
+
+
 def find_exit(
     bars: Optional[pd.DataFrame],
     entry_time,
@@ -98,10 +119,11 @@ def find_exit(
     if str(product).upper() == "MIS":
         if today is None:
             today = df.index[-1] + _dt.timedelta(days=1)
-        if entry_date < today and entry_date in df.index:
-            close = _num(df.loc[entry_date, "Close"])
+        session = mis_session(df.index, entry_time)
+        if session is not None and session < today:
+            close = _num(df.loc[session, "Close"])
             if close:
-                return {"exit_price": round(close, 2), "exit_date": entry_date,
+                return {"exit_price": round(close, 2), "exit_date": session,
                         "reason": REASON_MIS}
         return None
 
