@@ -274,3 +274,14 @@ def _no_price_store_tier(request, monkeypatch):
         return
     monkeypatch.setenv("NSE_PRICE_STORE", "0")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _clear_snapshot_read_cache():
+    """cache._kv_snapshot shares reads for 2 minutes; tests write snapshots and read them back."""
+    try:
+        from dashboard.shared import cache as _c
+        _c._snapshot_reads.clear()
+    except Exception:
+        pass
+    yield
