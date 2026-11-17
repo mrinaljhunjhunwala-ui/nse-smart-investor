@@ -36,12 +36,13 @@ trade_store.py                   persistence: SQLite by default, Postgres when D
 
 1. **Direct BUY / SELL / HOLD wording (owner decision, 2026-11-13).** This is the owner's personal tool; picks, Telegram alerts and verdict labels say BUY / SELL / HOLD plainly, with a stop on every BUY. Display labels live in `analysis/action_labels.py`; internal keys, ledger verdict strings and dedupe keys never change. Every call is model output, not a guarantee, and the app is not SEBI-registered advice: if it is ever promoted to other people, revisit this rule first (the older descriptive-only convention is in `PATTERN_REMOVAL_MIGRATION.md` and git history). Never promise an outcome ("sure shot", "guaranteed") in copy.
 2. **Composite score is 0–90, four components (40+25+15+10).** No candlestick component — the 40k-observation study killed it. Do not add it back.
-3. **Sector-aware fundamentals.** Banks/NBFCs/insurers are assessed on P/B + ROE, not "leverage". Route metric selection through `analysis/sector_classification.py` — never hard-code sector logic in a page.
+3. **Sector-aware fundamentals.** Banks/NBFCs/insurers are assessed on P/B + ROE, not "leverage". **ROCE is not applicable to banking stocks** (or NBFCs / insurers): borrowed money is their raw material, so never score, rank or show ROCE (or D/E) for them (owner, 17 Nov 2026). Route metric selection through `analysis/sector_classification.py` — never hard-code sector logic in a page.
 4. **`analysis/` is pure.** No `import streamlit`, no `st.cache_*`, no session state. Cache at the `dashboard/shared/cache.py` layer.
 5. **Every page must survive network being blocked.** The `test_pages_smoke.py` suite runs each page with the network stubbed; graceful degraded rendering is not optional.
 6. **Windows-first shell.** Use `py` launcher, not `python`. Set `PYTHONUTF8=1` for ₹-symbol output.
 7. **Page config has exactly two call sites.** `dashboard/app.py` sets title / icon / layout for the entry run, and `apply_design()` re-asserts `layout="wide"` on every page, because `pages/` routing drops app.py's config after `st.switch_page` (every page silently fell back to the narrow 736px column). Streamlit ≥1.44 makes repeated calls additive, so this is safe. Pages themselves still must not call `st.set_page_config`.
-8. **Secrets live in `.streamlit/secrets.toml` (gitignored) or the platform's secret store** — never in code, never in commits.
+8. **PIN unlock stays strict (owner, 17 Nov 2026).** `pin_gate` unlocks for 15 minutes from the unlock, not from the last activity, so My Portfolio's 5-minute auto-refresh turns into a PIN box after 15 minutes. That is deliberate: if the app ever has multiple users this gate is what keeps one person's holdings from another, so do not extend the unlock on activity or loosen it without asking the owner.
+9. **Secrets live in `.streamlit/secrets.toml` (gitignored) or the platform's secret store** — never in code, never in commits.
 
 ## Where things live
 

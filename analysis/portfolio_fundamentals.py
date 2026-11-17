@@ -84,11 +84,28 @@ def batch_fetch_fundamentals(tickers: List[str]) -> List[Dict]:
     return [fetch_fundamentals(t) for t in tickers]
 
 
+def _is_lender(fund: Dict) -> bool:
+    """Banks, NBFCs and insurers (CLAUDE.md rule 3, via analysis/sector_classification.py).
+    ROCE is not meaningful for them: borrowed money is their raw material, so "capital
+    employed" is not comparable with an industrial company's. They are judged on ROE
+    (and P/B for valuation). ``fund["is_financial"]`` wins when the caller already knows."""
+    if fund.get("is_financial") is not None:
+        return bool(fund["is_financial"])
+    try:
+        from analysis.sector_classification import classify_sector
+        from data.universe import get_sector
+        t = str(fund.get("ticker") or "")
+        return bool(t) and classify_sector(get_sector(t)).is_financial
+    except Exception:
+        return False
+
+
 def compute_quality_score(fund: Dict) -> int:
     """
     0–100 fundamental-quality score from whatever metrics are available.
 
-    Weights: ROE 30, ROCE 30, Revenue CAGR 20, EPS CAGR 20. The score is scaled
+    Weights: ROE 30, ROCE 30, Revenue CAGR 20, EPS CAGR 20 (banks / NBFCs / insurers: no ROCE,
+    see _is_lender). The score is scaled
     by the weight of the metrics actually present, so a stock with only partial
     data isn't unfairly penalised. Returns 0 when nothing is available.
 
@@ -102,7 +119,7 @@ def compute_quality_score(fund: Dict) -> int:
         score += min(30.0, max(0.0, roe_val * 2.0))   # 15% ROE → full 30 pts
         weight_used += 30.0
 
-    roce_val = fund.get("roce")
+    roce_val = None if _is_lender(fund) else fund.get("roce")
     if roce_val is not None:
         score += min(30.0, max(0.0, roce_val * 2.0))  # 15% ROCE → full 30 pts
         weight_used += 30.0
@@ -141,9 +158,10 @@ def quality_score_coverage(fund: Dict) -> tuple:
     looking number regardless of how much data backs it.
     """
     available = 0
+    lender = _is_lender(fund)
     if fund.get("roe") is not None:
         available += 1
-    if fund.get("roce") is not None:
+    if not lender and fund.get("roce") is not None:
         available += 1
     rev_cagr = fund.get("revenue_cagr_5y")
     if rev_cagr is None:
@@ -155,4 +173,4 @@ def quality_score_coverage(fund: Dict) -> tuple:
         eps_cagr = fund.get("eps_cagr_3y")
     if eps_cagr is not None:
         available += 1
-    return available, 4
+    return available, (3 if lender else 4)

@@ -3,6 +3,11 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Owner decisions, 17 Nov (recorded in CLAUDE.md rules 3 and 8):** ROCE is not applicable to
+  banking stocks: My Portfolio's quality score and table now leave it out for banks / NBFCs /
+  insurers (Valuation E1-v2 and Quality Watch already did). The PIN unlock stays strict (15 min from
+  unlock, even under auto-refresh) because it may have to guard holdings between users later. The
+  sidebar watchlist and Watchlist & Notes are now one list. Movers radar cap: left at 6.
 - **Message pass (17 Nov, owner "go all four"):** (1) BUY-call alerts capped at 3 from the
   opening scan + 2 that turn BUY later (was 10 + 10, ~18 by 09:30); 3 per run. (2) Portfolio
   posture: under the 50-day average by less than one ATR is HOLD with "SELL on a close below
