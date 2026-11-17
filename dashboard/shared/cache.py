@@ -100,7 +100,7 @@ import trade_store as _store
 # Imported from utils directly, not via trade_store: Streamlit only hot-reloads
 # modules under dashboard/, so after a deploy a live process can pair new
 # dashboard code with an old trade_store (AttributeError on 2026-09-28).
-from utils.snapshot_time import snapshot_age_seconds
+from utils.snapshot_time import scan_snapshot_current as _scan_snapshot_current, snapshot_age_seconds
 _log = logging.getLogger("dashboard.cache")
 
 
@@ -1067,7 +1067,11 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
 # ─────────────────────────────────────────────────────────────────────────────
 _TOP_PICKS_KV_KEY  = "top_picks_snapshot"
 _TOP_PICKS_KV_USER = "_system"          # not per-user — one shared scan result
-_TOP_PICKS_MAX_AGE_SECONDS = 1200       # 20 min — tolerates one missed 15-min cron tick
+# Freshness = utils.snapshot_time.scan_snapshot_current (FIX SCAN-CADENCE): up to
+# an hour old in market hours (the warmer runs every 45 min), and the last scan
+# of the session for as long as the market stays shut. The old 20-min rule
+# dropped a current snapshot for half of every market hour and all evening.
+_TOP_PICKS_MAX_AGE_SECONDS = 3600
 # FIX SPEED-DEV1 (2026-09-15): NSE_ACCEPT_STALE_SNAPSHOTS=1 makes every
 # persisted-snapshot age check pass regardless of wall-clock age. For local
 # dev where the GH-Actions warmer never runs against your machine's KV, a
@@ -1111,7 +1115,8 @@ def _persisted_top_picks_snapshot() -> dict | None:
     if _age is None:
         _log.debug("cache._persisted_top_picks_snapshot: bad generated_at %r", _gen_at)
         return None
-    if _age > _TOP_PICKS_MAX_AGE_SECONDS and not _ACCEPT_STALE:
+    _current = _scan_snapshot_current(_gen_at)
+    if not _current and not _ACCEPT_STALE:
         return None
     data = snap.get("data")
     if not (isinstance(data, dict) and "buys" in data):
@@ -1120,7 +1125,7 @@ def _persisted_top_picks_snapshot() -> dict | None:
     out.setdefault("sells", [])
     out["source"] = "persisted"
     out["generated_at"] = _gen_at
-    if _age > _TOP_PICKS_MAX_AGE_SECONDS:
+    if not _current:
         out["stale"] = True  # UI can surface this via a chip; behaviour is opt-in via NSE_ACCEPT_STALE_SNAPSHOTS
     return out
 
@@ -1153,7 +1158,7 @@ def _persisted_all_scores_snapshot() -> dict | None:
     if _age is None:
         _log.debug("cache._persisted_all_scores_snapshot: bad generated_at %r", _gen_at)
         return None
-    if _age > _TOP_PICKS_MAX_AGE_SECONDS and not _ACCEPT_STALE:
+    if not _scan_snapshot_current(_gen_at) and not _ACCEPT_STALE:
         return None
     data = snap.get("data")
     if not isinstance(data, dict):
