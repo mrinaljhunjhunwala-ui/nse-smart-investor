@@ -45,6 +45,9 @@ _TOKEN_TTL = 3600 * 6
 _TOKEN_FAIL_TTL = 300
 
 _INST_MAP: Dict[str, str] = {}
+# Exact Angel One tradingsymbol for a bare symbol ("ABCLTD" -> "ABCLTD-BE"), from the instrument
+# master or searchScrip. Orders must send the symbol that matches the token's series.
+_TRADING_SYMBOL: Dict[str, str] = {}
 _INST_MAP_LOCK = threading.Lock()
 _INST_MAP_TS: List[float] = [0.0]
 _INST_MAP_TTL = 3600 * 4
@@ -125,6 +128,8 @@ def _load_instrument_master() -> bool:
                 _log.warning("angel_fetcher: instrument master load returned unexpected shape: %s", type(instruments))
                 return False
             new_map: Dict[str, str] = {}
+            new_tsym: Dict[str, str] = {}
+            other: Dict[str, Tuple[str, str]] = {}      # bare -> (token, tradingsymbol), non-EQ
             for inst in instruments:
                 if not isinstance(inst, dict):
                     continue
@@ -132,21 +137,30 @@ def _load_instrument_master() -> bool:
                 itype = inst.get("instrumenttype", "")
                 raw_sym = str(inst.get("symbol", "")).strip().upper()
                 tok = inst.get("token", "") or inst.get("symboltoken", "")
-                if (
-                    exch == "NSE"
-                    and itype in ("", "EQ")
-                    and raw_sym.endswith("-EQ")
-                    and tok
-                ):
+                if exch != "NSE" or itype not in ("", "EQ") or not tok:
+                    continue
+                ser = series_of(raw_sym)
+                if ser == "EQ":
                     sym = raw_sym[:-3]
                     new_map[sym] = str(tok)
-            if len(new_map) < 500:
+                    new_tsym[sym] = raw_sym
+                elif ser:
+                    # BE / BZ / SM / ST ... (audit 2026-11): these stocks were missing from the map,
+                    # and an order sent "SYMBOL-EQ" with the token of another series.
+                    other.setdefault(base_symbol(raw_sym), (str(tok), raw_sym))
+            n_eq = len(new_map)
+            for sym, (tok, tsym) in other.items():
+                if sym not in new_map:                  # a stock trades in one series at a time
+                    new_map[sym] = tok
+                    new_tsym[sym] = tsym
+            if n_eq < 500:
                 _log.warning(
                     "angel_fetcher: instrument master loaded only %d NSE EQ entries — skipping",
-                    len(new_map),
+                    n_eq,
                 )
                 return False
             _INST_MAP = new_map
+            _TRADING_SYMBOL.update(new_tsym)
             _INST_MAP_TS[0] = time.time()
             _event("Instruments", f"{len(new_map):,} NSE equity tokens loaded", "good")
             _log.info(
@@ -540,6 +554,7 @@ def _get_token(symbol_base: str, session: Dict) -> Optional[str]:
             # NSE cash symbols come back with a series suffix ("RELIANCE-EQ").
             if stoken and sym in _exact and itype in ("", "EQ", "-EQ"):
                 token = str(stoken)
+                _TRADING_SYMBOL[key] = sym if series_of(sym) else f"{key}-EQ"
                 break
 
         # No exact symbol match: do NOT take the first hit. searchScrip is a
@@ -1489,6 +1504,14 @@ def _order_fields(order_type: str, side: str, price: float, trigger_price: float
     }
 
 
+def trading_symbol(symbol: str) -> str:
+    """The exact Angel One tradingsymbol for an order: the series the token belongs to
+    ("ABCLTD-BE" for a trade-for-trade stock), "SYMBOL-EQ" when nothing else is known.
+    Orders used to always send "-EQ", which does not match a BE / SM stock's token."""
+    sym = base_symbol(str(symbol or "").replace(".NS", "").replace(".BO", ""))
+    return _TRADING_SYMBOL.get(sym) or f"{sym}-EQ"
+
+
 def place_order(
     symbol: str,
     qty: int,
@@ -1510,7 +1533,7 @@ def place_order(
     if session is None:
         return None
 
-    sym = symbol.replace(".NS", "").replace(".BO", "").upper()
+    sym = base_symbol(symbol.replace(".NS", "").replace(".BO", ""))
     token = _get_token(sym, session)
     if token is None:
         return None
@@ -1519,7 +1542,7 @@ def place_order(
         resp = _http.post(
             f"{_BASE}/rest/secure/angelbroking/order/v1/placeOrder",
             json={
-                "tradingsymbol": sym + "-EQ",
+                "tradingsymbol": trading_symbol(sym),
                 "symboltoken": token,
                 "transactiontype": side.upper(),
                 "exchange": exchange,
@@ -1563,7 +1586,7 @@ def modify_order(
     if session is None:
         return None
 
-    sym = symbol.replace(".NS", "").replace(".BO", "").upper()
+    sym = base_symbol(symbol.replace(".NS", "").replace(".BO", ""))
     token = _get_token(sym, session)
     if token is None:
         return None
@@ -1576,7 +1599,7 @@ def modify_order(
                 "producttype": product,
                 "duration": validity,
                 "quantity": str(qty),
-                "tradingsymbol": sym + "-EQ",
+                "tradingsymbol": trading_symbol(sym),
                 "symboltoken": token,
                 "exchange": exchange,
                 "squareoff": "0",
@@ -1627,7 +1650,7 @@ def place_gtt(
     if session is None:
         return None
 
-    sym = symbol.replace(".NS", "").replace(".BO", "").upper()
+    sym = base_symbol(symbol.replace(".NS", "").replace(".BO", ""))
     token = _get_token(sym, session)
     if token is None:
         return None
@@ -1636,7 +1659,7 @@ def place_gtt(
         resp = _http.post(
             f"{_BASE}/rest/secure/angelbroking/gtt/v1/createRule",
             json={
-                "tradingsymbol": sym + "-EQ",
+                "tradingsymbol": trading_symbol(sym),
                 "symboltoken": token,
                 "exchange": exchange,
                 "producttype": product_type,
@@ -1694,7 +1717,7 @@ def cancel_gtt(rule_id: str, symbol: str, exchange: str = "NSE") -> bool:
     if session is None:
         return False
 
-    sym = symbol.replace(".NS", "").replace(".BO", "").upper()
+    sym = base_symbol(symbol.replace(".NS", "").replace(".BO", ""))
     token = _get_token(sym, session) or ""
 
     try:
@@ -1702,7 +1725,7 @@ def cancel_gtt(rule_id: str, symbol: str, exchange: str = "NSE") -> bool:
             f"{_BASE}/rest/secure/angelbroking/gtt/v1/cancelRule",
             json={
                 "id": str(rule_id),
-                "tradingsymbol": sym + "-EQ",
+                "tradingsymbol": trading_symbol(sym),
                 "symboltoken": token,
                 "exchange": exchange,
             },
