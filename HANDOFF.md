@@ -10,6 +10,20 @@ This section is the running memory between sessions; older sections below are hi
   Trades" button. Pure maths in `trade_utils.open_trades_summary`; quotes cached 60 s. The Market
   breadth line went from 13px dim to 16px. A separate cloud session is running a full bug audit
   (report: AUDIT_2026-11.md when it lands).
+- **Portfolio briefing fixes (17 Nov, owner tried it: "a lot of data is missing, Claude is not
+  checking live prices"):** every holding showed "app score n/a" because the briefing read the
+  scan through `_persisted_all_scores_snapshot`, which drops anything over 20 minutes; the view
+  now reads the KV snapshot directly up to 4 days old and names the scan time, and live-scores
+  holdings the scan doesn't cover. Each holding now carries company name, purchase date / holding
+  period (short- vs long-term), the app's stop, a levels line (52-week range, 50/200-day averages,
+  ATR 14, 1/3-month returns; `research_notes.technical_levels`, pure), P/E and P/B, and lenders
+  are shown on P/B + ROE without debt/equity (`classify_sector`). "⚠ check" lines flag the
+  Vedanta / Tata Motors demergers (`CORPORATE_EVENTS`), yields over 10%, 3y growth beyond ±50% and
+  short price history. Sugar mills and Xchanging get a finer label via `data.universe.get_industry`
+  (display only; SECTOR_MAP and scans unchanged). The prompt states when prices were taken (live
+  vs last close), the India VIX, tells Claude to web-check prices and news (and say when it
+  can't), lists the latest Top Picks as new names, takes an optional fresh-money amount, and the
+  "How to answer" block now matches the chosen question (`ANSWER_FORMATS`).
 - **Unlock in place (17 Nov, owner):** every place that only *reads* PIN-locked data now shows its
   own PIN box instead of "go unlock it on My Portfolio / Angel One": Today → My lists (My Portfolio
   and Angel One, each in a collapsed "🔒 Unlock … to include it here" expander), Research Notes'

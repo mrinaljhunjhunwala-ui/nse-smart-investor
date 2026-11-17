@@ -375,6 +375,27 @@ _SECTOR_ASSIGNMENTS: Dict[str, List[str]] = {
     ],
 }
 
+# Finer industry labels where the app's sector bucket misleads a reader. NSE files sugar mills
+# under "Fast Moving Consumer Goods" (so they land in FMCG here), and some small IT names have no
+# sector at all. Display only (Research Notes briefing): scans and sector rotation keep SECTOR_MAP.
+_INDUSTRY_HINTS: Dict[str, str] = {
+    **{t: "Sugar" for t in (
+        "BALRAMCHIN.NS", "BAJAJHIND.NS", "TRIVENI.NS", "EIDPARRY.NS", "DHAMPURSUG.NS",
+        "DWARKESH.NS", "AVADHSUGAR.NS", "MAWANASUG.NS", "UTTAMSUGAR.NS", "RENUKA.NS",
+        "DALMIASUG.NS", "KCPSUGIND.NS", "MAGADSUGAR.NS", "BANARISUG.NS", "PONNIERODE.NS",
+        "RAJSREESUG.NS", "UGARSUGAR.NS", "SAKHTISUG.NS", "KMSUGAR.NS", "DHARSUGAR.NS")},
+    "XCHANGING.NS": "IT services",
+}
+
+
+def get_industry(ticker: str) -> Optional[str]:
+    """A finer industry label than get_sector, or None when the sector already says enough."""
+    t = str(ticker or "").upper()
+    if not t.endswith(".NS"):
+        t += ".NS"
+    return _INDUSTRY_HINTS.get(t)
+
+
 SECTOR_MAP: Dict[str, str] = {}
 for _sector, _tickers in _SECTOR_ASSIGNMENTS.items():
     for _t in _tickers:
