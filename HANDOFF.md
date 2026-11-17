@@ -3,6 +3,11 @@
 This section is the running memory between sessions; older sections below are history.
 
 ## What happened
+- **Owner decisions, 17 Nov (recorded in CLAUDE.md rules 3 and 8):** ROCE is not applicable to
+  banking stocks: My Portfolio's quality score and table now leave it out for banks / NBFCs /
+  insurers (Valuation E1-v2 and Quality Watch already did). The PIN unlock stays strict (15 min from
+  unlock, even under auto-refresh) because it may have to guard holdings between users later. The
+  sidebar watchlist and Watchlist & Notes are now one list. Movers radar cap: left at 6.
 - **Audit, 17 Nov (owner: "earlier rounds said fine, then real bugs showed up"). Full report:
   `AUDIT_2026-11.md`, with a status for every page, view and alert job.** The bug hunted for:
   features that silently show n/a / empty / stale data in real conditions while tests pass.
