@@ -203,7 +203,42 @@ def test_session_warm_up_and_http_error(monkeypatch):
     assert s.urls[0] == "https://www.nseindia.com/"
     with pytest.raises(RuntimeError, match="HTTP 403"):
         N._nse_json("/api/corporate-announcements")
-    assert s.urls.count("https://www.nseindia.com/") == 1          # warm-up not repeated
+    # a 403 re-warms once and retries once, then reports both statuses
+    assert s.urls.count("https://www.nseindia.com/") == 2
+    assert s.urls.count("https://www.nseindia.com/api/corporate-announcements") == 2
+
+
+def test_nse_403_recovers_after_fresh_cookies(monkeypatch):
+    """17 Nov: announcements worked at 11:30 and 15:00 IST from the same job and got 403 at 15:15.
+    A stale cookie on the runner recovers with a new warm-up; the call must not fall straight to RSS."""
+    class Resp:
+        def __init__(self, code, payload=None):
+            self.status_code, self._p = code, payload
+
+        def json(self):
+            return self._p
+
+    class Cookies:
+        cleared = 0
+
+        def clear(self):
+            Cookies.cleared += 1
+
+    class Sess:
+        def __init__(self):
+            self.calls, self.cookies = 0, Cookies()
+
+        def get(self, url, params=None, timeout=None):
+            if url.endswith("/"):
+                return Resp(200)
+            self.calls += 1
+            return Resp(403) if self.calls == 1 else Resp(200, {"data": [1]})
+    import data.nse_corp_info as NC
+    s = Sess()
+    monkeypatch.setattr(NC, "_ensure_session", lambda: s)
+    monkeypatch.setattr(N, "_last_warm", 0.0)
+    assert N._nse_json("/api/corporate-announcements") == {"data": [1]}
+    assert s.calls == 2 and Cookies.cleared == 1
 
 
 # ── data: results filed ─────────────────────────────────────────────────────

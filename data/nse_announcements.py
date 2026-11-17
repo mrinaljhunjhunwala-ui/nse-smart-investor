@@ -125,18 +125,42 @@ def _session():
     return _ensure_session()
 
 
-def _nse_json(path: str, params: Optional[dict] = None) -> Any:
-    """GET an NSE API path with cookie warm-up; raises on HTTP / JSON failure (caught by _guarded)."""
+def _warm(s) -> Optional[int]:
+    """Load the NSE home page for cookies; the status (or None on a network error) is logged at debug."""
     global _last_warm
+    code = None
+    try:
+        code = getattr(s.get(_BASE + "/", timeout=10), "status_code", None)
+    except Exception as e:                                  # noqa: BLE001
+        _log.debug("nse warm-up failed: %s", e)
+    _log.debug("nse warm-up status %s", code)
+    _last_warm = time.time()
+    return code
+
+
+def _nse_json(path: str, params: Optional[dict] = None) -> Any:
+    """GET an NSE API path with cookie warm-up; raises on HTTP / JSON failure (caught by _guarded).
+
+    A 401 / 403 is often a stale or blocked cookie on this runner rather than a hard block (17 Nov:
+    announcements worked at 11:30 and 15:00 IST from the same job, then 403 at 15:15). So once per
+    call: drop the cookies, warm up again and retry before reporting the failure."""
     s = _session()
     if time.time() - _last_warm > _WARM_EVERY_S:
-        try:
-            s.get(_BASE + "/", timeout=10)
-        except Exception:                                   # noqa: BLE001
-            pass
-        _last_warm = time.time()
+        _warm(s)
     resp = s.get(_BASE + path, params=params or {}, timeout=_TIMEOUT)
     code = getattr(resp, "status_code", None)
+    if code in (401, 403):
+        try:
+            s.cookies.clear()
+        except Exception:                                   # noqa: BLE001
+            pass
+        warm = _warm(s)
+        resp = s.get(_BASE + path, params=params or {}, timeout=_TIMEOUT)
+        retry = getattr(resp, "status_code", None)
+        if retry != 200:
+            raise RuntimeError(f"HTTP {code} from {path} (retry after a fresh warm-up: "
+                               f"warm-up {warm}, retry {retry})")
+        code = retry
     if code != 200:
         raise RuntimeError(f"HTTP {code} from {path}")
     return resp.json()
