@@ -351,3 +351,17 @@ def test_analyze_headline_business_gate_leads(monkeypatch):
     assert "Business check failed." in hero and "negative net worth" in hero
     assert "timing only; business check failed" in hero
     assert hero.index("Business check failed") < hero.index("Trend:")
+
+
+def test_command_centre_paper_box_and_breadth_text():
+    """Owner 2026-11-17: open paper trades sit in a small box with P&L and a Paper Trades button;
+    the Market breadth line is 16px. Lives here so _join_page_threads waits for the page's scan
+    threads (in another module they leaked into the Postgres-pool tests)."""
+    import trade_store as store
+    store.open_trade("TCS.NS", 3000.0, 10, 2900.0, 3300.0, reason="t")
+    at = AppTest.from_file(os.path.join(_PAGES_DIR, "01_command_centre.py"), default_timeout=240).run()
+    assert not at.exception, at.exception
+    html = "\n".join(str(m.value) for m in at.markdown)
+    assert "📂 Open paper trades · 1" in html and "TCS" in html and "without a live price" in html
+    assert any(b.label == "📂 Open Paper Trades" for b in at.button)
+    assert "font-size:16px" in html and "Market breadth" in html

@@ -176,13 +176,3 @@ def test_open_trades_summary_pnl_and_today():
     empty = open_trades_summary(pd.DataFrame(), {})
     assert empty["n"] == 0 and empty["pnl"] is None and empty["day"] is None
 
-
-def test_command_centre_paper_box_renders(no_network):
-    import trade_store as store
-    store.open_trade("TCS.NS", 3000.0, 10, 2900.0, 3300.0, reason="t")
-    at = AppTest.from_file(os.path.join(os.path.dirname(_PAGE), "01_command_centre.py"), default_timeout=180).run()
-    assert not at.exception, [str(e.value) for e in at.exception]
-    text = " ".join(str(m.value) for m in at.markdown)
-    assert "📂 Open paper trades ·" in text
-    assert any(b.label == "📂 Open Paper Trades" for b in at.button)
-    assert "font-size:16px" in text and "Market breadth" in text
