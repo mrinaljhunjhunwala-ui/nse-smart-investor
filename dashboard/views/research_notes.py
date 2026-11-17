@@ -2,10 +2,12 @@
 
 Replaces the Stock Journal tab (owner, 17 Nov: "journal has no purpose for me"). Three parts:
 
-  💼 Portfolio briefing for Claude  builds one prompt with every holding (app score, trend read,
-                                    dividend yield, ROE, debt, growth), same-sector alternatives
-                                    and your latest notes; copy it into Claude, paste the answer
-                                    back, and it is saved against the stocks it covered.
+  💼 Portfolio briefing for Claude  builds one prompt with every holding (app score and stop,
+                                    price levels, sector-aware fundamentals, holding period, checks
+                                    on distorted figures), Top Picks and same-sector candidates,
+                                    and your latest notes; the answer format follows the question.
+                                    Copy it into Claude, paste the answer back, and it is saved
+                                    against the stocks it covered.
   🔎 Stock deep dive                the Deep Dive research prompt (moved here from Analyze Stock).
   📚 Library                        every saved note, newest first, filterable by stock.
 
@@ -60,38 +62,83 @@ def _holdings_rows() -> list:
         except (TypeError, ValueError):
             continue
         if sym:
-            out.append({"ticker": sym, "qty": qty, "avg": avg})
+            out.append({"ticker": sym, "qty": qty, "avg": avg,
+                        "bought": h.get("date_bought") or h.get("buy_date")})
     return out
 
 
-def _gather_briefing(holdings: list) -> tuple:
-    """Holdings enriched with live price, app score / read, sector and fundamentals; plus the
-    scan's same-sector alternatives and a one-line market read."""
-    from analysis.research_notes import alternative_candidates, dividend_yield_pct
+SCAN_MAX_AGE_DAYS = 4        # a Friday-close scan still serves a Monday-evening briefing
+IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+
+
+def _scan_snapshot(key: str):
+    """(data, 'from the scan at 16 Nov 15:28 IST') for a warm-scan KV snapshot up to
+    SCAN_MAX_AGE_DAYS old. The live readers in cache.py drop anything over 20 minutes, which is
+    right for Top Picks on screen but left every evening briefing with no scores at all."""
+    try:
+        from utils.snapshot_time import parse_snapshot_timestamp, snapshot_age_seconds
+        snap = _store().kv_get(key, None, user_id="_system")
+        if not isinstance(snap, dict) or not isinstance(snap.get("data"), dict):
+            return {}, ""
+        age = snapshot_age_seconds(snap.get("generated_at"))
+        if age is None or age > SCAN_MAX_AGE_DAYS * 86400:
+            return {}, ""
+        ts = parse_snapshot_timestamp(snap.get("generated_at")).astimezone(IST)
+        return snap["data"], f"{ts:%d %b %H:%M} IST"
+    except Exception:
+        return {}, ""
+
+
+def _history(sym: str):
+    try:
+        from data.fetcher import fetch_single
+        return fetch_single(f"{sym}.NS", period="1y")
+    except Exception:
+        return None
+
+
+def _gather_briefing(holdings: list) -> dict:
+    """Holdings enriched with live price, app score / stop / read, sector and industry, price
+    levels, sector-aware fundamentals and checks; plus Top Picks, same-sector alternatives, the
+    market line and when the prices / scan were taken."""
+    import concurrent.futures as _cf
+    from analysis.research_notes import alternative_candidates, dividend_yield_pct, technical_levels
     syms = [h["ticker"] for h in holdings]
     try:
         from utils.live_price import get_live_prices_batch
         q = get_live_prices_batch([f"{s}.NS" for s in syms], max_workers=12) or {}
     except Exception:
         q = {}
+    scored, scan_at = _scan_snapshot("all_scored_snapshot")
+    missing = tuple(f"{s}.NS" for s in syms
+                    if (scored.get(f"{s}.NS") or {}).get("score") is None)
+    live_scored = {}
+    if missing:                       # not in the scan universe (or no scan): score them now
+        try:
+            from dashboard.shared.cache import _score_watchlist
+            live_scored = _score_watchlist(missing) or {}
+        except Exception:
+            live_scored = {}
+    with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+        hist = dict(zip(syms, ex.map(_history, syms)))
     try:
-        from dashboard.shared.cache import _persisted_all_scores_snapshot
-        scored = _persisted_all_scores_snapshot() or {}
+        from data.universe import get_industry, get_sector
     except Exception:
-        scored = {}
-    try:
-        from data.universe import get_sector
-    except Exception:
-        get_sector = None
+        get_sector = get_industry = None
     out = []
     for h in holdings:
         t = h["ticker"]
         live = q.get(f"{t}.NS") or {}
         sc = scored.get(f"{t}.NS") or {}
+        ls = live_scored.get(f"{t}.NS") or {}
+        if not sc and str(ls.get("action", "")).upper() != "UNAVAILABLE":
+            sc = ls
         price = live.get("price") or sc.get("price")
         row = {**h, "price": price, "chg_pct": live.get("chg_pct"),
                "sector": sc.get("sector") or (get_sector(f"{t}.NS") if get_sector else None),
-               "score": sc.get("score"), "action": sc.get("action"), "why": sc.get("headline")}
+               "industry": get_industry(t) if get_industry else None,
+               "score": sc.get("score"), "action": sc.get("action"), "why": sc.get("headline"),
+               "sl": sc.get("sl"), "tech": technical_levels(hist.get(t)) if hist.get(t) is not None else {}}
         if price and h.get("avg"):
             row["pnl_pct"] = (float(price) / float(h["avg"]) - 1) * 100
         if price and h.get("qty"):
@@ -101,25 +148,48 @@ def _gather_briefing(holdings: list) -> tuple:
             from analysis.fundamentals import analytics as A
             cf = default_service().get_fundamentals(f"{t}.NS")
             if cf is not None:
+                row["company"] = cf.company_name
                 row["div_yield"] = dividend_yield_pct(cf)
                 for key, fn in (("roe", A.roe), ("de", A.debt_to_equity)):
                     r = fn(cf)
                     row[key] = r.value if getattr(r, "available", False) else None
                 r = A.revenue_cagr(cf, years=3)
                 row["rev_cagr_3y"] = r.value if getattr(r, "available", False) else None
+                rt = cf.ratios
+                if rt is not None:
+                    row["pe"], row["pb"] = rt.pe, rt.pb
         except Exception:
             pass
         out.append(row)
     alts = alternative_candidates(scored, syms, [r.get("sector") for r in out])
-    market = ""
+    picks_snap, _ = _scan_snapshot("top_picks_snapshot")
+    picks = [b for b in (picks_snap.get("buys") or []) if isinstance(b, dict)][:10]
+    market = []
     try:
         from dashboard.shared.cache import get_regime_snapshot
         rg = get_regime_snapshot() or {}
         if rg.get("label"):
-            market = f"regime {str(rg['label']).replace('_', ' ')}"
+            market.append(f"regime {str(rg['label']).replace('_', ' ')}")
     except Exception:
         pass
-    return out, alts, market
+    try:
+        from dashboard.shared.cache import get_vix_info
+        vx = get_vix_info() or {}
+        if vx.get("vix"):
+            market.append(f"India VIX {float(vx['vix']):.1f} ({vx.get('regime', 'n/a')})")
+    except Exception:
+        pass
+    from analysis.research_notes import price_note
+    n_scored = sum(1 for r in out if r.get("score") is not None)
+    if scan_at:
+        scan_note = (f"App scores: from the app's scan at {scan_at}"
+                     + (f"; {len(out) - n_scored} holding(s) the app could not score" if n_scored < len(out) else ""))
+    elif n_scored:
+        scan_note = f"App scores: scored just now ({n_scored} of {len(out)}); no recent full-market scan"
+    else:
+        scan_note = "App scores: not available (no scan in the last few days and live scoring failed)"
+    return {"rows": out, "alts": alts, "picks": picks, "market": " · ".join(market),
+            "prices_note": price_note(_dt.datetime.now(IST)), "scan_note": scan_note}
 
 
 def _render_briefing(st) -> None:
@@ -139,6 +209,10 @@ def _render_briefing(st) -> None:
         return
     labels = list(QUESTION_PRESETS) + ["My own question"]
     pick = st.selectbox("Question", labels, key="rn_q_pick")
+    from analysis.research_notes import FRESH_MONEY_KEY
+    fresh = st.number_input("Fresh money to invest (₹, optional)", min_value=0, step=10000, value=0,
+                            key="rn_fresh", help="Sent to Claude so it can size each suggestion.",
+                            ) if pick in (FRESH_MONEY_KEY, "My own question") else 0
     question = (st.text_area("Your question", key="rn_q_custom", height=90,
                              placeholder="e.g. Keep PFC and COALINDIA for dividends, or switch?")
                 if pick == "My own question" else QUESTION_PRESETS[pick])
@@ -146,15 +220,18 @@ def _render_briefing(st) -> None:
         st.caption(question)
     if st.button("🧾 Build the briefing", type="primary", key="rn_build"):
         with st.spinner(f"Collecting prices, scores and fundamentals for {len(holdings)} holdings…"):
-            rows, alts, market = _gather_briefing(holdings)
+            g = _gather_briefing(holdings)
             notes = {t: v for t, v in _load_stock_notes().items() if t in {h['ticker'] for h in holdings}}
             st.session_state["rn_prompt"] = build_portfolio_briefing(
-                rows, question, alternatives=alts, notes=notes, market_line=market)
+                g["rows"], question, alternatives=g["alts"], notes=notes, market_line=g["market"],
+                question_key=pick if pick in QUESTION_PRESETS else None, fresh_money=fresh,
+                prices_note=g["prices_note"], scan_note=g["scan_note"], top_picks=g["picks"])
             st.session_state["rn_prompt_q"] = (pick, question, [h["ticker"] for h in holdings])
     prompt = st.session_state.get("rn_prompt")
     if not prompt:
         return
-    st.caption("Copy with the icon at the top right of the box, then paste into Claude.")
+    st.caption("Copy with the icon at the top right of the box, then paste into Claude. Turn on "
+               "web search in Claude so it can check today's prices and news.")
     st.code(prompt, language=None)
     st.download_button("⬇️ Download as text", prompt, file_name=f"portfolio_briefing_{_dt.date.today()}.txt",
                        key="rn_dl")
