@@ -1,4 +1,4 @@
-# Latest — 2026-11-07 · Actions unblocked, alerts widened, keep-awake (read this first)
+# Latest — 2026-11-17 · Audit fixed end to end, owner decisions recorded (read this first)
 
 This section is the running memory between sessions; older sections below are history.
 
@@ -59,12 +59,18 @@ This section is the running memory between sessions; older sections below are hi
   - **#374:** a scored Smart Screener BUY could show no stop (no fallback to the composite stop).
 
   No score, verdict or threshold changed (reviewer: golden snapshots identical).
-  **Open (owner decisions or unverified):**
-  - Angel One `-BE` / `-SM` symbols and the T+1 quantity field (need a broker login);
-  - one watchlist or two;
-  - the bank quality score uses ROCE;
-  - the PIN expires under My Portfolio auto-refresh;
-  - low-priority items listed in the report.
+  **Follow-up PRs, same day (owner: "do all fixes on basis of priority"):** #376 Angel One 403
+  reason + back-off and radar pacing; #381 one watchlist; #382 no ROCE for lenders; #383 gap
+  scanner, `open_trade` stops, FII/DII date check, mover volume, dead code removed; #384 / #385
+  Angel One series suffixes, T+1 and order symbols; #386 MIS late entries, missing Angel price,
+  risk window note, Today paper trades; #387 source chip, FII/DII "sessions", TQS `.NS`,
+  holiday skip, lot-risk warning; #388 Tomorrow's Watchlist scan age on My lists, VIX change
+  labelled by its bar's date. The report's "Still open" section now lists only:
+  - owner live checks: the Angel 403 reason in the next 15:15 Market Alerts log; BE / SM / T+1
+    holdings and a BE order on the next broker login;
+  - latent: short paper trades would need a side check in `_auto_close_breached`.
+  The research clock is untouched: the holiday skip only stops the Telegram message, the
+  Tomorrow's Watchlist picks are still logged.
 - **Command Centre paper-trades box (17 Nov, owner):** the one-line entry-price strip from #362
   went unused. It is now a small bordered box: "📂 Open paper trades · N", overall P&L in ₹ and %,
   today's ₹ move (since previous close, or since entry for a trade opened today; shorts gain on a

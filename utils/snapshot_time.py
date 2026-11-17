@@ -122,3 +122,18 @@ def scan_move_caption(gen_at: Any) -> str:
     pre_open = is_trading_day(n.date()) and n.time() < _OPEN
     what = "Previous session's move" if pre_open else "Day's move"
     return f"{what} (1-session return) as of the scan at {ist_label(gen_at)}."
+
+
+def bar_change_label(last_bar: Any, now: datetime.datetime | None = None) -> str:
+    """How to label a last-bar-vs-previous-bar change.
+
+    "today" only when the last daily bar is today's (IST). Before the open, on
+    a holiday or at a weekend the last bar is an earlier session, so the change
+    is labelled with that session's date instead of "today"."""
+    try:
+        d = last_bar.date() if hasattr(last_bar, "date") else datetime.date.fromisoformat(str(last_bar)[:10])
+    except (TypeError, ValueError):
+        return "vs previous session"
+    now = now or ist_now()
+    today = (now.astimezone(_IST) if now.tzinfo else now).date()
+    return "today" if d == today else f"on {d:%a %d %b}"

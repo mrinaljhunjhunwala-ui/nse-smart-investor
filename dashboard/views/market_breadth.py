@@ -70,6 +70,8 @@ def render() -> None:
                 curr_vix   = float(vix_df["Close"].iloc[-1])
                 prev_vix   = float(vix_df["Close"].iloc[-2])
                 vix_chg    = (curr_vix / prev_vix - 1) * 100
+                from utils.snapshot_time import bar_change_label
+                vix_when   = bar_change_label(vix_df.index[-1])
                 vix_52w_hi = float(vix_df["High"].max())
                 vix_52w_lo = float(vix_df["Low"].min())
                 vix_rank   = (curr_vix - vix_52w_lo) / max(vix_52w_hi - vix_52w_lo, 0.01) * 100
@@ -121,7 +123,7 @@ def render() -> None:
                 st.markdown(
                     f'<div style="background:{reg_color};padding:12px 18px;border-radius:10px;'
                     f'color:var(--ground);font-weight:700;font-size:18px;text-align:center;">'
-                    f'VIX {curr_vix:.2f}  ({vix_chg:+.1f}% today)  —  {regime}  |  '
+                    f'VIX {curr_vix:.2f}  ({vix_chg:+.1f}% {vix_when})  —  {regime}  |  '
                     f'Options regime: {opt_str}'
                     f'</div>',
                     unsafe_allow_html=True

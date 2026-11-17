@@ -152,6 +152,8 @@ with tab_lists:
     ranks = watchlist_ranks(tw.get("data")) if isinstance(tw, dict) else {}
     if ranks:
         sources["Tomorrow's Watchlist"] = {s: f"#{r} {lbl}" for s, (lbl, r, _) in ranks.items()}
+    from utils.snapshot_time import ist_label as _tw_label
+    _tw_when = _tw_label(tw.get("generated_at")) if ranks else ""
     notes = []
     try:
         from dashboard.shared.pin_gate import unlock_inline
@@ -193,7 +195,8 @@ with tab_lists:
     syms = tuple(sorted({s for items in sources.values() for s in items}))
     moves = list_moves(sources, _quotes(syms), threshold_pct=thr)
     st.caption(f"{len(syms)} names across {', '.join(sources) or 'no lists'} · "
-               f"{len(moves)} moved ±{thr:g}% or more today")
+               f"{len(moves)} moved ±{thr:g}% or more today"
+               + (f" · Tomorrow's Watchlist ranks from the scan at {_tw_when}" if _tw_when else ""))
     if moves:
         st.dataframe(pd.DataFrame([{
             "Stock": m["symbol"], "Move": m["pct"], "Price ₹": m["price"],
