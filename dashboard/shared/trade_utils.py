@@ -318,6 +318,53 @@ def open_trades_line(rows) -> tuple:
     return " · ".join(items), len(items)
 
 
+def open_trades_summary(rows, quotes: dict, today=None) -> dict:
+    """Open paper trades with live P&L for Command Centre's small box.
+
+    quotes: {"TCS.NS" or "TCS": {"price", "prev_close", "chg_pct"}}. Long (BUY) trades gain
+    when price rises, short (SELL) when it falls. "Today" is the move since the previous close,
+    or since entry for a trade opened today. A trade with no quote keeps its entry and adds
+    nothing to the totals (counted in n_unpriced)."""
+    import datetime as _d
+    today = today or _d.datetime.now(_d.timezone(_d.timedelta(hours=5, minutes=30))).date()
+    try:
+        recs = rows.sort_values("timestamp").to_dict("records") if rows is not None and len(rows) else []
+    except Exception:
+        recs = []
+    out, tot_pnl, tot_cost, tot_day, n_unpriced = [], 0.0, 0.0, 0.0, 0
+    have_day = False
+    for r in recs:
+        sym = str(r.get("ticker", "")).upper().replace(".NS", "")
+        try:
+            qty, entry = float(r.get("quantity") or 0), float(r.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        sign = -1.0 if str(r.get("action") or "BUY").upper() in ("SELL", "SHORT") else 1.0
+        q = (quotes or {}).get(f"{sym}.NS") or (quotes or {}).get(sym) or {}
+        now = q.get("price")
+        row = {"symbol": sym, "qty": qty, "entry": entry, "price": now, "side": "SHORT" if sign < 0 else "LONG",
+               "pnl": None, "pnl_pct": None, "day": None}
+        if now and entry and qty:
+            now = float(now)
+            row["pnl"] = sign * (now - entry) * qty
+            row["pnl_pct"] = sign * (now / entry - 1) * 100
+            tot_pnl += row["pnl"]
+            tot_cost += entry * qty
+            opened = str(r.get("timestamp") or "")[:10]
+            prev = q.get("prev_close")
+            base = entry if opened == today.isoformat() else (float(prev) if prev else None)
+            if base:
+                row["day"] = sign * (now - base) * qty
+                tot_day += row["day"]
+                have_day = True
+        else:
+            n_unpriced += 1
+        out.append(row)
+    return {"rows": out, "n": len(out), "pnl": tot_pnl if tot_cost else None,
+            "pnl_pct": (tot_pnl / tot_cost * 100) if tot_cost else None,
+            "day": tot_day if have_day else None, "n_unpriced": n_unpriced}
+
+
 def load_open_trades_line() -> tuple:
     """open_trades_line over every account's OPEN paper trades."""
     return open_trades_line(_store.fetch_open())
