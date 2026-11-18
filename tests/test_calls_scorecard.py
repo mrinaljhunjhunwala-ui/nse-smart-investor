@@ -108,3 +108,16 @@ def test_momentum_digest_retired_and_why_moved_unscheduled(monkeypatch):
     assert "--mode=eod-scorecard" in wf and "run: python alerts/check_alerts.py --mode=why-moved" not in wf
     assert CA._in_send_window("eod-scorecard", dt.datetime(2026, 11, 17, 16, 2, tzinfo=CA._IST))
     assert not CA._in_send_window("eod-scorecard", dt.datetime(2026, 11, 17, 14, 0, tzinfo=CA._IST))
+
+
+def test_postclose_job_sends_even_when_the_scan_is_slow():
+    """18 Nov: a 19-minute scan hit the 20-minute job limit and the end-of-day check, the
+    watchlist and the posture message were all skipped."""
+    import pathlib
+    import re
+    wf = pathlib.Path(".github/workflows/warm_tomorrow_watchlist.yml").read_text(encoding="utf-8")
+    scan = wf[wf.index("- name: Run Tomorrow's Watchlist warm-up"):wf.index("run: python scripts/warm_tomorrow_watchlist.py")]
+    assert "continue-on-error: true" in scan
+    step_limit = int(re.search(r"timeout-minutes:\s*(\d+)", scan).group(1))
+    job_limit = int(re.search(r"\n    timeout-minutes:\s*(\d+)", wf).group(1))
+    assert step_limit + 10 <= job_limit          # room left for the sends after a timed-out scan
