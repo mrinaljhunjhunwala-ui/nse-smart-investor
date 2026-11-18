@@ -864,6 +864,7 @@ def _regime_note() -> str:
     return _MARKET_DOWN if lbl and str(lbl).lower() in _BEAR_REGIMES else ""
 
 
+_WIDE_STOP_PCT = 8.0  # a stop further than this gets a position-size hint on the BUY line
 _CHASE_PCT = 2.0     # a delivery entry is fine up to this far above the call price
 
 
@@ -887,6 +888,9 @@ def _plan_bits(b: dict, price=None) -> list:
     bits.append(f"hold {hz.split('(')[-1].rstrip(')') if '(' in hz else '2–6 weeks'}")
     if p:
         bits.append(f"skip above {_rs(round(p * (1 + _CHASE_PCT / 100), 2))}")
+    if p and sl and (1 - sl / p) * 100 > _WIDE_STOP_PCT:
+        # 18 Nov review: stops 10-16% away; same rupee risk means a smaller trade.
+        bits.append(f"wide stop: 1% risk = {100 / ((1 - sl / p) * 100):.1f}% of capital")
     return bits
 
 
@@ -1018,7 +1022,7 @@ def check_verdict_alerts(state: dict, today: str) -> int:
     if not batch:
         return 0
     # One Telegram message per run, not one per stock (9 Nov: ~40 separate pings).
-    lines = _format_verdict_batch(batch, regime, gen_at)
+    lines = _format_verdict_batch(batch, regime, gen_at, earlier=_earlier_calls(store, today))
     if dispatch("\n".join(lines), subject=f"{len(batch)} new BUY call(s) — NSE Smart Investor"):
         for key, *_ in batch:
             _mark_fired(state, key, today)
@@ -1049,15 +1053,49 @@ def _record_buy_calls(store, today: str, calls: list) -> None:
         print(f"[verdicts] could not record today's calls: {e}")
 
 
-def _format_verdict_batch(batch: list, regime: str, gen_at) -> list:
+def _earlier_calls(store, today: str, days: int = 5) -> dict:
+    """{SYMBOL: (date, price)} of the latest BUY call in the ``days`` calendar days before today
+    (KV buy_calls:<date>). 18 Nov: 7 of the day's 10 "new" calls repeated 17 Nov's. Never raises."""
+    out: dict = {}
+    if store is None:
+        return out
+    try:
+        d0 = datetime.date.fromisoformat(today)
+    except ValueError:
+        return out
+    for i in range(days, 0, -1):                      # oldest first, so the latest call wins
+        day = (d0 - datetime.timedelta(days=i)).isoformat()
+        try:
+            rows = store.kv_get(_BUY_CALLS_PREFIX + day, None, user_id="_system")
+        except Exception:                               # noqa: BLE001
+            rows = None
+        for r in rows if isinstance(rows, list) else []:
+            sym = _base_symbol((r or {}).get("symbol"))
+            if sym:
+                out[sym] = (day, r.get("price"))
+    return out
+
+
+def _format_verdict_batch(batch: list, regime: str, gen_at, earlier: dict | None = None) -> list:
     """One message for a run's new BUY / STRONG BUY calls, strongest first.
-    A reason line per stock only while the message stays within 15 lines."""
+    A reason line per stock only while the message stays within 15 lines. A name already
+    called BUY in the last few days carries a 'repeat' line with that call's date and price."""
     n = len(batch)
     lines = [f"🟢 <b>{n} new BUY call{'s' if n != 1 else ''}</b> · {_snapshot_ist_label(gen_at).replace(' IST', '')}"]
     if regime:
         lines.append(_h(regime))
     for _key, verdict, b, _fv in batch:
         lines += _verdict_pick_lines(verdict, b, reason=n <= 5)
+        prev = (earlier or {}).get(_base_symbol(b.get("ticker")))
+        if prev:
+            day, px = prev
+            try:
+                d = datetime.date.fromisoformat(day)
+                when = f"{d:%a} {d.day} {d:%b}"
+            except ValueError:
+                when = day
+            at = f" at {_rs(px)}" if isinstance(px, (int, float)) and px > 0 else ""
+            lines.append(f"   ↻ repeat: BUY call on {when}{at}, not a new signal")
     lines.append(_FOOTER)
     return lines
 

@@ -60,3 +60,30 @@ def test_radar_says_what_to_do():
     assert "don't chase +6.2%" in radar_action({"pct": 6.2, "watchlist": ("Breakout", 4, 1)})
     assert radar_action({"pct": 9.0, "held": True}).startswith("you hold it")
     assert radar_action({"pct": 9.0, "paper": True}).startswith("open paper trade")
+
+
+def test_wide_stop_gets_a_sizing_hint():
+    """18 Nov review: stops ran 10-16% away (AARTIPHARM -13.0%, DELTACORP -16.2%). With the same
+    rupee risk such a trade must be smaller; the line says how much."""
+    import alerts.check_alerts as CA
+    wide = " · ".join(CA._plan_bits({"price": 100, "sl": 87, "tp": 137}))
+    assert "wide stop: 1% risk = 7.7% of capital" in wide
+    assert "wide stop" not in " · ".join(CA._plan_bits({"price": 100, "sl": 94, "tp": 115}))
+
+
+def test_repeat_buy_call_names_the_earlier_call():
+    """18 Nov: 7 of 10 'new' BUY calls had been called on 17 Nov. A repeat says so, with the
+    earlier price, so it is not read as a fresh signal."""
+    import alerts.check_alerts as CA
+
+    class Store:
+        def kv_get(self, key, default=None, user_id=None):
+            return {"buy_calls:2026-11-17": [{"symbol": "PHOENIXLTD", "price": 2202.0}]}.get(key, default)
+
+    seen = CA._earlier_calls(Store(), "2026-11-18")
+    assert seen == {"PHOENIXLTD": ("2026-11-17", 2202.0)}
+    b = {"ticker": "PHOENIXLTD.NS", "price": 2229.0, "sl": 2092.13, "tp": 2539.86, "score": 80.4}
+    lines = CA._format_verdict_batch([("k", "STRONG BUY", b, None)], "", "2026-11-18T03:14:00+00:00",
+                                     earlier=seen)
+    assert any("repeat: BUY call on Tue 17 Nov at ₹2,202.00" in ln for ln in lines)
+    assert CA._earlier_calls(None, "2026-11-18") == {}
