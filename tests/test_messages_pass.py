@@ -58,3 +58,5 @@ def test_radar_says_what_to_do():
     from alerts.movers_alerts import radar_action
     assert radar_action({"pct": 7.9}).startswith("no action")
     assert "don't chase +6.2%" in radar_action({"pct": 6.2, "watchlist": ("Breakout", 4, 1)})
+    assert radar_action({"pct": 9.0, "held": True}).startswith("you hold it")
+    assert radar_action({"pct": 9.0, "paper": True}).startswith("open paper trade")

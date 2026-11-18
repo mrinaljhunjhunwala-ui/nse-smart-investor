@@ -186,6 +186,27 @@ def qualifies(row: Mapping[str, Any], band: str, on_watchlist: bool) -> bool:
     return pct >= THRESHOLD_PCT.get(band, THRESHOLD_PCT["Micro"])
 
 
+def restrict_to_lists(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    bands: Mapping[str, str],
+    ranks: Mapping[str, Tuple[str, int, int]],
+    held: Iterable[str] = (),
+    paper: Iterable[str] = (),
+) -> List[Mapping[str, Any]]:
+    """Rows the owner can act on (owner, 18 Nov: the 09:45 radar was five micro caps, all "no
+    action: not on your lists"): a holding, an open paper trade, a bullish Tomorrow's Watchlist
+    name or a Nifty 100 (Large tier) stock. Everything else is dropped before selection."""
+    own = {base_symbol(s) for s in held} | {base_symbol(s) for s in paper}
+    out = []
+    for r in rows or []:
+        sym = base_symbol(r.get("symbol"))
+        wl = ranks.get(sym)
+        if sym and (sym in own or (wl and wl[2] > 0) or cap_band(sym, bands) == "Large"):
+            out.append(r)
+    return out
+
+
 def select_movers(
     rows: Iterable[Mapping[str, Any]],
     *,
