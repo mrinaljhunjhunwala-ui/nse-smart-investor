@@ -46,6 +46,10 @@ concurrency:
 jobs:
   warm:
     runs-on: ubuntu-24.04
+    # Postgres outage fallback (19 Nov 2026, Neon transfer quota): if the database refuses,
+    # trade_store writes this SQLite file instead; it is cached between runs and uploaded.
+    env:
+      STORE_FALLBACK_PATH: data/store_fallback.db
     # Timeout covers both scans back-to-back plus setup: 2 min Top Picks +
     # ~2 min Tomorrow's Watchlist + 2 min pip install + slack = 12 min. Kept
     # generous rather than tight so a temporarily slow data provider does not
@@ -55,6 +59,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Restore database fallback file
+        uses: actions/cache/restore@v5
+        with:
+          path: data/store_fallback.db
+          key: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            store-fallback-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -134,3 +146,19 @@ jobs:
           # were added (2026-09-08 17:55 UTC) every scan here ran past the job
           # timeout; the last scans without them finished in ~31-35 s.
         run: python scripts/warm_tomorrow_watchlist.py
+
+      # Only present when Postgres refused this run (or an earlier one); see trade_store.
+      - name: Save database fallback file
+        if: always() && hashFiles('data/store_fallback.db') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: data/store_fallback.db
+          key: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload database fallback file
+        if: always() && hashFiles('data/store_fallback.db') != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/store_fallback.db
+          retention-days: 30

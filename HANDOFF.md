@@ -43,6 +43,25 @@ This section is the running memory between sessions; older sections below are hi
   result by stop width. The end-of-day check (KV `eod_scorecard:<date>`) and the ledger already
   keep most of this.
 
+## Neon is over its free 5 GB transfer allowance (email 18 Nov) — owner cannot pay
+- Neon blocks reads/writes until next month's reset; the data is kept, not deleted. It holds the
+  verdict ledger (since Sep), Tomorrow's Watchlist pick log (since 4 Nov), paper trades,
+  holdings, watchlist and KV. No other copy exists.
+- **Stopgap (19 Nov PR):** the five core jobs (pre-open scan, top picks, market alerts, market
+  digest, post-close watchlist) set `STORE_FALLBACK_PATH=data/store_fallback.db`. If Postgres
+  refuses, `trade_store` switches to that SQLite file for the run (log line `STORE FALLBACK:`).
+  The file is restored from and saved to the Actions cache (`store-fallback-*`) and uploaded as
+  an artifact per run (30 days). Overlapping runs can overwrite each other's cache copy, so the
+  artifacts are the complete record. The app sets no path and just degrades. In fallback the day
+  starts empty: no holdings (posture and radar holdings quiet), no delivery history (delivery
+  sub-score falls back to the volume split), no price store (Yahoo serves).
+- **Owner chose (19 Nov): resolve after the close.** Plan: (1) move the price store
+  (`daily_bars`, read in full by every overnight scan, the main transfer user) out of Postgres;
+  (2) new free Supabase project (the owner's free account has one project, "Saath"; the free plan
+  allows two); the owner pastes its URL into the `DATABASE_URL` Actions secret and the Streamlit
+  secrets; (3) merge every `store-fallback-*` artifact into it; (4) after Neon resets, copy the
+  ledger, watchlist pick log, paper trades, holdings and watchlist across once.
+
 ## Owner to-dos
 - cron-job.org job #6 (14:00 portfolio posture) still ran on 18 Nov: switch it off, or the
   post-close posture keeps being deduped away. Job #5 (momentum) should be off too.
