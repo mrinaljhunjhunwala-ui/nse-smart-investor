@@ -37,7 +37,11 @@ concurrency:
 jobs:
   warm:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 18 Nov: the scan step ran 19 min (Angel One "exceeding access rate" on every
+    # retry, then Yahoo) and the 20-min job limit cancelled the job before any message
+    # went out. The scan now has its own 15-min limit and may fail; the end-of-day
+    # check and the portfolio posture do not depend on it and always run.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -55,6 +59,8 @@ jobs:
         run: pip install --quiet -r requirements.txt
 
       - name: Run Tomorrow's Watchlist warm-up
+        timeout-minutes: 15
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Optional — set these only if you want the scan to use real-time
