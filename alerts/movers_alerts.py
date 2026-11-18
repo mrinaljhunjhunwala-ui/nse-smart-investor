@@ -1,7 +1,9 @@
 """alerts/movers_alerts.py — intraday movers radar and the holding guard (Telegram).
 
 check_movers_radar(state, today, now=None)
-    Every 15-minute market run from 09:45 to 15:25 IST. Sends only stocks that newly crossed
+    Every 15-minute market run from 09:45 to 15:25 IST. Only names the owner can act on count
+    (owner, 18 Nov): holdings, open paper trades, Tomorrow's Watchlist, Nifty 100; nothing is sent
+    when none of them moved. Sends only stocks that newly crossed
     their tier's move threshold since the last message (each symbol once a day), at most 5 per
     market-cap tier plus every bullish name from last evening's Tomorrow's Watchlist (any rank)
     up 4%+. Each line says why it moved (filings / volume, from evidence only) and how similar
@@ -125,11 +127,15 @@ def radar_action(m: dict) -> str:
     """What to do with a radar mover (owner, 17 Nov: every alert says what to do). The radar
     reports a move already made, so it never says BUY: a big up-day is a poor entry."""
     pct = m.get("pct") or 0.0
+    if m.get("held"):
+        return f"you hold it: HOLD with your stop; don't add after a {pct:+.1f}% day"
+    if m.get("paper"):
+        return f"open paper trade: HOLD with its stop; don't add after a {pct:+.1f}% day"
     if m.get("watchlist"):
         label, rank, _ = m["watchlist"]
         return (f"on your watchlist ({label} #{rank}): don't chase {pct:+.1f}%; "
                 "buy only if it holds the gain into the close or pulls back")
-    return f"no action: not on your lists, and a {pct:+.1f}% day is a poor entry"
+    return f"no action: large cap, not on your lists, and a {pct:+.1f}% day is a poor entry"
 
 
 def build_radar(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, List[str]],
@@ -149,10 +155,10 @@ def build_radar(movers: List[dict], *, now: _dt.datetime, reasons: Dict[str, Lis
         block = []
         if m["band"] != band:
             block.append(f"<b>{BAND_LABEL[m['band']]}</b>")
-        tag = ""
+        tag = " · 💼 you hold it" if m.get("held") else (" · 📂 open paper trade" if m.get("paper") else "")
         if m.get("watchlist"):
             label, rank, _ = m["watchlist"]
-            tag = f" · 📋 on Tomorrow's Watchlist #{rank} ({_h(label)})"
+            tag += f" · 📋 on Tomorrow's Watchlist #{rank} ({_h(label)})"
         block.append(f"▲ <b>{_h(m['symbol'])}</b> {m['pct']:+.1f}% ₹{m['price']:,.2f}{tag}")
         why = "; ".join(_h(r) for r in (reasons.get(m["symbol"]) or [])[:2]) or "no filing found"
         stats = chase_lookup((evidence or {}).get("table"), m["band"], m["pct"], m.get("vol_ratio"))
@@ -176,7 +182,7 @@ def check_movers_radar(state: dict, today: str, now: Optional[_dt.datetime] = No
     try:
         from alerts.check_alerts import _FORCE_SEND, dispatch
         from analysis import catalysts as C
-        from analysis.movers import select_movers, watchlist_ranks
+        from analysis.movers import base_symbol, restrict_to_lists, select_movers, watchlist_ranks
         from data.nse_movers import fetch_gainers
 
         n = _now(now)
@@ -194,10 +200,18 @@ def check_movers_radar(state: dict, today: str, now: Optional[_dt.datetime] = No
         tw = _fresh(_kv("tomorrow_watchlist_snapshot"), TW_MAX_AGE_H)
         ranks = watchlist_ranks(tw["data"]) if tw else {}
         already = [k[len("mover_"):] for k in state if k.startswith("mover_")]
-        movers = select_movers(rows, bands=_bands(), ranks=ranks, already=already)[:RADAR_MAX_ITEMS]
+        bands = _bands()
+        held = {base_symbol(s) for s in _holdings()}
+        paper = {base_symbol(s) for s in _paper_symbols()}
+        mine = restrict_to_lists(rows, bands=bands, ranks=ranks, held=held, paper=paper)
+        movers = select_movers(mine, bands=bands, ranks=ranks, already=already)[:RADAR_MAX_ITEMS]
         if not movers:
-            print(f"[movers] no new movers past their thresholds ({len(rows)} gainers checked)")
+            print(f"[movers] nothing to send: no new mover among your holdings, paper trades, "
+                  f"Tomorrow's Watchlist or large caps ({len(rows)} gainers checked)")
             return 0
+        for m in movers:
+            m["held"] = m["symbol"] in held
+            m["paper"] = m["symbol"] in paper
         if (sent_msgs >= radar_allowance(n.time()) and not any(m.get("watchlist") for m in movers)
                 and not _FORCE_SEND):
             print(f"[movers] pacing: {sent_msgs} of {RADAR_MAX_MSGS} sent; the next is released at "
@@ -237,6 +251,19 @@ def _holdings() -> List[str]:
         if sym and sym not in out:
             out.append(sym)
     return out
+
+
+def _paper_symbols() -> List[str]:
+    """Symbols of open paper trades (trade_store); empty when the store is unreachable."""
+    try:
+        import trade_store as store
+        df = store.fetch_open()
+        col = "ticker" if "ticker" in getattr(df, "columns", []) else "symbol"
+        return [str(t).upper().replace(".NS", "").replace(".BO", "").strip()
+                for t in (df[col].tolist() if df is not None and col in df.columns else []) if t]
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[movers] open paper trades unavailable: {e}")
+        return []
 
 
 def check_holding_guard(state: dict, today: str, now: Optional[_dt.datetime] = None) -> int:

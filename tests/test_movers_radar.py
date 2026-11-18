@@ -63,6 +63,15 @@ def test_filters_repeats_penny_and_illiquid():
     assert [m["symbol"] for m in out] == ["C"]
 
 
+def test_restrict_to_lists_keeps_holdings_paper_watchlist_and_large_caps():
+    rows = [_row("RELIANCE", 3.4), _row("TINYHELD", 9), _row("PAPERCO", 9), _row("DHANBANK", 6),
+            _row("WEAK", 9), _row("STYLEBAAZA", 14)]
+    ranks = {"DHANBANK": ("Breakout", 14, 1), "WEAK": ("Breakdown risk", 3, -1)}
+    out = M.restrict_to_lists(rows, bands=BANDS, ranks=ranks, held=["TINYHELD.NS"], paper=["PAPERCO"])
+    assert [r["symbol"] for r in out] == ["RELIANCE", "TINYHELD", "PAPERCO", "DHANBANK"]
+    assert M.restrict_to_lists(rows[-1:], bands=BANDS, ranks={}) == []
+
+
 # ── evidence table ──────────────────────────────────────────────────────────
 
 def _frame(closes, vols=None):
@@ -173,8 +182,12 @@ def test_radar_sends_new_movers_once_and_logs_them(wired, monkeypatch):
     import data.nse_movers as NM
     monkeypatch.setattr(NM, "fetch_gainers", lambda snap=None: [
         {"symbol": "STYLEBAAZA", "pct": 14.6, "price": 412.5, "turnover_cr": 43, "source": "NSE", "vol_ratio": 3.4},
+        {"symbol": "TINYHELD", "pct": 14.6, "price": 80.0, "turnover_cr": 5, "source": "NSE", "vol_ratio": 3.4},
+        {"symbol": "PAPERCO", "pct": 8.5, "price": 120.0, "turnover_cr": 5, "source": "NSE"},
         {"symbol": "RELIANCE", "pct": 3.4, "price": 1500, "turnover_cr": 900, "source": "NSE"},
         {"symbol": "DHANBANK", "pct": 6.5, "price": 42.84, "turnover_cr": 20, "source": "NSE"}])
+    monkeypatch.setattr(ma, "_holdings", lambda: ["TINYHELD"])
+    monkeypatch.setattr(ma, "_paper_symbols", lambda: ["PAPERCO"])
     kv["tomorrow_watchlist_snapshot"] = {"data": {"breakout_candidates": [{"ticker": f"X{i}.NS"} for i in range(13)]
                                                   + [{"ticker": "DHANBANK.NS"}]}}
     kv["all_scored_snapshot"] = {"data": {"RELIANCE.NS": {"score": 74, "action": "BUY", "sl": 1440}}}
@@ -185,12 +198,28 @@ def test_radar_sends_new_movers_once_and_logs_them(wired, monkeypatch):
     assert "Movers radar" in msg and "all NSE stocks" in msg
     assert "Large cap" in msg and "Micro / other" in msg
     assert "DHANBANK" in msg and "Tomorrow's Watchlist #14 (Breakout)" in msg
+    assert "STYLEBAAZA" not in msg                        # micro cap on none of your lists
+    assert "TINYHELD" in msg and "you hold it" in msg
+    assert "PAPERCO" in msg and "open paper trade" in msg
     assert "BUY, stop ₹1,440.00" in msg                  # BUY only with score 70+ and a stop
     assert "-2.1 pts vs Nifty" in msg and "3.4x normal volume" in msg
     assert "guarantee" not in msg.lower() and "sure" not in msg.lower()
-    assert {r["symbol"] for r in kv["movers_radar:2026-11-17"]} == {"STYLEBAAZA", "RELIANCE", "DHANBANK"}
+    assert {r["symbol"] for r in kv["movers_radar:2026-11-17"]} == {"TINYHELD", "PAPERCO", "RELIANCE", "DHANBANK"}
     # same names on the next run: nothing new to send
     assert ma.check_movers_radar(state, "2026-11-17", now=now) == 0 and len(sent) == 1
+
+
+def test_radar_sends_nothing_when_only_unlisted_small_names_move(wired, monkeypatch):
+    """18 Nov 09:45: five micro caps, all 'no action: not on your lists'. Now nothing is sent."""
+    ma, sent, kv = wired
+    import data.nse_movers as NM
+    monkeypatch.setattr(NM, "fetch_gainers", lambda snap=None: [
+        {"symbol": f"MICRO{i}", "pct": 12.0 + i, "price": 50.0, "turnover_cr": 5, "source": "NSE"} for i in range(5)])
+    monkeypatch.setattr(ma, "_holdings", lambda: [])
+    monkeypatch.setattr(ma, "_paper_symbols", lambda: [])
+    state = {}
+    assert ma.check_movers_radar(state, "2026-11-18", now=dt.datetime(2026, 11, 18, 9, 45, tzinfo=IST)) == 0
+    assert sent == [] and not any(k.startswith("movers_msg_") for k in state)
 
 
 def test_radar_quiet_outside_window_and_at_daily_cap(wired):
