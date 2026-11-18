@@ -1,6 +1,55 @@
-# Latest — 2026-11-17 · Audit fixed end to end, owner decisions recorded (read this first)
+# Latest — 2026-11-18 · Post-close rerun, quieter radar, first look at how the calls did (read this first)
 
 This section is the running memory between sessions; older sections below are history.
+
+## What happened (18 Nov)
+- **#391 merged:** the post-close scan step has its own 15-min limit and may fail, and the job limit
+  is 30 min, so the sends always run. Rerun on main (run 44318899969, 19:26 IST): the scan took
+  9.6 min (Angel One rate limits again, Yahoo fallback); **Tomorrow's Watchlist and "Today's calls —
+  end-of-day check" were sent**. **Portfolio Posture was not:** "portfolio_posture already fired
+  today", because cron-job.org job #6 (14:00) ran although the owner had switched it off; the daily
+  dedupe then blocks the post-close send. Breadth snapshot skipped (437/826 frames cached).
+- **#392 merged:** the movers radar only lists holdings, open paper trades, bullish Tomorrow's
+  Watchlist names and Nifty 100 stocks (`analysis.movers.restrict_to_lists`); nothing is sent when
+  none moved. Held / paper names get a HOLD line. Pacing and the 6-a-day cap unchanged.
+- **Calls PR (this session):** a BUY line whose stop is more than 8% away adds
+  "wide stop: 1% risk = X% of capital"; a BUY call that repeats one from the last 5 days adds
+  "↻ repeat: BUY call on <day> at ₹X, not a new signal" (`_earlier_calls`, KV `buy_calls:<date>`).
+
+## How the calls did (17–18 Nov; two days, far too few to tune on)
+- **18 Nov, 10 BUY calls** (5 digest at the 08:44 scan price, 3 at 09:15, 2 at 09:31): close vs call
+  average **-1.1%** (Nifty -0.6%), 2 up / 8 down, no stop or target touched. Best move available
+  averaged **+0.8%** (TIPSMUSIC never traded above its call price); worst -2.2%. A holder kept
+  nothing on day 1: only SOUTHBANK (+0.5% of +1.1%) and DLF (+0.3% of +1.1%) closed up.
+  Digest picks (-1.1%) and later BUY calls (-1.2%) did the same.
+- **Skip-above (+2%) never applied:** every digest pick opened within ±1% of its call price.
+  Day lows ran 1%+ under the call on 7 of 10, so a limit entry 1% under the call would have filled
+  7 of 10 at a better price. One day; a hypothesis to log, not a rule.
+- **Repeats:** 7 of 18 Nov's 10 calls (PHOENIXLTD, SOUTHBANK, TIPSMUSIC, KARURVYSYA, SAILIFE,
+  DIVISLAB, LUMAXTECH) were already BUY calls on 17 Nov; from the 17 Nov price they average -0.8%
+  after two sessions. Now labelled as repeats.
+- **Stops:** 4.7–13.0% away on 18 Nov, up to 16.2% on 17 Nov (DELTACORP; WESTLIFE 12.2%,
+  AARTIPHARM 13.0%). Day-1 swings (worst -4.3%) never reach such stops, so "stop / target hit on
+  day 1" says little; the 5- and 20-session ledger grading is the real test. Wide stops now carry
+  a size hint.
+- **17 Nov:** digest picks average +0.9%, 4 up / 1 down (SGMART +3.0%, MCX -0.4%) from the 15:15
+  recap. The 16 BUY calls of 17 Nov were not graded (the end-of-day check started 18 Nov, and
+  Yahoo / NSE / Stooq / Angel are blocked from the dev sandbox). DHANBANK swung -4.7% at 09:16 to
+  +2.7% at 09:31: the first 15 minutes are noise.
+- **Not measured:** paper trades and closed-trade history (Postgres is not reachable from the
+  sandbox; check Paper Trades in the app); posture usefulness (no post-close posture today).
+- **Track before changing anything (20+ sessions):** per call, the actual fill vs the call price;
+  how often skip-above applies; day-5 / day-20 vs Nifty by group (digest / 09:15 / later / repeat);
+  result by stop width. The end-of-day check (KV `eod_scorecard:<date>`) and the ledger already
+  keep most of this.
+
+## Owner to-dos
+- cron-job.org job #6 (14:00 portfolio posture) still ran on 18 Nov: switch it off, or the
+  post-close posture keeps being deduped away. Job #5 (momentum) should be off too.
+- A second Angel One SmartAPI key for the GitHub jobs would stop the rate limits (replace the four
+  `ANGEL_*` Actions secrets).
+
+# 2026-11-17 · Audit fixed end to end, owner decisions recorded
 
 ## What happened
 - **Owner decisions, 17 Nov (recorded in CLAUDE.md rules 3 and 8):** ROCE is not applicable to
