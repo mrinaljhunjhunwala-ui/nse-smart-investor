@@ -61,6 +61,39 @@ _pg_slots: Optional[threading.BoundedSemaphore] = None
 _pg_pool_lock = threading.Lock()
 _pg_held = threading.local()   # per-thread count of connections checked out
 
+# ── Postgres outage fallback (19 Nov 2026: Neon's free transfer allowance ran out) ──
+# The GitHub jobs set STORE_FALLBACK_PATH. If Postgres then refuses (connect or the
+# first query), the process switches to that SQLite file for the rest of the run; the
+# workflows cache it between runs and upload it, so the day's snapshots, calls and
+# ledger rows can be merged into the database later. The app sets no path and behaves
+# as before (reads return their default, writes report failure).
+_pg_fallback: Optional[str] = None
+_fallback_lock = threading.Lock()
+
+
+def fallback_reason() -> Optional[str]:
+    """Why this process writes to the SQLite fallback file, or None."""
+    return _pg_fallback
+
+
+def _activate_fallback(err: BaseException) -> bool:
+    global _pg_fallback, _SQLITE_PATH
+    path = os.environ.get("STORE_FALLBACK_PATH")
+    if not path:
+        return False
+    with _fallback_lock:
+        if _pg_fallback is None:
+            d = os.path.dirname(path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            _SQLITE_PATH = path
+            _pg_fallback = f"{type(err).__name__}: {err}"[:300]
+            msg = (f"STORE FALLBACK: Postgres unavailable ({_pg_fallback}); this run reads and "
+                   f"writes {path} instead")
+            _log.error(msg)
+            print(msg, flush=True)
+    return True
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend selection
@@ -72,6 +105,8 @@ def _database_url() -> Optional[str]:
     Not cached with lru_cache — tests monkeypatch DATABASE_URL between runs
     and need live re-reads. Fast enough: called only at connection time.
     """
+    if _pg_fallback:
+        return None
     url = None
     try:
         import streamlit as st
@@ -109,8 +144,20 @@ def _get_pg_pool():
         with _pg_pool_lock:   # scan threads race here on first use
             if _pg_pool is None:
                 from psycopg2 import pool as pg_pool_mod
+                pool = pg_pool_mod.ThreadedConnectionPool(1, _PG_MAXCONN, _database_url())
+                # Probe once: a project over its quota may accept the connection but
+                # refuse queries.
+                conn = pool.getconn()
+                try:
+                    conn.cursor().execute("SELECT 1")   # putconn rolls the transaction back
+                except BaseException:
+                    closeall = getattr(pool, "closeall", None)
+                    if closeall:
+                        closeall()
+                    raise
+                pool.putconn(conn)
                 _pg_slots = threading.BoundedSemaphore(_PG_MAXCONN)
-                _pg_pool = pg_pool_mod.ThreadedConnectionPool(1, _PG_MAXCONN, _database_url())
+                _pg_pool = pool
     return _pg_pool
 
 
@@ -124,8 +171,14 @@ def _get_conn():
     thread against itself — and hits the pool directly, as before.
     For SQLite: opens a file connection and closes it.
     """
+    pool = None
     if _is_pg():
-        pool = _get_pg_pool()
+        try:
+            pool = _get_pg_pool()
+        except Exception as e:
+            if not _activate_fallback(e):
+                raise
+    if pool is not None:
         slots = _pg_slots
         depth = getattr(_pg_held, "n", 0)
         gated = depth == 0 and slots is not None

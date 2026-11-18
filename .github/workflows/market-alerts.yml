@@ -37,10 +37,22 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    # Postgres outage fallback (19 Nov 2026, Neon transfer quota): if the database refuses,
+    # trade_store writes this SQLite file instead; it is cached between runs and uploaded.
+    env:
+      STORE_FALLBACK_PATH: data/store_fallback.db
     timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Restore database fallback file
+        uses: actions/cache/restore@v5
+        with:
+          path: data/store_fallback.db
+          key: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            store-fallback-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -108,3 +120,19 @@ jobs:
         with:
           path: data/alert_state.json
           key: alert-state-${{ github.run_id }}
+
+      # Only present when Postgres refused this run (or an earlier one); see trade_store.
+      - name: Save database fallback file
+        if: always() && hashFiles('data/store_fallback.db') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: data/store_fallback.db
+          key: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload database fallback file
+        if: always() && hashFiles('data/store_fallback.db') != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/store_fallback.db
+          retention-days: 30
