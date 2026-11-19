@@ -481,3 +481,33 @@ def test_summary_counts_rate_limits():
     clk = _FakeClock()
     r = wps.run(["AAA.NS"], fetch=fake_fetch, clock=clk, sleep=clk.sleep)
     assert r["ok"] == 1 and r["line"].endswith("· 1 rate limits")
+
+
+# ── Own file, not the shared database (19 Nov 2026: Neon's free transfer ran out) ─────
+
+def test_store_lives_in_its_own_file_not_in_trade_store(monkeypatch, tmp_path):
+    """Every overnight scan read ~826 symbols x 2 years of daily bars from Postgres, the
+    main user of Neon's 5 GB monthly transfer. The store is now a local SQLite file
+    (PRICE_STORE_PATH) that the jobs keep in the Actions cache; trade_store is never used."""
+    import trade_store
+    path = tmp_path / "ps" / "price_store.db"
+    monkeypatch.setenv("PRICE_STORE_PATH", str(path))
+
+    def boom(*a, **k):
+        raise AssertionError("price store must not touch trade_store's database")
+    monkeypatch.setattr(trade_store, "_get_conn", boom)
+    dates = _sessions_ending(_last_session(), 5)
+    assert ps.upsert_daily_bars("XYZ.NS", _frame(dates), "AngelOne") == 5
+    assert len(ps.load_daily_bars("XYZ.NS")) == 5
+    assert path.exists()
+
+
+def test_scan_jobs_restore_the_price_store_and_the_fill_job_saves_it():
+    wf = lambda n: open(f".github/workflows/{n}.yml", encoding="utf-8").read()  # noqa: E731
+    fill = wf("warm_price_store")
+    assert "PRICE_STORE_PATH: data/price_store.db" in fill
+    assert "actions/cache/restore@v5" in fill and "actions/cache/save@v5" in fill
+    for n in ("warm-top-picks", "warm-preopen-scan", "warm_tomorrow_watchlist", "movers-evidence"):
+        src = wf(n)
+        assert "PRICE_STORE_PATH: data/price_store.db" in src, n
+        assert "price-store-" in src, n

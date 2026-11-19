@@ -277,6 +277,13 @@ def _no_price_store_tier(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _price_store_in_tmp(tmp_path, monkeypatch):
+    """The price store is its own SQLite file (data/price_store.db); each test gets a fresh one."""
+    monkeypatch.setenv("PRICE_STORE_PATH", str(tmp_path / "price_store.db"))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clear_snapshot_read_cache():
     """cache._kv_snapshot shares reads for 2 minutes; tests write snapshots and read them back."""
     try:

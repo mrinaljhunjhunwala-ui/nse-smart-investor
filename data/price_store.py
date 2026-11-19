@@ -9,9 +9,9 @@ the close at a hard throttle, and data.fetcher.fetch_single reads it as
 Tier 0.5 (before Yahoo) when it is fresh and long enough.
 
 Table ``daily_bars(symbol, date, open, high, low, close, volume, source,
-fetched_at)``, PK (symbol, date), in the same database as trade_store
-(SQLite ``trades.db`` by default, Postgres when DATABASE_URL is set). It uses
-trade_store's connection helper; dates are ISO ``YYYY-MM-DD`` text on both
+fetched_at)``, PK (symbol, date), in its own SQLite file (``PRICE_STORE_PATH``,
+default ``data/price_store.db``; it was in trade_store's Postgres until 19 Nov 2026,
+when it used up Neon's free transfer allowance). Dates are ISO ``YYYY-MM-DD`` text on both
 backends (same convention as trade_store's timestamps), so range filters are
 plain string comparisons.
 
@@ -70,9 +70,37 @@ _HAS_ROWS_TTL = 600
 _has_rows_cache: dict = {}          # db_key -> (bool, ts)
 
 
+# 19 Nov 2026: Neon's free 5 GB monthly transfer ran out, mostly on this table (every
+# overnight scan read ~826 symbols x 2 years of bars). The store is now its own SQLite file,
+# never trade_store's Postgres. The GitHub jobs restore it from the Actions cache
+# (warm_price_store saves it); the app has no file and Yahoo serves as before.
+_DEFAULT_PATH = os.path.join("data", "price_store.db")
+
+
+def _store_path() -> str:
+    return os.environ.get("PRICE_STORE_PATH") or _DEFAULT_PATH
+
+
 def _ts():
-    import trade_store
-    return trade_store
+    """A trade_store-shaped handle on the store's own SQLite file (same call sites)."""
+    import sqlite3
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    path = _store_path()
+
+    @contextmanager
+    def _get_conn():
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        conn = sqlite3.connect(path, timeout=30)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    return SimpleNamespace(_get_conn=_get_conn, _is_pg=lambda: False, _q=lambda sql: sql,
+                           _database_url=lambda: None, _SQLITE_PATH=path)
 
 
 def _db_key() -> str:
