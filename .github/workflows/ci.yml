@@ -80,6 +80,21 @@ jobs:
   real-postgres:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # 19 Nov 2026: the Neon account went over its free quota and refused every
+    # connection, including the `ci-tests` branch, so this job failed on every PR.
+    # A throwaway Postgres container in the job costs nothing and uses no Neon transfer.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci_tests
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci_tests"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     # Every run shares the Neon `ci-tests` branch; concurrent runs doing DDL on
     # the same tables deadlocked (run 37014283387). tests/conftest.py now gives
     # each pytest session its own schema (search_path pinned to it, dropped at
@@ -104,9 +119,8 @@ jobs:
           pip install --quiet pytest
 
       - name: Run real-Postgres tests
-        # TEST_DATABASE_URL points at the throwaway Neon `ci-tests` branch (schema
-        # only); tests skip when it's unset (forks) and conftest refuses a URL
-        # equal to production.
+        # TEST_DATABASE_URL points at the job's own Postgres container above; conftest
+        # still refuses a URL equal to production.
         env:
-          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_tests
         run: python -m pytest -m "real_postgres and not slow" -q -rs

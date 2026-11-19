@@ -17,10 +17,22 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      PRICE_STORE_PATH: data/price_store.db
     timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      # The price store is its own SQLite file (data/price_store.py), filled nightly by
+      # warm_price_store.yml and kept in the Actions cache (it used up Neon's free transfer).
+      - name: Restore price store
+        uses: actions/cache/restore@v5
+        with:
+          path: data/price_store.db
+          key: price-store-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            price-store-
 
       - name: Set up Python
         uses: actions/setup-python@v6

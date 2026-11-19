@@ -50,6 +50,7 @@ jobs:
     # trade_store writes this SQLite file instead; it is cached between runs and uploaded.
     env:
       STORE_FALLBACK_PATH: data/store_fallback.db
+      PRICE_STORE_PATH: data/price_store.db
     # Timeout covers both scans back-to-back plus setup: 2 min Top Picks +
     # ~2 min Tomorrow's Watchlist + 2 min pip install + slack = 12 min. Kept
     # generous rather than tight so a temporarily slow data provider does not
@@ -59,6 +60,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      # The price store is its own SQLite file (data/price_store.py), filled nightly by
+      # warm_price_store.yml and kept in the Actions cache (it used up Neon's free transfer).
+      - name: Restore price store
+        uses: actions/cache/restore@v5
+        with:
+          path: data/price_store.db
+          key: price-store-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            price-store-
 
       - name: Restore database fallback file
         uses: actions/cache/restore@v5

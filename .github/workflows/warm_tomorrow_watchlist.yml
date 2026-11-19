@@ -41,6 +41,7 @@ jobs:
     # trade_store writes this SQLite file instead; it is cached between runs and uploaded.
     env:
       STORE_FALLBACK_PATH: data/store_fallback.db
+      PRICE_STORE_PATH: data/price_store.db
     # 18 Nov: the scan step ran 19 min (Angel One "exceeding access rate" on every
     # retry, then Yahoo) and the 20-min job limit cancelled the job before any message
     # went out. The scan now has its own 15-min limit and may fail; the end-of-day
@@ -49,6 +50,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      # The price store is its own SQLite file (data/price_store.py), filled nightly by
+      # warm_price_store.yml and kept in the Actions cache (it used up Neon's free transfer).
+      - name: Restore price store
+        uses: actions/cache/restore@v5
+        with:
+          path: data/price_store.db
+          key: price-store-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            price-store-
 
       - name: Restore database fallback file
         uses: actions/cache/restore@v5
