@@ -429,8 +429,12 @@ def test_caption_text():
 
 
 @pytest.mark.real_postgres
-def test_postgres_ddl_upsert_and_status_round_trip():
-    """Runs only in CI's real-postgres job (TEST_DATABASE_URL)."""
+def test_store_stays_in_its_own_file_even_with_postgres_configured():
+    """Runs only in CI's real-postgres job (TEST_DATABASE_URL). trade_store points at a real
+    Postgres there; the price store must still use its own SQLite file (19 Nov 2026)."""
+    import trade_store
+    assert trade_store._is_pg()
+    assert ps._ts()._is_pg() is False
     dates = _sessions_ending(_last_session(), 30)
     df = _frame(dates)
     assert ps.upsert_daily_bars("PGT.NS", df, "AngelOne") == 30
