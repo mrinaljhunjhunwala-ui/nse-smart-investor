@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the NSE end-of-day downloads at 19:45 and 22:00 IST, Mon-Fri
+
+[Timer]
+# Same slots as refresh-eod-data.yml; 22:00 catches late publications.
+OnCalendar=Mon..Fri *-*-* 19:45:00 Asia/Kolkata
+OnCalendar=Mon..Fri *-*-* 22:00:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

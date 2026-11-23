@@ -6,7 +6,7 @@
 #
 # What it does: installs git + python3-venv, clones / updates the repo in
 # /opt/nse-smart-investor, makes a small virtualenv with only what the relay needs,
-# adds swap on a 1 GB VM, creates the service user, installs the systemd unit, and
+# adds swap on a 1 GB VM, creates the service user, installs the systemd units (relay + EOD download timer), and
 # creates /etc/nse-price-relay.env (chmod 600) from the template if it is missing.
 # It never overwrites your secrets file. It restarts the relay only if secrets exist.
 set -euo pipefail
@@ -71,12 +71,17 @@ fi
 
 echo "==> systemd unit"
 install -m 644 "$APP_DIR/deploy/oracle-relay/nse-price-relay.service" "$UNIT"
+# NSE end-of-day downloads (NSE refuses GitHub's runners; this VM's Indian IP gets through).
+install -m 644 "$APP_DIR/deploy/oracle-relay/nse-eod-refresh.service" /etc/systemd/system/nse-eod-refresh.service
+install -m 644 "$APP_DIR/deploy/oracle-relay/nse-eod-refresh.timer" /etc/systemd/system/nse-eod-refresh.timer
 systemctl daemon-reload
 systemctl enable nse-price-relay >/dev/null 2>&1
 
 if grep -Eq '^ANGEL_API_KEY=.+' "$ENV_FILE" && grep -Eq '^DATABASE_URL=.+' "$ENV_FILE"; then
   systemctl restart nse-price-relay
-  echo "==> Relay (re)started. Watch it with:  sudo journalctl -u nse-price-relay -f"
+  systemctl enable --now nse-eod-refresh.timer >/dev/null 2>&1
+  echo "==> Relay (re)started; EOD download timer on (systemctl list-timers nse-eod-refresh)."
+  echo "    Watch it with:  sudo journalctl -u nse-price-relay -f"
 else
   echo "==> Not started yet: put your secrets in $ENV_FILE, then run"
   echo "    sudo systemctl restart nse-price-relay"
