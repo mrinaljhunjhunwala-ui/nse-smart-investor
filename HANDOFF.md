@@ -74,6 +74,18 @@ This section is the running memory between sessions; older sections below are hi
   allows two); the owner pastes its URL into the `DATABASE_URL` Actions secret and the Streamlit
   secrets; (3) merge every `store-fallback-*` artifact into it; (4) after Neon resets, copy the
   ledger, watchlist pick log, paper trades, holdings and watchlist across once.
+- **Plan changed (23 Nov): a NEW free Neon project, kept permanently.** The owner points
+  `DATABASE_URL` (Actions secret + Streamlit secret) at it now; the app and jobs start on an
+  empty database. After the old project resets (~1 Dec) put its URL in the `OLD_DATABASE_URL`
+  Actions secret and run **Actions → "Merge old database into new"**
+  (`.github/workflows/merge_databases.yml`; dry run first, then tick `apply`). It runs
+  `tools/merge_databases.py`: tables discovered from the old DB (`daily_bars` skipped as a
+  cache), target tables made by the repo's own ensure functions, rows already in the new
+  project win, serial ids that collide get fresh ids (with `verdict_signal_tags` /
+  `verdict_forward_returns` remapped), `user_kv` keys present in both keep the NEW value and are
+  listed, sequences set to max(id)+1. Read-only on the old DB, never deletes, safe to re-run.
+  Then `OLD_DATABASE_URL` can be removed. The `store-fallback-*` artifacts (SQLite) are not
+  covered by this tool.
 
 ## Owner to-dos
 - cron-job.org job #6 (14:00 portfolio posture) still ran on 18 Nov: switch it off, or the
