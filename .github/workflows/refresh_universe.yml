@@ -3,7 +3,9 @@ name: Refresh universe
 # Weekly check of data/nse_index_constituents.csv (the scan universe behind
 # Top Picks, Tomorrow's Watchlist and the alerts) against NSE's official index
 # constituent CSVs. Runs `tools/refresh_universe.py --ci`, which:
-#   - fetches every tier (Nifty 50 ... Nifty Total Market);
+#   - fetches every tier (Nifty 50 ... Nifty Total Market) from the official CSVs,
+#     falling back per tier to NSE's index API (www.nseindia.com/api/
+#     equity-stockIndices) when both CSV hosts refuse (403 on 22 Nov 2026);
 #   - exits non-zero WITHOUT writing if a fetch fails or the new list is
 #     < 90% of the committed size (NSE outage / HTML error page / partial file);
 #   - "universe unchanged" → exit 0, nothing committed (except a meta-only
