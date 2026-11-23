@@ -1,0 +1,18 @@
+[Unit]
+Description=NSE Smart Investor - NSE end-of-day downloads (bhavcopy, OI, FII futures, option chain)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=nserelay
+Group=nserelay
+WorkingDirectory=/opt/nse-smart-investor
+EnvironmentFile=/etc/nse-price-relay.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+ExecStart=/bin/bash /opt/nse-smart-investor/deploy/oracle-relay/eod_refresh.sh
+TimeoutStartSec=45min
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true

@@ -162,6 +162,25 @@ curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-inv
 | Restart | `sudo systemctl restart nse-price-relay` |
 | Stop for good | `sudo systemctl disable --now nse-price-relay` |
 
+## NSE end-of-day downloads
+
+NSE's archive site refuses GitHub's servers (HTTP 403), so the VM also downloads the evening
+NSE files: delivery %, F&O open interest, FII index futures and the option chain. A timer runs
+them at **19:45 and 22:00 India time, Mon–Fri** and saves them in the same database. setup.sh
+turns the timer on once the secrets file is filled in; nothing else to configure.
+
+Then, in GitHub: **Settings → Secrets and variables → Actions → Variables → New repository
+variable**, name `EOD_VIA_RELAY`, value `true`. The "Refresh EOD market data" job then skips
+those four steps (it still does FII/DII cash flows and the verdict-ledger returns).
+
+| What | Command |
+|---|---|
+| Next run times | `systemctl list-timers nse-eod-refresh` |
+| Run it now | `sudo systemctl start nse-eod-refresh` |
+| Last run's log | `sudo journalctl -u nse-eod-refresh -n 80` |
+
+Each run reads about 3 days of files and writes a few MB to the database.
+
 ## Costs and limits
 
 - Oracle: the A1 / E2.1.Micro VM and one reserved IP are Always Free.

@@ -1,4 +1,5 @@
-# Price relay only (scripts/price_relay.py). Checked against its imports:
+# Price relay (scripts/price_relay.py) and the NSE EOD downloads (eod_refresh.sh: scripts/fetch_nse_*,
+# same imports plus curl_cffi, which the option chain uses when present). Checked against its imports:
 #   scripts/price_relay.py -> data.angel_fetcher (pandas, requests, urllib3, pyotp),
 #   trade_store (pandas, psycopg2 for DATABASE_URL), utils.nse_holidays (stdlib).
 # Streamlit / yfinance are NOT needed: angel_fetcher and trade_store fall back to env vars
@@ -9,3 +10,4 @@ requests>=2.31.0,<3.0
 urllib3>=1.26,<3.0
 pyotp>=2.8.0,<2.12
 psycopg2-binary>=2.9.0,<3.0
+curl_cffi>=0.6.0,<1.0
