@@ -606,3 +606,109 @@ def test_search_fallback_records_the_matched_series(monkeypatch, _clean_master):
     monkeypatch.setattr(af, "_http", _S())
     assert af._get_token("NEWCO", {"jwt": "J", "api_key": "K"}) == "77"
     assert af.trading_symbol("NEWCO") == "NEWCO-BE"
+
+
+# ── FIX AO-HIST-KEY: GitHub jobs use a second SmartAPI key; quote 403s share the cooldown ──
+_REAL_GET_CREDENTIALS = af._get_credentials        # module import time: before any fixture patch
+
+
+@pytest.fixture
+def _key_env(monkeypatch):
+    monkeypatch.setattr(af, "_get_credentials", _REAL_GET_CREDENTIALS)
+    monkeypatch.setattr(af, "_secrets_section", lambda: {})
+    monkeypatch.setattr(af, "_USE_HIST_KEY", [False])
+    monkeypatch.setattr(af, "_KEY_SLOT_LOGGED", [False])
+    for k, v in (("ANGEL_API_KEY", "main"), ("ANGEL_CLIENT_ID", "C"),
+                 ("ANGEL_PASSWORD", "P"), ("ANGEL_TOTP_SECRET", "T")):
+        monkeypatch.setenv(k, v)
+    for k in ("GITHUB_ACTIONS", "ANGEL_USE_HIST_KEY", "ANGEL_HIST_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    return monkeypatch
+
+
+def test_github_actions_uses_the_hist_key_when_set(_key_env):
+    _key_env.setenv("GITHUB_ACTIONS", "true")
+    _key_env.setenv("ANGEL_HIST_API_KEY", "hist")
+    assert af._get_credentials()["api_key"] == "hist" and af._key_slot() == "hist"
+
+
+@pytest.mark.parametrize("hist", ["", "   "])
+def test_github_actions_keeps_primary_when_hist_key_empty(_key_env, hist):
+    _key_env.setenv("GITHUB_ACTIONS", "true")
+    _key_env.setenv("ANGEL_HIST_API_KEY", hist)
+    assert af._get_credentials()["api_key"] == "main" and af._key_slot() == "primary"
+
+
+def test_env_switch_uses_the_hist_key(_key_env):
+    _key_env.setenv("ANGEL_USE_HIST_KEY", "1")
+    _key_env.setenv("ANGEL_HIST_API_KEY", "hist")
+    assert af._get_credentials()["api_key"] == "hist"
+
+
+def test_app_keeps_the_primary_key(_key_env):
+    _key_env.setenv("ANGEL_HIST_API_KEY", "hist")     # set, but the app never asks for it
+    assert af._get_credentials()["api_key"] == "main" and af._key_slot() == "primary"
+    af.use_hist_api_key(True)                          # explicit switch still works
+    assert af._get_credentials()["api_key"] == "hist"
+
+
+def test_key_slot_logged_once_without_the_key(_key_env, caplog):
+    pytest.importorskip("pyotp", reason="Angel One login flow needs pyotp")
+    _key_env.setenv("GITHUB_ACTIONS", "true")
+    _key_env.setenv("ANGEL_HIST_API_KEY", "SECRET-HIST-VALUE")
+    _key_env.setenv("ANGEL_TOTP_SECRET", "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
+    with caplog.at_level("INFO", logger="angel_fetcher"):
+        assert af._get_session() is not None
+        af._SESSION["jwt"] = None
+        af._get_session()
+    lines = [r.getMessage() for r in caplog.records if "key slot" in r.getMessage()]
+    assert lines == ["angel_fetcher: using the hist API key slot"]
+    assert "SECRET-HIST-VALUE" not in caplog.text
+    assert af._SESSION["api_key"] == "SECRET-HIST-VALUE"
+
+
+class _QuoteBodySession(_QuoteSession):
+    def __init__(self, status, body):
+        super().__init__(status=status)
+        self.body = body
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        assert "quote" in url
+        self.quote_calls += 1
+        return FakeResponse(self.status, self.body)
+
+
+_RATE_BODY = {"message": "Access denied because of exceeding access rate", "errorcode": "AB1004"}
+
+
+def test_quote_rate_limit_403_starts_the_cooldown_and_logs_why(clean_breaker, monkeypatch, caplog,
+                                                               _clean_rate_state):
+    sess = _QuoteBodySession(403, _RATE_BODY)
+    _quote_setup(monkeypatch, sess)
+    with caplog.at_level("WARNING", logger="angel_fetcher"):
+        assert af.get_full_quote("RELIANCE.NS") is None
+    assert "rate limit" in caplog.text and "access rate" in caplog.text
+    assert af._rate_cooldown_left() > 0
+    assert af.last_candle_error().startswith("rate limit")
+    with pytest.raises(af.AngelBusy):                 # candles stop too: quiet skip, no call
+        af.fetch_historical("TCS.NS", period="1mo")
+
+
+def test_quotes_skip_during_rate_cooldown(clean_breaker, monkeypatch, _clean_rate_state):
+    sess = _QuoteBodySession(200, {"data": {"fetched": [{"ltp": 100, "close": 99}]}})
+    _quote_setup(monkeypatch, sess)
+    monkeypatch.setattr(af, "_get_session", lambda: pytest.fail("login tried during cooldown"))
+    af._RATE_COOLDOWN_UNTIL[0] = af.time.time() + 60
+    assert af.get_full_quote("X.NS") is None
+    assert af.get_live_quote("X.NS") is None
+    assert af.get_batch_quotes(["A.NS", "B.NS"]) == {"A.NS": None, "B.NS": None}
+    assert af.get_market_depth("A.NS") is None
+    assert sess.quote_calls == 0
+
+
+def test_batch_quote_rate_limit_stops_remaining_batches(clean_breaker, monkeypatch, _clean_rate_state):
+    sess = _QuoteBodySession(403, _RATE_BODY)
+    _quote_setup(monkeypatch, sess)
+    tickers = [f"S{i}.NS" for i in range(120)]       # three batches of 50
+    assert all(v is None for v in af.get_batch_quotes(tickers).values())
+    assert sess.quote_calls == 1 and af._rate_cooldown_left() > 0

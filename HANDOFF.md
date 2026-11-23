@@ -2,6 +2,19 @@
 
 This section is the running memory between sessions; older sections below are history.
 
+## 23 Nov: GitHub jobs move to a second Angel One key (`fix/angel-separate-key`)
+- **Why:** every Actions job's FIRST Angel call (candles and quotes) answered 403 "exceeding access
+  rate" while login worked: the one `ANGEL_API_KEY` is shared with the live app's quote refreshes
+  and overlapping jobs, and SmartAPI limits are per key.
+- **Change:** `angel_fetcher._get_credentials` uses `ANGEL_HIST_API_KEY` whenever
+  `GITHUB_ACTIONS=true`, `ANGEL_USE_HIST_KEY=1` or `use_hist_api_key(True)`, and the secret is
+  non-empty; empty means unchanged. The Streamlit app keeps `ANGEL_API_KEY`. First login per process
+  logs `angel_fetcher: using the hist|primary API key slot` (never the key). Market Alerts, Market
+  Digest and Warm Tomorrow's Watchlist now pass the secret (Warm Price Store already did).
+- **Quotes:** a quote / batch-quote / depth HTTP error now logs its reason like candle errors; a
+  quote rate limit starts the shared cooldown, and quotes skip Angel during that cooldown (next
+  tier serves), so candles and quotes stop together.
+
 ## What happened (18 Nov)
 - **#391 merged:** the post-close scan step has its own 15-min limit and may fail, and the job limit
   is 30 min, so the sends always run. Rerun on main (run 44318899969, 19:26 IST): the scan took
@@ -65,8 +78,10 @@ This section is the running memory between sessions; older sections below are hi
 ## Owner to-dos
 - cron-job.org job #6 (14:00 portfolio posture) still ran on 18 Nov: switch it off, or the
   post-close posture keeps being deduped away. Job #5 (momentum) should be off too.
-- A second Angel One SmartAPI key for the GitHub jobs would stop the rate limits (replace the four
-  `ANGEL_*` Actions secrets).
+- **Create `ANGEL_HIST_API_KEY` (23 Nov; the code is ready and waits for it):** Angel One SmartAPI
+  portal (smartapi.angelone.in) → create a second app → copy its API key → GitHub repo Settings →
+  Secrets and variables → Actions → New repository secret named `ANGEL_HIST_API_KEY`. Same client
+  ID / password / TOTP; only the key differs. Until it exists, jobs keep sharing `ANGEL_API_KEY`.
 
 # 2026-11-17 · Audit fixed end to end, owner decisions recorded
 

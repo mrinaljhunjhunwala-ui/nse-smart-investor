@@ -23,7 +23,7 @@ serves daily history from that table (Tier 0.5) before trying Yahoo.
 * Index tokens (^NSEI / ^INDIAVIX) are tried with the tokens in
   angel_fetcher.INDEX_TOKENS; unverified live — if Angel can't serve them they
   are skipped and the app keeps reading them from Yahoo.
-* ``ANGEL_HIST_API_KEY`` (if set) replaces ANGEL_API_KEY for this script only.
+* ``ANGEL_HIST_API_KEY`` (if set) replaces ANGEL_API_KEY here, as in every GitHub Actions job.
 
 Pure (no Streamlit UI), never raises; exit code is always 0. Final log line:
 ``price_store: N ok, M skipped, K new rows, took Ts``.

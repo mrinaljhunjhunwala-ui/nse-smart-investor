@@ -135,6 +135,7 @@ jobs:
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
           # Optional real-time Angel One prices for the momentum scan
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}

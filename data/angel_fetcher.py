@@ -381,22 +381,41 @@ def _get_credentials() -> Dict[str, str]:
     ):
         if not creds.get(key):
             creds[key] = os.environ.get(env, "")
-    # The nightly price-store job (scripts/warm_price_store.py) may run on a
-    # separate SmartAPI app key so its candle quota is not shared with the
-    # live app. Only that script switches this on; login/TOTP are unchanged.
-    if _USE_HIST_KEY[0] and os.environ.get("ANGEL_HIST_API_KEY"):
-        creds["api_key"] = os.environ["ANGEL_HIST_API_KEY"]
+    # FIX AO-HIST-KEY (23 Nov 2026): SmartAPI rate limits are per API key, and the
+    # one ANGEL_API_KEY was shared by the live Streamlit app (Live Ticker / My
+    # Portfolio quote refreshes) and every overlapping GitHub job, so each job's
+    # FIRST candle / quote call already answered 403 "exceeding access rate".
+    # GitHub Actions jobs (or any process with ANGEL_USE_HIST_KEY=1, or one that
+    # called use_hist_api_key) now run on a second SmartAPI app's key,
+    # ANGEL_HIST_API_KEY. Empty / unset: unchanged. Login / TOTP are unchanged.
+    if _key_slot() == "hist":
+        creds["api_key"] = os.environ["ANGEL_HIST_API_KEY"].strip()
     return creds
 
 
 _USE_HIST_KEY = [False]
+_KEY_SLOT_LOGGED = [False]
+
+
+def _hist_key_wanted() -> bool:
+    return (_USE_HIST_KEY[0]
+            or os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true"
+            or os.environ.get("ANGEL_USE_HIST_KEY", "").strip().lower() in ("1", "true", "yes"))
+
+
+def _key_slot() -> str:
+    """'hist' when this process should and can use ANGEL_HIST_API_KEY, else 'primary'."""
+    if _hist_key_wanted() and os.environ.get("ANGEL_HIST_API_KEY", "").strip():
+        return "hist"
+    return "primary"
 
 
 def use_hist_api_key(on: bool = True) -> None:
     """Prefer env ANGEL_HIST_API_KEY over ANGEL_API_KEY in this process
-    (scripts/warm_price_store.py only). Drops any cached session."""
+    (already the default under GitHub Actions). Drops any cached session."""
     _USE_HIST_KEY[0] = bool(on)
     _SESSION["jwt"] = None
+    _KEY_SLOT_LOGGED[0] = False
 
 
 def is_configured() -> bool:
@@ -438,6 +457,10 @@ def _get_session() -> Optional[Dict]:
         creds = _get_credentials()
         if not all(creds.values()):
             return None
+        if not _KEY_SLOT_LOGGED[0]:
+            _KEY_SLOT_LOGGED[0] = True
+            # Which SmartAPI key slot this process uses; never the key itself.
+            _log.info("angel_fetcher: using the %s API key slot", _key_slot())
 
         try:
             import pyotp
@@ -812,6 +835,18 @@ def _rate_cooldown_left() -> float:
     return max(0.0, _RATE_COOLDOWN_UNTIL[0] - time.time())
 
 
+def _note_quote_error(where: str, status: int, resp) -> None:
+    """A quote HTTP error: log why (like a candle error) and share its state.
+
+    Angel's limit is per API key, so a quote 'rate limit' starts the same
+    cooldown the candle calls honour (and quotes skip during it too)."""
+    reason, detail = _classify_candle_error(status, resp)
+    _note_candle_error(reason, detail)
+    _log.warning("angel_fetcher.%s: quote API returned %s (%s%s)",
+                 where, status, reason, f": {detail}" if detail else "")
+    _quote_record_failure()
+
+
 def last_candle_error() -> str:
     """Why the last candle call failed, e.g. 'rate limit: AB1004 Access denied …'."""
     r, d = _LAST_CANDLE_ERROR["reason"], _LAST_CANDLE_ERROR["detail"]
@@ -893,7 +928,8 @@ def fetch_daily_candles(
 def get_full_quote(ticker: str) -> Optional[Dict]:
     # FIX AO-QUOTE-BREAKER: an open breaker is a quiet skip (no login, no HTTP
     # call, no WARNING per stock) so the caller's next quote tier serves it.
-    if _breaker_tripped():
+    # An active rate-limit cooldown is a quiet skip too (AO-HIST-KEY).
+    if _breaker_tripped() or _rate_cooldown_left() > 0:
         return None
     session = _get_session()
     if session is None:
@@ -913,8 +949,7 @@ def get_full_quote(ticker: str) -> Optional[Dict]:
         )
         status = getattr(resp, "status_code", None)
         if status and status >= 400:
-            _log.warning("angel_fetcher.get_full_quote: quote API returned %s", status)
-            _quote_record_failure()
+            _note_quote_error("get_full_quote", status, resp)
             return None
 
         parsed = _safe_parse_json_response(resp)
@@ -1049,7 +1084,8 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
     if not tickers:
         return {}
 
-    if _breaker_tripped():        # FIX AO-QUOTE-BREAKER: quiet skip, fallbacks serve
+    # FIX AO-QUOTE-BREAKER: quiet skip, fallbacks serve; same during a rate cooldown.
+    if _breaker_tripped() or _rate_cooldown_left() > 0:
         return {t: None for t in tickers}
     session = _get_session()
     if session is None:
@@ -1083,9 +1119,8 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
             )
             status = getattr(resp, "status_code", None)
             if status and status >= 400:
-                _log.warning("angel_fetcher.get_batch_quotes batch %d returned HTTP %s", i // BATCH, status)
-                _quote_record_failure()
-                if _breaker_tripped():
+                _note_quote_error(f"get_batch_quotes batch {i // BATCH}", status, resp)
+                if _breaker_tripped() or _rate_cooldown_left() > 0:
                     break         # the remaining batches would be refused too
                 continue
             parsed = _safe_parse_json_response(resp)
@@ -1132,7 +1167,7 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
 
 
 def get_market_depth(ticker: str) -> Optional[Dict]:
-    if _breaker_tripped():        # FIX AO-QUOTE-BREAKER
+    if _breaker_tripped() or _rate_cooldown_left() > 0:        # FIX AO-QUOTE-BREAKER
         return None
     session = _get_session()
     if session is None:
@@ -1150,6 +1185,10 @@ def get_market_depth(ticker: str) -> Optional[Dict]:
             headers=_auth_headers(session["jwt"], session["api_key"]),
             timeout=10,
         )
+        status = getattr(resp, "status_code", None)
+        if status and status >= 400:
+            _note_quote_error("get_market_depth", status, resp)
+            return None
         parsed = _safe_parse_json_response(resp)
         fetched = (parsed.get("data", {}).get("fetched") if isinstance(parsed, dict) else None) or []
         if not fetched:
