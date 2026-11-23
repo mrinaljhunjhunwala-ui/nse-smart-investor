@@ -89,6 +89,7 @@ jobs:
           # Optional — set these only if you want the scan to use real-time
           # Angel One prices instead of the free Stooq/Yahoo fallback chain:
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
@@ -145,6 +146,7 @@ jobs:
           ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
@@ -164,6 +166,7 @@ jobs:
           ALERT_GMAIL_TO:           ${{ secrets.ALERT_GMAIL_TO }}
           DATABASE_URL:             ${{ secrets.DATABASE_URL }}
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
           ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
           ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}

@@ -221,6 +221,8 @@ def test_hist_api_key_only_when_switched_on(monkeypatch):
     from data import angel_fetcher as af
     monkeypatch.setenv("ANGEL_API_KEY", "main")
     monkeypatch.setenv("ANGEL_HIST_API_KEY", "hist")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)      # CI sets it; this is the app path
+    monkeypatch.delenv("ANGEL_USE_HIST_KEY", raising=False)
     monkeypatch.setattr(af, "_secrets_section", lambda: {})
     monkeypatch.setattr(af, "_USE_HIST_KEY", [False])
     assert af._get_credentials()["api_key"] == "main"

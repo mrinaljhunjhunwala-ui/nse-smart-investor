@@ -61,7 +61,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
-          # Optional: a second SmartAPI app key used only by this job, so its
+          # Optional: a second SmartAPI app key used by every Actions job, so its
           # candle quota is not shared with the live app.
           ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
           ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
