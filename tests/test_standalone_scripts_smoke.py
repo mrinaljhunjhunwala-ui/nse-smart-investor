@@ -84,6 +84,8 @@ _STANDALONE_SCRIPTS = [
      ["main", "parse_index_csv", "build", "diff"]),
     ("tools.refresh_fno_universe",          "tools/refresh_fno_universe.py",
      ["main", "parse_mktlots", "parse_underlying_api", "diff"]),
+    ("tools.merge_databases",               "tools/merge_databases.py",
+     ["main", "merge", "ensure_target_schema", "SurrogatePlanner"]),
 ]
 _IDS = [mod for mod, _, _ in _STANDALONE_SCRIPTS]
 

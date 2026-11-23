@@ -1,0 +1,56 @@
+# Copy the old Neon project's rows into the new one (tools/merge_databases.py).
+#
+# Nov 2026: the old project ran out of its free monthly transfer on 19 Nov; DATABASE_URL now
+# points at a new project. After the old project resets (~1 Dec), set the OLD_DATABASE_URL
+# secret to the old project's connection string and run this from the Actions tab:
+#   1. Run workflow with "apply" unticked: a dry run, read the summary in the log.
+#   2. Run again with "apply" ticked: copies the rows. Safe to re-run; rows already in the
+#      new project are kept (they are newer), and nothing is ever deleted from either side.
+name: Merge old database into new
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write to the new database (unticked = dry run, nothing written)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-databases
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --quiet -r requirements.txt
+
+      - name: Merge (dry run unless "apply" is ticked)
+        env:
+          OLD_DATABASE_URL: ${{ secrets.OLD_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PYTHONUTF8: "1"
+        run: |
+          if [ -z "$OLD_DATABASE_URL" ] || [ -z "$DATABASE_URL" ]; then
+            echo "::error::Set both the OLD_DATABASE_URL and DATABASE_URL repository secrets."
+            exit 1
+          fi
+          if [ "${{ inputs.apply }}" = "true" ]; then MODE=--apply; else MODE=--dry-run; fi
+          python tools/merge_databases.py $MODE
