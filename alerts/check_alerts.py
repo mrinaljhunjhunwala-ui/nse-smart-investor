@@ -2341,6 +2341,44 @@ def _holding_guard(state: dict, today: str) -> int:
         return 0
 
 
+_RELAY_HEARTBEAT_KEY = "live_quotes_heartbeat"
+_RELAY_STALE_S = 600
+
+
+def check_relay_heartbeat(state: dict, today: str, now: datetime.datetime | None = None,
+                          market_open: bool | None = None) -> int:
+    """One Telegram warning a day when the price relay (scripts/price_relay.py) has stopped:
+    market open and its heartbeat older than 10 minutes. No heartbeat ever = relay not set up
+    yet, so nothing is sent. Never raises."""
+    try:
+        if not (market_open if market_open is not None else _is_market_hours()):
+            return 0
+        import trade_store as store
+        hb = store.kv_get(_RELAY_HEARTBEAT_KEY, None, user_id="_system")
+        if not isinstance(hb, dict) or not hb.get("ts"):
+            return 0
+        ts = datetime.datetime.fromisoformat(str(hb["ts"]).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=datetime.timezone.utc)
+        now = (now or datetime.datetime.now(_IST)).astimezone(_IST)
+        if (now - ts).total_seconds() <= _RELAY_STALE_S:
+            return 0
+        key = "relay_stale"
+        if _already_fired(state, key, today):
+            return 0
+        at = ts.astimezone(_IST)
+        when = at.strftime("%H:%M") if at.date() == now.date() else at.strftime("%H:%M on %d %b")
+        err = str(hb.get("last_error") or "").strip()
+        msg = (f"⚠️ <b>Live price relay stopped at {when}</b> — prices fall back to Yahoo "
+               "(can lag ~15 min)." + (f"\nLast error: {_h(err[:120])}" if err else ""))
+        if send_telegram(msg):
+            _mark_fired(state, key, today)
+            return 1
+    except Exception as e:                                  # noqa: BLE001
+        print(f"[relay] heartbeat check failed: {type(e).__name__}: {e}")
+    return 0
+
+
 def _parse_mode(argv: list[str]) -> str:
     for a in argv:
         if a.startswith("--mode="):
@@ -2445,6 +2483,7 @@ def main() -> int:
             "movers":    _movers_radar(state, today),
             "guard":     _holding_guard(state, today),
             "paper":     check_paper_targets(state, today),
+            "relay":     check_relay_heartbeat(state, today),
         }
         print("[main] per-check: " + ", ".join(f"{k}={v}" for k, v in _counts.items()))
         total += sum(_counts.values())

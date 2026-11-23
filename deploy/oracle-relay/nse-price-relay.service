@@ -1,0 +1,22 @@
+[Unit]
+Description=NSE Smart Investor - Angel One price relay
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nserelay
+Group=nserelay
+WorkingDirectory=/opt/nse-smart-investor
+EnvironmentFile=/etc/nse-price-relay.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+ExecStart=/opt/nse-smart-investor/.venv-relay/bin/python scripts/price_relay.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

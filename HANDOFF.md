@@ -2,6 +2,43 @@
 
 This section is the running memory between sessions; older sections below are history.
 
+## 23 Nov: Angel One price relay on an Oracle VM (`feat/angel-price-relay`, not merged yet)
+- **Why:** the ShagStocks SmartAPI app only answers its registered static IPs, so Streamlit
+  Cloud / Actions never get Angel quotes and "live" prices are Yahoo (up to ~15 min late).
+- **Architecture:** `scripts/price_relay.py` runs under systemd on an Oracle Always Free VM
+  whose reserved public IP is the app's **Secondary Static IP**. Trading days 09:08–15:35 IST
+  (IST computed in code; sleeps and re-checks every minute otherwise) it pulls
+  `angel_fetcher.get_batch_quotes` (50 per call) every `RELAY_INTERVAL_S` (20 s) for up to 250
+  symbols: holdings, watchlist (+ `my_watchlist_rows`), open paper trades,
+  `morning_digest_picks`, `buy_calls:<today>`, `intraday_levels`, ^NSEI / ^NSEBANK / ^INDIAVIX
+  (`angel_fetcher.QUOTE_INDEX_TOKENS`; Nifty Bank token 99926009 unverified live),
+  `top_picks_snapshot`, `tomorrow_watchlist_snapshot`, then NIFTY 50. Small keys re-read every
+  5 min, the two snapshots every 30 min. Loop never exits (logs, backs off up to 5 min).
+- **KV keys (user `_system`):** `live_quotes` = `{"ts", "source": "angel-relay", "quotes":
+  {SYM: {ltp, prev_close, change_pct, volume, ts}}}` (compact JSON, `kv_set(compact=True)`;
+  per-quote `ts` epoch, a missed symbol keeps its last quote up to 5 min); `live_quotes_heartbeat`
+  = `{ts, n_symbols, n_requested, last_error, key_slot}` every tick.
+- **Read path:** `utils.live_price.relay_quotes` is the first tier of `get_live_quote` /
+  `get_live_prices_batch`: one KV read per 10 s per process (`RELAY_CACHE_TTL_S`), missing doc or
+  DB error cached 60 s, used only while NSE is open and the quote is ≤ `RELAY_MAX_AGE_S` (90 s)
+  old; otherwise the old tiers run unchanged. Quotes carry `source: "angel-relay"` + `as_of`;
+  `relay_source_label()` gives "live (Angel via relay, 12 s ago)" for the Live Ticker Feed box
+  and the My Portfolio caption.
+- **Health:** Market Alerts (`check_relay_heartbeat`) sends one Telegram a day when the market
+  is open and the heartbeat is > 10 min old ("Live price relay stopped at HH:MM — prices fall
+  back to Yahoo"); silent if the heartbeat never existed. The relay itself Telegrams once a day
+  after ~5 min of empty ticks if `TELEGRAM_*` is in its env file.
+- **Transfer:** ~97 B per quote → ~10.5 KB doc typical (~110 symbols), ~24 KB at 250; ~1,160
+  ticks/day → ~12 MB/day writes typical (~28 MB at cap), app reads ≤ ~24 MB/day per open live
+  page. Well under 1 GB/month. The relay keeps Neon compute awake ~6.5 h per trading day.
+- **Owner steps:** follow `deploy/oracle-relay/README.md` (Oracle account in Mumbai/Hyderabad,
+  A1.Flex or E2.1.Micro Ubuntu VM, reserved public IP on the VNIC, Cloud Shell → ssh → `setup.sh`,
+  fill `/etc/nse-price-relay.env`: ANGEL_API_KEY / ANGEL_CLIENT_ID / ANGEL_PASSWORD (PIN) /
+  ANGEL_TOTP_SECRET / DATABASE_URL, optional RELAY_INTERVAL_S, RELAY_MAX_SYMBOLS,
+  TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID; register the IP as Secondary Static IP on ShagStocks,
+  changeable once a week; `systemctl restart nse-price-relay`). `setup.sh` is fetched from
+  `main`, so merge first. Nothing was run against live Angel / Neon from the dev sandbox.
+
 ## 23 Nov: GitHub jobs move to a second Angel One key (`fix/angel-separate-key`)
 - **Why:** every Actions job's FIRST Angel call (candles and quotes) answered 403 "exceeding access
   rate" while login worked: the one `ANGEL_API_KEY` is shared with the live app's quote refreshes

@@ -858,6 +858,10 @@ def last_candle_error() -> str:
 # tries them and counts a failure as a skip; fetch_single still sends "^"
 # symbols to Yahoo whenever the store has nothing fresh for them.
 INDEX_TOKENS: Dict[str, str] = {"^NSEI": "99926000", "^INDIAVIX": "99926017"}
+# Quote-only index tokens (price relay, scripts/price_relay.py). Nifty Bank's token
+# comes from the same instrument master and is equally unverified live; it is kept
+# out of INDEX_TOKENS so the price-store candle job does not start fetching it.
+QUOTE_INDEX_TOKENS: Dict[str, str] = {**INDEX_TOKENS, "^NSEBANK": "99926009"}
 
 
 def _is_rate_limited(resp, parsed) -> bool:
@@ -1096,7 +1100,9 @@ def get_batch_quotes(tickers: List[str]) -> Dict[str, Optional[Dict]]:
     valid_tokens: List[str] = []
 
     for orig, sym in zip(tickers, symbols):
-        token = _get_token(sym, session)
+        # Indices ("^NSEI") have fixed tokens; searchScrip would miss them and
+        # count every miss against the breaker.
+        token = QUOTE_INDEX_TOKENS.get(sym) or _get_token(sym, session)
         if token:
             token_map[token] = orig
             valid_tokens.append(token)

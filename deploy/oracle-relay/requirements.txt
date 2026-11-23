@@ -1,0 +1,11 @@
+# Price relay only (scripts/price_relay.py). Checked against its imports:
+#   scripts/price_relay.py -> data.angel_fetcher (pandas, requests, urllib3, pyotp),
+#   trade_store (pandas, psycopg2 for DATABASE_URL), utils.nse_holidays (stdlib).
+# Streamlit / yfinance are NOT needed: angel_fetcher and trade_store fall back to env vars
+# when streamlit is missing. Same bounds as the repo's requirements.txt.
+pandas>=2.0.0,<3.0
+numpy>=1.24.0,<3.0
+requests>=2.31.0,<3.0
+urllib3>=1.26,<3.0
+pyotp>=2.8.0,<2.12
+psycopg2-binary>=2.9.0,<3.0

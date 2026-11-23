@@ -86,6 +86,9 @@ _STANDALONE_SCRIPTS = [
      ["main", "parse_mktlots", "parse_underlying_api", "diff"]),
     ("tools.merge_databases",               "tools/merge_databases.py",
      ["main", "merge", "ensure_target_schema", "SurrogatePlanner"]),
+    # scripts/ is outside the inventory glob; listed for its import check (it runs on a VM).
+    ("scripts.price_relay",                 "scripts/price_relay.py",
+     ["main", "run_forever", "Relay", "SymbolSource", "fetch_quotes"]),
 ]
 _IDS = [mod for mod, _, _ in _STANDALONE_SCRIPTS]
 

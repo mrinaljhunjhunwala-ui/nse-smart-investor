@@ -198,8 +198,12 @@ def render() -> None:
             raw = _load_view_quotes(tuple(tickers))
             recs = [dict(raw[t], ticker=t) for t in tickers
                     if isinstance(raw.get(t), dict) and raw[t].get("price")]
-            # angel_fetcher's batch rows carry net_chg; the Yahoo tiers don't.
-            src = "Angel One" if any("net_chg" in r for r in recs) else "Yahoo Finance"
+            # Relay quotes say so (with their age); angel_fetcher's batch rows
+            # carry net_chg; the Yahoo tiers carry neither.
+            from utils.live_price import relay_source_label
+            _relay_lbl = relay_source_label(recs)
+            src = ((_relay_lbl.replace("live (", "").rstrip(")") if _relay_lbl else "")
+                   or ("Angel One" if any("net_chg" in r for r in recs) else "Yahoo Finance"))
         rows = []
         for q in recs:
             try:
