@@ -96,10 +96,60 @@ def parse_index_csv(text: str) -> List[Dict[str, str]]:
     return rows
 
 
+# Backup source (22 Nov 2026: both CSV hosts answered 403 from GitHub Actions):
+# NSE's index API lists the same constituents as JSON. Index name per tier.
+API_INDEX = {
+    "NIFTY50": "NIFTY 50", "NEXT50": "NIFTY NEXT 50", "MIDCAP150": "NIFTY MIDCAP 150",
+    "SMALLCAP250": "NIFTY SMALLCAP 250", "MICROCAP250": "NIFTY MICROCAP 250",
+    "TOTALMARKET": "NIFTY TOTAL MARKET",
+}
+_API_URL = "https://www.nseindia.com/api/equity-stockIndices"
+
+
+def parse_index_api(payload: dict, index_name: str) -> List[Dict[str, str]]:
+    """Rows from the equity-stockIndices JSON, in parse_index_csv's shape. The
+    first row is the index itself (symbol == index name) and is skipped."""
+    rows = []
+    for d in (payload or {}).get("data") or []:
+        sym = str(d.get("symbol") or "").strip()
+        if not sym or sym.upper() == index_name.upper() or sym.upper().startswith("DUMMY"):
+            continue
+        meta = d.get("meta") or {}
+        series = str(d.get("series") or meta.get("series") or "EQ").strip()
+        if series not in ("EQ", "BE", "BZ", ""):
+            continue
+        rows.append({"Symbol": sym, "Company": str(meta.get("companyName") or "").strip(),
+                     "Industry": str(meta.get("industry") or "").strip()})
+    return rows
+
+
+def _api_fetch(tier: str) -> List[Dict[str, str]]:
+    """Backup: one tier's constituents from NSE's index API. [] on any failure."""
+    index_name = API_INDEX.get(tier)
+    if not index_name:
+        return []
+    try:
+        import requests
+        s = requests.Session()
+        s.headers.update({"User-Agent": _UA, "Accept": "application/json,*/*",
+                          "Referer": "https://www.nseindia.com/market-data/live-equity-market"})
+        s.get("https://www.nseindia.com/", timeout=20)          # session cookies
+        r = s.get(_API_URL, params={"index": index_name}, timeout=30)
+        if r.status_code != 200:
+            print(f"  NSE API {index_name}: HTTP {r.status_code}", file=sys.stderr)
+            return []
+        return parse_index_api(r.json(), index_name)
+    except Exception as exc:  # noqa: BLE001 — backup only; the caller reports the failure
+        print(f"  NSE API {index_name}: {exc}", file=sys.stderr)
+        return []
+
+
 def fetch_all(download: Callable[[str], Optional[str]] = _download,
-              pause: float = 1.5) -> Dict[str, List[Dict[str, str]]]:
-    """Download + parse every tier. Raises RuntimeError naming the first tier
-    that could not be fetched or parsed (callers must not write anything then)."""
+              pause: float = 1.5,
+              api: Callable[[str], List[Dict[str, str]]] = _api_fetch) -> Dict[str, List[Dict[str, str]]]:
+    """Download + parse every tier: the official CSV first, NSE's index API as the
+    backup. Raises RuntimeError naming the first tier neither source could supply
+    (callers must not write anything then)."""
     fetched: Dict[str, List[Dict[str, str]]] = {}
     for tier, names in TIERS:
         text = None
@@ -107,12 +157,15 @@ def fetch_all(download: Callable[[str], Optional[str]] = _download,
             text = download(name)
             if text:
                 break
-        if not text:
-            raise RuntimeError(f"could not fetch {tier} ({' / '.join(names)})")
-        fetched[tier] = parse_index_csv(text)
-        if not fetched[tier]:
-            raise RuntimeError(f"{tier} CSV parsed to 0 rows")
-        print(f"{tier:<12} {len(fetched[tier]):>4} rows")
+        rows = parse_index_csv(text) if text else []
+        source = "csv"
+        if not rows:
+            rows, source = api(tier), "nse-api"
+        if not rows:
+            what = f"{tier} CSV parsed to 0 rows" if text else f"could not fetch {tier} ({' / '.join(names)})"
+            raise RuntimeError(f"{what}; NSE index API backup also failed")
+        fetched[tier] = rows
+        print(f"{tier:<12} {len(rows):>4} rows ({source})")
         time.sleep(pause)
     return fetched
 

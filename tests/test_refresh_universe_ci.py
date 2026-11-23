@@ -141,10 +141,51 @@ def test_fetch_failure_fails_and_writes_nothing(repo):
     def broken_download(name):
         return None if "smallcap" in name else _nse_csv([("X", "X Ltd.")])
 
-    assert repo["run"](fetch=lambda: ru.fetch_all(download=broken_download, pause=0)) != 0
+    assert repo["run"](fetch=lambda: ru.fetch_all(download=broken_download, pause=0,
+                                                  api=lambda tier: [])) != 0
     assert (repo["out"].read_bytes(), repo["meta"].read_bytes()) == before
     assert repo["published"] == []
     assert "FAILED: could not fetch SMALLCAP250" in repo["sent"][-1]
+    assert "NSE index API backup also failed" in repo["sent"][-1]
+
+
+def _api_payload(index_name, rows):
+    """NSE equity-stockIndices JSON: the index row first, then constituents."""
+    data = [{"symbol": index_name, "priority": 1}]
+    data += [{"symbol": s, "series": "EQ", "meta": {"companyName": c, "industry": "Financial Services"}}
+             for s, c in rows]
+    return {"name": index_name, "data": data}
+
+
+def test_parse_index_api_skips_index_row_dummies_and_non_eq():
+    payload = _api_payload("NIFTY 50", [("AAA", "Aaa Ltd."), ("DUMMYX", "Dummy")])
+    payload["data"].append({"symbol": "BBB", "series": "SM", "meta": {"companyName": "Bbb"}})
+    rows = ru.parse_index_api(payload, "NIFTY 50")
+    assert rows == [{"Symbol": "AAA", "Company": "Aaa Ltd.", "Industry": "Financial Services"}]
+
+
+def test_api_backup_fills_a_tier_the_csv_hosts_refuse(repo):
+    """22 Nov 2026: both CSV hosts answered 403 for Nifty 50 from GitHub Actions."""
+    base = repo["base"]
+    csv_by_name = {names[0]: _nse_csv(base[tier]) for tier, names in ru.TIERS}
+    api_calls = []
+
+    def download(name):
+        return None if name == "ind_nifty50list.csv" else csv_by_name.get(name)
+
+    def api(tier):
+        api_calls.append(tier)
+        return ru.parse_index_api(_api_payload(ru.API_INDEX[tier], base[tier]), ru.API_INDEX[tier])
+
+    fetched = ru.fetch_all(download=download, pause=0, api=api)
+    assert api_calls == ["NIFTY50"]
+    assert [r["Symbol"] for r in fetched["NIFTY50"]] == [s for s, _ in base["NIFTY50"]]
+    assert repo["run"](fetch=lambda: fetched) == 0
+    assert repo["published"] == [] and repo["sent"][-1] == "Universe check: unchanged"
+
+
+def test_api_index_covers_every_tier():
+    assert set(ru.API_INDEX) == {tier for tier, _ in ru.TIERS}
 
 
 def test_publish_failure_is_non_zero(repo):
