@@ -584,15 +584,17 @@ def kv_get(key: str, default: Any = None, user_id: str = "default") -> Any:
         return default
 
 
-def kv_set(key: str, value: Any, user_id: str = "default") -> bool:
+def kv_set(key: str, value: Any, user_id: str = "default", compact: bool = False) -> bool:
     """
     Upsert a JSON-serialisable setting for a specific user.
     Returns True on success, False on failure (never silent).
     `user_id` defaults to 'default' — single-user setups work unchanged.
+    `compact` drops the spaces after "," and ":" (the price relay rewrites its
+    quote document every ~20 s, so fewer bytes means less database transfer).
     """
     try:
         _kv_ensure()
-        payload = json.dumps(value)
+        payload = json.dumps(value, separators=(",", ":")) if compact else json.dumps(value)
         with _get_conn() as conn:
             cur = conn.cursor()
             if _is_pg():

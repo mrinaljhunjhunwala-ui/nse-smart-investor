@@ -2,7 +2,11 @@
 utils/live_price.py — Real-time NSE equity prices.
 
 Tier hierarchy (fastest → most reliable fallback):
-  Tier 0: Angel One SmartAPI   — true real-time LTP, no delay, official exchange feed.
+  Relay:  Angel One quotes the price relay (scripts/price_relay.py, on a VM whose
+           static IP Angel accepts) writes to KV live_quotes every ~20 s. Used only
+           while NSE is open and the quote is ≤ RELAY_MAX_AGE_S (90 s) old; see
+           relay_quotes(). Quotes carry "source": "angel-relay" and "as_of".
+  Tier 0: Angel One SmartAPI  — true real-time LTP, no delay, official exchange feed.
            get_live_prices_batch() uses get_batch_quotes() (up to 50 symbols per HTTP
            call) so the entire portfolio/scanner resolves in 1–2 network round-trips
            instead of N parallel single-symbol calls that trip the rate limiter.
@@ -50,6 +54,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -222,7 +228,9 @@ def _nse_live_price(symbol: str) -> Optional[dict]:
 def _stooq_eod_price(ticker_ns: str) -> Optional[dict]:
     """Last EOD close from Stooq — never rate-limited, works everywhere."""
     try:
-        import io, datetime, pandas as pd
+        import io
+        import datetime
+        import pandas as pd
         from data.fetcher import _stooq_enabled
         if not _stooq_enabled():
             # Same switch as the history tier (FIX STOOQ-OFF): stooq.com has
@@ -311,6 +319,155 @@ def _normalise(q: dict) -> dict:
     return out
 
 
+# ─── Relay tier: Angel One quotes written by scripts/price_relay.py ──────────
+#
+# Angel One refuses calls from Streamlit Cloud / GitHub Actions (the SmartAPI app
+# is locked to registered static IPs), so a relay on a VM with a registered IP
+# writes one KV document, live_quotes (user _system), every ~20 s in market
+# hours. This tier reads it once per RELAY_CACHE_TTL_S per process (shared by
+# every symbol and thread) and serves a quote only while NSE is open and the
+# quote is at most RELAY_MAX_AGE_S old; anything else falls through to the tiers
+# below unchanged. A missing document / unreachable database is cached for a
+# minute, so a relay that was never set up costs one quiet read a minute.
+
+_RELAY_KEY = "live_quotes"
+_RELAY_SOURCE = "angel-relay"
+_relay_lock = threading.Lock()
+_relay_cache: dict = {"at": None, "doc": None}
+
+
+def _relay_env(name: str, default: float) -> float:
+    try:
+        v = float(os.environ.get(name, "") or default)
+        return v if v >= 0 else default
+    except ValueError:
+        return default
+
+
+def _ist_now():
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+
+
+def _relay_market_open(now=None) -> bool:
+    """NSE regular session (09:15-15:30 IST on a trading day). Pure: no Streamlit."""
+    import datetime as _dt
+    n = now or _ist_now()
+    try:
+        from utils.nse_holidays import is_trading_day
+        if not is_trading_day(n.date()):
+            return False
+    except Exception:                                           # noqa: BLE001
+        if n.weekday() >= 5:
+            return False
+    return _dt.time(9, 15) <= n.time() <= _dt.time(15, 30)
+
+
+def _relay_doc() -> Optional[dict]:
+    """The relay document, read at most once per TTL per process. None when absent."""
+    now = time.monotonic()
+    with _relay_lock:      # held across the read: concurrent callers share one DB read
+        at, doc = _relay_cache["at"], _relay_cache["doc"]
+        ttl = _relay_env("RELAY_CACHE_TTL_S", 10) if doc is not None else 60.0
+        if at is not None and now - at < ttl:
+            return doc
+        doc = None
+        try:
+            import trade_store as _ts
+            raw = _ts.kv_get(_RELAY_KEY, None, user_id="_system")
+            if isinstance(raw, dict) and isinstance(raw.get("quotes"), dict):
+                doc = raw
+        except Exception as e:                                  # noqa: BLE001
+            _log.debug("relay quotes unreadable: %s", e)
+        _relay_cache["at"], _relay_cache["doc"] = now, doc
+        return doc
+
+
+def _reset_relay_cache() -> None:
+    with _relay_lock:
+        _relay_cache["at"], _relay_cache["doc"] = None, None
+
+
+def _relay_doc_epoch(doc: dict) -> Optional[float]:
+    try:
+        import datetime as _dt
+        t = _dt.datetime.fromisoformat(str(doc.get("ts")).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=_dt.timezone.utc)
+        return t.timestamp()
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def relay_quotes(symbols: List[str], now=None) -> Dict[str, dict]:
+    """{symbol: normalised quote} for the symbols the relay has fresh, else {}.
+
+    Quotes carry "source": "angel-relay" and "as_of" (IST ISO time of the
+    fetch). Never raises; .BO symbols are never served (the relay quotes NSE)."""
+    try:
+        now = now or _ist_now()
+        if not symbols or not _relay_market_open(now):
+            return {}
+        doc = _relay_doc()
+        if not doc:
+            return {}
+        max_age = _relay_env("RELAY_MAX_AGE_S", 90)
+        now_ep = now.timestamp()
+        doc_ep = _relay_doc_epoch(doc)
+        quotes = doc["quotes"]
+        import datetime as _dt
+        out: Dict[str, dict] = {}
+        for sym in symbols:
+            s = str(sym).strip().upper()
+            if s.endswith(".BO"):
+                continue
+            q = quotes.get(s[:-3] if s.endswith(".NS") else s)
+            if not isinstance(q, dict):
+                continue
+            try:
+                ts = float(q.get("ts") or doc_ep)
+                price = float(q.get("ltp"))
+                prev = float(q.get("prev_close") or price)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(price) and price > 0) or not (0 <= now_ep - ts <= max_age):
+                continue
+            if not (math.isfinite(prev) and prev > 0):
+                prev = price
+            row = {
+                "price": price, "prev_close": prev, "chg_pct": (price / prev - 1) * 100,
+                "source": _RELAY_SOURCE,
+                "as_of": _dt.datetime.fromtimestamp(ts, _dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+                                    .isoformat(timespec="seconds"),
+            }
+            try:
+                if q.get("volume"):
+                    row["volume"] = int(q["volume"])
+            except (TypeError, ValueError):
+                pass
+            out[sym] = row
+        return out
+    except Exception as e:                                      # noqa: BLE001
+        _log.debug("relay tier skipped: %s", e)
+        return {}
+
+
+def relay_source_label(quotes, now=None) -> Optional[str]:
+    """'live (Angel via relay, 12 s ago)' when any quote in ``quotes`` (dict values or an
+    iterable of quote dicts) came from the relay, else None. Age = the newest such quote."""
+    try:
+        import datetime as _dt
+        items = quotes.values() if isinstance(quotes, dict) else quotes
+        times = [_dt.datetime.fromisoformat(q["as_of"]) for q in items
+                 if isinstance(q, dict) and q.get("source") == _RELAY_SOURCE and q.get("as_of")]
+        if not times:
+            return None
+        age = max(0, int(((now or _ist_now()) - max(times)).total_seconds()))
+        return f"live (Angel via relay, {age} s ago)"
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
 # ─── Public interface ────────────────────────────────────────────────────────
 
 def get_live_price(symbol: str) -> Optional[float]:
@@ -338,6 +495,11 @@ def get_live_quote(symbol: str) -> Optional[dict]:
     """
     clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
     clean    = symbol.replace(".NS", "").upper()
+
+    # Relay tier: fresh Angel One quote from scripts/price_relay.py, if any.
+    _rq = relay_quotes([symbol]).get(symbol)
+    if _rq:
+        return _rq
 
     # Tier 0: Angel One (real-time, true LTP)
     try:
@@ -425,6 +587,14 @@ def get_live_prices_batch(
 
     results: Dict[str, Optional[dict]] = {s: None for s in symbols}
     remaining: List[str] = list(symbols)
+
+    # ── Relay tier: one shared KV read serves every fresh symbol ────────────
+    _relay = relay_quotes(remaining)
+    if _relay:
+        results.update(_relay)
+        remaining = [s for s in remaining if s not in _relay]
+        if not remaining:
+            return results
 
     # ── Tier 0: Angel One bulk batch ────────────────────────────────────────
     try:

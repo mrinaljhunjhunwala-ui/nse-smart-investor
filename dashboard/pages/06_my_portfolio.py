@@ -371,9 +371,13 @@ if _csv_source is not None:
         with _refresh_col:
             if st.button("🔄 Refresh prices", key="port_refresh_live", width="stretch"):
                 clear_price_caches()
-        with _live_col:
-            st.caption("Live prices refresh every 60 s; scores every 5 min.")
         _live_prices = _portfolio_live_prices(_port_tickers)
+        with _live_col:
+            # Name the price relay (Angel One via the VM) when it priced the holdings.
+            from utils.live_price import relay_source_label as _relay_lbl
+            _lp_src = _relay_lbl(_live_prices or {})
+            st.caption("Live prices refresh every 60 s; scores every 5 min."
+                       + (f" Prices: {_lp_src}." if _lp_src else ""))
         if _live_prices:
             _total_today_pnl   = 0.0
             _total_overall_pnl = 0.0
