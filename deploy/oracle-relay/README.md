@@ -181,6 +181,36 @@ those four steps (it still does FII/DII cash flows and the verdict-ledger return
 
 Each run fetches the latest trading day (set `EOD_DAYS=3` in the secrets file to backfill more) and takes about 15–40 minutes, mostly database writes.
 
+## The app's database (Postgres on this VM)
+
+Since Nov 2026 the app's database runs on this VM instead of Neon. Neon's free plan allows
+about 5 GB of data transfer a month and locked the database twice; Oracle's Always Free
+allowance is about 10 TB. **Keep this account Always Free**: no upgrade, no paid shapes, until
+the model's results justify paying for anything.
+
+Set up (or re-run safely) with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/main/deploy/oracle-relay/postgres_setup.sh | sudo bash
+```
+
+It installs PostgreSQL, creates the `nse` database and `nse_app` user with a generated
+password, accepts only encrypted password logins from outside, opens port 5432 in the VM
+firewall and backs the database up every night at 01:30 IST (7 days kept in
+`/var/backups/nse-postgres`). The connection URL is in `/etc/nse-postgres.url` (root only);
+that is the `DATABASE_URL` for Streamlit, GitHub and `/etc/nse-price-relay.env`.
+
+In the Oracle console, port 5432 must also be open: **Networking → Virtual cloud networks →**
+your VCN **→ Security Lists → Default Security List → Add Ingress Rules**: source
+`0.0.0.0/0`, TCP, destination port `5432`.
+
+| What | Command |
+|---|---|
+| Is it running? | `systemctl status postgresql` |
+| Backups | `ls -lh /var/backups/nse-postgres` |
+| Back up now | `sudo systemctl start nse-pg-backup` |
+| Restore a backup | `sudo -u postgres pg_restore -d nse --clean /var/backups/nse-postgres/nse-YYYYMMDD.dump` |
+
 ## Costs and limits
 
 - Oracle: the A1 / E2.1.Micro VM and one reserved IP are Always Free.
