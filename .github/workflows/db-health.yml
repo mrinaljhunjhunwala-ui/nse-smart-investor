@@ -1,0 +1,89 @@
+name: Database health
+
+# Since Nov 2026 the app's Postgres runs on the Oracle Always Free VM
+# (deploy/oracle-relay/postgres_setup.sh). Oracle may stop an Always Free VM it
+# considers idle, and the VM can simply go down. This checks DATABASE_URL every
+# hour and sends one Telegram message when it stops answering (repeated at most
+# every 6 hours while it stays down) and one when it is back.
+# GitHub's cron is best-effort; an hour or two of lag is fine for this.
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: db-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Restore last state
+        uses: actions/cache/restore@v5
+        with:
+          path: db_health_state.json
+          key: db-health-${{ github.run_id }}
+          restore-keys: db-health-
+
+      - name: Check the database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          pip install --quiet "psycopg2-binary>=2.9.0,<3.0" "requests>=2.31.0,<3.0"
+          python - <<'PY'
+          import json, os, time, requests, psycopg2
+
+          state_path = "db_health_state.json"
+          try:
+              state = json.load(open(state_path))
+          except Exception:
+              state = {"up": True, "last_alert": 0}
+
+          err = None
+          try:
+              conn = psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=20)
+              cur = conn.cursor()
+              cur.execute("SELECT count(*) FROM verdict_log")
+              rows = cur.fetchone()[0]
+              conn.close()
+          except Exception as e:  # noqa: BLE001 - any failure means "down"
+              err = str(e).splitlines()[0][:200]
+
+          def send(text):
+              token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+              if not (token and chat):
+                  print("Telegram secrets missing; would send:", text)
+                  return
+              r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                data={"chat_id": chat, "text": text}, timeout=20)
+              print("telegram", r.status_code)
+
+          now = time.time()
+          if err is None:
+              print(f"database OK ({rows} verdict rows)")
+              if not state.get("up", True):
+                  send("✅ Database is back up (Oracle VM). Paper trades and verdict logging work again.")
+              state = {"up": True, "last_alert": 0}
+          else:
+              print("database DOWN:", err)
+              if state.get("up", True) or now - state.get("last_alert", 0) > 6 * 3600:
+                  send("⚠️ Database on the Oracle VM is not answering.\n"
+                       f"{err}\n"
+                       "Paper trades and verdict calibration are not being saved. "
+                       "Check the VM in the Oracle console (Compute → Instances → nse-relay → Start).")
+                  state["last_alert"] = now
+              state["up"] = False
+          json.dump(state, open(state_path, "w"))
+          PY
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: db_health_state.json
+          key: db-health-${{ github.run_id }}

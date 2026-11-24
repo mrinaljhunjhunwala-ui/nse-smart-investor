@@ -1,0 +1,16 @@
+[Unit]
+Description=NSE Smart Investor - keep the Always Free VM from looking idle
+
+# Oracle may reclaim an Always Free VM whose CPU 95th percentile, network and
+# memory use all stay under 20% for 7 days. The relay and Postgres are light,
+# so overnight this burns one core at the lowest priority for 20 minutes an
+# hour (00:00-08:59 IST, ~12% of the week), which keeps the CPU 95th percentile
+# above 20%. nice 19 / idle IO class: Postgres and the relay always win.
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+ExecStart=/usr/bin/timeout 20m /bin/sh -c 'while :; do :; done'
+SuccessExitStatus=124
