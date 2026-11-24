@@ -127,6 +127,28 @@ def probe_angel() -> ProviderCheck:
     return ProviderCheck("Angel One SmartAPI", "market", status, at, warnings, note)
 
 
+def probe_upstox() -> Optional[ProviderCheck]:
+    """Upstox: None (no row at all) until an analytics token is configured."""
+    try:
+        from data import upstox_fetcher as _up
+        from data.fetcher import get_last_diagnostic as _fetch_diag
+    except ImportError:
+        return None
+    if not _try(_up.is_configured):
+        return None
+    st_ = _try(_up.status) or {}
+    if st_.get("breaker_open"):
+        return ProviderCheck("Upstox", "market", STATUS_DEGRADED,
+                             note=f"paused {st_.get('breaker_seconds_left', 0)} s: "
+                                  f"{st_.get('breaker_reason', '')}"[:200])
+    diag = _try(_fetch_diag, "Upstox") or {}
+    if not diag:
+        return ProviderCheck("Upstox", "market", STATUS_HEALTHY,
+                             note="token present, no fetches yet")
+    status, at, warnings, note = _status_from_diagnostic(diag)
+    return ProviderCheck("Upstox", "market", status, at, warnings, note)
+
+
 def probe_stooq() -> ProviderCheck:
     """Stooq: circuit-breaker state from fetcher module."""
     try:
@@ -500,7 +522,9 @@ def probe_stored_datasets(now_ist: Optional[datetime] = None) -> List[ProviderCh
 
 def collect_all_health() -> List[ProviderCheck]:
     """Every probe. Pure: no network, no Streamlit."""
+    upstox = probe_upstox()
     return [
+        *([upstox] if upstox is not None else []),
         probe_angel(),
         probe_stooq(),
         probe_yahoo(),

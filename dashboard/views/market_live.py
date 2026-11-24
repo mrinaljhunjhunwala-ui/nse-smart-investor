@@ -122,7 +122,8 @@ def render() -> None:
         if not raw:
             from utils.live_price import get_live_prices_batch
             raw     = get_live_prices_batch(tickers_list, max_workers=20)
-            _source = "Yahoo Finance"
+            _source = ("Upstox" if any(isinstance(q, dict) and q.get("source") == "upstox"
+                                       for q in raw.values()) else "Yahoo Finance")
 
 
         rows = []
@@ -203,6 +204,7 @@ def render() -> None:
             from utils.live_price import relay_source_label
             _relay_lbl = relay_source_label(recs)
             src = ((_relay_lbl.replace("live (", "").rstrip(")") if _relay_lbl else "")
+                   or ("Upstox" if any(r.get("source") == "upstox" for r in recs) else "")
                    or ("Angel One" if any("net_chg" in r for r in recs) else "Yahoo Finance"))
         rows = []
         for q in recs:

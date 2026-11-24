@@ -142,6 +142,12 @@ import data.angel_fetcher as _angel  # noqa: E402
 
 _angel._secrets_section = lambda: {}
 
+# Upstox: same idea; tests set UPSTOX_ANALYTICS_TOKEN when they want it configured.
+import data.upstox_fetcher as _upstox  # noqa: E402
+
+_upstox._secrets_section = lambda: {}
+os.environ.pop("UPSTOX_ANALYTICS_TOKEN", None)
+
 
 def pytest_configure(config):
     config.addinivalue_line(

@@ -468,6 +468,21 @@ def relay_source_label(quotes, now=None) -> Optional[str]:
         return None
 
 
+# ─── Upstox tier (data/upstox_fetcher.py) ───────────────────────────────────
+
+def _upstox_quotes(symbols: List[str]) -> Dict[str, dict]:
+    """{symbol: quote} from Upstox for usable answers; {} (no call at all) when no
+    token is configured. Quotes carry "source": "upstox". Never raises."""
+    try:
+        from data import upstox_fetcher as _up
+        if not symbols or not _up.is_configured():
+            return {}
+        return {s: q for s, q in _up.get_batch_quotes(list(symbols)).items() if _usable(q)}
+    except Exception as e:
+        _log.debug("upstox tier skipped: %s", e)
+        return {}
+
+
 # ─── Public interface ────────────────────────────────────────────────────────
 
 def get_live_price(symbol: str) -> Optional[float]:
@@ -495,6 +510,11 @@ def get_live_quote(symbol: str) -> Optional[dict]:
     """
     clean_ns = (symbol if symbol.endswith(".NS") else f"{symbol}.NS")
     clean    = symbol.replace(".NS", "").upper()
+
+    # Upstox tier (only when an analytics token is configured; else no call).
+    _uq = _upstox_quotes([symbol]).get(symbol)
+    if _uq:
+        return _uq
 
     # Relay tier: fresh Angel One quote from scripts/price_relay.py, if any.
     _rq = relay_quotes([symbol]).get(symbol)
@@ -587,6 +607,14 @@ def get_live_prices_batch(
 
     results: Dict[str, Optional[dict]] = {s: None for s in symbols}
     remaining: List[str] = list(symbols)
+
+    # ── Upstox tier: only when an analytics token is configured ─────────────
+    _up = _upstox_quotes(remaining)
+    if _up:
+        results.update(_up)
+        remaining = [s for s in remaining if s not in _up]
+        if not remaining:
+            return results
 
     # ── Relay tier: one shared KV read serves every fresh symbol ────────────
     _relay = relay_quotes(remaining)

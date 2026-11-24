@@ -30,6 +30,7 @@ jobs:
     # trade_store writes this SQLite file instead; it is cached between runs and uploaded.
     env:
       STORE_FALLBACK_PATH: data/store_fallback.db
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}  # empty = Upstox off
       PRICE_STORE_PATH: data/price_store.db
     # 20, not 8 (2026-09-28): the full-universe scan regularly ran past 8 min
     # (runs on 2026-09-25 and 09-27 were cancelled before persisting anything),

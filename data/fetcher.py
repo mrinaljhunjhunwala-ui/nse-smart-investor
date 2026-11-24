@@ -895,7 +895,7 @@ def _later_tier_wins(held: pd.DataFrame, new: pd.DataFrame, period: str) -> bool
 def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
     """
     Fetch OHLCV for one ticker.
-    Priority: Angel One (Tier 0) → PriceStore (Tier 0.5, daily only) → Stooq
+    Priority: Upstox (Tier -1, only with a token) → Angel One (Tier 0) → PriceStore (Tier 0.5, daily only) → Stooq
     (Tier 1) → Yahoo Finance (Tier 2) → NSE bhavcopy (Tier 3, daily only, last
     ~60 sessions, NOT split-adjusted).
     Results are cached in-process with TTL expiry (5 minutes) — repeated calls
@@ -938,8 +938,28 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
             held[:] = [(frame, provider, problem)]
         return None
 
+    # ── Tier -1: Upstox (only when an analytics token is configured) ─────────
+    try:
+        from data import upstox_fetcher as _up
+        if _up.is_configured():
+            df = _up.fetch_historical(ticker, period=period, interval=interval)
+            if df is not None and not df.empty:
+                served = "Upstox"
+                _record_provider_diagnostic("Upstox", ok=True, symbol=ticker)
+                df = _hold_if_suspect(df, "Upstox")
+            else:
+                df = None
+                _why = _up.last_error().get("reason") or ""
+                _record_provider_diagnostic("Upstox", ok=False, symbol=ticker,
+                                            reason=f"returned no data ({_why})" if _why else "returned no data")
+    except Exception as e:
+        df = None
+        _fail("Upstox", e)
+
     # ── Tier 0: Angel One SmartAPI (only if credentials configured) ───────────
     try:
+        if df is not None and not df.empty:
+            raise _SkipAngel
         import importlib
         _af = importlib.import_module(".angel_fetcher", __package__)
         _ao_fetch, _ao_ok = _af.fetch_historical, _af.is_configured

@@ -50,6 +50,7 @@ jobs:
     # trade_store writes this SQLite file instead; it is cached between runs and uploaded.
     env:
       STORE_FALLBACK_PATH: data/store_fallback.db
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}  # empty = Upstox off
       PRICE_STORE_PATH: data/price_store.db
     # Timeout covers both scans back-to-back plus setup: 2 min Top Picks +
     # ~2 min Tomorrow's Watchlist + 2 min pip install + slack = 12 min. Kept
