@@ -179,7 +179,7 @@ those four steps (it still does FII/DII cash flows and the verdict-ledger return
 | Run it now | `sudo systemctl start nse-eod-refresh` |
 | Last run's log | `sudo journalctl -u nse-eod-refresh -n 80` |
 
-Each run reads about 3 days of files and writes a few MB to the database.
+Each run fetches the latest trading day (set `EOD_DAYS=3` in the secrets file to backfill more) and takes about 15–40 minutes, mostly database writes.
 
 ## Costs and limits
 

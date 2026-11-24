@@ -10,7 +10,7 @@ set -uo pipefail
 
 cd /opt/nse-smart-investor
 PY=/opt/nse-smart-investor/.venv-relay/bin/python
-DAYS="${EOD_DAYS:-3}"
+DAYS="${EOD_DAYS:-1}"
 failed=0
 
 run() {

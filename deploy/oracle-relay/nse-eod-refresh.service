@@ -12,7 +12,7 @@ EnvironmentFile=/etc/nse-price-relay.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONUTF8=1
 ExecStart=/bin/bash /opt/nse-smart-investor/deploy/oracle-relay/eod_refresh.sh
-TimeoutStartSec=45min
+TimeoutStartSec=90min
 NoNewPrivileges=true
 ProtectSystem=full
 PrivateTmp=true
