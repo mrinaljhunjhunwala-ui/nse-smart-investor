@@ -1,0 +1,7 @@
+[Unit]
+Description=NSE Smart Investor - nightly Postgres backup (7 days kept)
+
+[Service]
+Type=oneshot
+User=postgres
+ExecStart=/bin/bash -c 'f=/var/backups/nse-postgres/nse-$(date -u +%%Y%%m%%d).dump; pg_dump -Fc -d nse -f "$f.tmp" && mv "$f.tmp" "$f" && find /var/backups/nse-postgres -name "nse-*.dump" -mtime +7 -delete'
