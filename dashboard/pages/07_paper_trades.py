@@ -103,7 +103,7 @@ try:
             "⚠️ **Your paper trades are stored on temporary disk and will RESET when the "
             "app redeploys** (typically every few days on Streamlit Cloud, or on any code "
             "update). That's why older trades disappear. **To keep full history permanently**, "
-            "connect a free Postgres database (Neon or Supabase, 5-min setup): add a "
+            "connect a Postgres database: add a "
             "`DATABASE_URL` in the app's Secrets. See `dashboard/DB_SETUP.md`. "
             "Until then, export your trades below to keep a copy.",
             icon="🗄️",
@@ -118,51 +118,6 @@ try:
             icon="✅",
         )
 
-    with st.expander("🔌 Test storage connection", expanded=False):
-        if st.button("Run connection test", key="pers_test_btn"):
-            _secret_seen = False
-            _masked = "—"
-            _which = "—"
-            try:
-                _raw = _pers_ts._database_url()
-                if _raw:
-                    _secret_seen = True
-                    import re as _re
-                    _masked = _re.sub(r"://[^@]*@", "://***@", str(_raw))
-                try:
-                    import streamlit as _sst
-                    if "database" in _sst.secrets and "url" in _sst.secrets["database"]:
-                        _which = "[database].url"
-                    elif "DATABASE_URL" in _sst.secrets:
-                        _which = "DATABASE_URL (flat)"
-                    else:
-                        _which = "not found in st.secrets"
-                except Exception as _we:
-                    _which = f"secrets read error: {_we}"
-            except Exception as _de:
-                _which = f"diag error: {_de}"
-
-            st.caption(f"🔎 Secret detected by app: **{'YES' if _secret_seen else 'NO'}**  ·  "
-                       f"source: `{_which}`")
-            if _secret_seen:
-                st.caption(f"🔎 Using (password masked): `{_masked}`")
-
-            _r = _pers_ts.validate_persistence()
-            _c1, _c2, _c3 = st.columns(3)
-            _c1.metric("Backend",    _r.get("backend", "—"))
-            _c2.metric("Reachable",  "✅ Yes" if _r.get("reachable") else "❌ No")
-            _c3.metric("Schema OK",  "✅ Yes" if _r.get("schema_ok") else "❌ No")
-            if _r.get("error"):
-                st.error(f"Error: {_r['error']}")
-            elif _r.get("reachable") and _r.get("schema_ok") and not _r.get("ephemeral"):
-                st.success("Connection good — persistence is working.")
-            elif _r.get("ephemeral") and not _secret_seen:
-                st.warning("The DATABASE_URL secret is **not being read** by the app.")
-            elif _r.get("ephemeral") and _secret_seen:
-                st.warning("Secret IS read but backend is still SQLite — likely old code is "
-                           "running. Reboot the app from 'Manage app'.")
-        else:
-            st.caption("Click to verify the database is connected and the schema is valid.")
 except Exception as _pers_e:
     import logging; logging.getLogger("dashboard.paper_trades").warning("Persistence status banner failed: %s", _pers_e)
 
@@ -812,31 +767,31 @@ else:
         f'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Today\'s P&amp;L</div>'
+        f'<div class="t-label" style="margin-bottom:3px">Today\'s P&amp;L</div>'
         f'<div style="font-size:22px;font-weight:700;color:{_td_col}">{_td_arr} ₹{fmt_inr(abs(_pt_today_pnl))}'
         + (" <span style='font-size:10px;color:var(--dim)'>·stale</span>" if _prices_stale else "") +
         f'</div></div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Unrealised P&amp;L</div>'
+        f'<div class="t-label" style="margin-bottom:3px">Unrealised P&amp;L</div>'
         f'<div style="font-size:22px;font-weight:700;color:{_ur_col}">{_ur_arr} ₹{fmt_inr(abs(_pt_unrealised))} '
         f'<span style="font-size:13px">({_pt_unr_pct:+.1f}%)</span></div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">'
+        f'<div class="t-label" style="margin-bottom:3px">'
         f'Realised P&amp;L · net &nbsp;<span style="color:var(--dim)">({_wins_cnt}/{_n_closed} won)</span></div>'
         f'<div style="font-size:22px;font-weight:700;color:{_re_col}">{_re_arr} ₹{fmt_inr(abs(_pt_realised))}</div>'
         f'<div style="font-size:10px;color:var(--dim)">after est. charges ₹{fmt_inr(_pt_charges)}</div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Deployed Capital</div>'
+        f'<div class="t-label" style="margin-bottom:3px">Deployed Capital</div>'
         f'<div style="font-size:22px;font-weight:700;color:var(--ink)">₹{fmt_inr(_pt_deployed)}</div>'
         f'</div>'
 
         f'<div style="flex:1;min-width:130px">'
-        f'<div style="font-size:10px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Positions</div>'
+        f'<div class="t-label" style="margin-bottom:3px">Positions</div>'
         f'<div style="font-size:20px;font-weight:700">'
         f'<span style="color:var(--bull)">{_n_open}</span> open &nbsp; '
         f'<span style="color:var(--ink-mid);font-size:16px">{_n_closed} closed</span></div>'
@@ -920,7 +875,7 @@ else:
                 f'</div></div>'
                 # Progress bar
                 f'<div style="margin-bottom:6px">'
-                f'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-bottom:3px">'
+                f'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:3px">'
                 f'<span>SL ₹{_sl:,.2f}</span>'
                 f'<span>Entry ₹{_ep:,.2f}</span>'
                 f'<span>Now ₹{_cur:,.2f}</span>'
@@ -1142,19 +1097,19 @@ else:
             st.markdown(
                 f'<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">'
                 f'<div style="flex:1;min-width:120px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid {_wr_c}">'
-                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Win Rate</div>'
+                f'<div class="t-label">Win Rate</div>'
                 f'<div style="font-size:22px;font-weight:700;color:{_wr_c}">{_wr_ins:.0f}%</div>'
                 f'<div style="font-size:11px;color:var(--dim)">{len(_wins_ins)}/{_n_ins} trades</div></div>'
                 f'<div style="flex:1;min-width:120px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid {_pay_c}">'
-                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Payoff Ratio</div>'
+                f'<div class="t-label">Payoff Ratio</div>'
                 f'<div style="font-size:22px;font-weight:700;color:{_pay_c}">{_pay_ins:.2f}:1</div>'
                 f'<div style="font-size:11px;color:var(--dim)">avg win / avg loss</div></div>'
                 f'<div style="flex:1;min-width:140px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid {_exp_c}">'
-                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Expectancy</div>'
+                f'<div class="t-label">Expectancy</div>'
                 f'<div style="font-size:22px;font-weight:700;color:{_exp_c}">₹{_exp_ins:,.0f}</div>'
                 f'<div style="font-size:11px;color:var(--dim)">avg ₹ per trade</div></div>'
                 f'<div style="flex:1;min-width:120px;background:var(--surface);border-radius:8px;padding:12px 14px;border-top:3px solid var(--azure)">'
-                f'<div style="font-size:10px;color:var(--dim);text-transform:uppercase">Avg Win</div>'
+                f'<div class="t-label">Avg Win</div>'
                 f'<div style="font-size:22px;font-weight:700;color:var(--bull)">₹{_aw_ins:,.0f}</div>'
                 f'<div style="font-size:11px;color:var(--dim)">avg loss ₹{abs(_al_ins):,.0f}</div></div>'
                 f'</div>',
@@ -1241,3 +1196,59 @@ else:
             file_name=f"paper_trades_{_safe_acc}.csv",
             mime="text/csv",
         )
+
+
+# ── Settings (moved to the bottom, 2026-11-25 UX review #20) ──────────────────
+def _render_storage_test() -> None:
+    import trade_store as _pers_ts
+    with st.expander("🔌 Test storage connection", expanded=False):
+        if st.button("Run connection test", key="pers_test_btn"):
+            _secret_seen = False
+            _masked = "—"
+            _which = "—"
+            try:
+                _raw = _pers_ts._database_url()
+                if _raw:
+                    _secret_seen = True
+                    import re as _re
+                    _masked = _re.sub(r"://[^@]*@", "://***@", str(_raw))
+                try:
+                    import streamlit as _sst
+                    if "database" in _sst.secrets and "url" in _sst.secrets["database"]:
+                        _which = "[database].url"
+                    elif "DATABASE_URL" in _sst.secrets:
+                        _which = "DATABASE_URL (flat)"
+                    else:
+                        _which = "not found in st.secrets"
+                except Exception as _we:
+                    _which = f"secrets read error: {_we}"
+            except Exception as _de:
+                _which = f"diag error: {_de}"
+
+            st.caption(f"🔎 Secret detected by app: **{'YES' if _secret_seen else 'NO'}**  ·  "
+                       f"source: `{_which}`")
+            if _secret_seen:
+                st.caption(f"🔎 Using (password masked): `{_masked}`")
+
+            _r = _pers_ts.validate_persistence()
+            _c1, _c2, _c3 = st.columns(3)
+            _c1.metric("Backend",    _r.get("backend", "—"))
+            _c2.metric("Reachable",  "✅ Yes" if _r.get("reachable") else "❌ No")
+            _c3.metric("Schema OK",  "✅ Yes" if _r.get("schema_ok") else "❌ No")
+            if _r.get("error"):
+                st.error(f"Error: {_r['error']}")
+            elif _r.get("reachable") and _r.get("schema_ok") and not _r.get("ephemeral"):
+                st.success("Connection good — persistence is working.")
+            elif _r.get("ephemeral") and not _secret_seen:
+                st.warning("The DATABASE_URL secret is **not being read** by the app.")
+            elif _r.get("ephemeral") and _secret_seen:
+                st.warning("Secret IS read but backend is still SQLite — likely old code is "
+                           "running. Reboot the app from 'Manage app'.")
+        else:
+            st.caption("Click to verify the database is connected and the schema is valid.")
+
+
+try:
+    _render_storage_test()
+except Exception as _st_e:
+    import logging; logging.getLogger("dashboard.paper_trades").warning("Storage test panel failed: %s", _st_e)

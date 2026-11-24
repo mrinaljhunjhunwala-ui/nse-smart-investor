@@ -486,7 +486,7 @@ def _render_follow_through() -> None:
             continue
         _act = _r.get("composite_action")
         _sc = _num(_r.get("composite_score"))
-        _rows = [("Ref", _px(_r.get("entry_price")))]
+        _rows = [("Entry", _px(_r.get("entry_price")))]
         if _basis == "now":
             _now = (_live.get(str(_r.get("ticker"))) or {}).get("price")
             _rows.append(("Now", f"{_px(_now)} {chip_delta(_move)}"))
@@ -651,7 +651,7 @@ def _card_bg(tok: str) -> str:
 
 _BG = {"breakout": _card_bg("bull"), "breakdown": _card_bg("bear"), "reversal": _card_bg("violet")}
 
-_TABLE_COLS = [("#", "l"), ("Ticker", "l"), ("Ref", "r"), ("Invalidation", "r"), ("Measured move", "r"),
+_TABLE_COLS = [("#", "l"), ("Ticker", "l"), ("Entry", "r"), ("Stop", "r"), ("Target", "r"),
                ("R:R", "r"), ("Score", "r"), ("Conviction", "l"), ("Setup", "l")]
 
 
@@ -722,8 +722,10 @@ def _render_detail(it: dict, rank: int, kind: str, key_prefix: str) -> None:
             if _horizon else ""
         )
         + (
-            f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
-            f'Ref ₹{_entry:,.2f} · Invalidation ₹{_sl:,.2f} · Measured move ₹{_tp:,.2f}</div>'
+            f'<div class="t-value-sm" style="margin-top:5px;color:var(--ink)">'
+            f'<span class="t-label">Entry</span> ₹{_entry:,.2f} · '
+            f'<span class="t-label">Stop</span> <span style="color:var(--bear)">₹{_sl:,.2f}</span> · '
+            f'<span class="t-label">Target</span> <span style="color:var(--bull)">₹{_tp:,.2f}</span></div>'
             if _show_levels else ""
         )
         + "</div>",

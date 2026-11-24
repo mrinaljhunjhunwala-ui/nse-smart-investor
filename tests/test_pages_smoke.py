@@ -363,5 +363,5 @@ def test_command_centre_paper_box_and_breadth_text():
     assert not at.exception, at.exception
     html = "\n".join(str(m.value) for m in at.markdown)
     assert "📂 Open paper trades · 1" in html and "TCS" in html and "without a live price" in html
-    assert any(b.label == "📂 Open Paper Trades" for b in at.button)
+    assert any(b.label == "📂 Paper trades" for b in at.button)
     assert "font-size:16px" in html and "Market breadth" in html
