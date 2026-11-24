@@ -211,6 +211,14 @@ your VCN **→ Security Lists → Default Security List → Add Ingress Rules**:
 | Back up now | `sudo systemctl start nse-pg-backup` |
 | Restore a backup | `sudo -u postgres pg_restore -d nse --clean /var/backups/nse-postgres/nse-YYYYMMDD.dump` |
 
+## Staying up on Always Free
+
+Oracle may stop an Always Free VM that looks idle for a week (CPU, network and memory all under
+20%). `nse-keepbusy.timer` (installed by setup.sh) runs a lowest-priority CPU loop for 20 minutes
+each hour between 00:00 and 08:59 IST so the VM never looks idle; it never slows the relay or
+the database. If the VM still goes down, the GitHub workflow **Database health** checks the
+database every hour and sends a Telegram message (and another when it is back).
+
 ## Costs and limits
 
 - Oracle: the A1 / E2.1.Micro VM and one reserved IP are Always Free.
