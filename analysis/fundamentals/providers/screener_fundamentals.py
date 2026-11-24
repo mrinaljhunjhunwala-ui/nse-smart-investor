@@ -17,8 +17,12 @@ Symbol resolution:
 """
 from __future__ import annotations
 
+import calendar
 import logging
 import re
+import threading
+import time
+from collections import Counter
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
@@ -36,6 +40,18 @@ _CR = 1e7                       # Rs. Crore → absolute INR
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/122.0 Safari/537.36")
 _TIMEOUT = 12                   # seconds
+_MIN_INTERVAL_S = 1.2           # polite throttle between Screener requests (process-wide)
+_throttle_lock = threading.Lock()
+_last_request = [0.0]
+
+
+def _throttle() -> None:
+    """Space Screener requests at least _MIN_INTERVAL_S apart (all threads)."""
+    with _throttle_lock:
+        wait = _last_request[0] + _MIN_INTERVAL_S - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_request[0] = time.monotonic()
 
 # Screener section-id → (row label on the site → normalized field name)
 _PL_MAP = {
@@ -51,6 +67,8 @@ _BS_MAP = {
     "Equity Capital":       "_equity_capital",     # combined with reserves
     "Reserves":             "_reserves",
     "Borrowings":           "total_debt",
+    "Borrowing":            "total_debt",          # banks / NBFCs use the singular
+    "Deposits":             "_deposits",           # banks: kept apart from debt (rule 3)
     "Other Liabilities":    "_other_liab",
     "Total Liabilities":    "total_liabilities",
     "Fixed Assets":         "_fixed_assets",
@@ -89,13 +107,43 @@ def _parse_col_date(header: str) -> Optional[date]:
     """'Mar 2024' | 'Mar 2024 *' | 'TTM' → date or None (TTM ignored)."""
     if not header:
         return None
-    h = re.sub(r"[\s *]+", " ", header).strip()
+    # Screener marks standalone figures on a consolidated page as "Mar 2015 (S)"
+    # (SBILIFE): strip the marker, or every column was unparseable and dropped.
+    h = re.sub(r"\([^)]*\)", " ", header)
+    h = re.sub(r"[\s *]+", " ", h).strip()
     if h.upper() == "TTM":
         return None
     try:
-        return datetime.strptime(h, "%b %Y").date().replace(day=28)
+        d = datetime.strptime(h, "%b %Y").date()
     except ValueError:
         return None
+    # Month-end, like Yahoo and the filings, so the same fiscal period lines up
+    # across providers (was the 28th, which duplicated every year in the merge).
+    return d.replace(day=calendar.monthrange(d.year, d.month)[1])
+
+
+def _annual_month(dates: List[Optional[date]]) -> Optional[int]:
+    """The company's fiscal-year-end month: the most common column month."""
+    months = Counter(d.month for d in dates if d is not None)
+    if not months:
+        return None
+    return months.most_common(1)[0][0]
+
+
+def _has_numbers(html: str) -> bool:
+    """True when the profit-loss section carries at least one numeric cell.
+
+    Screener serves an empty consolidated page (200, section present, every
+    value blank) for some companies (SBILIFE); the standalone page has the data.
+    """
+    i = html.find('id="profit-loss"')
+    if i < 0:
+        return False
+    chunk = html[i:i + 60000]
+    end = chunk.find("</section>")
+    if end > 0:
+        chunk = chunk[:end]
+    return re.search(r"<td[^>]*>\s*-?[\d,]+(?:\.\d+)?%?\s*</td>", chunk) is not None
 
 
 class ScreenerFundamentalProvider(FundamentalProvider):
@@ -119,19 +167,29 @@ class ScreenerFundamentalProvider(FundamentalProvider):
 
     # ── raw fetch (only network seam; monkeypatched in tests) ───────────────
     def _fetch_html(self, symbol: str) -> Optional[str]:
-        """Fetch the company page HTML. Returns None on 404 (unknown ticker)."""
+        """Fetch the company page HTML. Returns None only when Screener has no
+        page with numbers for this ticker (404 / empty pages).
+
+        Consolidated is tried first, then standalone when consolidated is
+        missing or empty. Throttling / blocking (429, 403, 5xx) is a transport
+        failure: it raises, so the caller does not cache "unknown ticker".
+        """
         code = symbol.upper().replace(".NS", "").replace(".BO", "").strip()
+        empty_page: Optional[str] = None
         for path in (f"/company/{code}/consolidated/", f"/company/{code}/"):
             url = f"https://www.screener.in{path}"
+            _throttle()
             try:
                 r = self._session.get(url, timeout=_TIMEOUT)
             except requests.RequestException as e:
                 raise RuntimeError(f"Screener fetch failed for {symbol}: {e}") from e
+            if r.status_code in (403, 429) or r.status_code >= 500:
+                raise RuntimeError(f"Screener HTTP {r.status_code} for {symbol} (throttled/blocked)")
             if r.status_code == 200 and "profit-loss" in r.text:
-                return r.text
-            if r.status_code == 404:
-                continue
-        return None
+                if _has_numbers(r.text):
+                    return r.text
+                empty_page = empty_page or r.text
+        return empty_page
 
     def _raw(self, symbol: str) -> Optional[dict]:
         """Parsed page dict, cached. Returns None if the ticker is unknown to Screener."""
@@ -286,6 +344,13 @@ class ScreenerFundamentalProvider(FundamentalProvider):
         headers = section["headers"]
         # Drop TTM columns entirely from statements (they aren't a period).
         col_dates = [_parse_col_date(h) for h in headers]
+        if period == "annual":
+            # Screener appends an interim column (e.g. "Sep 2026" half-year balance
+            # sheet) to annual tables. It is not a fiscal year: drop any column whose
+            # month differs from the company's fiscal-year-end month.
+            fy_month = _annual_month(col_dates)
+            col_dates = [d if (d is not None and d.month == fy_month) else None
+                         for d in col_dates]
         row_vals: Dict[str, List[Optional[float]]] = {
             fld: [None] * len(headers) for fld in set(label_map.values())
         }
@@ -405,11 +470,13 @@ class ScreenerFundamentalProvider(FundamentalProvider):
         book_value = top.get("Book Value")
         cmp_ = top.get("Current Price")
         pb = (cmp_ / book_value) if (cmp_ is not None and book_value not in (None, 0)) else None
+        mcap = top.get("Market Cap")                   # Rs. Crore on the page
         return RatioSnapshot(
             as_of=date.today(),
             roe=roe, roce=roce,
             debt_to_equity=d2e,
             pe=pe, pb=pb,
+            market_cap=(mcap * _CR) if mcap is not None else None,
         )
 
     def company_info(self, symbol: str) -> dict:

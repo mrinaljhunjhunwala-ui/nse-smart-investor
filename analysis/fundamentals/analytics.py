@@ -186,24 +186,45 @@ def roce(cf: CompanyFundamentals) -> AnalyticResult:
               EBIT            = IncomeStatement.operating_income (latest)
               Capital Employed = BalanceSheet.total_assets − current_liabilities (latest)
 
+    Fallbacks, in order, when current liabilities are not reported (Screener's
+    balance sheet has none): the vendor's own ROCE (Screener top ratio), then
+    EBIT / (total equity + total debt).
+
     Data source: existing normalized statements only (no provider/network change).
     Edge cases: any input missing → unavailable (None, never 0); non-positive capital
-    employed → unavailable (ROCE not meaningful).
+    employed → unavailable (ROCE not meaningful). Not meaningful for banks / NBFCs /
+    insurers (rule 3): callers drop it for financials via sector_classification.
     """
     inc = cf.latest_income()
     bal = cf.latest_balance()
     ebit = inc.operating_income if inc else None
+    if (ebit is not None and bal is not None and bal.total_assets is not None
+            and bal.current_liabilities is not None):
+        ce = bal.total_assets - bal.current_liabilities
+        if ce <= 0:
+            return _na("ROCE", "%",
+                       f"capital employed non-positive ({ce:.0f}) — ROCE not meaningful")
+        return AnalyticResult("ROCE", round(ebit / ce * 100, 2), "%", True, "high",
+                              detail={"ebit": ebit, "capital_employed": ce,
+                                      "total_assets": bal.total_assets,
+                                      "current_liabilities": bal.current_liabilities,
+                                      "source": cf.provider_name})
+    vendor = cf.ratios.roce if cf.ratios else None
+    if vendor is not None:
+        return AnalyticResult("ROCE", round(vendor * 100, 2), "%", True, "medium",
+                              detail={"method": "vendor ROCE (ratios)",
+                                      "source": (cf.provenance or {}).get("ratios", cf.provider_name)})
     if ebit is None:
         return _na("ROCE", "%", "missing operating income (EBIT)")
-    if bal is None or bal.total_assets is None or bal.current_liabilities is None:
-        return _na("ROCE", "%", "missing total assets or current liabilities")
-    ce = bal.total_assets - bal.current_liabilities
+    if bal is None or bal.total_equity is None or bal.total_debt is None:
+        return _na("ROCE", "%", "missing current liabilities, and equity or debt for the fallback")
+    ce = bal.total_equity + bal.total_debt
     if ce <= 0:
         return _na("ROCE", "%", f"capital employed non-positive ({ce:.0f}) — ROCE not meaningful")
-    return AnalyticResult("ROCE", round(ebit / ce * 100, 2), "%", True, "high",
+    return AnalyticResult("ROCE", round(ebit / ce * 100, 2), "%", True, "medium",
                           detail={"ebit": ebit, "capital_employed": ce,
-                                  "total_assets": bal.total_assets,
-                                  "current_liabilities": bal.current_liabilities,
+                                  "method": "EBIT / (equity + debt)",
+                                  "total_equity": bal.total_equity, "total_debt": bal.total_debt,
                                   "source": cf.provider_name})
 
 

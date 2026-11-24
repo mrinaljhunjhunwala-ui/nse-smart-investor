@@ -202,6 +202,15 @@ def quality_ratio_keys(profile: Optional[SectorProfile]) -> tuple:
     return tuple(keys)
 
 
+def shows_roce_and_leverage(profile: Optional[SectorProfile]) -> bool:
+    """Whether ROCE and debt/equity may be shown at all (CLAUDE.md rule 3).
+
+    False for banks / NBFCs / insurers / financial services: borrowed money is
+    their raw material, so pages show P/B + ROE in their place.
+    """
+    return not (profile is not None and profile.is_financial)
+
+
 def classify_sector(raw: Optional[str], name: Optional[str] = None) -> SectorProfile:
     """Map a raw sector label (and optional company name) to a SectorProfile.
 
