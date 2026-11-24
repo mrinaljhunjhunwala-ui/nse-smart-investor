@@ -140,10 +140,35 @@ class YahooFundamentalProvider(FundamentalProvider):
         self._raw_cache.set(key, raw)
         return raw
 
+    def _statement_df(self, symbol: str, period: PeriodType, which: str):
+        """The raw statement frame, or None when it is not reported in rupees.
+
+        Yahoo reports some Indian companies' statements in another currency
+        (INFY: financialCurrency = USD). Every consumer treats statements as
+        absolute INR, so a USD series read as rupees made INFY's revenue about
+        1/88th of the truth. Such statements are dropped: Screener (INR) fills
+        them, and one series never mixes currencies. Ratios are kept (P/E, P/B,
+        ROE and margins are currency-neutral; marketCap is quoted in INR).
+        """
+        raw = self._raw(symbol, period)
+        cur = self._statement_currency(symbol)
+        if cur not in (None, "INR"):
+            _log.info("Yahoo statements for %s are in %s, not INR — dropped", symbol, cur)
+            return None
+        return raw.get(which)
+
+    def _statement_currency(self, symbol: str) -> Optional[str]:
+        try:
+            info = self._raw(symbol, "annual").get("info") or {}
+        except Exception:
+            return None
+        cur = info.get("financialCurrency")
+        return str(cur).upper() if cur else None
+
     # ── normalized statement builders ───────────────────────────────────────
     def get_income_statement(self, symbol, period: PeriodType = "annual",
                              limit: int = 10) -> List[IncomeStatement]:
-        df = self._raw(symbol, period).get("income")
+        df = self._statement_df(symbol, period, "income")
         if df is None or getattr(df, "empty", True):
             return []
         rows = {k: _row(df, c) for k, c in _INCOME_MAP.items()}
@@ -160,7 +185,7 @@ class YahooFundamentalProvider(FundamentalProvider):
 
     def get_balance_sheet(self, symbol, period: PeriodType = "annual",
                           limit: int = 10) -> List[BalanceSheet]:
-        df = self._raw(symbol, period).get("balance")
+        df = self._statement_df(symbol, period, "balance")
         if df is None or getattr(df, "empty", True):
             return []
         rows = {k: _row(df, c) for k, c in _BALANCE_MAP.items()}
@@ -180,7 +205,7 @@ class YahooFundamentalProvider(FundamentalProvider):
 
     def get_cash_flow(self, symbol, period: PeriodType = "annual",
                       limit: int = 10) -> List[CashFlow]:
-        df = self._raw(symbol, period).get("cashflow")
+        df = self._statement_df(symbol, period, "cashflow")
         if df is None or getattr(df, "empty", True):
             return []
         rows = {k: _row(df, c) for k, c in _CASHFLOW_MAP.items()}
@@ -225,4 +250,7 @@ class YahooFundamentalProvider(FundamentalProvider):
         info = self._raw(symbol, "annual").get("info") or {}
         return {"company_name": info.get("longName") or info.get("shortName"),
                 "sector": info.get("sector"),
-                "currency": info.get("financialCurrency") or "INR"}
+                # Non-INR statements are dropped (see _statement_df), so what this
+                # provider hands the service is rupees-only.
+                "currency": "INR",
+                "reported_currency": info.get("financialCurrency") or "INR"}

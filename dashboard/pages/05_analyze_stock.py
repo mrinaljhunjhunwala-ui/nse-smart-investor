@@ -289,8 +289,8 @@ def _cached_fund_card(ticker: str, sector: str | None, company_name: str | None 
     from analysis.fundamentals.valuation import build_valuation_context
     from analysis.sector_classification import classify_sector
     _cf = _fund_service().get_fundamentals(ticker)
-    if _cf is None:
-        return None
+    if _cf is None or not _cf.has_any_data():
+        return None              # → "Fundamentals unavailable" empty state, not a card of "—"
     _sp = classify_sector(sector, name=company_name)
     _val = build_valuation_context(_cf, sector_profile=_sp)
     _an = _fund_analytics.compute_all(_cf, cagr_years=5)
@@ -301,7 +301,7 @@ def _cached_fund_card(ticker: str, sector: str | None, company_name: str | None 
             return float(_r.value)
         return None
 
-    return {
+    _card = {
         "group": _sp.group, "is_financial": bool(_sp.is_financial),
         "preferred": _val.preferred_valuation or _sp.preferred_valuation,
         "note": _sp.note, "provider": _cf.provider_name,
@@ -312,6 +312,10 @@ def _cached_fund_card(ticker: str, sector: str | None, company_name: str | None 
         "de": _v("debt_to_equity"), "de_ok": bool(_sp.leverage_warning_applies),
         "rev_cagr": _v("revenue_cagr"), "eps_cagr": _v("eps_cagr"),
     }
+    _metrics = ("pe", "pb", "ev_ebitda", "roe", "roce", "de", "rev_cagr", "eps_cagr")
+    if all(_card[k] is None for k in _metrics):
+        return None
+    return _card
 
 
 def _overview_chart(df):
@@ -708,6 +712,7 @@ if analyze_btn or _prefill_active or (
                 _fv_an = None
                 _fv_th = None
                 _fv_cf = None
+                _fv_val_failed = False
                 # SPEED FIX: route through page-level cached helpers so the
                 # SAME banner on a rerun (period change, popover open, checkbox
                 # toggle) is instant, and the fundamentals TTL cache is the
@@ -733,6 +738,7 @@ if analyze_btn or _prefill_active or (
                         _fv_val_guard  = getattr(_fv_va, "triggered_guard", None)
                         _fv_val_reason = getattr(_fv_va, "justification", None)
                 except Exception as _fv_val_e:
+                    _fv_val_failed = True
                     import logging
                     logging.getLogger("dashboard.analyze_stock").debug(
                         "FinalVerdict valuation fetch failed for %s: %s", ticker, _fv_val_e)
@@ -827,7 +833,9 @@ if analyze_btn or _prefill_active or (
 
                 # Searched every source and found no statements at all → the
                 # long lens says "not enough fundamental data" (final_verdict).
-                _fv_fund_missing = _fv_cf is not None and not _fv_cf.has_any_data()
+                # A valuation that raised also means no usable fundamentals.
+                _fv_fund_missing = _fv_val_failed or (
+                    _fv_cf is not None and not _fv_cf.has_any_data())
                 _fv = _fv_combine(
                     composite_score=cs.score,
                     composite_action=cs.action,
@@ -2338,7 +2346,7 @@ if analyze_btn or _prefill_active or (
                     if _cagr_results and any(r.confidence in ("medium", "low") for r in _cagr_results):
                         st.caption(
                             "📊 **Data coverage note:** the *data:* label above measures how many "
-                            "years of history Yahoo Finance returned (~4–5 for most NSE names) — "
+                            "years of history the sources returned (Screener ~10, Yahoo ~4) — "
                             "**not** whether the number itself is good. Colour on the value = "
                             "the metric's own health (green good · amber ok · red weak)."
                         )

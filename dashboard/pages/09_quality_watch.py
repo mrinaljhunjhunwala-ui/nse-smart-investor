@@ -139,7 +139,7 @@ def _assess_one(ticker: str) -> dict:
         from analysis.fundamentals import analytics as _fund_analytics
         from analysis.fundamentals.valuation import build_valuation_context
         from analysis.fundamentals.valuation_decision import assess_valuation
-        from analysis.sector_classification import classify_sector
+        from analysis.sector_classification import classify_sector, shows_roce_and_leverage
         from data.universe import get_sector
 
         cf = _fund_service().get_fundamentals(ticker)
@@ -163,6 +163,13 @@ def _assess_one(ticker: str) -> dict:
             "roce": getattr(r, "roce", None) if r else None,
             "debt_to_equity": getattr(r, "debt_to_equity", None) if r else None,
         })
+        if not shows_roce_and_leverage(sector_profile):
+            # Rule 3: never score, rank or show ROCE / D/E for lenders and insurers.
+            out["roce"] = out["debt_to_equity"] = None
+        elif out["roce"] is None:
+            _rc = analytics_res.get("roce")
+            if getattr(_rc, "available", False) and _rc.value is not None:
+                out["roce"] = _rc.value / 100.0        # analytics is in %, ratios are fractions
         # Same Fundamental score Analyze Stock uses (Piotroski F + growth +
         # valuation sanity), revenue growth, and where / how old the figures are.
         try:
@@ -226,7 +233,7 @@ def _log_quality_ranking(ranked: pd.DataFrame) -> None:
 
 
 @st.cache_data(ttl=4 * 60 * 60, show_spinner=False)
-def _run_screen(tickers: tuple, max_workers: int = 12) -> pd.DataFrame:
+def _run_screen(tickers: tuple, max_workers: int = 6) -> pd.DataFrame:
     """Parallel scan — same ThreadPoolExecutor pattern as
     research/score_efficacy.py's _prepare_ticker fan-out. This is what
     makes a nifty500 scan feasible inside one Streamlit page load instead
@@ -254,21 +261,27 @@ def _run_screen(tickers: tuple, max_workers: int = 12) -> pd.DataFrame:
 def _fetch_ratios_only(ticker: str) -> dict:
     try:
         from analysis.fundamentals.service import default_service as _fund_service
+        from analysis.sector_classification import classify_sector, shows_roce_and_leverage
+        from data.universe import get_sector
         cf = _fund_service().get_fundamentals(ticker)
         r = cf.ratios
+        _ok = shows_roce_and_leverage(classify_sector(get_sector(ticker),
+                                                      name=getattr(cf, "company_name", None)))
         return {
+            "capital_ratios_apply": _ok,
             "ticker": ticker,
             "company_name": getattr(cf, "company_name", None),
             "pe": getattr(r, "pe", None) if r else None,
             "pb": getattr(r, "pb", None) if r else None,
             "roe": getattr(r, "roe", None) if r else None,
-            "roce": getattr(r, "roce", None) if r else None,
-            "debt_to_equity": getattr(r, "debt_to_equity", None) if r else None,
+            "roce": (getattr(r, "roce", None) if r else None) if _ok else None,
+            "debt_to_equity": (getattr(r, "debt_to_equity", None) if r else None) if _ok else None,
             "net_margin": getattr(r, "net_margin", None) if r else None,
         }
     except Exception as e:
         _log.debug("quality_watch: peer ratio fetch failed for %s: %s", ticker, e)
-        return {"ticker": ticker, "company_name": None, "pe": None, "pb": None,
+        return {"ticker": ticker, "capital_ratios_apply": True,
+                "company_name": None, "pe": None, "pb": None,
                 "roe": None, "roce": None, "debt_to_equity": None, "net_margin": None}
 
 
@@ -467,7 +480,7 @@ def _fmt_x(val) -> str:
     return f"{val:.2f}x"
 
 
-def _render_financials_tab(cf_annual, cf_quarterly):
+def _render_financials_tab(cf_annual, cf_quarterly, sector=None):
     period_choice = st.radio("Period", ["Annual", "Quarterly"], horizontal=True,
                               key="qw_dd_period")
     cf = cf_quarterly if period_choice == "Quarterly" else cf_annual
@@ -528,10 +541,16 @@ def _render_financials_tab(cf_annual, cf_quarterly):
     st.markdown("##### Key Ratios (latest)")
     r = cf.ratios
     if r:
+        from analysis.sector_classification import classify_sector, shows_roce_and_leverage
         rc1, rc2, rc3, rc4 = st.columns(4)
         rc1.metric("ROE", _fmt_pct(r.roe))
-        rc2.metric("ROCE", _fmt_pct(r.roce))
-        rc3.metric("Debt/Equity", _fmt_x(r.debt_to_equity))
+        if shows_roce_and_leverage(classify_sector(sector, name=cf.company_name)):
+            rc2.metric("ROCE", _fmt_pct(r.roce))
+            rc3.metric("Debt/Equity", _fmt_x(r.debt_to_equity))
+        else:
+            # Rule 3: lenders / insurers are judged on P/B + ROE, never ROCE or D/E.
+            rc2.metric("P/B", _fmt_x(r.pb))
+            rc3.metric("ROA", _fmt_pct(r.roa))
         rc4.metric("Net Margin", _fmt_pct(r.net_margin))
         rc5, rc6, rc7 = st.columns(3)
         rc5.metric("P/E", _fmt_x(r.pe))
@@ -578,6 +597,9 @@ def _render_peers_tab(ticker: str, sector: str):
         "Debt/Equity": df["debt_to_equity"].apply(_fmt_x),
         "Net Margin": df["net_margin"].apply(_fmt_pct),
     })
+    if not bool(df["capital_ratios_apply"].iloc[0]):
+        # Rule 3: the viewed stock is a lender / insurer — compare on P/B + ROE.
+        df_disp = df_disp.drop(columns=["ROCE", "Debt/Equity"])
     df_disp.loc[0, "Ticker"] = f"⭐ {df_disp.loc[0, 'Ticker']}"
     st.dataframe(df_disp, hide_index=True, width="stretch")
     st.caption("⭐ = the stock you're viewing. Ratios are latest-available, annual basis.")
@@ -653,7 +675,7 @@ def render_deep_dive(ticker: str, quality_score: int, score_breakdown: dict):
     tabs = st.tabs(["📊 Financials", "💰 Sizing & Duration", "👥 Peer Comparison",
                     "🏛️ Governance & Flags", "📰 News", "📄 Documents"])
     with tabs[0]:
-        _render_financials_tab(bundle["cf_annual"], bundle["cf_quarterly"])
+        _render_financials_tab(bundle["cf_annual"], bundle["cf_quarterly"], bundle.get("sector"))
     with tabs[1]:
         _render_sizing_tab(ticker, quality_score, score_breakdown)
     with tabs[2]:

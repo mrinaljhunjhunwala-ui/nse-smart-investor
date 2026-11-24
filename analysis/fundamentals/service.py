@@ -203,9 +203,18 @@ class FundamentalsService:
                     patch[f_name] = v
         return replace(primary, **patch) if patch else primary
 
+    @staticmethod
+    def _fiscal_key(row):
+        """Merge key: the period's (year, month). Providers date the same fiscal
+        period differently (Screener used the 28th, Yahoo the month-end), so an
+        exact-date key listed every year twice."""
+        d = row.period.period_end if row and row.period else None
+        return (d.year, d.month) if d else None
+
     @classmethod
-    def _merge_series(cls, primary_list, follower_list, key_getter):
-        """Fill primary rows by period_end match; append follower-only rows (deeper history)."""
+    def _merge_series(cls, primary_list, follower_list, key_getter=None):
+        """Fill primary rows by fiscal-period match; append follower-only rows (deeper history)."""
+        key_getter = key_getter or cls._fiscal_key
         by_key = {key_getter(x): x for x in primary_list}
         for row in follower_list:
             k = key_getter(row)
@@ -214,17 +223,48 @@ class FundamentalsService:
             else:
                 by_key[k] = row
         # newest-first
-        return sorted(by_key.values(),
-                      key=lambda r: (key_getter(r) or datetime(1900, 1, 1).date()),
-                      reverse=True)
+        def _end(r):
+            if r and r.period and r.period.period_end:
+                return r.period.period_end
+            return datetime(1900, 1, 1).date()
+        return sorted(by_key.values(), key=_end, reverse=True)
+
+    # Revenue from two providers that differs by more than this on a shared year is a
+    # different definition (lenders: Yahoo net revenue vs Screener gross interest income).
+    REVENUE_MISMATCH = 0.10
+
+    @classmethod
+    def _one_revenue_source(cls, primary_list, follower_list):
+        """Keep revenue from a single provider when the two define it differently.
+
+        Returns (primary_list, follower_list) with revenue blanked on the side that
+        loses, so a CAGR is never taken across two definitions. The side with more
+        revenue years wins (deeper history); ties keep the primary.
+        """
+        key = cls._fiscal_key
+        prim = {key(r): r.revenue for r in primary_list if r.revenue}
+        foll = {key(r): r.revenue for r in follower_list if r.revenue}
+        shared = [k for k in prim if k in foll]
+        if not shared:
+            return primary_list, follower_list
+        mismatch = any(abs(prim[k] - foll[k]) / max(abs(prim[k]), abs(foll[k]))
+                       > cls.REVENUE_MISMATCH for k in shared)
+        if not mismatch:
+            return primary_list, follower_list
+        if len(foll) > len(prim):
+            primary_list = [replace(r, revenue=None) for r in primary_list]
+        else:
+            follower_list = [replace(r, revenue=None) for r in follower_list]
+        return primary_list, follower_list
 
     @classmethod
     def _merge(cls, primary: CompanyFundamentals,
                follower: CompanyFundamentals) -> CompanyFundamentals:
-        period_key = lambda row: (row.period.period_end if row and row.period else None)
+        period_key = cls._fiscal_key
 
-        primary.income_statements = cls._merge_series(
-            primary.income_statements, follower.income_statements, period_key)
+        p_inc, f_inc = cls._one_revenue_source(
+            primary.income_statements, follower.income_statements)
+        primary.income_statements = cls._merge_series(p_inc, f_inc, period_key)
         primary.balance_sheets = cls._merge_series(
             primary.balance_sheets, follower.balance_sheets, period_key)
         primary.cash_flows = cls._merge_series(

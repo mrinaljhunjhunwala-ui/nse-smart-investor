@@ -119,8 +119,13 @@ class CompanyFundamentals:
         return self.cash_flows[0] if self.cash_flows else None
 
     def has_any_data(self) -> bool:
+        # An empty RatioSnapshot (only `as_of`, e.g. a filing provider with nothing
+        # stored) is not data: counting it listed sources that supplied nothing.
+        ratios = self.ratios
+        has_ratio = ratios is not None and any(
+            getattr(ratios, f) is not None for f in ratios.__dataclass_fields__ if f != "as_of")
         return bool(self.income_statements or self.balance_sheets
-                    or self.cash_flows or self.ratios)
+                    or self.cash_flows or has_ratio)
 
     def field_sources(self) -> Dict[str, Optional[str]]:
         """Which provider supplied each core field, in display order.
