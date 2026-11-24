@@ -1,6 +1,37 @@
-# Latest — 2026-11-18 · Post-close rerun, quieter radar, first look at how the calls did (read this first)
+# Latest — 2026-11-24 · Database moved to the Oracle VM; Neon retired (read this first)
 
 This section is the running memory between sessions; older sections below are history.
+
+## 24 Nov: Postgres on the Oracle Always Free VM (#400–#404)
+- **Why:** Neon's free plan (~5 GB transfer/month) locked the database on 19 Nov and again after
+  the move to a second Neon project. Owner rule: **Oracle stays Always Free; no paid platform
+  until the model's accuracy is proven.**
+- **Where things run now:** VM `nse-relay`, Mumbai, reserved IP **132.226.184.196**, Ubuntu 24.04,
+  A1.Flex 1 OCPU / 6 GB. SSH key on the owner's laptop: `D:\Chrome\ssh-key-2026-11-23.key`.
+  - **Postgres 16** (`deploy/oracle-relay/postgres_setup.sh`): db `nse`, user `nse_app`, SSL +
+    scram only, port 5432 open in the VM firewall and the VCN Default Security List. URL in
+    `/etc/nse-postgres.url` (root). `DATABASE_URL` points here in GitHub secrets, Streamlit
+    secrets, the VM env file (127.0.0.1) and the owner's local `.streamlit/secrets.toml`.
+  - **Backups:** `nse-pg-backup.timer` 01:30 IST on the VM (7 days, `/var/backups/nse-postgres`)
+    and `db-backup.yml` 02:40 IST: gpg-encrypted dump as a 30-day artifact (repo is PUBLIC, so
+    always encrypt). Passphrase = `BACKUP_PASSPHRASE` secret = `/etc/nse-backup.pass` on the VM.
+  - **NSE EOD downloads** (`nse-eod-refresh.timer`, 19:45 + 22:00 IST, 1 day per run): NSE 403s
+    GitHub runners; `refresh-eod-data.yml` skips those steps while repo var `EOD_VIA_RELAY=true`.
+  - **Idle guard** `nse-keepbusy.timer` (00:05–08:59 IST, 20 min/h at idle priority) so Oracle
+    doesn't reclaim the VM; **`db-health.yml`** hourly → Telegram when the DB is down / back.
+- **Data:** new-Neon rows copied with `tools/merge_databases.py`; verdicts the 19–23 Nov alert
+  runs wrote to the `store-fallback` artifacts were recovered (19 Nov 102, 20 Nov 113, 23 Nov 127).
+  **Still to do ~1 Dec:** old Neon project (`OLD_DATABASE_URL`, Oct/Nov paper trades + history)
+  unlocks → run "Merge old database into new" (dry run, then apply); it now writes to the VM.
+- **Angel price relay: NOT working.** Installed and running, but the VM gets TCP timeouts to
+  `apiconnect.angelbroking.com` / `apiconnect.angelone.in` while the laptop connects. IP is
+  registered as Secondary Static IP on the SmartAPI app "ShagStocks" (its redirect URL
+  shagstocks.com is a placeholder; irrelevant). Static IPs only gate order endpoints, so this is
+  Angel-side filtering. Retest scheduled 25 Nov 09:20 IST; next step is Angel support.
+- **Open:** confirm "Reserved public IP count" is in the Always Free limits before the trial
+  ends (~23 Dec); after the old-Neon merge, delete both Neon projects.
+
+## Earlier — 2026-11-18 · Post-close rerun, quieter radar, first look at how the calls did
 
 ## 23 Nov: Angel One price relay on an Oracle VM (`feat/angel-price-relay`, not merged yet)
 - **Why:** the ShagStocks SmartAPI app only answers its registered static IPs, so Streamlit
