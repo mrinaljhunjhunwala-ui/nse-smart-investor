@@ -416,7 +416,7 @@ def _render_command_bar() -> None:
     q = st.sidebar.text_input(
         "🔎 Jump to…",
         key="__cmdbar_q",
-        placeholder="page or ticker (min 2 chars)",
+        placeholder="Page or ticker…",
         label_visibility="collapsed",
     )
     hits = _cmdbar_match(q)
@@ -687,16 +687,16 @@ def render_sidebar(current: str = None) -> None:
                         _q_total += (_qcur - _qbuy) * _qty
                         _q_rows.append((str(_qr.ticker).replace(".NS",""),
                                         (_qcur/_qbuy-1)*100 if _qbuy else 0))
-                _tc = "#00d4aa" if _q_today >= 0 else "#ff4757"
-                _oc = "#00d4aa" if _q_total >= 0 else "#ff4757"
+                _tc = "var(--bull)" if _q_today >= 0 else "var(--bear)"
+                _oc = "var(--bull)" if _q_total >= 0 else "var(--bear)"
                 _op = (_q_total/_q_inv*100) if _q_inv else 0
                 st.markdown(
-                    f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1px">Value</div>'
-                    f'<div style="font-size:22px;font-weight:800;color:#f0f4ff">₹{_q_val:,.0f}</div>'
+                    '<div class="t-label">Value</div>'
+                    f'<div style="font-size:22px;font-weight:800;color:var(--ink)">₹{_q_val:,.0f}</div>'
                     f'<div style="display:flex;gap:14px;margin-top:6px">'
-                    f'<div><div style="font-size:10px;color:#4a5568">TODAY</div>'
+                    f'<div><div style="font-size:11px;color:var(--dim)">TODAY</div>'
                     f'<div style="font-size:14px;font-weight:700;color:{_tc}">{"▲" if _q_today>=0 else "▼"} ₹{abs(_q_today):,.0f}</div></div>'
-                    f'<div><div style="font-size:10px;color:#4a5568">OVERALL</div>'
+                    f'<div><div style="font-size:11px;color:var(--dim)">OVERALL</div>'
                     f'<div style="font-size:14px;font-weight:700;color:{_oc}">{"▲" if _q_total>=0 else "▼"} ₹{abs(_q_total):,.0f} ({_op:+.1f}%)</div></div>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -729,12 +729,12 @@ def render_sidebar(current: str = None) -> None:
                     _pt_qty = int(_ptr.get("quantity", 0) or 0)
                     _pt_cur = _pt_lp.get(str(_ptr["ticker"]), {}).get("price", _pt_ep)
                     _pt_unreal += (_pt_cur - _pt_ep) * _pt_qty
-            _puc = "#00d4aa" if _pt_unreal >= 0 else "#ff4757"
+            _puc = "var(--bull)" if _pt_unreal >= 0 else "var(--bear)"
             st.markdown(
-                f'<div style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:1px">Open Positions</div>'
-                f'<div style="font-size:22px;font-weight:800;color:#f0f4ff">{_pt_n}</div>'
+                '<div class="t-label">Open Positions</div>'
+                f'<div style="font-size:22px;font-weight:800;color:var(--ink)">{_pt_n}</div>'
                 f'<div style="margin-top:6px">'
-                f'<div style="font-size:10px;color:#4a5568">UNREALISED P&amp;L</div>'
+                f'<div style="font-size:11px;color:var(--dim)">UNREALISED P&amp;L</div>'
                 f'<div style="font-size:14px;font-weight:700;color:{_puc}">'
                 f'{"▲" if _pt_unreal>=0 else "▼"} ₹{abs(_pt_unreal):,.0f}</div></div>',
                 unsafe_allow_html=True,
@@ -769,7 +769,7 @@ def render_sidebar(current: str = None) -> None:
         st.sidebar.markdown("VIX: *—*")
 
     for name, (price, chg, dp) in _pulse.items():
-        clr   = "#6faa84" if chg >= 0 else "#c77070"
+        clr   = "var(--bull)" if chg >= 0 else "var(--bear)"
         arrow = "▲" if chg >= 0 else "▼"
         st.sidebar.markdown(
             f'<span style="font-size:11px"><b>{name}</b> '
@@ -918,7 +918,7 @@ def render_sidebar(current: str = None) -> None:
         if _wl_q:
             _wl_p   = _wl_q["price"]
             _wl_chg = _wl_q.get("chg_pct", 0.0)
-            _wl_clr = "#6faa84" if _wl_chg >= 0 else "#c77070"
+            _wl_clr = "var(--bull)" if _wl_chg >= 0 else "var(--bear)"
             _wl_arr = "▲" if _wl_chg >= 0 else "▼"
             _wl_c2.markdown(
                 f'<span style="font-size:11px">₹{_wl_p:,.1f} '
@@ -958,9 +958,9 @@ def render_sidebar(current: str = None) -> None:
                 _ntp = float(_nr.get("tp", 0) or 0)
                 _nt = str(_nr["ticker"]).replace(".NS", "")
                 if _ntp and _ncur >= _ntp:
-                    _notifs.append(("🎯", f"{_nt} hit target ₹{_ntp:,.2f}", "#00d4aa"))
+                    _notifs.append(("🎯", f"{_nt} hit target ₹{_ntp:,.2f}", "var(--bull)"))
                 elif _nsl and _ncur <= _nsl:
-                    _notifs.append(("🚨", f"{_nt} hit stop ₹{_nsl:,.2f}", "#ff4757"))
+                    _notifs.append(("🚨", f"{_nt} hit stop ₹{_nsl:,.2f}", "var(--bear)"))
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass
@@ -970,25 +970,26 @@ def render_sidebar(current: str = None) -> None:
         _nvr = _nvi.get("regime", "normal")
         if _nvr == "unknown":
             # Fail-closed VIX (utils.vix): surface the outage, don't read it as calm.
-            _notifs.append(("⚪", _nvi.get("reason") or "India VIX unavailable", "#8899bb"))
+            _notifs.append(("⚪", _nvi.get("reason") or "India VIX unavailable", "var(--dim)"))
         elif _nvr in ("fear", "panic"):
             # CC-COPY: descriptive only, no instruction (CLAUDE.md rule 1).
-            _notifs.append(("🔴", f"India VIX in the {_nvr} zone", "#ff4757"))
+            _notifs.append(("🔴", f"India VIX in the {_nvr} zone", "var(--bear)"))
         elif _nvr == "complacency":
-            _notifs.append(("😴", "India VIX unusually low (complacency zone)", "#c88a3f"))
+            _notifs.append(("😴", "India VIX unusually low (complacency zone)", "var(--accent)"))
     except Exception as _e:
         _log.debug("nav.%s degraded: %s", "render_sidebar", _e)
         pass
 
     st.sidebar.markdown("---")
     _nb_count = len(_notifs)
-    _nb_color = "#ff4757" if any(c == "#ff4757" for _, _, c in _notifs) else ("#00d4aa" if _nb_count else "#4a5568")
+    _nb_color = ("var(--bear)" if any(c == "var(--bear)" for _, _, c in _notifs)
+                 else ("var(--bull)" if _nb_count else "var(--dim)"))
     with st.sidebar.expander(f"🔔 Notifications ({_nb_count})", expanded=_nb_count > 0):
         if _notifs:
             for _ic, _msg, _col in _notifs:
                 st.markdown(
                     f'<div style="border-left:3px solid {_col};background:rgba(255,255,255,.02);'
-                    f'border-radius:6px;padding:7px 11px;margin:4px 0;font-size:12px;color:#d0d0d0">'
+                    f'border-radius:6px;padding:7px 11px;margin:4px 0;font-size:12px;color:var(--ink-mid)">'
                     f'{_ic} {_msg}</div>', unsafe_allow_html=True)
             if st.button("🎯 Go to Command Centre", key="nb_goto_cc", use_container_width=True):
                 st.session_state["_goto_page"] = "🎯 Command Centre"

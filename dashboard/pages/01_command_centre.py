@@ -70,7 +70,7 @@ st.markdown('<h1 class="page-title-serif">Command <em>Centre</em></h1>', unsafe_
 _mb_now = _mb_dt.datetime.now(_mb_dt.timezone(_mb_dt.timedelta(hours=5, minutes=30)))
 st.markdown(
     f'<p class="page-subtitle">{_mb_now.strftime("%a %d %b %Y · %H:%M IST")} · '
-    'market posture and today\'s top picks. What is moving and what was sent to you: Today.</p>',
+    'market posture and today\'s top picks. For live movers and alerts, see Today.</p>',
     unsafe_allow_html=True,
 )
 
@@ -120,9 +120,22 @@ def _pulse_cells() -> list:
                   f"{_cc_vix_v:.2f}" if isinstance(_cc_vix_v, (int, float)) else "–",
                   _tinted(_cc_vix_r.title() + " zone", _cc_vix_r)
                   if _cc_vix_r != "unknown" else _tinted("Unavailable", "unknown")))
+    _bp, _bl, _bsub = _cc_breadth_pct, _cc_breadth, " · Nifty 500 above SMA50"
+    if not isinstance(_bp, (int, float)):
+        # Regime snapshot has no breadth: use the same bhavcopy breadth the
+        # "Market breadth" line below shows, so the tile never contradicts it.
+        try:
+            from dashboard.shared.breadth_panel import load_breadth as _lb
+            _bd = _lb() or {}
+        except Exception:
+            _bd = {}
+        if isinstance(_bd.get("pct_above_50dma"), (int, float)):
+            _bp = _bd["pct_above_50dma"]
+            _bl = str(_bd.get("breadth_label") or "unknown").lower()
+            _bsub = " · NSE stocks above 50DMA"
     cells.append(("Breadth",
-                  f"{_cc_breadth_pct:.0f}%" if isinstance(_cc_breadth_pct, (int, float)) else "–",
-                  _tinted(_cc_breadth.title(), _cc_breadth) + " · Nifty 500 above SMA50"))
+                  f"{_bp:.0f}%" if isinstance(_bp, (int, float)) else "–",
+                  (_tinted(_bl.title(), _bl) if _bl != "unknown" else "") + _bsub))
     if _cc_flows and _cc_flows.get("fii") is not None:
         _dii = _cc_flows.get("dii")
         cells.append(("FII net · ₹ Cr",
@@ -818,9 +831,12 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
                 f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_b["headline"]}</div>'
-                + (f'<div style="font-size:11px;color:var(--dim);margin-top:4px">'
-                   f'Ref ₹{_b_lvl["entry"]:,.2f} · Invalidation ₹{_b_lvl["sl"]:,.2f} · '
-                   f'Measured move ₹{_b_lvl["tp"]:,.2f} '
+                + (f'<div class="t-value-sm" style="margin-top:5px;color:var(--ink)">'
+                   f'<span class="t-label">Entry</span> ₹{_b_lvl["entry"]:,.2f} · '
+                   f'<span class="t-label">Stop</span> '
+                   f'<span style="color:var(--bear)">₹{_b_lvl["sl"]:,.2f}</span> · '
+                   f'<span class="t-label">Target</span> '
+                   f'<span style="color:var(--bull)">₹{_b_lvl["tp"]:,.2f}</span> '
                    f'{_b_live_span}</div>'
                    if _b_lvl["entry"] else "")
                 + (f'<div style="font-size:11px;color:var(--azure);margin-top:2px">'
@@ -955,7 +971,7 @@ def _render_open_trades_line() -> None:
         _ot1.markdown(
             f'<div style="font-size:16px;color:var(--ink)"><b>📂 Open paper trades · {sm["n"]}</b>'
             f'<span style="font-size:15px"> &nbsp;{tot}</span></div>', unsafe_allow_html=True)
-        if _ot2.button("📂 Open Paper Trades", key="cc_open_paper", width="stretch"):
+        if _ot2.button("📂 Paper trades", key="cc_open_paper", width="stretch"):
             from dashboard.shared.nav import nav_to
             nav_to("Paper Trades")
         if sm["rows"]:

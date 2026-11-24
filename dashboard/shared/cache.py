@@ -101,6 +101,7 @@ import trade_store as _store
 # modules under dashboard/, so after a deploy a live process can pair new
 # dashboard code with an old trade_store (AttributeError on 2026-09-28).
 from utils.snapshot_time import scan_snapshot_current as _scan_snapshot_current, snapshot_age_seconds
+from dashboard.shared.tokens import COLORS as _TOK  # noqa: E402
 _log = logging.getLogger("dashboard.cache")
 
 
@@ -369,14 +370,14 @@ def _trade_type(headline: str) -> tuple:
     """
     h = (headline or "").lower()
     if any(k in h for k in ("breakout", "52-week high", "52w high", "new high", "all-time high")):
-        return ("Breakout", "🚀", "#00d4aa")
+        return ("Breakout", "🚀", _TOK["bull"])
     if any(k in h for k in ("oversold", "bounce", "reversal", "support")):
-        return ("Oversold Bounce", "🔄", "#5b8def")
+        return ("Oversold Bounce", "🔄", _TOK["azure"])
     if any(k in h for k in ("momentum", "uptrend", "above sma", "strong trend", "trending")):
-        return ("Momentum", "📈", "#c88a3f")
+        return ("Momentum", "📈", _TOK["accent"])
     if any(k in h for k in ("pullback", "dip")):
-        return ("Pullback", "🎯", "#a78bfa")
-    return ("Trend", "•", "#8899bb")
+        return ("Pullback", "🎯", _TOK["violet"])
+    return ("Trend", "•", _TOK["dim"])
 
 
 def _horizon_countdown(valid_until: str) -> str:
@@ -397,12 +398,12 @@ def _horizon_countdown(valid_until: str) -> str:
     import datetime as _dtm
     _days = (_d - _dtm.date.today()).days
     if _days < 0:
-        return '<span style="color:#c77070;font-weight:700">⚠ past its window — reassess</span>'
+        return '<span style="color:var(--bear);font-weight:700">⚠ past its window — reassess</span>'
     if _days == 0:
-        return '<span style="color:#FF9800;font-weight:700">⚠ expires today</span>'
+        return '<span style="color:var(--amber);font-weight:700">⚠ expires today</span>'
     if _days <= 2:
-        return f'<span style="color:#FF9800;font-weight:600">expires in {_days}d</span>'
-    return f'<span style="color:#6a8caf">expires in {_days}d</span>'
+        return f'<span style="color:var(--amber);font-weight:600">expires in {_days}d</span>'
+    return f'<span style="color:var(--azure)">expires in {_days}d</span>'
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2003,7 +2004,7 @@ def _sparkline_svg(prices: list, w: int = 120, h: int = 28) -> str:
         f"{i/(len(prices)-1)*w:.1f},{h - (p-lo)/rng*(h-4) - 2:.1f}"
         for i, p in enumerate(prices)
     )
-    col = "#00d4aa" if prices[-1] >= prices[0] else "#ff4757"
+    col = _TOK["bull"] if prices[-1] >= prices[0] else _TOK["bear"]
     return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="display:block">'
             f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="1.6" '
             f'stroke-linejoin="round" stroke-linecap="round"/></svg>')

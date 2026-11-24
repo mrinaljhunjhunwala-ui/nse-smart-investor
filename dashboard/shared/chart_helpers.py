@@ -566,22 +566,23 @@ def _live_top_bar():
             _vinfo = _ltb_vix()
             _vv = _vinfo.get("vix")
             if _vv:
-                _vcol = "#00d4aa" if _vv < 16 else "#c88a3f" if _vv < 22 else "#ff4757"
+                _vcol = "var(--bull)" if _vv < 16 else "var(--accent)" if _vv < 22 else "var(--bear)"
                 _chips += (
-                    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
-                    f'border-left:3px solid {_vcol};border-radius:8px;padding:6px 12px;min-width:96px">'
-                    f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
+                    f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);'
+                    f'border-left:3px solid {_vcol};border-radius:8px;padding:3px 10px;min-width:96px">'
+                    f'<div style="font-size:11px;color:var(--dim);letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
                     f'<div style="font-size:14px;font-weight:700;color:{_vcol}">{_vv:.1f} '
-                    f'<span style="font-size:10px;color:#8899bb">{_vinfo.get("regime","").title()}</span></div></div>'
+                    f'<span style="font-size:11px;color:var(--dim)">'
+                    f'{_vinfo.get("regime","").title()}</span></div></div>'
                 )
             else:
                 # Fail-closed VIX: an explicit "unavailable" chip, not a missing one.
                 _chips += (
                     '<div title="VIX unavailable from NSE / Yahoo — fear filter treated as closed" '
-                    'style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
-                    'border-left:3px solid #8899bb;border-radius:8px;padding:6px 12px;min-width:96px">'
-                    '<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
-                    '<div style="font-size:12px;font-weight:700;color:#8899bb">Unavailable</div></div>'
+                    'style="background:var(--surface);border:1px solid rgba(255,255,255,.05);'
+                    'border-left:3px solid var(--dim);border-radius:8px;padding:3px 10px;min-width:96px">'
+                    '<div style="font-size:11px;color:var(--dim);letter-spacing:.6px;font-weight:600">INDIA VIX</div>'
+                    '<div style="font-size:12px;font-weight:700;color:var(--dim)">Unavailable</div></div>'
                 )
         except Exception as _e:
             _log.debug("chart_helpers.%s degraded: %s", "_live_top_bar", _e)
@@ -589,11 +590,11 @@ def _live_top_bar():
         try:
             from utils.market_hours import market_status as _ltb_ms
             _msd = _ltb_ms()
-            _scol = "#00d4aa" if _msd.get("is_open") else "#ff4757"
+            _scol = "var(--bull)" if _msd.get("is_open") else "var(--bear)"
             _chips += (
-                f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
-                f'border-left:3px solid {_scol};border-radius:8px;padding:6px 12px;min-width:110px">'
-                f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">MARKET</div>'
+                f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_scol};border-radius:8px;padding:3px 10px;min-width:110px">'
+                f'<div style="font-size:11px;color:var(--dim);letter-spacing:.6px;font-weight:600">MARKET</div>'
                 f'<div style="font-size:13px;font-weight:700;color:{_scol}">{_msd.get("status","")}</div></div>'
             )
         except Exception as _e:
@@ -608,7 +609,7 @@ def _live_top_bar():
         _prev = st.session_state.setdefault("_topbar_prev_vals", {})
         _new_prev = {}
         for _lbl, _val, _chg in (_idx or []):
-            _c = "#00d4aa" if _chg >= 0 else "#ff4757"
+            _c = "var(--bull)" if _chg >= 0 else "var(--bear)"
             _a = "▲" if _chg >= 0 else "▼"
             # F7b · a11y — the chip is primary data (indices strip), so it
             # should be announced with a semantic label rather than hidden.
@@ -624,17 +625,17 @@ def _live_top_bar():
             _new_prev[_lbl] = _val
             _chips += (
                 f'<div class="topbar-chip{_tick_cls}" role="group" aria-label="{_aria}" '
-                f'style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
-                f'border-left:3px solid {_c};border-radius:8px;padding:6px 12px;min-width:118px">'
-                f'<div style="font-size:9px;color:#4a5568;letter-spacing:.6px;font-weight:600">{_lbl}</div>'
-                f'<div style="font-size:14px;font-weight:700;color:#f0f4ff">{_val:,.0f} '
+                f'style="background:var(--surface);border:1px solid rgba(255,255,255,.05);'
+                f'border-left:3px solid {_c};border-radius:8px;padding:3px 10px;min-width:118px">'
+                f'<div style="font-size:11px;color:var(--dim);letter-spacing:.6px;font-weight:600">{_lbl}</div>'
+                f'<div style="font-size:14px;font-weight:700;color:var(--ink)">{_val:,.0f} '
                 f'<span style="font-size:11px;color:{_c}"><span aria-hidden="true">{_a}</span>{abs(_chg):.2f}%</span></div></div>'
             )
         st.session_state["_topbar_prev_vals"] = _new_prev
         if _chips:
             st.markdown(
                 f'<div role="region" aria-label="Live market indices" '
-                f'style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{_chips}</div>',
+                f'style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">{_chips}</div>',
                 unsafe_allow_html=True,
             )
     except Exception as _e:
@@ -649,15 +650,15 @@ def _live_top_bar():
             for _kind, _sym, _px, _chg in _tt:
                 if _kind != _seen_kind:
                     _seen_kind = _kind
-                    _tt_items += (f'<span style="margin:0 10px 0 22px;color:#8899bb;font-size:11px;'
+                    _tt_items += (f'<span style="margin:0 10px 0 22px;color:var(--dim);font-size:11px;'
                                   f'letter-spacing:.6px;font-weight:600">'
                                   f'{"NIFTY 50 GAINERS" if _kind == "gainer" else "NIFTY 50 LOSERS"}</span>')
-                _tc = "#00d4aa" if _chg >= 0 else "#ff4757"
+                _tc = "var(--bull)" if _chg >= 0 else "var(--bear)"
                 _ta = "▲" if _chg >= 0 else "▼"
                 _tt_items += (
                     f'<span style="margin:0 22px">'
-                    f'<b style="color:#f0f4ff">{_sym}</b> '
-                    f'<span style="color:#c8d0e0">₹{_px:,.2f}</span> '
+                    f'<b style="color:var(--ink)">{_sym}</b> '
+                    f'<span style="color:var(--ink-mid)">₹{_px:,.2f}</span> '
                     f'<span style="color:{_tc}">{_ta}{abs(_chg):.2f}%</span></span>'
                 )
             # F7b · a11y — the auto-scrolling ticker is decorative visual
@@ -725,13 +726,13 @@ def render_top_bar():
             st.caption(f"**{_ix_pick}** — {len(_ix_rows)} stocks · {_ix_up} up / {len(_ix_rows)-_ix_up} down")
             _ix_html = '<div style="display:flex;flex-wrap:wrap;gap:6px">'
             for _nm, _px, _ch in _ix_rows:
-                _cc = "#00d4aa" if _ch >= 0 else "#ff4757"
+                _cc = "var(--bull)" if _ch >= 0 else "var(--bear)"
                 _ar = "▲" if _ch >= 0 else "▼"
                 _ix_html += (
-                    f'<div style="background:#0d1526;border:1px solid rgba(255,255,255,.05);'
+                    f'<div style="background:var(--surface);border:1px solid rgba(255,255,255,.05);'
                     f'border-left:3px solid {_cc};border-radius:7px;padding:6px 11px;min-width:120px">'
-                    f'<div style="font-size:12px;font-weight:700;color:#f0f4ff">{_nm}</div>'
-                    f'<div style="font-size:12px;color:#c8d0e0">₹{_px:,.2f} '
+                    f'<div style="font-size:12px;font-weight:700;color:var(--ink)">{_nm}</div>'
+                    f'<div style="font-size:12px;color:var(--ink-mid)">₹{_px:,.2f} '
                     f'<span style="color:{_cc};font-weight:600">{_ar}{abs(_ch):.2f}%</span></div></div>'
                 )
             _ix_html += '</div>'

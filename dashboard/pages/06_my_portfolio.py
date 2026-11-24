@@ -447,7 +447,7 @@ if _csv_source is not None:
                 "border:1px solid color-mix(in srgb,var(--accent) 30%,var(--hairline));"
                 "border-radius:var(--r-sharp);padding:14px 16px"
             )
-            _k_lbl = ("font-size:10px;text-transform:uppercase;"
+            _k_lbl = ("font-size:11px;text-transform:uppercase;"
                       "letter-spacing:.1em;color:var(--dim);font-weight:600")
             _k_v   = ("font-family:var(--font-mono);font-size:22px;font-weight:500;"
                       "margin-top:4px;letter-spacing:-.01em;color:var(--ink)")
@@ -851,7 +851,7 @@ if _csv_source is not None:
                     f'{_h_pnl_a} ₹{abs(h.pnl):,.0f} ({h.pnl_pct:+.1f}%)'
                     f'</div>'
                     f'<div style="margin-bottom:6px">'
-                    f'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-bottom:2px">'
+                    f'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:2px">'
                     f'<span>SL ₹{_h_sl:,.0f}</span><span>Target ₹{_h_tp:,.0f}</span></div>'
                     f'<div style="width:100%;height:6px;background:var(--hairline);border-radius:3px;position:relative">'
                     f'<div style="position:absolute;left:0;width:{_h_cur_pct:.0f}%;height:100%;'

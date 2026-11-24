@@ -202,8 +202,8 @@ def render_checklist_expander(sym: str, df_daily: pd.DataFrame,
             st.markdown(
                 f'<div class="card-blue" style="margin-top:10px">'
                 f'<b>Reference levels:</b> '
-                f'Ref ₹{tp["entry"]:.2f} · Invalidation ₹{tp["sl"]:.2f} (2×ATR) · '
-                f'Measured move ₹{tp["tp"]:.2f} (3×ATR) · R:R {tp["rr"]:.1f}x'
+                f'Entry ₹{tp["entry"]:.2f} · Stop ₹{tp["sl"]:.2f} (2×ATR) · '
+                f'Target ₹{tp["tp"]:.2f} (3×ATR) · R:R {tp["rr"]:.1f}x'
                 f'</div>',
                 unsafe_allow_html=True,
             )

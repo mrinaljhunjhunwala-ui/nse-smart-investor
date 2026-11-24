@@ -169,7 +169,7 @@ if _backend == "sqlite":
         "🗄 Storage is **SQLite** (ephemeral on Streamlit Cloud). Every redeploy "
         "resets the verdict ledger — a 20-day calibration needs 20 days of "
         "uninterrupted deploy. For durable calibration set **DATABASE_URL** "
-        "(Neon/Supabase free tier). See `dashboard/DB_SETUP.md`.",
+        "(any hosted Postgres database). See `dashboard/DB_SETUP.md`.",
         icon="⚠️",
     )
 
@@ -179,11 +179,12 @@ with st.spinner("Fetching forward returns for eligible verdicts…"):
     if _NEW_API:
         _vl.backfill_sector_returns()      # stored bhavcopy closes only — no network
 
-_col1, _col2, _col3, _col4 = st.columns(4)
-_col1.metric("Backend", _backend.upper())
-_col2.metric("Rows scanned this load", _stats.get("scanned", 0))
-_col3.metric("Rows updated", _stats.get("updated", 0))
-_col4.metric("Tickers fetched", _stats.get("tickers_fetched", 0))
+with st.expander("Diagnostics", expanded=False):
+    _col1, _col2, _col3, _col4 = st.columns(4)
+    _col1.metric("Backend", _backend.upper())
+    _col2.metric("Rows scanned this load", _stats.get("scanned", 0))
+    _col3.metric("Rows updated", _stats.get("updated", 0))
+    _col4.metric("Tickers fetched", _stats.get("tickers_fetched", 0))
 
 def _ledger_read_error(df) -> "str | None":
     """Error type if `df` is empty because the ledger read failed. getattr: an

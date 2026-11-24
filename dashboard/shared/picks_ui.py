@@ -81,11 +81,16 @@ def render_pick_analysis(pick: dict, key_prefix: str):
         from dashboard.shared.ui_components import data_as_of as _pk_asof
         _ts  = str(pick.get("timestamp") or "").strip()
         _src = str(pick.get("source") or "").strip() or "yfinance"
-        _when = _ts[11:16] + " IST" if len(_ts) >= 16 else (_ts or "unknown")
-        st.markdown(
-            _pk_asof(_when, source=_src, ttl_hint="cache 15 min"),
-            unsafe_allow_html=True,
-        )
+        if not _ts:
+            # No per-pick timestamp: fall back to the scan time; if that is
+            # missing too, omit the stamp rather than print "as of unknown".
+            _ts = str(pick.get("scan_time") or pick.get("scanned_at") or "").strip()
+        _when = (_ts[11:16] + " IST") if len(_ts) >= 16 else _ts
+        if _when:
+            st.markdown(
+                _pk_asof(_when, source=_src, ttl_hint="cache 15 min"),
+                unsafe_allow_html=True,
+            )
     except Exception:
         pass
 
