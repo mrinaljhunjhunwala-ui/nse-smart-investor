@@ -1,0 +1,58 @@
+name: Database backup (off-VM)
+
+# The app's Postgres runs on the Oracle VM, which also keeps 7 nightly dumps on
+# its own disk. If the VM itself were lost, those would go with it, so this job
+# pulls a dump every night and keeps it as a workflow artifact for 30 days.
+# The repo is public, so the dump is encrypted (AES-256, gpg) with the
+# BACKUP_PASSPHRASE secret before upload; the same passphrase is on the VM in
+# /etc/nse-backup.pass (root only). To restore, download the artifact, then:
+#   gpg --batch --passphrase-file pass.txt -d nse-YYYYMMDD.dump.gpg > nse.dump
+#   pg_restore -d "<DATABASE_URL>" --clean --if-exists --no-owner nse.dump
+
+on:
+  schedule:
+    - cron: "10 21 * * *"   # 21:10 UTC = 02:40 IST, after the VM's own 01:30 dump
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install pg_dump 16 (matches the server)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-16 >/dev/null
+
+      - name: Dump and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::DATABASE_URL and BACKUP_PASSPHRASE secrets are required"
+            exit 1
+          fi
+          f="nse-$(date -u +%Y%m%d).dump"
+          /usr/lib/postgresql/16/bin/pg_dump -Fc --no-owner -d "$DATABASE_URL" -f "$f"
+          ls -lh "$f"
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+              --passphrase-fd 3 -o "$f.gpg" "$f" 3<<<"$BACKUP_PASSPHRASE"
+          rm -f "$f"
+          ls -lh "$f.gpg"
+          echo "ARTIFACT=$f.gpg" >> "$GITHUB_ENV"
+
+      - name: Keep for 30 days
+        uses: actions/upload-artifact@v6
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: ${{ env.ARTIFACT }}
+          retention-days: 30
+          if-no-files-found: error
