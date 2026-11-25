@@ -216,3 +216,83 @@ def test_regime_calibration_by_source():
     out = vl.regime_calibration(horizon_days=20, nifty_df=None, source="tomorrow_watchlist")
     assert out["n"].sum() == 2
     assert vl.regime_calibration(horizon_days=20, nifty_df=None, source="nope").empty
+
+
+# ── direction-aware wins (audit 2026-11-25 F3) ───────────────────────────────
+
+def _seed_tagged(rows, d="2026-09-01"):
+    """rows: (ticker, verdict, ret_20d, nifty_ret_20d, tag)."""
+    vl.ensure_schema()
+    with sqlite3.connect(trade_store._SQLITE_PATH) as con:
+        for tk, verdict, ret, nret, tag in rows:
+            cur = con.execute(
+                "INSERT INTO verdict_log (logged_at, logged_date, ticker, entry_price, verdict, "
+                "horizon, source) VALUES (?,?,?,?,?,?,?)",
+                (f"{d}T20:00:00", d, tk, 100.0, verdict, "medium", "tomorrow_watchlist"))
+            con.execute("INSERT INTO verdict_forward_returns (verdict_log_id, ret_20d, nifty_ret_20d) "
+                        "VALUES (?,?,?)", (cur.lastrowid, ret, nret))
+            con.execute("INSERT INTO verdict_signal_tags (verdict_log_id, tag) VALUES (?,?)",
+                        (cur.lastrowid, tag))
+
+
+# One tag firing on 1 BUY that rose (right), 3 AVOIDs that rallied (wrong),
+# 1 AVOID that fell (right) and 1 HOLD (no direction).
+_MIXED = [("B1.NS", "BUY", 4.0, 1.0, "mixed"),
+          ("A1.NS", "AVOID", 5.0, 1.0, "mixed"),
+          ("A2.NS", "AVOID", 3.0, 1.0, "mixed"),
+          ("A3.NS", "AVOID", 2.0, 1.0, "mixed"),
+          ("A4.NS", "AVOID", -3.0, 1.0, "mixed"),
+          ("H1.NS", "HOLD", 6.0, 1.0, "mixed")]
+
+
+def test_tag_win_rate_follows_each_calls_direction():
+    _seed_tagged(_MIXED)
+    r = vl.tag_calibration(horizon_days=20, min_n=1).iloc[0]
+    # Before the fix: 5 of 6 rows had ret > 0 -> 83.3% "wins". Now BUY-up and
+    # AVOID-down are right (2), AVOIDs that rallied are wrong (3), HOLD excluded.
+    assert r["n"] == 6 and r["n_directional"] == 5
+    assert r["win_rate"] == 40.0
+    assert r["win_vs_nifty"] == 40.0          # alpha: B1 +3 right, A4 -4 right, A1..A3 wrong
+
+
+def test_subsystem_calibration_is_direction_aware():
+    _seed_tagged(_MIXED)
+    out = vl.calibration_by(group_col="source", horizon_days=20).iloc[0]
+    assert out["win_rate"] == 40.0 and out["n_directional"] == 5
+
+
+def test_avoid_row_wins_when_the_stock_falls():
+    _seed_tagged([("A.NS", "AVOID", -4.0, 0.0, "t"), ("B.NS", "AVOID", 2.0, 0.0, "t")])
+    r = vl.calibration_by(group_col="verdict", horizon_days=20).iloc[0]
+    assert r["verdict"] == "AVOID" and r["win_rate"] == 50.0 and r["win_vs_nifty"] == 50.0
+    assert r["day_win_vs_nifty"] == 100.0     # day mean signed alpha +1
+
+
+def test_hold_only_group_has_no_win_rate():
+    _seed_tagged([("H.NS", "HOLD", 3.0, 0.0, "h")])
+    r = vl.calibration_by(group_col="verdict", horizon_days=20).iloc[0]
+    assert r["n"] == 1 and r["n_directional"] == 0 and pd.isna(r["win_rate"])
+
+
+# ── one ledger read per page load (audit 2026-11-25 F4) ──────────────────────
+
+def test_functions_reuse_a_passed_ledger_without_reading(monkeypatch):
+    _seed_tagged(_MIXED)
+    frame = vl.load_ledger(limit=vl._FULL_LEDGER_LIMIT)
+
+    def _no_read(**k):
+        raise AssertionError("re-read the ledger")
+    monkeypatch.setattr(vl, "load_ledger", _no_read)
+    assert vl.calibration_by(group_col="verdict", horizon_days=20, ledger=frame)["n"].sum() == 6
+    assert vl.calibration_by(group_col="verdict", horizon_days=20, ledger=frame, source="nope").empty
+    vl.live_scorecard(horizon_days=20, ledger=frame)
+    vl.regime_calibration(horizon_days=20, nifty_df=None, ledger=frame)
+    vl.shadow_pnl(horizon_days=20, ledger=frame)
+    assert vl.evaluate_decision_rule(ledger=frame)["status"] == "insufficient"
+
+
+def test_ledger_stamp_changes_when_a_row_is_logged():
+    _seed_tagged(_MIXED[:1])
+    a = vl.ledger_stamp()
+    _seed_tagged(_MIXED[1:2])
+    assert vl.ledger_stamp() != a

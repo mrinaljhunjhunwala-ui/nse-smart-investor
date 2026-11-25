@@ -28,10 +28,10 @@ def test_sends_top_names_once_per_day(monkeypatch):
     msg = sent[0]
     _assert_descriptive(msg)
     assert "B4" in msg and "B5" not in msg          # top 5 only
-    # BUY only at 70+: a breakout under 70 keeps its level but reads WATCH (owner decision, 15 Nov)
+    # Same word as the app (audit F2): a breakout under 70 still reads BUY, with its stop
     assert "BUY  <b>B0</b>  above ₹100.00 · stop ₹94.00 · score 70/90" in msg
-    assert "WATCH  <b>B1</b>  above ₹100.00 · stop ₹94.00 · score 69/90" in msg
-    assert "BUY  <b>B1</b>" not in msg and "WATCH  <b>M&amp;M</b>  — bounce setup" in msg
+    assert "BUY  <b>B1</b>  above ₹100.00 · stop ₹94.00 · score 69/90" in msg
+    assert "WATCH  <b>M&amp;M</b>  — bounce setup" in msg
     assert "M&amp;M" in msg and "ZZZ" not in msg     # escaped; breakdown not listed
     assert ca.check_tomorrow_watchlist(state, "2026-11-06") == 0
 
@@ -53,8 +53,14 @@ def test_empty_breakout_in_bear_market_says_why(monkeypatch):
     assert "held back in the trend down market" in sent[0] and "A</b>" in sent[0]
 
 
-def test_weekly_digest_and_buy_calls_use_the_same_floor():
+def test_alerts_have_no_separate_watch_floor():
+    """Audit 2026-11-25 F2: Telegram carries the app's word, no 70-point relabel."""
     import inspect
-    assert "_floor_word(action_display_label(" in inspect.getsource(ca.check_weekly_digest)
-    assert "_floor_word(verdict_display_label(verdict)" in inspect.getsource(ca._verdict_pick_lines)
-    assert ca._WATCH_FLOOR == 70.0
+    assert not hasattr(ca, "_floor_word") and not hasattr(ca, "_under_watch_floor")
+    assert "action_display_label(" in inspect.getsource(ca.check_weekly_digest)
+    assert "verdict_display_label(verdict)" in inspect.getsource(ca._verdict_pick_lines)
+
+
+def test_breakout_buy_with_no_stop_reads_watch():
+    row = ca._tomorrow_row({"ticker": "NOSL.NS", "entry": 100.0, "sl": None, "score": 72}, "BUY")
+    assert row.startswith("WATCH  <b>NOSL</b>") and "no stop available" in row and "BUY" not in row

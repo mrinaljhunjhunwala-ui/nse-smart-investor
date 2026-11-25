@@ -2092,3 +2092,64 @@ def load_band_record(band: str, horizon_days: int = 20):
     except Exception as _e:
         _log.debug("cache.load_band_record degraded: %s", _e)
         return None
+
+
+# ── Verdict Calibration page reads (audit 2026-11-25 F4) ─────────────────────
+# The page used to run a network backfill and ~8 full-ledger reads on every
+# rerun (each slider / select change). Now: one cached full read, keyed on a
+# cheap stamp (row count / newest id / newest return check) plus the date, so a
+# new row, a backfilled return or a new day refreshes it; the network backfill
+# runs at most once per _LEDGER_BACKFILL_MIN_GAP_S per process (the nightly
+# tools/backfill_ledger.py does the real work).
+_LEDGER_BACKFILL_MIN_GAP_S = 30 * 60
+_ledger_backfill_last = {"at": 0.0, "stats": {}}
+
+
+def ledger_backfill_throttled(*, max_rows: int = 200, force: bool = False) -> dict:
+    """verdict_ledger.backfill_returns + backfill_sector_returns, at most once per
+    _LEDGER_BACKFILL_MIN_GAP_S per process unless `force`. Returns the last run's
+    stats with "skipped": True when throttled. Never raises."""
+    import time as _time
+    now = _time.monotonic()
+    last = _ledger_backfill_last
+    if not force and last["at"] and now - last["at"] < _LEDGER_BACKFILL_MIN_GAP_S:
+        return {**last["stats"], "skipped": True}
+    last["at"] = now
+    stats: dict = {}
+    try:
+        from analysis import verdict_ledger as _vl
+        stats = dict(_vl.backfill_returns(max_rows=max_rows) or {})
+        if hasattr(_vl, "backfill_sector_returns"):
+            _vl.backfill_sector_returns()      # stored bhavcopy closes only — no network
+    except Exception as _e:
+        _log.warning("ledger backfill failed: %s: %s", type(_e).__name__, _e)
+    if stats.get("updated"):
+        load_full_ledger_cached.clear()
+    last["stats"] = stats
+    return {**stats, "skipped": False}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _full_ledger_cached(stamp: str, day: str) -> pd.DataFrame:
+    """Full ledger frame for (stamp, day). Raises on a failed read so a failure
+    is never cached."""
+    from analysis import verdict_ledger as _vl
+    return _vl.load_ledger(limit=_vl._FULL_LEDGER_LIMIT, on_error="raise")
+
+
+def load_full_ledger_cached() -> pd.DataFrame:
+    """Every verdict-ledger row (with forward returns), cached 10 min and
+    refreshed when the ledger changes or the day rolls over. A failed read
+    returns the ledger's tagged empty frame (verdict_ledger.ledger_error
+    names it) and is retried on the next rerun."""
+    from analysis import verdict_ledger as _vl
+    try:
+        stamp = _vl.ledger_stamp() if hasattr(_vl, "ledger_stamp") else "nostamp"
+        return _full_ledger_cached(stamp, datetime.date.today().isoformat())
+    except _vl.LedgerUnavailable as e:
+        return _vl._unavailable_frame(e)
+    except Exception as e:
+        return _vl._unavailable_frame(_vl.LedgerUnavailable(e))
+
+
+load_full_ledger_cached.clear = _full_ledger_cached.clear
