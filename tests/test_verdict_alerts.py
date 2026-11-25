@@ -99,51 +99,46 @@ def test_test_digest_ignores_staleness_and_saves_nothing(monkeypatch):
     assert sent[0].startswith("🧪") and "TEST" in sent[0] and not saved
 
 
-def test_digest_marks_under_70_watch_only_with_record(monkeypatch):
+def test_digest_67_score_reads_the_app_word(monkeypatch):
+    """Audit 2026-11-25 F2: a 67/90 BUY reads BUY in the digest, as on the app's pick card."""
     from tests.test_alert_copy_no_advice import _assert_descriptive
-    buys = [_pick("HI.NS", 74, "BUY"), _pick("LO.NS", 58, "WATCHLIST")]
-    sent = _setup(monkeypatch, buys, {"HI.NS": "BUY", "LO.NS": "WATCH"})
-    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
-    monkeypatch.setattr(ca, "_under_floor_record",
-                        lambda: {"n": 114, "beat_rate": 39.0, "mean_vs_nifty": -0.84})
+    buys = [_pick("HI.NS", 74, "BUY"), _pick("MID.NS", 67, "BUY")]
+    sent = _setup(monkeypatch, buys, {"HI.NS": "BUY", "MID.NS": "BUY"})
+    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("BUY", 80))
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
     msg = sent[0]
     _assert_descriptive(msg)
-    assert "1 of 2 scored under 70 — WATCH, not BUY" in msg and "39%" in msg and "n=114" in msg
-    lo_line = next(ln for ln in msg.splitlines() if "LO</b>" in ln)
-    assert lo_line.startswith("WATCH  <b>LO</b>") and "levels ₹95.00 / ₹110.00" in lo_line
+    assert "WATCH, not BUY" not in msg
+    assert "BUY  <b>MID</b>  ₹100.00 · stop ₹95.00 · target ₹110.00" in msg
 
 
-def test_digest_still_sends_when_nothing_reaches_70(monkeypatch):
-    buys = [_pick(f"T{i}.NS", 57 - i, "WATCHLIST") for i in range(5)]
-    sent = _setup(monkeypatch, buys, {f"T{i}.NS": "WATCH" for i in range(5)})
-    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
-    monkeypatch.setattr(ca, "_under_floor_record", lambda: None)   # ledger unreachable
+def test_digest_buy_without_stop_goes_out_as_watch(monkeypatch):
+    """Audit F5: never a BUY without a stop; no stop at all -> WATCH + note."""
+    buys = [dict(_pick("NOSL.NS", 75, "BUY"), sl=None)]
+    sent = _setup(monkeypatch, buys, {"NOSL.NS": "BUY"})
+    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("BUY", 80))
     assert ca.check_delivery_digest({}, "2026-10-02") == 1
-    assert "None scored 70+ today — all WATCH, not BUY" in sent[0]
-    assert sum(ln.startswith("WATCH  <b>T") for ln in sent[0].splitlines()) == 5
+    head = next(ln for ln in sent[0].splitlines() if "NOSL</b>" in ln)
+    assert head.startswith("WATCH  <b>NOSL</b>") and "no stop available" in head
+    assert "BUY  <b>NOSL" not in sent[0] and "risk " not in sent[0]
 
 
-def test_digest_has_no_watch_note_when_all_clear_70(monkeypatch):
-    sent = _setup(monkeypatch, [_pick("HI.NS", 72, "BUY")], {"HI.NS": "BUY"})
-    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
-    monkeypatch.setattr(ca, "_under_floor_record", lambda: (_ for _ in ()).throw(AssertionError))
-    assert ca.check_delivery_digest({}, "2026-10-02") == 1
-    assert "WATCH, not BUY" not in sent[0]
+def test_stock_line_never_prints_a_buy_without_a_stop():
+    for stop in (None, "", 0, "x", -1):
+        line = ca._stock_line("BUY", "AAA", 100.0, stop, 110.0)
+        assert line.startswith("WATCH  <b>AAA</b>") and "no stop available" in line
+    assert ca._stock_line("STRONG BUY", "AAA", 100.0, None).startswith("WATCH")
+    assert ca._stock_line("BUY", "AAA", 100.0, 95.0, 110.0) == \
+        "BUY  <b>AAA</b>  ₹100.00 · stop ₹95.00 · target ₹110.00"
+    assert ca._stock_line("SELL", "AAA", 100.0) == "SELL  <b>AAA</b>  ₹100.00"   # non-BUY untouched
 
 
-def test_under_70_gets_levels_to_watch_not_a_trade_plan(monkeypatch):
-    from tests.test_alert_copy_no_advice import _assert_descriptive
-    buys = [dict(_pick("LO.NS", 58, "WATCHLIST"), entry=100.0)]
-    sent = _setup(monkeypatch, buys, {"LO.NS": "WATCH"})
-    monkeypatch.setattr(ca, "_verdict_of", lambda b: ("WATCH", 60))
-    monkeypatch.setattr(ca, "_under_floor_record", lambda: None)
-    assert ca.check_delivery_digest({}, "2026-10-02") == 1
-    msg = sent[0]
-    _assert_descriptive(msg)
-    head = next(ln for ln in msg.splitlines() if "LO</b>" in ln)
-    assert head == "WATCH  <b>LO</b>  ₹100.00 · levels ₹95.00 / ₹110.00"   # no stop / target plan
-    assert "   Pharma · score 58/90" in msg
+def test_verdict_alert_uses_the_app_stop_field(monkeypatch):
+    """The stop comes from the same snapshot field the pick card shows (sl, else stop_loss)."""
+    b = dict(_pick("ALT.NS", 75, "BUY"), sl=None, stop_loss=93.0)
+    sent = _setup(monkeypatch, [b], {"ALT.NS": "BUY"})
+    assert ca.check_verdict_alerts({}, "2026-10-02") == 1
+    assert "BUY  <b>ALT</b>  ₹100.00 · stop ₹93.00" in sent[0]
 
 
 def test_digest_uses_the_verdict_word_and_one_footer(monkeypatch):
@@ -224,58 +219,12 @@ def test_combined_message_escapes_html(monkeypatch):
     assert "M&amp;M" in sent[0] and "1 new BUY call</b>" in sent[0]
 
 
-def test_buy_verdict_under_70_is_not_sent_as_a_buy_call(monkeypatch):
-    """Owner decision 15 Nov: under 70 a name reads WATCH everywhere, so it is not a BUY call."""
+def test_buy_verdict_under_70_is_sent_as_the_app_shows_it(monkeypatch):
+    """Audit F2: no alert-only floor; a 66/90 BUY is a BUY call, as on Command Centre."""
     buys = [_pick("HI.NS", 74, "BUY"), _pick("LO.NS", 66, "BUY"), _pick("EDGE.NS", 70, "BUY")]
     sent = _setup(monkeypatch, buys, {"HI.NS": "BUY", "LO.NS": "BUY", "EDGE.NS": "BUY"})
     state = {}
-    assert ca.check_verdict_alerts(state, "2026-10-02") == 2
-    assert "2 new BUY calls" in sent[0] and "HI" in sent[0] and "EDGE" in sent[0] and "LO" not in sent[0]
-    assert "verdict_buy_LO" not in state                         # not marked: it can fire once it reaches 70
-    sent = _setup(monkeypatch, [_pick("LO.NS", 66, "BUY")], {"LO.NS": "BUY"})
-    assert ca.check_verdict_alerts({}, "2026-10-02") == 0 and sent == []
-
-
-def test_floor_word():
-    assert ca._floor_word("BUY", 69.9) == "WATCH" and ca._floor_word("STRONG BUY", 60) == "WATCH"
-    assert ca._floor_word("BUY", 70) == "BUY" and ca._floor_word("STRONG BUY", 85) == "STRONG BUY"
-    assert ca._floor_word("BUY", None) == "BUY" and ca._floor_word("BUY", "x") == "BUY"   # no score: unchanged
-    assert ca._floor_word("SELL", 10) == "SELL" and ca._floor_word("HOLD", 50) == "HOLD"
-
-
-def test_names_new_since_the_open_have_their_own_allowance(monkeypatch):
-    """16 Nov: the first run spent the whole day cap, so later BUYs could not be sent."""
-    import trade_store
-    opening = [_pick(f"O{i}.NS", 70 + i % 15, "BUY") for i in range(30)]
-    _setup_full(monkeypatch, [], opening, {p["ticker"]: "BUY" for p in opening})
-    state = {}
-    day = "2026-11-16"
-    assert ca.check_verdict_alerts(state, day) == ca._VERDICT_MAX_PER_RUN
-    assert ca.check_verdict_alerts(state, day) == ca._VERDICT_MAX_PER_DAY - ca._VERDICT_MAX_PER_RUN
-    assert ca.check_verdict_alerts(state, day) == 0                         # opening list: cap spent
-    later = opening + [_pick("NEW1.NS", 71, "BUY"), _pick("NEW2.NS", 73, "BUY")]
-    sent = _setup_full(monkeypatch, [], later, {p["ticker"]: "BUY" for p in later})
-    assert ca.check_verdict_alerts(state, day) == 2
-    assert "NEW1" in sent[0] and "NEW2" in sent[0]
-    assert ca.check_verdict_alerts(state, day) == 0                         # deduped
-    many = later + [_pick(f"F{i}.NS", 75, "BUY") for i in range(20)]
-    _setup_full(monkeypatch, [], many, {p["ticker"]: "BUY" for p in many})
-    total = 2
-    for _ in range(4):
-        total += ca.check_verdict_alerts(state, day)
-    assert total == ca._VERDICT_FRESH_MAX_PER_DAY                           # fresh names are capped too
-    assert trade_store is not None
-
-
-def test_digest_names_are_not_repeated_and_take_no_slot(monkeypatch):
-    import trade_store
-    picks = [_pick("DIG.NS", 80, "BUY"), _pick("OTHER.NS", 71, "BUY")]
-    sent = _setup(monkeypatch, picks, {"DIG.NS": "BUY", "OTHER.NS": "BUY"})
-    snap = trade_store.kv_get("top_picks_snapshot")
-    digest = {"date": "2026-11-16", "buys": [{"ticker": "DIG.NS", "price": 100.0}]}
-    monkeypatch.setattr(trade_store, "kv_get",
-                        lambda key, *a, **k: digest if key == ca._MORNING_PICKS_KEY else snap)
-    state = {}
-    assert ca.check_verdict_alerts(state, "2026-11-16") == 1
-    assert "OTHER" in sent[0] and "DIG" not in sent[0]
-    assert not any(k.startswith("verdict_") and k.endswith("_DIG") for k in state)
+    assert ca.check_verdict_alerts(state, "2026-10-02") == 3
+    assert "3 new BUY calls" in sent[0] and "BUY  <b>LO</b>" in sent[0]
+    assert state.get("verdict_buy_LO") == "2026-10-02"           # same dedupe key as before
+    assert not hasattr(ca, "_floor_word")

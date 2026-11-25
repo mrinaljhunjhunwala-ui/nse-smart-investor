@@ -39,14 +39,16 @@ def test_buy_line_carries_the_plan():
     assert "hold 2–6 weeks" in " ".join(CA._plan_bits({"price": 100}))     # no horizon on the pick
 
 
-def test_digest_lines_carry_the_plan_but_watch_names_do_not():
+def test_digest_lines_carry_the_plan_but_no_stop_names_do_not():
+    """Every BUY line carries its plan (no 70-point floor since audit F2); a BUY
+    with no stop reads WATCH and gets no trade plan (audit F5)."""
     import alerts.check_alerts as CA
     buys = [{"ticker": "AAA.NS", "price": 100, "sl": 95, "tp": 110, "score": 78, "sector": "IT",
              "action": "STRONG BUY"},
-            {"ticker": "BBB.NS", "price": 50, "sl": 47, "tp": 56, "score": 60, "sector": "IT", "action": "BUY"}]
+            {"ticker": "BBB.NS", "price": 50, "sl": None, "tp": 56, "score": 60, "sector": "IT", "action": "BUY"}]
     text = "\n".join(CA._digest_lines(buys, "2026-11-17T03:13:00+00:00", 5))
     a, b = text.split("BBB")[0], text.split("BBB")[1]
-    assert "risk -5.0% / reward +10.0%" in a and "skip above" not in b
+    assert "risk -5.0% / reward +10.0%" in a and "skip above" not in b and "no stop available" in b
 
 
 def test_recap_left_the_15_minute_run():

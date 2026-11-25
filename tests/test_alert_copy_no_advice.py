@@ -141,10 +141,10 @@ def test_delivery_digest_is_descriptive_and_maps_action_labels(sent, monkeypatch
                         SimpleNamespace(kv_get=lambda k, user_id: _snapshot()))
     assert ca.check_delivery_digest({}, "2026-09-30") == 1
     _assert_descriptive(sent[0])
-    # TICK0/TICK1 score 85/75 (BUY words), TICK2 scores 65 → WATCH, not BUY
+    # TICK2 scores 65: same word the app's pick card shows, no separate alert floor (audit F2)
     lines = sent[0].splitlines()
     assert any(ln.startswith(("STRONG BUY  <b>TICK0", "BUY  <b>TICK0")) for ln in lines)
-    assert any(ln.startswith("WATCH  <b>TICK2</b>") for ln in lines)
+    assert any(ln.startswith(("STRONG BUY  <b>TICK2</b>", "BUY  <b>TICK2</b>")) for ln in lines)
     assert "score 85/90" in sent[0]                            # data unchanged
 
 

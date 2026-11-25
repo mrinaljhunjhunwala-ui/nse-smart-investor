@@ -92,8 +92,27 @@ def _rs(x) -> str:
         return _h(x)
 
 
+_NO_STOP_NOTE = "no stop available"
+
+
+def _has_stop(stop) -> bool:
+    try:
+        return float(stop) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _stock_line(word: str, symbol, price=None, stop=None, target=None, extra: str = "") -> str:
-    """'BUY  <b>SYM</b>  ₹price · stop ₹x · target ₹y' — missing parts dropped."""
+    """'BUY  <b>SYM</b>  ₹price · stop ₹x · target ₹y' — missing parts dropped.
+
+    A BUY / STRONG BUY never goes out without a stop (CLAUDE.md rule 1, audit
+    2026-11-25 F5): with no usable stop the line reads WATCH with a short
+    "no stop available" note, and the downgrade is logged."""
+    if word in ("BUY", "STRONG BUY") and not _has_stop(stop):
+        _log.warning("alert %s %s has no stop: sent as WATCH", word, symbol)
+        print(f"[alerts] {symbol}: {word} with no stop, sent as WATCH")
+        word, stop = "WATCH", None
+        extra = " · ".join(x for x in (extra, _NO_STOP_NOTE) if x)
     parts = [f"{word}  <b>{_h(symbol)}</b>"]
     head = f"{_rs(price)}" if price not in (None, "") else ""
     tail = [s for s in (head,
@@ -752,9 +771,10 @@ def check_opening_update(state: dict, today: str, now: datetime.datetime | None 
 
 
 def _pick_stop(b: dict) -> float:
-    """The stop the Morning Digest printed for this pick, 0.0 when it had none."""
+    """The stop the app shows for this pick (the scan's ``sl``, the same field the
+    Command Centre / Top Picks cards print), 0.0 when it has none."""
     try:
-        return float(b.get("sl") or 0)
+        return float(b.get("sl") or b.get("stop_loss") or b.get("stop") or 0)
     except (TypeError, ValueError):
         return 0.0
 
@@ -897,8 +917,8 @@ def _plan_bits(b: dict, price=None) -> list:
 def _verdict_pick_lines(verdict: str, b: dict, *, reason: bool = True) -> list:
     """'STRONG BUY  <b>PNB</b>  ₹118.40 · stop ₹112.10 · target ₹131.00' + optional reason line."""
     price = b.get("price")
-    line = _stock_line(_floor_word(verdict_display_label(verdict), b.get("score")), _base_symbol(b.get("ticker")),
-                       price if isinstance(price, (int, float)) else None, b.get("sl"), b.get("tp"))
+    line = _stock_line(verdict_display_label(verdict), _base_symbol(b.get("ticker")),
+                       price if isinstance(price, (int, float)) else None, _pick_stop(b) or None, b.get("tp"))
     sector = (b.get("sector") or "").strip()
     why = " · ".join(x for x in (_h(sector[:30]) if sector else "", f"score {b.get('score')}/90") if x)
     if not reason:
@@ -973,11 +993,8 @@ def check_verdict_alerts(state: dict, today: str) -> int:
         verdict = str(getattr(fv, "verdict", "") or "").upper()
         if verdict in _VERDICT_ALERT_TIERS:
             hits.append((verdict, b, fv))
-    # Under _WATCH_FLOOR a name reads WATCH everywhere, so it is not a BUY call.
-    n_all = len(hits)
-    hits = [h for h in hits if not _under_watch_floor(h[1].get("score"))]
-    print(f"[verdicts] {len(hits)} BUY/STRONG BUY at {_WATCH_FLOOR:.0f}+ in scan at "
-          f"{_snapshot_ist_label(gen_at)} ({n_all - len(hits)} under {_WATCH_FLOOR:.0f} left as WATCH)")
+    # Same call the app shows (audit 2026-11-25 F2): no separate score floor here.
+    print(f"[verdicts] {len(hits)} BUY/STRONG BUY in scan at {_snapshot_ist_label(gen_at)}")
 
     regime = _regime_note()
     # The digest already sent its names as BUY this morning: not news, no slot.
@@ -1388,79 +1405,21 @@ def _snapshot_ist_label(gen_at, *, with_date: bool = False) -> str:
     return f"{label}, {ist:%a} {ist.day} {ist:%b}" if with_date else label
 
 
-# Bullish names under this composite score are labelled "Watch only" in the
-# digest: in the shadow ledger they beat Nifty over 5 days less often than
-# not, while 70+ did better (see the Tomorrow's Watchlist scorecard, #253).
-# Labelled, not hidden: in a bear regime scores cluster mid-range by design
-# (#168/#198), so hiding would empty the digest and every follow-up alert
-# that reuses its names (opening update, pick moves, recap, 09:20 watchlist).
+# Score line the record messages compare against ("70+ vs under 70"). It is a
+# research cut for the calibration read only: since the 2026-11-25 audit (F2)
+# alerts no longer relabel BUY as WATCH under it, so Telegram carries exactly
+# the call the app shows (analysis/score.py action -> analysis/action_labels).
 _WATCH_FLOOR = 70.0
-_BEARISH_ACTIONS = frozenset({"EXIT", "CAUTION", "AVOID", "SELL", "STRONG SELL"})
-
-
-def _under_watch_floor(score) -> bool:
-    """True when a composite score is a number below _WATCH_FLOOR. A missing or
-    unreadable score is not treated as under the floor (the caller keeps its word)."""
-    try:
-        return float(score) < _WATCH_FLOOR
-    except (TypeError, ValueError):
-        return False
-
-
-def _floor_word(word: str, score) -> str:
-    """BUY / STRONG BUY reads WATCH when the score is under _WATCH_FLOOR, in
-    every alert (owner decision, 15 Nov 2026: the calibration read showed the
-    60-69 band and the plain BUY tier lagging the Nifty). Display only: verdict
-    strings, ledger rows and dedupe keys are unchanged."""
-    return "WATCH" if word in ("BUY", "STRONG BUY") and _under_watch_floor(score) else word
-
-
-def _under_floor_record() -> "dict | None":
-    """Settled 5-day record of bullish Top Picks names scoring under
-    _WATCH_FLOOR (shadow ledger), as analysis.tw_scorecard.settle_stats; None
-    when the ledger is unreachable or holds fewer than 20 settled names."""
-    try:
-        import pandas as pd
-        from analysis.tw_scorecard import settle_stats
-        from analysis.verdict_ledger import load_ledger
-        df = load_ledger(source="shadow_auto", limit=5000)
-        if df is None or df.empty or "ret_5d" not in df.columns:
-            return None
-        df = df.drop_duplicates(["logged_date", "ticker"])
-        sc = pd.to_numeric(df["composite_score"], errors="coerce")
-        bear = df["composite_action"].astype(str).str.strip().str.upper().isin(_BEARISH_ACTIONS)
-        sub = df[(sc < _WATCH_FLOOR) & ~bear]
-        s = settle_stats(list(zip([1] * len(sub), sub["ret_5d"], sub["nifty_ret_5d"])))
-        return s if s["n"] >= 20 and s["beat_rate"] is not None else None
-    except Exception as _e:
-        _log.debug("under-floor record unavailable: %s", _e)
-        return None
 
 
 def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = None) -> list:
     """Message lines for the Morning Delivery Digest (shared by the real
     digest and --mode=test-digest). One line per pick, action word first;
-    names under _WATCH_FLOOR read WATCH, not BUY."""
+    the word is the one the app shows for the pick (no separate score floor)."""
     lines = [(header or "📈 <b>Morning Delivery Digest</b>")
              + f" · scan at {_snapshot_ist_label(gen_at, with_date=True)}"]
 
-    def _under(b) -> bool:
-        try:
-            return float(b.get("score") or 0) < _WATCH_FLOOR
-        except (TypeError, ValueError):
-            return True
-
     shown = buys[:max_picks]
-    n_under = sum(1 for b in shown if _under(b))
-    if n_under:
-        rec = _under_floor_record()
-        note = (f"⚠️ None scored {_WATCH_FLOOR:.0f}+ today — all WATCH, not BUY"
-                if n_under == len(shown) else
-                f"⚠️ {n_under} of {len(shown)} scored under {_WATCH_FLOOR:.0f} — WATCH, not BUY")
-        if rec:
-            note += (f" (under-{_WATCH_FLOOR:.0f} names beat Nifty {rec['beat_rate']:.0f}% of 5-day "
-                     f"windows, n={rec['n']})")
-        lines.append(note)
     for b in shown:
         price = b.get("price") or b.get("last_price") or b.get("current_price")
         price = price if isinstance(price, (int, float)) else None
@@ -1468,22 +1427,19 @@ def _digest_lines(buys: list, gen_at, max_picks: int, header: "str | None" = Non
         tgt   = b.get("target") or b.get("tp")
         sec   = _h(str(b.get("sector", "") or "").strip()[:30])
         tk    = _base_symbol(b.get("ticker", "?"))
-        if _under(b):
-            levels = " / ".join(_rs(x) for x in (stop, tgt) if x)
-            lines.append(_stock_line("WATCH", tk, price, extra=f"levels {levels}" if levels else ""))
-        else:
-            v = _verdict_of(b)
-            word = (verdict_display_label(v[0]) if v
-                    else action_display_label(str(b.get("action", "")).replace("_", " ")))
-            lines.append(_stock_line(word, tk, price, stop, tgt))
-        plan = [] if _under(b) else [_h(x) for x in _plan_bits(b, price)]
+        v = _verdict_of(b)
+        word = (verdict_display_label(v[0]) if v
+                else action_display_label(str(b.get("action", "")).replace("_", " ")))
+        line = _stock_line(word, tk, price, stop, tgt)
+        lines.append(line)
+        plan = [_h(x) for x in _plan_bits(b, price)] if _NO_STOP_NOTE not in line else []
         lines.append("   " + " · ".join(x for x in (sec, f"score {b.get('score', 0)}/90", *plan) if x))
 
     # BUY / STRONG BUY verdicts further down the scan than the top max_picks
     extra = []
     for b in buys[max_picks:]:
         v = _verdict_of(b)
-        if v and v[0] in _VERDICT_ALERT_TIERS and not _under(b):
+        if v and v[0] in _VERDICT_ALERT_TIERS and _has_stop(_pick_stop(b)):
             extra.append((v, b))
     if extra:
         extra.sort(key=lambda e: (e[0][0] != "STRONG BUY", -float(e[1].get("score") or 0)))
@@ -2010,13 +1966,15 @@ def check_tomorrow_watchlist(state: dict, today: str, *, top_n: int = 5) -> int:
 
 
 def _tomorrow_row(p: dict, word: str) -> str:
-    """'BUY  <b>B1</b>  above ₹100.00 · stop ₹94.00 · score 70/90'. A breakout
-    scoring under _WATCH_FLOOR keeps its 'above ₹ref' level but reads WATCH."""
+    """'BUY  <b>B1</b>  above ₹100.00 · stop ₹94.00 · score 70/90'. A BUY with
+    no stop reads WATCH with a 'no stop available' note (audit F5)."""
     sym = _base_symbol(p.get("ticker"))
     ref = p.get("entry")
     if word == "BUY":
         lead = f"above {_rs(ref)}" if ref else ""
-        word = _floor_word(word, p.get("score"))
+        if not _has_stop(p.get("sl")):
+            _log.warning("tomorrow-watchlist BUY %s has no stop: sent as WATCH", sym)
+            word, lead = "WATCH", ", ".join(x for x in (lead, _NO_STOP_NOTE) if x)
     elif word == "SELL":
         lead = f"below {_rs(ref)}" if ref else ""
     else:
@@ -2246,8 +2204,7 @@ def check_weekly_digest(state: dict, today: str) -> int:
     if buys:
         lines.append("<b>Top scores from the delivery scan</b>")
         for b in buys[:5]:
-            act = _floor_word(action_display_label(str(b.get("action", "")).replace("_", " ")),
-                              b.get("score"))
+            act = action_display_label(str(b.get("action", "")).replace("_", " "))
             price = b.get("price") or b.get("last_price")
             lines.append(_stock_line(act, _base_symbol(b.get("ticker", "?")),
                                      price if isinstance(price, (int, float)) else None,

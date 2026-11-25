@@ -173,11 +173,15 @@ if _backend == "sqlite":
         icon="⚠️",
     )
 
-# ── Backfill (lazy, capped, silent) ───────────────────────────────────────────
+# ── Backfill (throttled: at most once per 30 min per process, audit F4) ───────
+# The nightly tools/backfill_ledger.py does the real work; this only tops up.
+from dashboard.shared.cache import (                       # noqa: E402
+    ledger_backfill_throttled as _backfill_throttled,
+    load_full_ledger_cached as _load_full_ledger_cached,
+)
+_force_bf = st.session_state.pop("_cal_force_backfill", False)
 with st.spinner("Fetching forward returns for eligible verdicts…"):
-    _stats = _vl.backfill_returns(max_rows=200)
-    if _NEW_API:
-        _vl.backfill_sector_returns()      # stored bhavcopy closes only — no network
+    _stats = _backfill_throttled(max_rows=200, force=_force_bf)
 
 with st.expander("Diagnostics", expanded=False):
     _col1, _col2, _col3, _col4 = st.columns(4)
@@ -185,6 +189,11 @@ with st.expander("Diagnostics", expanded=False):
     _col2.metric("Rows scanned this load", _stats.get("scanned", 0))
     _col3.metric("Rows updated", _stats.get("updated", 0))
     _col4.metric("Tickers fetched", _stats.get("tickers_fetched", 0))
+    if _stats.get("skipped"):
+        st.caption("Forward-return top-up ran recently in this process; skipped this load.")
+    if st.button("Fetch forward returns now", key="cal_backfill_btn"):
+        st.session_state["_cal_force_backfill"] = True
+        st.rerun()
 
 def _ledger_read_error(df) -> "str | None":
     """Error type if `df` is empty because the ledger read failed. getattr: an
@@ -202,7 +211,19 @@ def _ledger_unavailable(err: str, what: str) -> None:
     )
 
 
-_ledger = _vl.load_ledger(limit=1_000_000)   # FIX CAL-LIMIT (#26): 5000 dropped the oldest rows
+# One cached full read per ledger change / day (audit F4); every table below reuses it.
+_ledger_all = _load_full_ledger_cached()   # FIX CAL-LIMIT (#26): full ledger, no 5000 cap
+_ledger = _ledger_all
+
+
+def _led_kw(fn) -> dict:
+    """{'ledger': the cached full frame} when `fn` accepts it, so the calibration
+    functions reuse this page's one read instead of each re-reading the table."""
+    import inspect
+    try:
+        return {"ledger": _ledger_all} if "ledger" in inspect.signature(fn).parameters else {}
+    except (TypeError, ValueError):
+        return {}
 if _ledger_read_error(_ledger):
     _ledger_unavailable(_ledger_read_error(_ledger), "every number on this page")
     st.stop()
@@ -219,7 +240,7 @@ if _ledger.empty:
 # One card with the registered test's state, before any table: "is the model
 # working?" Uses all sources, like the test itself. Descriptive only.
 if _NEW_API and hasattr(_vl, "plain_summary"):
-    _ps_res = _vl.evaluate_decision_rule()
+    _ps_res = _vl.evaluate_decision_rule(**_led_kw(_vl.evaluate_decision_rule))
     _ps_h = int(_ps_res["rule"]["horizon_days"])
     _ps_col = f"ret_{_ps_h}d"
     _ps_pending = 0
@@ -338,9 +359,10 @@ def _src_kw(fn) -> dict:
     before a redeploy may not (same failure as the stale-code guard above)."""
     import inspect
     try:
-        return {"source": _src_choice} if "source" in inspect.signature(fn).parameters else {}
+        kw = {"source": _src_choice} if "source" in inspect.signature(fn).parameters else {}
     except (TypeError, ValueError):
-        return {}
+        kw = {}
+    return {**kw, **_led_kw(fn)}
 
 # ── Overview strip ────────────────────────────────────────────────────────────
 _total = len(_ledger)
@@ -406,8 +428,9 @@ if _NEW_API:
     if hasattr(_vl, "DECISION_RULE_RISING"):
         _rules.append(("Rising NIFTY only", _vl.DECISION_RULE_RISING))
     for _rule_name, _rule_def in _rules:
-        _rule_res = (_vl.evaluate_decision_rule(_rule_def, nifty_df=_nifty_df) if _rule_def
-                     else _vl.evaluate_decision_rule())
+        _rule_res = (_vl.evaluate_decision_rule(_rule_def, nifty_df=_nifty_df,
+                                                **_led_kw(_vl.evaluate_decision_rule)) if _rule_def
+                     else _vl.evaluate_decision_rule(**_led_kw(_vl.evaluate_decision_rule)))
         if _rule_res["status"] == "unavailable":
             st.caption(f"**{_rule_name}.**")
             _ledger_unavailable(_rule_res.get("error") or "unknown error",
@@ -456,9 +479,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "For each verdict, what percent of calls closed positive, and what did "
-    "the average call earn vs NIFTY? **Win % (raw)** = forward return > 0; "
-    "**Win vs NIFTY %** = beat the index (α > 0), counted only over rows "
+    "For each verdict, what percent of calls were right, and what did "
+    "the average call earn vs NIFTY? A win follows the call's direction: "
+    "BUY / WATCH win when the stock rose (beat NIFTY), AVOID wins when it fell "
+    "(lagged NIFTY); HOLD has no win rate. **Win % (raw)** uses the forward return; "
+    "**Win vs NIFTY %** uses α, counted only over rows "
     "where the NIFTY return is available (**N α**) — α is shown as blank, "
     "not the raw return, when NIFTY is missing. Wilson lower-bound is the "
     "floor on win rate given the sample size — a 100% win rate on 3 trades "
@@ -725,7 +750,7 @@ _sh_horizon = st.select_slider(
     format_func=lambda h: f"{h} sessions",
     key="_sh_horizon",
 )
-_sh = _vl.shadow_pnl(horizon_days=_sh_horizon)
+_sh = _vl.shadow_pnl(horizon_days=_sh_horizon, **_led_kw(_vl.shadow_pnl))
 if _ledger_read_error(_sh):
     _ledger_unavailable(_ledger_read_error(_sh), "the shadow-trade record")
 elif _sh.empty:

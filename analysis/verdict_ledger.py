@@ -524,6 +524,23 @@ def _read_ledger(*, ticker: Optional[str], source: Optional[str], limit: int) ->
         return read_sql_df(sql, conn, params=tuple(params))
 
 
+def ledger_stamp() -> str:
+    """Cheap fingerprint of the ledger: row count, newest row id and newest
+    forward-return check. A cache keyed on it (dashboard/shared/cache.py)
+    refreshes as soon as a row is logged or a return is backfilled, without
+    moving the whole table (audit 2026-11-25 F4). Raises on a failed read."""
+    ensure_schema()
+    sql = _store._q("""
+        SELECT (SELECT COUNT(*) FROM verdict_log),
+               (SELECT MAX(id) FROM verdict_log),
+               (SELECT COUNT(*) FROM verdict_forward_returns),
+               (SELECT MAX(checked_at) FROM verdict_forward_returns)
+    """)
+    with _store._get_conn() as conn:
+        row = read_sql_df(sql, conn, params=()).iloc[0].tolist()
+    return "|".join(str(x) for x in row)
+
+
 TW_BUCKET_PREFIX = "tw:"
 
 
@@ -992,6 +1009,17 @@ _SESSION_EPOCH = np.datetime64("2020-01-01")
 _VERDICT_DIRECTION = {"STRONG BUY": 1, "BUY": 1, "WATCH": 1, "AVOID": -1}
 
 
+def _direction_of(df: pd.DataFrame) -> pd.Series:
+    """+1 / -1 per row from its verdict, by the same _VERDICT_DIRECTION map the
+    live scorecard uses, so every calibration number agrees on what a win is
+    (audit 2026-11-25 F3). HOLD and unknown verdicts are NaN (no win/loss).
+    A frame with no verdict column is treated as bullish-only (+1)."""
+    if "verdict" not in df.columns:
+        return pd.Series(1.0, index=df.index)
+    v = df["verdict"].astype(str).str.strip().str.upper()
+    return pd.to_numeric(v.map(_VERDICT_DIRECTION), errors="coerce")
+
+
 def _session_index(dates) -> np.ndarray:
     """NSE sessions from 2020-01-01 to each date (holidays excluded)."""
     d = pd.to_datetime(pd.Series(dates).astype(str), errors="coerce").values.astype("datetime64[D]")
@@ -1042,7 +1070,8 @@ def _evidence_label(s: Dict[str, Any]) -> str:
 
 
 def live_scorecard(*, horizon_days: int = 5,
-                   source: Optional[str] = "tomorrow_watchlist") -> Dict[str, Any]:
+                   source: Optional[str] = "tomorrow_watchlist",
+                   ledger: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """Out-of-sample record of logged calls at one horizon.
 
     Each settled row's `edge` = direction x (return - Nifty return), where
@@ -1058,7 +1087,7 @@ def live_scorecard(*, horizon_days: int = 5,
     empty = {"summary": pd.DataFrame(), "timeline": pd.DataFrame(), "pending": 0,
              "error": None, "horizon_days": horizon_days}
     try:
-        df = load_ledger(source=source, limit=_FULL_LEDGER_LIMIT, on_error="raise")
+        df = _ledger_or_read(ledger, source)
     except LedgerUnavailable as e:
         return {**empty, "error": str(e)}
     ret_c, nif_c = f"ret_{horizon_days}d", f"nifty_ret_{horizon_days}d"
@@ -1098,7 +1127,8 @@ def live_scorecard(*, horizon_days: int = 5,
 
 
 def calibration_by(*, group_col: str, horizon_days: int,
-                   source: Optional[str] = None) -> pd.DataFrame:
+                   source: Optional[str] = None,
+                   ledger: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     Return one row per bucket with n / mean-return / win-rate / alpha /
     Wilson lower bound. Missing (unfilled) rows are excluded so the stats
@@ -1107,7 +1137,7 @@ def calibration_by(*, group_col: str, horizon_days: int,
     try:
         # FIX CAL-LIMIT (audit 2026-10-03 #26): was limit=5000, which silently
         # dropped the oldest — i.e. the only matured — rows once the ledger grew.
-        df = load_ledger(source=source, limit=_FULL_LEDGER_LIMIT, on_error="raise")
+        df = _ledger_or_read(ledger, source)
     except LedgerUnavailable as e:
         return _unavailable_frame(e)
     if df.empty:
@@ -1125,7 +1155,8 @@ def calibration_by(*, group_col: str, horizon_days: int,
                      group_col=group_col, id_col="id")
     # FIX CAL-BLOCKS (audit #26): next to the day-clustered columns, the share
     # of non-overlapping horizon-length periods whose mean alpha beat NIFTY.
-    alpha = pd.to_numeric(df[ret_col], errors="coerce") - pd.to_numeric(n_ret, errors="coerce")
+    alpha = ((pd.to_numeric(df[ret_col], errors="coerce") - pd.to_numeric(n_ret, errors="coerce"))
+             * _direction_of(df))   # direction-aware: an AVOID wins when it lags the Nifty
     blk = []
     for key, g in df.assign(_alpha=alpha).groupby(group_col, dropna=False):
         s = _block_stats(g, "_alpha", horizon_days)
@@ -1173,7 +1204,7 @@ def _sector_stats(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
     """α vs the verdict's own sector basket: row-level and day-clustered."""
     d = df.copy()
     d["s_ret_val"] = pd.to_numeric(d["s_ret_val"], errors="coerce")
-    d["alpha_sector"] = d["ret_val"] - d["s_ret_val"]
+    d["alpha_sector"] = (d["ret_val"] - d["s_ret_val"]) * d.get("direction", 1.0)
     d["has_s"] = d["alpha_sector"].notna().astype(int)
     d["s_win"] = (d["alpha_sector"] > 0).astype(int)
     g = d.groupby(group_col, dropna=False).agg(
@@ -1209,6 +1240,13 @@ def _aggregate(df: pd.DataFrame, *, group_col: str, id_col: str) -> pd.DataFrame
           win_rate      — raw: forward return > 0
           win_vs_nifty  — alpha > 0 (beat the index), over n_alpha rows
         each with its own Wilson lower bound.
+
+    FIX CAL-DIRECTION (audit 2026-11-25 F3): a "win" follows the call's
+    direction (_direction_of / _VERDICT_DIRECTION, as in live_scorecard):
+    bullish rows win on return > 0 (alpha > 0), AVOID rows on return < 0
+    (alpha < 0). HOLD / unknown verdicts count in n and the mean returns but
+    not in any win rate; `n_directional` is the win-rate denominator.
+    mean_ret / mean_alpha stay raw (not sign-flipped).
     """
     df = df.copy()
     # All-NULL columns arrive as object dtype (None), which pandas 2 refuses
@@ -1216,37 +1254,46 @@ def _aggregate(df: pd.DataFrame, *, group_col: str, id_col: str) -> pd.DataFrame
     df["ret_val"] = pd.to_numeric(df["ret_val"], errors="coerce")
     df["n_ret_val"] = pd.to_numeric(df["n_ret_val"], errors="coerce")
     df["alpha"] = df["ret_val"] - df["n_ret_val"]          # NaN when Nifty missing
-    df["is_win"] = (df["ret_val"] > 0).astype(int)
+    df["direction"] = _direction_of(df)
+    df["has_dir"] = (df["direction"].notna() & df["ret_val"].notna()).astype(int)
+    df["is_win"] = ((df["ret_val"] * df["direction"]) > 0).astype(int)
     df["has_alpha"] = df["alpha"].notna().astype(int)
-    df["is_alpha_win"] = (df["alpha"] > 0).astype(int)     # NaN > 0 is False
+    df["alpha_signed"] = df["alpha"] * df["direction"]     # NaN when no direction
+    df["has_alpha_dir"] = df["alpha_signed"].notna().astype(int)
+    df["is_alpha_win"] = (df["alpha_signed"] > 0).astype(int)     # NaN > 0 is False
     out = df.groupby(group_col, dropna=False).agg(
         n=(id_col, "count"),
         mean_ret=("ret_val", "mean"),
         median_ret=("ret_val", "median"),
         mean_alpha=("alpha", "mean"),                       # skips NaN
         n_alpha=("has_alpha", "sum"),
-        win_rate=("is_win", "mean"),
+        n_directional=("has_dir", "sum"),
+        n_alpha_dir=("has_alpha_dir", "sum"),
         wins=("is_win", "sum"),
         alpha_wins=("is_alpha_win", "sum"),
     ).reset_index()
+    out["win_rate"] = out.apply(
+        lambda r: r["wins"] / r["n_directional"] if r["n_directional"] > 0 else np.nan, axis=1)
     out["wilson_lower_win"] = out.apply(
-        lambda r: _wilson_lower(int(r["wins"]), int(r["n"])), axis=1)
+        lambda r: _wilson_lower(int(r["wins"]), int(r["n_directional"]))
+        if r["n_directional"] > 0 else np.nan, axis=1)
     out["win_vs_nifty"] = out.apply(
-        lambda r: (r["alpha_wins"] / r["n_alpha"]) if r["n_alpha"] > 0 else np.nan, axis=1)
+        lambda r: (r["alpha_wins"] / r["n_alpha_dir"]) if r["n_alpha_dir"] > 0 else np.nan, axis=1)
     out["wilson_lower_vs_nifty"] = out.apply(
-        lambda r: _wilson_lower(int(r["alpha_wins"]), int(r["n_alpha"]))
-        if r["n_alpha"] > 0 else np.nan, axis=1)
+        lambda r: _wilson_lower(int(r["alpha_wins"]), int(r["n_alpha_dir"]))
+        if r["n_alpha_dir"] > 0 else np.nan, axis=1)
     out["mean_ret"] = out["mean_ret"].round(2)
     out["median_ret"] = out["median_ret"].round(2)
     out["mean_alpha"] = out["mean_alpha"].round(2)
-    out["win_rate"] = (out["win_rate"] * 100).round(1)
-    out["wilson_lower_win"] = (out["wilson_lower_win"] * 100).round(1)
+    out["win_rate"] = (out["win_rate"].astype(float) * 100).round(1)
+    out["wilson_lower_win"] = (out["wilson_lower_win"].astype(float) * 100).round(1)
+    out["n_directional"] = out["n_directional"].astype(int)
     out["win_vs_nifty"] = (out["win_vs_nifty"].astype(float) * 100).round(1)
     out["wilson_lower_vs_nifty"] = (out["wilson_lower_vs_nifty"].astype(float) * 100).round(1)
     out["n_alpha"] = out["n_alpha"].astype(int)
     # FIX CAL-DAYS (2026-09-29): day-clustered columns next to the row-level
     # ones — the row-level Wilson bounds treat same-day picks as independent.
-    days = _day_stats(df, group_col)
+    days = _day_stats(df, group_col, alpha_col="alpha_signed")
     out = out.merge(days, on=group_col, how="left")
     out["day_win_vs_nifty"] = (out["day_win_vs_nifty"].astype(float) * 100).round(1)
     out["wilson_lower_days_vs_nifty"] = (
@@ -1255,7 +1302,7 @@ def _aggregate(df: pd.DataFrame, *, group_col: str, id_col: str) -> pd.DataFrame
     # s_ret_val (the verdict's own sector basket return over the same window).
     if "s_ret_val" in df.columns:
         out = out.merge(_sector_stats(df, group_col), on=group_col, how="left")
-    return out.drop(columns=["alpha_wins"])
+    return out.drop(columns=["alpha_wins", "n_alpha_dir"])
 
 
 def tag_calibration(*, horizon_days: int, min_n: int = 5,
@@ -1277,6 +1324,7 @@ def tag_calibration(*, horizon_days: int, min_n: int = 5,
             SELECT t.tag,
                    v.id AS log_id,
                    v.logged_date,
+                   v.verdict,
                    r.{ret_col}   AS ret_val,
                    r.{nifty_col} AS n_ret_val,
                    r.sector_ret_{horizon_days}d AS s_ret_val
@@ -1298,7 +1346,7 @@ def tag_calibration(*, horizon_days: int, min_n: int = 5,
     return agg.sort_values("wilson_lower_win", ascending=False)
 
 
-def shadow_pnl(*, horizon_days: int = 20) -> pd.DataFrame:
+def shadow_pnl(*, horizon_days: int = 20, ledger: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     'What would you have made if you'd taken every BUY/STRONG BUY the model
     emitted?' Returns are close-to-close from the entry session's close;
@@ -1307,7 +1355,7 @@ def shadow_pnl(*, horizon_days: int = 20) -> pd.DataFrame:
     computed forward return for the horizon.
     """
     try:
-        df = load_ledger(source="shadow_auto", limit=_FULL_LEDGER_LIMIT, on_error="raise")
+        df = _ledger_or_read(ledger, "shadow_auto")
     except LedgerUnavailable as e:
         return _unavailable_frame(e)
     if df.empty:
@@ -1350,9 +1398,22 @@ REGIME_LOOKBACK_SESSIONS = 20
 _FULL_LEDGER_LIMIT = 1_000_000
 
 
-def _load_full_ledger() -> pd.DataFrame:
+def _ledger_or_read(ledger: Optional[pd.DataFrame], source: Optional[str] = None) -> pd.DataFrame:
+    """`ledger` (a full-ledger frame the caller already read, e.g. the
+    Calibration page's cached copy, audit 2026-11-25 F4) narrowed to `source`;
+    or, when None, a fresh full read (raises LedgerUnavailable on failure)."""
+    if ledger is None:
+        return load_ledger(source=source, limit=_FULL_LEDGER_LIMIT, on_error="raise")
+    if source and "source" in ledger.columns:
+        return ledger[ledger["source"] == source]
+    return ledger
+
+
+def _load_full_ledger(ledger: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Every ledger row. Raises LedgerUnavailable when the read fails — an empty
     frame here must mean an empty ledger, never a failed read."""
+    if ledger is not None:
+        return ledger
     df = load_ledger(limit=_FULL_LEDGER_LIMIT, on_error="raise")
     if len(df) >= _FULL_LEDGER_LIMIT:
         _log.warning("verdict ledger read truncated at %d rows", _FULL_LEDGER_LIMIT)
@@ -1379,12 +1440,13 @@ def nifty_regime_at(nifty_df: Optional[pd.DataFrame], logged: _dt.date,
 
 def regime_calibration(*, horizon_days: int, nifty_df: Optional[pd.DataFrame],
                        verdicts: tuple = BULLISH_VERDICTS,
-                       source: Optional[str] = None) -> pd.DataFrame:
+                       source: Optional[str] = None,
+                       ledger: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Calibration for `verdicts` split by the NIFTY regime on the day each
     verdict was logged. Rows whose regime can't be determined are 'Unknown'.
     `source` limits it to verdicts logged by one surface."""
     try:
-        df = _load_full_ledger()
+        df = _load_full_ledger(ledger)
     except LedgerUnavailable as e:
         return _unavailable_frame(e)
     if source and not df.empty and "source" in df.columns:
@@ -1438,7 +1500,8 @@ DECISION_RULE_RISING: Dict[str, Any] = dict(DECISION_RULE, registered_on="2026-1
 
 
 def evaluate_decision_rule(rule: Optional[Dict[str, Any]] = None,
-                           nifty_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+                           nifty_df: Optional[pd.DataFrame] = None,
+                           ledger: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """Evaluate DECISION_RULE on the current ledger.
 
     status: 'insufficient' (verdicts / days WITH a NIFTY return below
@@ -1457,7 +1520,7 @@ def evaluate_decision_rule(rule: Optional[Dict[str, Any]] = None,
                            "day_win_vs_nifty": None, "mean_alpha": None, "rule": rule,
                            "n_alpha": 0, "alpha_days": 0, "error": None}
     try:
-        df = _load_full_ledger()
+        df = _load_full_ledger(ledger)
     except LedgerUnavailable as e:
         res.update(status="unavailable", error=e.error_type)
         return res
