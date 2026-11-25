@@ -98,8 +98,12 @@ def summary_line(b, idx: dict) -> str:
             pass
         if isinstance(b.get("pct_above_50dma"), (int, float)):
             bits.append(f"{b['pct_above_50dma']:.0f}% above 50DMA")
-        if b.get("breadth_label"):
+        if b.get("breadth_label") and str(b["breadth_label"]).lower() != "unknown":
             bits.append(f"breadth reads {b['breadth_label']}")
+        try:  # breadth may be a few sessions older than the live index quotes
+            bits.append("as of " + _dt.date.fromisoformat(str(b.get("date"))[:10]).strftime("%d %b"))
+        except (TypeError, ValueError):
+            pass
     else:
         bits.append("NSE breadth unavailable")
     rows = [(name, idx[lbl][1]) for lbl, name in SECTOR_IDX

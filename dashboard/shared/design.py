@@ -481,6 +481,14 @@ def apply_design():
         font-weight: 500 !important;
         transition: background .12s ease, color .12s ease, border-color .12s ease !important;
     }
+    /* Streamlit buttons are flex-centred, so text-align alone never applied:
+       left-align label + its inner wrappers so the nav scans down one edge. */
+    [data-testid="stSidebar"] .stButton > button,
+    [data-testid="stSidebar"] .stButton > button > div,
+    [data-testid="stSidebar"] .stButton > button p {
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
     [data-testid="stSidebar"] .stButton > button:hover {
         background: rgba(200,138,63,.06) !important;
         color: #e8e6e0 !important;

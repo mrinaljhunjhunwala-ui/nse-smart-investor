@@ -431,13 +431,15 @@ def _index_strip_data():
     for label, sym in _INDEX_STRIP:
         try:
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
-                   f"{urllib.parse.quote(sym)}?interval=1d&range=5d{_qs}")
+                   f"{urllib.parse.quote(sym)}?interval=1d&range=1d{_qs}")
             req = urllib.request.Request(url, headers={
                 "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
             with _open(req, timeout=6) as r:
                 meta = json.loads(r.read())["chart"]["result"][0]["meta"]
             price = meta.get("regularMarketPrice")
-            prev  = meta.get("chartPreviousClose") or meta.get("previousClose")
+            # range=1d: chartPreviousClose is yesterday's close (with 5d it was the close
+            # 5 sessions back, so the strip showed a 5-day change as "today").
+            prev  = meta.get("previousClose") or meta.get("chartPreviousClose")
             if price and prev:
                 out.append((label, float(price), (float(price) / float(prev) - 1) * 100))
         except Exception as _e:

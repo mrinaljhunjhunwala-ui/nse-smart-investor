@@ -378,12 +378,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
             f'🔥 {session_possessive(title=True)} Top Picks — NSE Scan</div>',
             unsafe_allow_html=True,
         )
-        st.caption(f"Strongest and weakest **trend-quality** setups from {session_possessive()} scan. "
-                   "Scores rank trend health — they are **not a forecast of returns**. "
-                   "The pick list is regenerated every ~15 min by a scheduled scan and this page "
-                   "picks up each new snapshot within seconds; prices on each card tick live "
-                   "(~60s) in between. Old picks stay on screen while a refresh runs in the "
-                   "background.")
+        st.caption(f"Strongest and weakest **trend-quality** setups from {session_possessive()} scan: "
+                   "a rank of trend health, **not a forecast of returns**. Rescanned every ~15 min.")
     with _tp_h2:
         st.write("")
         _run_picks = st.button("🔎 Scan Now", key="cc_run_picks", width="stretch")
@@ -392,7 +388,6 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         render_regime_reliability_note as _cc_regime_note,
         render_score_methodology as _cc_score_methodology,
     )
-    _cc_regime_note()
     _cc_score_methodology()
 
     # ── Decide whether a (re)scan is needed, then kick it off in the background ──
@@ -705,6 +700,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
         if _pk_n > 10 else True
     _pk_limit = None if _pk_all else 10
 
+    if _picks["buys"] or _picks["sells"]:
+        _cc_regime_note()   # nothing to caveat when the scan returned no names
     _pk_buy, _pk_sell = st.columns(2)
     with _pk_buy:
         st.markdown(
@@ -1002,12 +999,16 @@ try:
         collect_all_health as _dh_collect, render_data_health_html as _dh_render,
     )
     _dh_checks = _dh_collect()
-    _dh_dot = {"healthy": "bull", "stale": "amber", "degraded": "bear"}
+    _dh_dot = {"stale": "amber", "degraded": "bear"}
+    _dh_bad = [c for c in _dh_checks if c.status in _dh_dot]   # only problems earn a line
+    _dh_ok = sum(c.status == "healthy" for c in _dh_checks)
     st.markdown(
-        '<div class="health-strip"><b>Data health</b>' + "".join(
+        '<div class="health-strip"><b>Data health</b>' + ("".join(
             f'<span class="health-item"><span class="health-dot" '
-            f'style="background:var(--{_dh_dot.get(c.status, "faint")})"></span>{_html.escape(c.name)}</span>'
-            for c in _dh_checks) + "</div>",
+            f'style="background:var(--{_dh_dot[c.status]})"></span>{_html.escape(c.name)} · {c.status}</span>'
+            for c in _dh_bad) if _dh_bad else
+            f'<span class="health-item">No problems · {_dh_ok} of {len(_dh_checks)} sources checked '
+            'this session</span>') + "</div>",
         unsafe_allow_html=True,
     )
     with st.expander("Data health details", expanded=False):
