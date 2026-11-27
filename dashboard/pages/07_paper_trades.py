@@ -42,6 +42,7 @@ FIX APPTEST  st.selectbox index=None replaced with explicit index lookup so
      'NewType object has no attribute replic'.
 """
 
+import html
 import os
 import sys
 import time
@@ -161,7 +162,7 @@ with st.container():
         _at_badge  = "🔆 INTRADAY (MIS)" if _acc_type == "MIS" else "📦 DELIVERY (CNC)"
         _at_col    = "var(--accent)"     if _acc_type == "MIS" else "var(--azure)"
         st.markdown(
-            f'<span style="font-size:11px">📂 <b>{_selected_account}</b> '
+            f'<span style="font-size:11px">📂 <b>{html.escape(_selected_account)}</b> '
             f'<span style="color:{_at_col};font-weight:700">· {_at_badge}</span></span>',
             unsafe_allow_html=True,
         )

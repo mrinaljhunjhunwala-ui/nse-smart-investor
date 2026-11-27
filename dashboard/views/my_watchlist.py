@@ -83,8 +83,12 @@ def render() -> None:
             _new_sl = st.number_input("Stop ₹", 0.0, 1000000.0, 0.0, key="wl_sl", format="%.1f",
                                       help="For your reference in the table; no alert is sent on it.") or None
         if st.button("⭐ Add", key="wl_page_add_btn") and _new_tkr:
-            _sym = _new_tkr if _new_tkr.endswith(".NS") else _new_tkr + ".NS"
-            if add_row(_wl_list, _sym, _new_notes, _new_target, _new_sl):
+            from dashboard.shared.cache import _validate_ticker
+            _clean, _err = _validate_ticker(_new_tkr)
+            _sym = _clean + ".NS"
+            if _err:
+                st.error(_err)
+            elif add_row(_wl_list, _sym, _new_notes, _new_target, _new_sl):
                 st.success(f"Added {_sym} to watchlist!")
                 st.session_state["_wl_page_add_clear_pending"] = True
                 st.rerun()

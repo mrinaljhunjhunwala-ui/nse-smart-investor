@@ -276,7 +276,10 @@ def _render_deep_dive(st) -> None:
 def _render_library(st) -> None:
     from analysis.research_notes import library
     st.markdown("#### 📚 Library")
-    stock_notes, port_notes = _load_stock_notes(), _load_portfolio_notes()
+    from dashboard.shared.pin_gate import holdings_unlocked
+    stock_notes = _load_stock_notes()
+    # Portfolio notes list held tickers: same gate as the briefing that wrote them.
+    port_notes = _load_portfolio_notes() if holdings_unlocked() else []
     tickers = sorted({t.replace(".NS", "") for t in stock_notes}
                      | {t for n in port_notes for t in n.get("tickers") or []})
     pick = st.selectbox("Show notes for", ["All stocks"] + tickers, key="rn_lib_filter")
