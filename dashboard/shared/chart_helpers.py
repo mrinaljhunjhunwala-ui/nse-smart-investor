@@ -427,8 +427,8 @@ def _index_strip_data():
         _opener, _crumb = None, ""
     _qs = f"&crumb={urllib.parse.quote(_crumb)}" if _crumb else ""
     _open = _opener.open if _opener else urllib.request.urlopen
-    out = []
-    for label, sym in _INDEX_STRIP:
+    def _one(item):
+        label, sym = item
         try:
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
                    f"{urllib.parse.quote(sym)}?interval=1d&range=1d{_qs}")
@@ -441,11 +441,15 @@ def _index_strip_data():
             # 5 sessions back, so the strip showed a 5-day change as "today").
             prev  = meta.get("previousClose") or meta.get("chartPreviousClose")
             if price and prev:
-                out.append((label, float(price), (float(price) / float(prev) - 1) * 100))
+                return (label, float(price), (float(price) / float(prev) - 1) * 100)
         except Exception as _e:
             _log.debug("chart_helpers.%s degraded: %s", "_index_strip_data", _e)
-            continue
-    return out
+        return None
+
+    # Fetched together, not one after another: 8 serial calls blocked every page load ~2s.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(_INDEX_STRIP)) as _ex:
+        return [row for row in _ex.map(_one, _INDEX_STRIP) if row]
 
 
 _INDEX_RAIL = [
