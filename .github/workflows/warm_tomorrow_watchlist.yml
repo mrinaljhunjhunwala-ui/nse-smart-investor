@@ -46,7 +46,13 @@ jobs:
     # retry, then Yahoo) and the 20-min job limit cancelled the job before any message
     # went out. The scan now has its own 15-min limit and may fail; the end-of-day
     # check and the portfolio posture do not depend on it and always run.
-    timeout-minutes: 30
+    # 27 Nov: the scan step hit its 15-min limit on 25, 26 and 27 Nov. The cause was the
+    # database, not Angel: score_stock ran one delivery query per stock (~826) against the
+    # Oracle VM in Mumbai (since 24 Nov) and Warm Top Picks, which never had Angel
+    # credentials, slowed the same way (65 s on 23 Nov on the SQLite fallback, 980 s on
+    # 27 Nov). Scans now do one bulk delivery read and run with ANGEL_DISABLED=1; the
+    # step limit is 25 min as a backstop only.
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -82,17 +88,14 @@ jobs:
         run: pip install --quiet -r requirements.txt
 
       - name: Run Tomorrow's Watchlist warm-up
-        timeout-minutes: 15
+        timeout-minutes: 25
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Optional — set these only if you want the scan to use real-time
-          # Angel One prices instead of the free Stooq/Yahoo fallback chain:
-          ANGEL_API_KEY:      ${{ secrets.ANGEL_API_KEY }}
-          ANGEL_HIST_API_KEY: ${{ secrets.ANGEL_HIST_API_KEY }}
-          ANGEL_CLIENT_ID:    ${{ secrets.ANGEL_CLIENT_ID }}
-          ANGEL_PASSWORD:     ${{ secrets.ANGEL_PASSWORD }}
-          ANGEL_TOTP_SECRET:  ${{ secrets.ANGEL_TOTP_SECRET }}
+          # No Angel One here (27 Nov): at 15:50 IST Angel answers 403 "exceeding access
+          # rate" (the price relay uses the same key) and each refusal only costs time.
+          # Daily bars come from the price store / Yahoo / NSE bhavcopy.
+          ANGEL_DISABLED: "1"
         run: python scripts/warm_tomorrow_watchlist.py
 
       # After-close Telegram/Gmail message with the top breakout and reversal

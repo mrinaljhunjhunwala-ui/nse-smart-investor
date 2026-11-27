@@ -74,6 +74,7 @@ jobs:
       - name: Run Top Picks warm-up
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_DISABLED: "1"
           # Angel One credentials deliberately NOT passed (2026-09-28): from GitHub's
           # runners Angel's candle API answers 403 for every ticker, and each
           # rejection costs time before the Yahoo fallback. Since the ANGEL_* secrets

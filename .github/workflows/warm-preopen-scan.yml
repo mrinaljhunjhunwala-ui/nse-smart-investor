@@ -56,7 +56,10 @@ jobs:
     # generous rather than tight so a temporarily slow data provider does not
     # cancel the job the same way an 8-min timeout used to cancel Top Picks
     # (see warm-top-picks.yml history).
-    timeout-minutes: 15
+    # 27 Nov: 25 (was 15) and a 10-min limit on the Top Picks step. On 25-27 Nov the scan
+    # ran past 15 min (one delivery query per stock to the Oracle VM database; now one bulk
+    # read) and the job was cancelled before the digest and the results calls went out.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -88,8 +91,11 @@ jobs:
         run: pip install --quiet -r requirements.txt
 
       - name: Warm Top Picks (pre-open refresh)
+        timeout-minutes: 10
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_DISABLED: "1"
           # Angel One credentials deliberately NOT passed (2026-09-28): from GitHub's
           # runners Angel's candle API answers 403 for every ticker, and each
           # rejection costs time before the Yahoo fallback. Since the ANGEL_* secrets
@@ -149,8 +155,10 @@ jobs:
         # afternoon's Tomorrow's Watchlist stays served (its 6h TTL covers
         # the overnight window).
         continue-on-error: true
+        timeout-minutes: 10
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_DISABLED: "1"
           # Angel One credentials deliberately NOT passed (2026-09-28): from GitHub's
           # runners Angel's candle API answers 403 for every ticker, and each
           # rejection costs time before the Yahoo fallback. Since the ANGEL_* secrets

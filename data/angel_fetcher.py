@@ -418,7 +418,18 @@ def use_hist_api_key(on: bool = True) -> None:
     _KEY_SLOT_LOGGED[0] = False
 
 
+def disabled() -> bool:
+    """True when env ``ANGEL_DISABLED`` is 1/true/yes/on: this process makes no Angel One
+    call at all (candles, quotes, login), so every tier falls through to the price store /
+    Yahoo / bhavcopy at once. Set on the GitHub scan jobs (27 Nov 2026): during market hours
+    Angel answers them 403 "exceeding access rate" (the relay on the Oracle VM uses the same
+    key), and each rejection only costs time. The nightly price-store fill leaves it unset."""
+    return os.environ.get("ANGEL_DISABLED", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def is_configured() -> bool:
+    if disabled():
+        return False
     c = _get_credentials()
     return bool(c["api_key"] and c["client_id"] and c["password"] and c["totp_secret"])
 
@@ -443,6 +454,8 @@ def _get_session() -> Optional[Dict]:
     Cached for 50 minutes. Thread-safe via double-check locking.
     """
     global _SESSION
+    if disabled():
+        return None
     if _SESSION["jwt"] and time.time() - _SESSION["ts"] < 3000:
         return _SESSION
 

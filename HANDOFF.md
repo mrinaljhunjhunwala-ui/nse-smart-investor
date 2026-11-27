@@ -2,6 +2,24 @@
 
 This section is the running memory between sessions; older sections below are history.
 
+## 27 Nov: scans slowed 15x after the DB move; most Telegram messages stopped (`fix/watchlist-timeout-alert-volume`)
+- **Cause:** `score_stock` read each stock's delivery history with its own query. From US
+  GitHub runners to the Mumbai VM that made the ~826-name scans 980 s+ (Warm Top Picks: 65 s on
+  23 Nov on the SQLite fallback, 1-5 min on Neon). Not Angel: Warm Top Picks never had Angel
+  credentials and slowed the same way. From 25 Nov the pre-open job (15 min) and the 15:50
+  Tomorrow's Watchlist scan (15 min) were cut off, most Warm Top Picks runs were cancelled at
+  20 min, so the Morning Digest, pre-open results calls, Opening update, digest-pick move /
+  stop alerts and Tomorrow's Watchlist stopped (25-27 Nov), and the movers radar went silent on
+  26-27 Nov (it needs a Tomorrow's Watchlist under 30 h old). BUY calls kept their 3 + 2 a day.
+- **Fix:** `nse_delivery.prefetch_snapshots(universe)` (one bulk read, 30-min in-process cache,
+  identical results; per-symbol query only for names the bulk window can't answer) called by
+  both universe scans in `dashboard/shared/cache.py`. `ANGEL_DISABLED=1` (new switch in
+  `angel_fetcher.disabled()`: no login / candles / quotes) on the scan steps. Step limits:
+  watchlist scan 25 min (job 40), pre-open scans 10 min each with continue-on-error (job 25),
+  so the sends still run. A stale or missing watchlist now sends one "could not be built" note.
+- **Check after merge:** the next Warm Top Picks log should print `nse_delivery: prefetched N
+  of 826` and `scan done in` ~1-2 min. If it is still slow, look for other per-stock DB reads.
+
 ## 24 Nov: Postgres on the Oracle Always Free VM (#400–#404)
 - **Why:** Neon's free plan (~5 GB transfer/month) locked the database on 19 Nov and again after
   the move to a second Neon project. Owner rule: **Oracle stays Always Free; no paid platform

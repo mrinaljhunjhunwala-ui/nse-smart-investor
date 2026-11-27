@@ -893,6 +893,17 @@ def _sector_df_from_tuple(sector_ranks: tuple):
         return None
 
 
+def _prefetch_delivery(universe) -> None:
+    """One bulk delivery read before a universe scan instead of one query per name
+    (FIX SCAN-DB-RTT, see data/nse_delivery.prefetch_snapshots). Best-effort.
+    Not cached here: the bulk read keeps its own 30-min cache."""
+    try:
+        from data.nse_delivery import prefetch_snapshots
+        prefetch_snapshots(universe)
+    except Exception as _e:
+        _log.debug("cache._prefetch_delivery skipped: %s", _e)
+
+
 # Per-ticker list exclusion, cached 5 min alongside the scans that call it.
 @st.cache_data(ttl=300, show_spinner=False)
 def _list_exclusion(tk: str, period: str = "2y") -> "str | None":
@@ -958,6 +969,7 @@ def _home_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple
     _vix = {"regime": vix_regime, "vix": None,
             "allow_buy": vix_regime not in ("fear", "panic", "unknown")}
     _sec_df = _sector_df_from_tuple(sector_ranks)
+    _prefetch_delivery(_UNIV)
 
     def _one(tk):
         """Score directly via score_stock (not the cached wrapper) — safe in threads."""
@@ -1301,6 +1313,7 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     # every name was scored as "unranked" (audit 2026-10-03), so the same stock
     # read differently here than on Top Picks / Analyze Stock.
     _sec_df = _sector_df_from_tuple(_sector_ranks_tuple())
+    _prefetch_delivery(_UNIV)
 
     def _one(tk):
         try:
