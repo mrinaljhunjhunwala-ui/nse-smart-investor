@@ -2,6 +2,13 @@
 
 Read this before doing anything in the repo, then the **"Latest" section at the top of `HANDOFF.md`** (open work, owner to-dos, research clock). It's the one-page brief that keeps agents from wasting turns re-deriving what the codebase already documents.
 
+## Talking to the owner (read first, owner 28 Nov 2026)
+
+The owner is **not a coder and not a trader**. This app is their test of how far AI can help a non-IT, non-trader person invest. So:
+- Explain every change in plain words: what they will notice, and what it protects them from. No code, and no jargon unless you explain it in a few words (e.g. "ROCE = profit made on the money a company uses").
+- Put decisions to them as simple either/or choices.
+- Do only what was asked. Unrequested audits, sweeps or extra agents waste tokens; offer them in one line instead.
+
 ## What this is
 
 A 15-page Streamlit dashboard for **NSE/BSE (Indian) equity analysis**. It scores stocks on a composite framework, surfaces qualitative flags, runs a valuation decision layer (E1-v2), does portfolio risk, paper-trading, intraday tools, and optional Angel One live-broker integration. **Personal tool of its owner — not a SEBI-registered advice product.**
