@@ -96,6 +96,25 @@ def test_pool_serves_more_threads_than_connections():
     assert all(isinstance(f, pd.DataFrame) for f in frames)   # empty, but no PoolError
 
 
+def test_delivery_prefetch_sql_runs_on_postgres(monkeypatch):
+    """FIX SCAN-DB-RTT: the bulk read (DISTINCT ... OFFSET, IN (...)) must work on Postgres
+    and give what the per-symbol read gives."""
+    import datetime as _d
+    start = _d.date(2026, 6, 1)
+    rows = [{"symbol": _sym(0), "date": (start + _d.timedelta(days=i)).isoformat(), "close": 1.0,
+             "traded_qty": 10.0, "deliv_qty": 4.0, "deliv_pct": 30.0 + i % 5} for i in range(30)]
+    nse_delivery._persist(rows)
+    want = nse_delivery.get_snapshot(_sym(0))
+    nse_delivery.clear_prefetch()
+    try:
+        nse_delivery.prefetch_snapshots([_sym(0), _sym(1)], lookback=10)
+        assert nse_delivery.get_snapshot(_sym(0), lookback=10) == \
+            nse_delivery._snapshot_from_hist(nse_delivery.load_symbol_history(_sym(0), days=10))
+        assert want and want["n"] == 30
+    finally:
+        nse_delivery.clear_prefetch()
+
+
 # ── verdict dedup (ON CONFLICT DO NOTHING RETURNING id) ──────────────────────
 
 def test_concurrent_log_verdict_writes_exactly_one_row():

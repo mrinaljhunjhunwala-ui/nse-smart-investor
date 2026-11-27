@@ -36,9 +36,28 @@ def test_sends_top_names_once_per_day(monkeypatch):
     assert ca.check_tomorrow_watchlist(state, "2026-11-06") == 0
 
 
-def test_stale_or_empty_snapshot_sends_nothing(monkeypatch):
+def test_stale_snapshot_says_the_list_was_not_built_once(monkeypatch):
+    """25-27 Nov: the warm-up timed out and the stale list was skipped in silence. Now one
+    short note a day, never the stale names; a fresh list later that day still goes out."""
     sent = _setup(monkeypatch, {"breakout_candidates": [_p("A.NS", 60, "x")]}, age_h=6)
-    assert ca.check_tomorrow_watchlist({}, "2026-11-06") == 0
+    state = {}
+    assert ca.check_tomorrow_watchlist(state, "2026-11-06") == 1
+    assert "could not be built" in sent[0] and "A</b>" not in sent[0] and "IST" in sent[0]
+    assert ca.check_tomorrow_watchlist(state, "2026-11-06") == 0 and len(sent) == 1
+    sent = _setup(monkeypatch, {"breakout_candidates": [_p("B.NS", 70, "🚀 Breakout setup")]})
+    assert ca.check_tomorrow_watchlist(state, "2026-11-06") == 1 and "B</b>" in sent[0]
+
+
+def test_missing_snapshot_also_says_so(monkeypatch):
+    import trade_store
+    sent = []
+    monkeypatch.setattr(trade_store, "kv_get", lambda *a, **k: None)
+    monkeypatch.setattr(ca, "dispatch", lambda m, **k: sent.append(m) or True)
+    assert ca.check_tomorrow_watchlist({}, "2026-11-06") == 1
+    assert "no earlier list" in sent[0]
+
+
+def test_empty_fresh_snapshot_sends_nothing(monkeypatch):
     sent = _setup(monkeypatch, {"breakout_candidates": [], "reversal_watch": []})
     assert ca.check_tomorrow_watchlist({}, "2026-11-06") == 0 and not sent
 

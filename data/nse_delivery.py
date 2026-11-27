@@ -312,13 +312,102 @@ def load_symbol_history(symbol: str, days: int = 60) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# FIX SCAN-DB-RTT (27 Nov 2026): score_stock read each symbol's delivery history with
+# its own query. Since the database moved to the Oracle VM in Mumbai (24 Nov), each
+# query from a US GitHub runner pays several long round trips, and the ~826-name scans
+# went from ~65 s (SQLite fallback, 23 Nov) to 980 s and more (Warm Top Picks, 25-27
+# Nov), so the Tomorrow's Watchlist, pre-open and Top Picks warm-ups hit their limits.
+# A scan now calls prefetch_snapshots(universe) once: 3 queries for ~826 symbols,
+# kept in memory for _PREFETCH_TTL_S. get_snapshot serves from it and still queries per
+# symbol for any name the bulk read cannot answer exactly.
+_PREFETCH_TTL_S = 1800
+_PREFETCH: Dict[str, Optional[Dict]] = {}
+_PREFETCH_META: Dict[str, object] = {"key": None, "ts": 0.0, "lookback": 0}
+
+
+def _db_key() -> str:
+    return _store._database_url() or _store._SQLITE_PATH
+
+
+def clear_prefetch() -> None:
+    _PREFETCH.clear()
+    _PREFETCH_META.update(key=None, ts=0.0, lookback=0)
+
+
+def prefetch_snapshots(symbols, lookback: int = 60) -> int:
+    """Bulk-load delivery snapshots for ``symbols`` and cache them in this process.
+
+    Gives exactly what get_snapshot computes per symbol. The bulk read covers the last
+    2 x ``lookback`` trade dates; a symbol is cached only when that window holds at least
+    ``lookback`` of its rows, or when the window is the whole table (then a symbol with
+    no rows is cached as None). Anything else stays uncached and get_snapshot queries it
+    on its own. Returns the number of symbols cached; never raises."""
+    import time
+    syms = sorted({str(s or "").upper().replace(".NS", "") for s in symbols if s})
+    if not syms:
+        return 0
+    t0 = time.time()
+    found: Dict[str, Optional[Dict]] = {}
+    try:
+        ensure_schema()
+        with _store._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(_store._q("SELECT DISTINCT date FROM nse_delivery_daily "
+                                  "ORDER BY date DESC LIMIT 1 OFFSET ?"), (int(lookback) * 2 - 1,))
+            row = cur.fetchone()
+            whole_table = row is None
+            parts = []
+            for i in range(0, len(syms), 500):          # SQLite's old 999-parameter limit
+                chunk = syms[i:i + 500]
+                parts.append(read_sql_df(_store._q(
+                    "SELECT symbol, date, deliv_pct FROM nse_delivery_daily "
+                    f"WHERE date >= ? AND symbol IN ({','.join('?' * len(chunk))})"),
+                    conn, params=(row[0] if row else "", *chunk)))
+            parts = [p for p in parts if p is not None and not p.empty]
+            df = pd.concat(parts) if parts else None
+        if df is not None and not df.empty:
+            df = df.sort_values(["symbol", "date"], ascending=[True, False])
+            for sym, grp in df.groupby("symbol", sort=False):
+                if whole_table or len(grp) >= lookback:
+                    found[str(sym)] = _snapshot_from_hist(grp.head(int(lookback)))
+        if whole_table:
+            for sym in syms:
+                found.setdefault(sym, None)
+    except Exception as e:
+        _log.warning("prefetch_snapshots failed (%d symbols): %s — reading per symbol", len(syms), e)
+        return 0
+    _PREFETCH.clear()
+    _PREFETCH.update(found)
+    _PREFETCH_META.update(key=_db_key(), ts=time.time(), lookback=int(lookback))
+    _log.info("nse_delivery: prefetched %d of %d delivery snapshots in %.1fs",
+              len(found), len(syms), time.time() - t0)
+    return len(found)
+
+
+def _prefetched(sym: str, lookback: int):
+    """(True, snapshot) when the bulk cache answers for ``sym``, else (False, None)."""
+    import time
+    meta = _PREFETCH_META
+    if (not meta["ts"] or meta["lookback"] != lookback or meta["key"] != _db_key()
+            or time.time() - float(meta["ts"]) > _PREFETCH_TTL_S or sym not in _PREFETCH):
+        return False, None
+    return True, _PREFETCH[sym]
+
+
 def get_snapshot(symbol: str, lookback: int = 60) -> Optional[Dict]:
     """
     Return the delivery snapshot for one symbol, or None when we have too few
     rows to say anything meaningful. Score consumer falls back to legacy
     volume-only mode when this returns None.
     """
-    hist = load_symbol_history(symbol, days=lookback)
+    hit, snap = _prefetched((symbol or "").upper().replace(".NS", ""), int(lookback))
+    if hit:
+        return dict(snap) if snap else None
+    return _snapshot_from_hist(load_symbol_history(symbol, days=lookback))
+
+
+def _snapshot_from_hist(hist: Optional[pd.DataFrame]) -> Optional[Dict]:
+    """Snapshot from rows newest first (date, deliv_pct, ...), or None under 5 rows."""
     if hist is None or hist.empty or len(hist) < 5:
         return None
     pct = pd.to_numeric(hist["deliv_pct"], errors="coerce").dropna()

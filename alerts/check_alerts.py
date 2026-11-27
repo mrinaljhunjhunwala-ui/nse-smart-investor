@@ -1949,17 +1949,36 @@ def check_tomorrow_watchlist(state: dict, today: str, *, top_n: int = 5) -> int:
         return 0
     if not (snap and isinstance(snap, dict) and isinstance(snap.get("data"), dict)):
         print("[tomorrow] no Tomorrow's Watchlist snapshot")
-        return 0
+        return _tomorrow_unavailable(state, today, None)
     gen_at = snap.get("generated_at", "unknown")
     _age = snapshot_age_seconds(gen_at)
     if _age is None or _age / 3600 > _TOMORROW_MAX_SNAPSHOT_AGE_H:
         print(f"[tomorrow] snapshot is stale (generated_at={gen_at}) — skipping")
-        return 0
+        return _tomorrow_unavailable(state, today, gen_at)
     lines = tomorrow_watchlist_lines(snap["data"], gen_at, top_n=top_n)
     if not lines:
         print("[tomorrow] breakout and reversal lists are empty — nothing to send")
         return 0
     if dispatch("\n".join(lines), subject="Tomorrow's Watchlist — NSE Smart Investor"):
+        _mark_fired(state, key, today)
+        return 1
+    return 0
+
+
+def _tomorrow_unavailable(state: dict, today: str, gen_at) -> int:
+    """One short note a day when today's watchlist could not be built (25-27 Nov the
+    warm-up timed out and the old snapshot was skipped without a word). Its own dedupe
+    key, so a later run that does build the list still sends it."""
+    key = "tomorrow_watchlist_missing"
+    if _already_fired(state, key, today):
+        return 0
+    from utils.snapshot_time import ist_label
+    last = ist_label(gen_at, "%a %d %b %H:%M IST") if gen_at else ""
+    msg = (f"🌙 <b>Tomorrow's Watchlist</b> · {_day_label(today)}\n"
+           "Today's list could not be built: the after-close scan did not finish. "
+           + (f"The app still shows the last list ({_h(last)}), which is not for tomorrow."
+              if last else "There is no earlier list to show."))
+    if dispatch(msg, subject="Tomorrow's Watchlist not built — NSE Smart Investor"):
         _mark_fired(state, key, today)
         return 1
     return 0
