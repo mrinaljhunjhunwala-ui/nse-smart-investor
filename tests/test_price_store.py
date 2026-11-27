@@ -512,7 +512,7 @@ def test_scan_jobs_restore_the_price_store_and_the_fill_job_saves_it():
     wf = lambda n: open(f".github/workflows/{n}.yml", encoding="utf-8").read()  # noqa: E731
     fill = wf("warm_price_store")
     assert "PRICE_STORE_PATH: data/price_store.db" in fill
-    assert "actions/cache/restore@v5" in fill and "actions/cache/save@v5" in fill
+    assert "actions/cache/restore@" in fill and "actions/cache/save@" in fill
     for n in ("warm-top-picks", "warm-preopen-scan", "warm_tomorrow_watchlist", "movers-evidence"):
         src = wf(n)
         assert "PRICE_STORE_PATH: data/price_store.db" in src, n

@@ -16,13 +16,16 @@ concurrency:
   group: db-health
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Restore last state
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: db_health_state.json
           key: db-health-${{ github.run_id }}
@@ -83,7 +86,7 @@ jobs:
 
       - name: Save state
         if: always()
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: db_health_state.json
           key: db-health-${{ github.run_id }}

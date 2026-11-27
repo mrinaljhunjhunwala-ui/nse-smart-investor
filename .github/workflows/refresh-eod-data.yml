@@ -34,6 +34,9 @@ concurrency:
   group: refresh-eod-data
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   refresh:
     runs-on: ubuntu-24.04
@@ -44,10 +47,10 @@ jobs:
       DAYS: ${{ github.event.inputs.days || '3' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.11"
 

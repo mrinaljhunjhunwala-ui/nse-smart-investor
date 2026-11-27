@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # deploy/oracle-relay/postgres_setup.sh — the app's Postgres on the relay VM (replaces Neon).
 #
-#   curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/main/deploy/oracle-relay/postgres_setup.sh | sudo bash
+#   REF=<commit-sha>   # pin a reviewed commit, not main
+#   curl -fsSLo postgres_setup.sh https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/$REF/deploy/oracle-relay/postgres_setup.sh
+#   less postgres_setup.sh            # read it before running as root
+#   sudo bash postgres_setup.sh
 #
 # Why: Neon's free plan caps data transfer at ~5 GB a month and locked the database twice in
 # Nov 2026. This VM is Oracle Always Free (about 10 TB a month of outbound transfer), so the

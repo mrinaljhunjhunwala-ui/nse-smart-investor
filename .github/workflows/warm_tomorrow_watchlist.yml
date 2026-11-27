@@ -34,6 +34,9 @@ concurrency:
   group: warm-tomorrow-watchlist
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   warm:
     runs-on: ubuntu-24.04
@@ -49,12 +52,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # The price store is its own SQLite file (data/price_store.py), filled nightly by
       # warm_price_store.yml and kept in the Actions cache (it used up Neon's free transfer).
       - name: Restore price store
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: data/price_store.db
           key: price-store-${{ github.run_id }}-${{ github.run_attempt }}
@@ -62,7 +65,7 @@ jobs:
             price-store-
 
       - name: Restore database fallback file
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: data/store_fallback.db
           key: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
@@ -70,7 +73,7 @@ jobs:
             store-fallback-
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.11"
 
@@ -100,7 +103,7 @@ jobs:
       # with the other alert jobs, so it goes out at most once a day.
       - name: Restore alert state
         id: restore_state
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: data/alert_state.json
           key: alert-state-${{ github.run_id }}
@@ -174,7 +177,7 @@ jobs:
 
       - name: Save alert state
         if: always() && steps.restore_state.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: data/alert_state.json
           key: alert-state-${{ github.run_id }}
@@ -182,14 +185,14 @@ jobs:
       # Only present when Postgres refused this run (or an earlier one); see trade_store.
       - name: Save database fallback file
         if: always() && hashFiles('data/store_fallback.db') != ''
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: data/store_fallback.db
           key: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload database fallback file
         if: always() && hashFiles('data/store_fallback.db') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: store-fallback-${{ github.run_id }}-${{ github.run_attempt }}
           path: data/store_fallback.db

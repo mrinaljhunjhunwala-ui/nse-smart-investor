@@ -53,5 +53,5 @@ def test_core_jobs_cache_and_upload_the_fallback_file():
                "market-digest"):
         src = open(f".github/workflows/{wf}.yml", encoding="utf-8").read()
         assert "STORE_FALLBACK_PATH: data/store_fallback.db" in src, wf
-        assert "store-fallback-" in src and "actions/cache/restore@v5" in src, wf
+        assert "store-fallback-" in src and "actions/cache/restore@" in src, wf
         assert "upload-artifact" in src, wf

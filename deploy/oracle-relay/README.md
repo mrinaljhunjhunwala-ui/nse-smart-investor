@@ -78,7 +78,10 @@ then pick it in step 3.)
 Still in that terminal (on the VM), paste:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/main/deploy/oracle-relay/setup.sh | sudo bash
+REF=<commit-sha>   # pin a reviewed commit, not main
+curl -fsSLo setup.sh https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/$REF/deploy/oracle-relay/setup.sh
+less setup.sh            # read it before running as root
+sudo bash setup.sh
 ```
 
 It takes a few minutes. It ends with "Not started yet: put your secrets in
@@ -147,7 +150,10 @@ Market Alerts job sends one Telegram message that day: "Live price relay stopped
 Run the same command as step 5 again; it pulls the latest code and restarts the relay:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/main/deploy/oracle-relay/setup.sh | sudo bash
+REF=<commit-sha>   # pin a reviewed commit, not main
+curl -fsSLo setup.sh https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/$REF/deploy/oracle-relay/setup.sh
+less setup.sh            # read it before running as root
+sudo bash setup.sh
 ```
 
 (or `cd /opt/nse-smart-investor && sudo git pull && sudo systemctl restart nse-price-relay`).
@@ -191,7 +197,10 @@ the model's results justify paying for anything.
 Set up (or re-run safely) with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/main/deploy/oracle-relay/postgres_setup.sh | sudo bash
+REF=<commit-sha>   # pin a reviewed commit, not main
+curl -fsSLo postgres_setup.sh https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/$REF/deploy/oracle-relay/postgres_setup.sh
+less postgres_setup.sh            # read it before running as root
+sudo bash postgres_setup.sh
 ```
 
 It installs PostgreSQL, creates the `nse` database and `nse_app` user with a generated
