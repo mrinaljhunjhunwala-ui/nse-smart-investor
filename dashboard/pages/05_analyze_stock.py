@@ -1517,14 +1517,12 @@ if analyze_btn or _prefill_active or (
                 # Full width under the two columns, still inside the first tab.
                 # _pctx (your position) feeds the panel's Portfolio context.
                 try:
-                    from dashboard.shared.ai import (
-                        collect_for_analyze_stock as _ai_collect,
-                        render_chat_panel as _ai_panel,
-                    )
+                    from dashboard.shared.ai import render_chat_panel as _ai_panel
+                    from dashboard.shared.cache import cached_ai_context as _cached_ai_context
                     from dashboard.shared.ai.context_builder import Portfolio as _AIPortfolio
                     _ai_sym = ticker.replace(".NS", "") if ticker else ""
                     if _ai_sym:
-                        _ai_inputs = _ai_collect(_ai_sym)
+                        _ai_inputs = _cached_ai_context(_ai_sym)
                         _ai_portfolio = None
                         _pctx_local = locals().get("_pctx")
                         if _pctx_local:
@@ -2821,14 +2819,12 @@ if analyze_btn or _prefill_active or (
 # success, so users don't see two panels for the same symbol.
 if not st.session_state.get("_ai_panel_top_rendered", False):
     try:
-        from dashboard.shared.ai import (
-            collect_for_analyze_stock,
-            render_chat_panel,
-        )
+        from dashboard.shared.ai import render_chat_panel
+        from dashboard.shared.cache import cached_ai_context
 
         _copilot_sym = ticker.replace(".NS", "") if ticker else ""
         if _copilot_sym:
-            _copilot_inputs = collect_for_analyze_stock(_copilot_sym)
+            _copilot_inputs = cached_ai_context(_copilot_sym)
             render_chat_panel(_copilot_sym, _copilot_inputs,
                               heading="AI Co-Pilot (bottom fallback)",
                               expanded=False)

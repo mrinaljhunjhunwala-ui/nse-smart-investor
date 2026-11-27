@@ -445,6 +445,14 @@ def _picks_live_prices(tickers: tuple) -> dict:
 # Shared helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=120, show_spinner=False)
+def cached_ai_context(symbol: str):
+    """AI Co-Pilot inputs for Analyze Stock. Uncached, this re-scored the stock and
+    re-fetched quote + fundamentals on every rerun (~0.8s warm, ~7s cold)."""
+    from dashboard.shared.ai import collect_for_analyze_stock
+    return collect_for_analyze_stock(symbol)
+
+
 @st.cache_data(ttl=300)
 def load_ticker_df(ticker: str, period: str = "2y") -> pd.DataFrame:
     """
