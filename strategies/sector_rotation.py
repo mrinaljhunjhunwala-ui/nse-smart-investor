@@ -2,7 +2,7 @@
 strategies/sector_rotation.py — Phase 3a
 Sector momentum scoring and rotation for Indian equities.
 
-Ranks 7 NSE sectors (IT, Banking, Pharma, Auto, FMCG, Energy, Metal)
+Ranks every NSE sector in data/universe (baskets built automatically)
 by composite momentum score across 20 / 60 / 120-day windows.
 Returns tickers from the top-N sectors for portfolio allocation.
 """
@@ -14,43 +14,28 @@ from typing import Dict, List, Tuple
 from data.fetcher import fetch_single
 
 # ── Sector definitions ────────────────────────────────────────────────────────
-# Fix (v2): Tata Motors demerged Oct 2025 into two separately listed entities —
-# TMCV.NS (commercial vehicles) and TMPV.NS (passenger vehicles/cars — the
-# larger consumer-facing business). Only TMCV.NS was listed here, so Auto
-# sector scoring was blind to the passenger-vehicle side entirely. Added
-# TMPV.NS. Also thickened Metal, which had only 3 constituents (one outlier
-# stock could swing the whole sector average) — added VEDL.NS and NMDC.NS.
-SECTORS: Dict[str, List[str]] = {
-    "IT":      ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
-    "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS"],
-    "Pharma":  ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS"],
-    "Auto":    ["MARUTI.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "TMCV.NS", "TMPV.NS"],
-    "FMCG":    ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"],
-    "Energy":  ["RELIANCE.NS", "ONGC.NS", "BPCL.NS", "NTPC.NS", "POWERGRID.NS"],
-    "Metal":   ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "VEDL.NS", "NMDC.NS"],
-    # FIX SEC2 — the 15 sectors below exist in data.universe.get_sector()'s
-    # taxonomy (used by analysis/score.py's sentiment sub-scorer) but had no
-    # entry here, so any stock in one of them could never receive a real
-    # sector-momentum rank. 5 liquid, representative tickers each — kept
-    # small deliberately so compute_sector_scores() stays fast; these are
-    # NOT meant to be exhaustive sector constituent lists (see data.universe
-    # for the full ~578-ticker breakdown across all 22 sectors).
-    "CapitalGoods":  ["LT.NS", "BEL.NS", "SIEMENS.NS", "ABB.NS", "HAVELLS.NS"],
-    "Cement":        ["ULTRACEMCO.NS", "SHREECEM.NS", "AMBUJACEM.NS", "ACC.NS", "RAMCOCEM.NS"],
-    "Chemicals":     ["PIDILITIND.NS", "AARTIIND.NS", "DEEPAKNTR.NS", "SRF.NS", "GNFC.NS"],
-    "Conglomerate":  ["ADANIENT.NS", "ADANIPORTS.NS", "GRASIM.NS", "TITAN.NS", "ASIANPAINT.NS"],
-    "Consumer":      ["SYMPHONY.NS", "HONASA.NS", "BAJAJELEC.NS", "AMBER.NS", "BLUESTARCO.NS"],
-    "Finance":       ["BAJFINANCE.NS", "BAJAJFINSV.NS", "SHRIRAMFIN.NS", "CHOLAFIN.NS", "MUTHOOTFIN.NS"],
-    "Healthcare":    ["APOLLOHOSP.NS", "MAXHEALTH.NS", "FORTIS.NS", "LALPATHLAB.NS", "METROPOLIS.NS"],
-    "Hospitality":   ["INDHOTEL.NS", "CHALET.NS", "WONDERLA.NS", "EIHOTEL.NS", "LEMONTREE.NS"],
-    "Insurance":     ["HDFCLIFE.NS", "SBILIFE.NS", "GICRE.NS", "NIACL.NS", "STARHEALTH.NS"],
-    "Media":         ["SUNTV.NS", "ZEEL.NS", "PVRINOX.NS", "NAZARA.NS", "SAREGAMA.NS"],
-    "RealEstate":    ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PHOENIXLTD.NS", "PRESTIGE.NS"],
-    "Retail":        ["TRENT.NS", "DMART.NS", "NYKAA.NS", "INDIAMART.NS", "KALYANKJIL.NS"],
-    "Shipping":      ["GESHIP.NS", "SCI.NS", "COCHINSHIP.NS", "MAZDOCK.NS", "GRSE.NS"],
-    "Telecom":       ["BHARTIARTL.NS", "INDUSTOWER.NS", "TATACOMM.NS", "IDEA.NS", "TTML.NS"],
-    "Textiles":      ["TRIDENT.NS", "VTL.NS", "KPRMILL.NS", "RAYMOND.NS", "SIYARAM.NS"],
-}
+# Built from data/universe (refreshed from NSE's official index files), so a
+# demerger, rename or index change reaches sector rotation with no hand edit.
+# Each basket = up to 5 names per sector, biggest index tier first
+# (Nifty 50 → Next 50 → Midcap 150 → Smallcap 250 → rest), listing order within a tier.
+BASKET_SIZE = 5
+
+
+def _build_sectors(size: int = BASKET_SIZE) -> Dict[str, List[str]]:
+    from data import universe as u
+    tiers = [u.NIFTY50_OFFICIAL, u.NIFTY_NEXT50, u.NIFTY_MIDCAP150, u.NIFTY_SMALLCAP250]
+    rank = {t: i for i, tier in enumerate(tiers) for t in tier}
+    out: Dict[str, List[str]] = {}
+    for sector in u.list_sectors():
+        if sector == "Other":
+            continue
+        names = u.get_tickers_by_sector(sector)
+        names.sort(key=lambda t: rank.get(t, len(tiers)))  # stable: keeps listing order within a tier
+        out[sector] = names[:size]
+    return out
+
+
+SECTORS: Dict[str, List[str]] = _build_sectors()
 
 # Lookback windows (trading days) and their weights in composite score
 LOOKBACKS: Dict[str, int]   = {"mom_20d": 20, "mom_60d": 60, "mom_120d": 120}
@@ -71,7 +56,7 @@ def compute_sector_scores(period: str = "2y") -> pd.DataFrame:
         mom_20d, mom_60d, mom_120d, composite_score, Rank, n_tickers
     """
     print(f"\n{'='*60}")
-    print(f"  PHASE 3a  —  SECTOR ROTATION ANALYSIS")
+    print("  PHASE 3a  —  SECTOR ROTATION ANALYSIS")
     print(f"  Scoring {len(SECTORS)} sectors  |  lookbacks: 20d / 60d / 120d")
     print(f"{'='*60}\n")
     print(f"  {'Sector':<12}  {'20d':>8}  {'60d':>8}  {'120d':>9}  {'Score':>8}")
