@@ -461,7 +461,7 @@ def check_paper_targets(state: dict, today: str) -> int:
         if ok:
             ep, qty = float(r.get("price") or 0), int(r.get("quantity") or 0)
             pct = (ex / ep - 1) * 100 if ep else 0.0
-            lines.append(f"🎯 <b>{str(r['ticker']).replace('.NS', '')}</b>  target ₹{float(r['tp']):,.2f} met · "
+            lines.append(f"🎯 <b>{_h(str(r['ticker']).replace('.NS', ''))}</b>  target ₹{float(r['tp']):,.2f} met · "
                          f"closed at ₹{ex:,.2f} · {qty} @ ₹{ep:,.2f} · {pct:+.1f}% (₹{(ex - ep) * qty:+,.0f})")
     if not lines:
         return 0

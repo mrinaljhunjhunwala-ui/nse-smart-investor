@@ -639,8 +639,10 @@ def _render_news_tab(ticker: str, company_name: str):
         return
     for item in items[:10]:
         st.markdown(
-            f"- [{item['title']}]({item['link']}) "
-            f"— *{item.get('source', 'Google News')}*"
+            (f"- [{item['title']}]({item['link']}) "
+             if str(item.get("link", "")).startswith(("https://", "http://"))  # no javascript: links from feeds
+             else f"- {item['title']} ")
+            + f"— *{item.get('source', 'Google News')}*"
             + (f" · {item['pub_date'][:16]}" if item.get("pub_date") else "")
         )
 

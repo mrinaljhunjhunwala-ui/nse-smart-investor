@@ -2097,10 +2097,15 @@ if analyze_btn or _prefill_active or (
                             else "Negative signal" if s == "negative"
                             else "Neutral update"
                         )
+                        import html as _nw_html
+                        # Feed text renders as raw HTML here: escape it, link only http(s).
+                        _nw_t, _nw_l = _nw_html.escape(str(art["title"])), str(art["link"])
+                        _nw_head = f'[{_nw_t}]({_nw_l})' if _nw_l.startswith(("https://", "http://")) else _nw_t
                         st.markdown(
-                            f'{icon} **[{art["title"]}]({art["link"]})**  \n'
+                            f'{icon} **{_nw_head}**  \n'
                             f'<span style="font-size:11px;color:var(--dim)">'
-                            f'{art["publisher"]} · {art["time"]} · *{impact}*</span>',
+                            f'{_nw_html.escape(str(art["publisher"]))} · {_nw_html.escape(str(art["time"]))}'
+                            f' · *{impact}*</span>',
                             unsafe_allow_html=True,
                         )
                 elif not _flag_dicts:

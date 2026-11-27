@@ -827,7 +827,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'{_display_label(_b["action"])}</span>'
                 f'</div>'
                 f'<div style="font-size:11px;color:{_tt_col};font-weight:600;margin-top:3px">{_tt_emo} {_tt_lbl} setup</div>'
-                f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">{_b["headline"]}</div>'
+                f'<div style="font-size:12px;color:var(--ink-mid);margin-top:2px">'
+                f'{_html.escape(str(_b["headline"]))}</div>'
                 + (f'<div class="t-value-sm" style="margin-top:5px;color:var(--ink)">'
                    f'<span class="t-label">Entry</span> ₹{_b_lvl["entry"]:,.2f} · '
                    f'<span class="t-label">Stop</span> '
@@ -904,7 +905,8 @@ def _render_top_picks_section(vix_regime: str, sector_tuple: tuple) -> None:
                 f'<span style="font-size:13px;font-weight:700;color:var(--bear)">{_sv["score"]:.0f}/90 · '
                 f'{_display_label(_sv["action"])}</span>'
                 f'</div>'
-                f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">{_sv["headline"]}</div>'
+                f'<div style="font-size:12px;color:var(--ink-mid);margin-top:3px">'
+                f'{_html.escape(str(_sv["headline"]))}</div>'
                 f'{_sv_live_html}'
                 + '</div>',
                 unsafe_allow_html=True,

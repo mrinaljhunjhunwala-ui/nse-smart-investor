@@ -1611,7 +1611,7 @@ def place_order(
         return {"status": "failed", "message": (parsed or {}).get("message", "Unknown error")}
     except Exception as e:
         _log.warning("angel_fetcher.place_order(%s) failed: %s", sym, e)
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Broker request failed ({type(e).__name__}); see logs."}
 
 
 def modify_order(
@@ -1664,7 +1664,7 @@ def modify_order(
         return {"status": "failed", "message": (parsed or {}).get("message", "")}
     except Exception as e:
         _log.warning("angel_fetcher.modify_order(%s) failed: %s", order_id, e)
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Broker request failed ({type(e).__name__}); see logs."}
 
 
 def cancel_order(order_id: str, variety: str = "NORMAL") -> bool:
@@ -1729,7 +1729,7 @@ def place_gtt(
         return {"status": "failed", "message": (parsed or {}).get("message", "")}
     except Exception as e:
         _log.warning("angel_fetcher.place_gtt(%s) failed: %s", sym, e)
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Broker request failed ({type(e).__name__}); see logs."}
 
 
 def get_gtt_list() -> Optional[List[Dict]]:

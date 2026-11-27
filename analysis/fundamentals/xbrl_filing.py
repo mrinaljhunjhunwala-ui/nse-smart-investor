@@ -105,6 +105,10 @@ def _contexts(root: ET.Element) -> Dict[str, Tuple[Optional[_dt.date], Optional[
 
 def parse_xbrl(data: bytes | str) -> Dict[str, Any]:
     """Parse one Ind-AS XBRL instance. Raises ValueError if it isn't XML."""
+    head = (data.encode() if isinstance(data, str) else bytes(data))[:4096].upper()
+    if b"<!DOCTYPE" in head or b"<!ENTITY" in head:
+        # XBRL instances never need a DTD; refusing one rules out entity-expansion tricks.
+        raise ValueError("not a valid XBRL/XML file: DTD/entity declarations are not allowed")
     try:
         root = ET.fromstring(data if isinstance(data, (bytes, str)) else bytes(data))
     except ET.ParseError as e:
