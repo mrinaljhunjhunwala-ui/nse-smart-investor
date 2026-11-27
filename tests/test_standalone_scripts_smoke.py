@@ -72,6 +72,7 @@ _STANDALONE_SCRIPTS = [
      ["main", "parse_full", "fill_cache", "regime_frame", "lag_table"]),
     ("tools.validate_valuation",            "tools/validate_valuation.py", ["main"]),
     ("tools.refresh_flags_batch",           "tools/refresh_flags_batch.py", ["main"]),
+    ("tools.upstox_check",                 "tools/upstox_check.py", ["main"]),
     ("tools.composite_golden",              "tools/composite_golden.py", ["main", "build_snapshot", "run_case"]),
     ("tools.purge_test_rows",               "tools/purge_test_rows.py",
      ["main", "find_test_rows", "apply_plan", "is_test_ticker"]),

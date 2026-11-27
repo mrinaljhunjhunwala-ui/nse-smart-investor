@@ -41,6 +41,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONUTF8: "1"
+      UPSTOX_ANALYTICS_TOKEN: ${{ secrets.UPSTOX_ANALYTICS_TOKEN }}  # empty = Upstox off
       DAYS: ${{ github.event.inputs.days || '3' }}
     steps:
       - name: Checkout

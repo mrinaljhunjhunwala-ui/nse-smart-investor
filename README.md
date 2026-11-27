@@ -77,6 +77,30 @@ SQLite for storage.
 
 ---
 
+## Upstox market data (optional)
+
+When an Upstox **Analytics Token** is configured, Upstox becomes the first tier for live
+quotes (`utils/live_price.py`, before the Angel relay / Angel One / Yahoo) and for historical
+candles (`data/fetcher.py`, before Angel One → Stooq → Yahoo). Without a token nothing changes
+and no Upstox call is made. Code: `data/upstox_fetcher.py`.
+
+1. Log in at https://account.upstox.com/developer/apps → **Analytics** tab → **Generate Token**
+   → copy it (read-only, valid 1 year, no static IP needed for market data; generating a new
+   one revokes the old one).
+2. GitHub: repo Settings → Secrets and variables → Actions → new secret
+   `UPSTOX_ANALYTICS_TOKEN`. The price-fetching workflows already pass it (empty = off).
+3. Streamlit Cloud (and local `.streamlit/secrets.toml`):
+   ```toml
+   [upstox]
+   analytics_token = "..."
+   ```
+   or set the env var `UPSTOX_ANALYTICS_TOKEN`.
+4. Live check (prints 3 quotes + 5 days of RELIANCE candles, never the token):
+   `py tools/upstox_check.py` with `UPSTOX_ANALYTICS_TOKEN` set.
+
+A 401/403 pauses Upstox for 30 minutes (logged with the reason) and the next tier answers.
+Quotes it serves carry `"source": "upstox"`; Data Health shows an Upstox row once configured.
+
 ## 🧱 Architecture
 
 ```
