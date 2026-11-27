@@ -201,7 +201,7 @@ def _nse_live_price(symbol: str) -> Optional[dict]:
     """NSE India official API — real-time, needs fresh session cookies."""
     try:
         session = _get_nse_session()
-        url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}"
+        url = f"https://www.nseindia.com/api/quote-equity?symbol={urllib.parse.quote(symbol.upper(), safe='')}"
         resp = session.get(url, timeout=6)
         if resp.status_code != 200:
             return None

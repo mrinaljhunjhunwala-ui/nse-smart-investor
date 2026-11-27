@@ -330,7 +330,7 @@ def _fetch_stooq(ticker: str, period: str = "1y") -> pd.DataFrame:
         sym = _INDEX_MAP[sym]
 
     d1, d2 = _period_to_dates(period)
-    url = f"https://stooq.com/q/d/l/?s={sym}&d1={d1}&d2={d2}&i=d"
+    url = f"https://stooq.com/q/d/l/?s={urllib.parse.quote(sym, safe='.^')}&d1={d1}&d2={d2}&i=d"
 
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     # Short timeout: when Stooq is congested, fail fast to the Yahoo fallback rather

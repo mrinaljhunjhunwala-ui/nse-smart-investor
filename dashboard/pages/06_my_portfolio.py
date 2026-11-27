@@ -860,7 +860,8 @@ if _csv_source is not None:
                     f'top:-4px;width:14px;height:14px;background:{_h_bar_c};border-radius:50%;'
                     f'border:2px solid var(--ink)"></div>'
                     f'</div></div>'
-                    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:6px">{h.headline}</div>'
+                    f'<div style="font-size:12px;color:var(--ink-mid);margin-top:6px">'
+                    f'{_html.escape(str(h.headline))}</div>'
                     f'</div>'
                 )
                 with _hc_grid[_hi % 2]:

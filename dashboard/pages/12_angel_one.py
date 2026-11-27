@@ -9,6 +9,7 @@ holding-posture read follow as tabs once connected.
 """
 import os, sys
 import datetime as _dt
+import html
 import logging
 
 _log = logging.getLogger("dashboard.angel_one")
@@ -498,7 +499,7 @@ with tab_ao5:
         _card_cls = "order-buy" if _qo_side == "BUY" else "order-sell"
         st.markdown(
             f'<div class="{_card_cls}">'
-            f'<b>{_qo_side} {_qo_qty} × {_qo_sym}</b>  |  '
+            f'<b>{_qo_side} {_qo_qty} × {html.escape(_qo_sym)}</b>  |  '
             f'{_qo_prod} · {_qo_type}'
             + (f'  |  Price: Rs {_qo_price:.2f}' if _qo_price > 0 else "  |  Market Order")
             + f'</div>',
