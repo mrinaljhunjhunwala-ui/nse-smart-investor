@@ -202,3 +202,34 @@ def test_lint_hook_handles_malformed_payload():
         timeout=30,
     )
     assert result.returncode == 0
+
+
+# ── check_raw_html.py / smoke_on_stop.py (security audit 2026-11) ────────────
+def _load_hook(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / ".claude" / "hooks" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_raw_html_flags_only_new_unescaped_fields():
+    h = _load_hook("check_raw_html")
+    old = "st.markdown(x, unsafe_allow_html=True)\n    f'<b>{legacy}</b>'"
+    src = old + "\n    f'<b>{name}</b>'\n    f'<b>{html.escape(name)}</b>'\n    f'<b>{price:,.2f}</b>'\n"
+    hits = h.find_issues(src, set(old.splitlines()))
+    assert [no for no, _ in hits] == [3]
+
+
+def test_raw_html_ignores_files_without_raw_html_and_noqa():
+    h = _load_hook("check_raw_html")
+    assert h.find_issues("f'<b>{name}</b>'\n", set()) == []
+    assert h.find_issues("unsafe_allow_html\nf'<b>{name}</b>'  # noqa: html\n", set()) == []
+
+
+def test_smoke_hook_maps_changes_to_page_stems():
+    h = _load_hook("smoke_on_stop")
+    assert h.stems_for(["dashboard/pages/05_analyze_stock.py"], REPO_ROOT) == ["05_analyze_stock"]
+    assert "08_watchlist_journal" in h.stems_for(["dashboard/views/research_notes.py"], REPO_ROOT)
+    assert "07_paper_trades" in h.stems_for(["dashboard/shared/trade_utils.py"], REPO_ROOT)
+    assert h.stems_for(["dashboard/app.py"], REPO_ROOT) is None
