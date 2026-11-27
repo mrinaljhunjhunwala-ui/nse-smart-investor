@@ -2,7 +2,10 @@
 # deploy/oracle-relay/setup.sh — install or update the Angel One price relay on an
 # Ubuntu 22.04 / 24.04 VM. Safe to run again any time (it is how you update too).
 #
-#   curl -fsSL https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/main/deploy/oracle-relay/setup.sh | sudo bash
+#   REF=<commit-sha>   # pin a reviewed commit, not main
+#   curl -fsSLo setup.sh https://raw.githubusercontent.com/mrinaljhunjhunwala-ui/nse-smart-investor/$REF/deploy/oracle-relay/setup.sh
+#   less setup.sh            # read it before running as root
+#   sudo bash setup.sh
 #
 # What it does: installs git + python3-venv, clones / updates the repo in
 # /opt/nse-smart-investor, makes a small virtualenv with only what the relay needs,
