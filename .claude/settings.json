@@ -23,6 +23,21 @@
           {
             "type": "command",
             "command": "py .claude/hooks/block_page_hex.py"
+          },
+          {
+            "type": "command",
+            "command": "py .claude/hooks/check_raw_html.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py .claude/hooks/smoke_on_stop.py",
+            "timeout": 900
           }
         ]
       }
