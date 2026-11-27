@@ -123,11 +123,18 @@ def _cache_get(cache_key, now: float):
         return None
 
 
+def _pit_cut(df):
+    """Bars dated after the active point-in-time date dropped (backfill runs only;
+    a no-op on a live run). The cache keeps the full frame. See utils/point_in_time."""
+    from utils.point_in_time import cut
+    return cut(df)
+
+
 def peek_cached(ticker: str, period: str = "2y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """The frame fetch_single() cached for these arguments, or None. Never
     fetches: for callers that only want data a scan already paid for."""
     cached = _cache_get((ticker, period, interval), time.time())
-    return None if cached is None else cached.copy()
+    return None if cached is None else _pit_cut(cached.copy())
 
 
 def _cache_put(cache_key, df, now: float) -> None:
@@ -907,7 +914,7 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
     # FIX CACHE1: lock-guarded lookup + expiry (see _cache_get above).
     cached = _cache_get(cache_key, now)
     if cached is not None:
-        return cached.copy()
+        return _pit_cut(cached.copy())
 
     df = None
     served = None
@@ -1085,7 +1092,7 @@ def fetch_single(ticker: str, period: str = "2y", interval: str = "1d") -> pd.Da
 
     # Store in cache with current timestamp (bounded + lock-guarded — FIX CACHE1)
     _cache_put(cache_key, df, now)
-    return df.copy()
+    return _pit_cut(df.copy())
 
 
 def fetch_intraday(

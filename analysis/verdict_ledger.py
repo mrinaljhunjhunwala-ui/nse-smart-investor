@@ -244,7 +244,11 @@ def ensure_schema() -> None:
                         raise
         # Additive migration (2026-10-08): SHADOW breadth regime read at log
         # time. Recorded only for a later re-test; never read by scoring.
-        _shadow_cols = (("breadth_label", "TEXT"), ("breadth_pct_above_50dma", real))
+        # Additive migration (2026-11-27): rows rebuilt after the fact by the
+        # Tomorrow's Watchlist backfill (scripts/warm_tomorrow_watchlist.py
+        # --as-of). backfilled=1 keeps them out of WATCHLIST_RULE.
+        _shadow_cols = (("breadth_label", "TEXT"), ("breadth_pct_above_50dma", real),
+                        ("backfilled", "INTEGER DEFAULT 0"), ("backfill_note", "TEXT"))
         if is_pg:
             for c, t in _shadow_cols:
                 cur.execute(f"ALTER TABLE verdict_log ADD COLUMN IF NOT EXISTS {c} {t}")
@@ -303,10 +307,17 @@ def log_verdict(*,
                 signal_tags:     Optional[List[str]] = None,
                 source:          str = "analyze_page",
                 horizon:         Optional[str]  = None,
+                as_of:           Optional[_dt.date] = None,
+                backfill_note:   Optional[str]  = None,
                 ) -> Optional[int]:
     """
     Persist ONE verdict row. Idempotent per (logged_date, ticker, horizon, source):
     calling twice on the same day for the same ticker is a no-op.
+
+    as_of: a BACKFILLED row rebuilt after the fact for that past session
+    (logged_date = as_of, logged_at = 15:50 IST that day, backfilled = 1,
+    `backfill_note` says when and how; no breadth shadow, which is latest-only).
+    The same unique key means a backfill never overwrites a row logged live.
 
     Every failure is caught and logged — the ledger is a background concern
     and must NEVER surface an exception in the user-facing page render.
@@ -340,9 +351,20 @@ def log_verdict(*,
         # we don't have it as a field, so we leave it None here. The banner
         # caller CAN pass it via subsystem_labels if desired; the ledger
         # doesn't require it for calibration to work.
+        if as_of is not None:
+            if not is_trading_day(as_of) or as_of > last_closed_session(now):
+                _log.warning("log_verdict(%s): backfill date %s is not a closed session", ticker, as_of)
+                return None
+            logged_at = _dt.datetime.combine(as_of, _dt.time(15, 50)).isoformat(timespec="seconds")
+            logged_date = as_of.isoformat()
+            shadow: Tuple[Optional[str], Optional[float]] = (None, None)
+        else:
+            logged_at = now.replace(tzinfo=None).isoformat(timespec="seconds")   # IST, naive like old rows
+            logged_date = session_date(now).isoformat()
+            shadow = _breadth_shadow()     # SHADOW: recorded only, never read by scoring
         row = (
-            now.replace(tzinfo=None).isoformat(timespec="seconds"),   # IST, naive like old rows
-            session_date(now).isoformat(),
+            logged_at,
+            logged_date,
             ticker,
             float(entry_price) if entry_price is not None else None,
             str(getattr(fv, "verdict", "") or "") or None,
@@ -360,13 +382,15 @@ def log_verdict(*,
             getattr(fv, "limiting_gate", None),
             (getattr(fv, "primary_reason", "") or "")[:500] or None,
             source,
-            *_breadth_shadow(),     # SHADOW: recorded only, never read by scoring
+            *shadow,
+            1 if as_of is not None else 0,
+            ((backfill_note or "")[:500] or None) if as_of is not None else None,
         )
         cols = ("logged_at,logged_date,ticker,entry_price,verdict,conviction,"
                 "confidence,horizon,composite_score,composite_action,tqs,"
                 "valuation_posture,thesis_verdict,thesis_score,quality_score,"
                 "quality_flags,limiting_gate,primary_reason,source,"
-                "breadth_label,breadth_pct_above_50dma")
+                "breadth_label,breadth_pct_above_50dma,backfilled,backfill_note")
         placeholders = ",".join(["?"] * len(row))
 
         with _store._get_conn() as conn:
@@ -539,6 +563,17 @@ def ledger_stamp() -> str:
     with _store._get_conn() as conn:
         row = read_sql_df(sql, conn, params=()).iloc[0].tolist()
     return "|".join(str(x) for x in row)
+
+
+def live_rows_on(logged_date: _dt.date, source: str) -> int:
+    """How many rows logged LIVE (not backfilled) `source` holds for `logged_date`.
+    A backfill skips a day that has any, so a rebuilt list never mixes into a
+    live one. Raises on a failed read (the caller must not guess "none")."""
+    ensure_schema()
+    sql = _store._q("SELECT COUNT(*) FROM verdict_log WHERE logged_date = ? AND source = ? "
+                    "AND COALESCE(backfilled, 0) = 0")
+    with _store._get_conn() as conn:
+        return int(read_sql_df(sql, conn, params=(logged_date.isoformat(), source)).iloc[0, 0])
 
 
 TW_BUCKET_PREFIX = "tw:"
@@ -1742,6 +1777,21 @@ def with_list_buckets(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def is_backfilled(df: pd.DataFrame) -> pd.Series:
+    """Boolean mask of rows rebuilt after the fact (backfilled = 1). Rows from
+    before the column existed, and frames without it, read as live."""
+    if df is None or "backfilled" not in getattr(df, "columns", ()):
+        return pd.Series(False, index=getattr(df, "index", None), dtype=bool)
+    return pd.to_numeric(df["backfilled"], errors="coerce").fillna(0).astype(int) == 1
+
+
+def rebuilt_days(df: pd.DataFrame) -> List[str]:
+    """Sorted distinct logged_date values of backfilled rows in `df`."""
+    if df is None or getattr(df, "empty", True) or "logged_date" not in df.columns:
+        return []
+    return sorted(df.loc[is_backfilled(df), "logged_date"].astype(str).unique().tolist())
+
+
 def _list_key(source: Any, bucket: Any) -> str:
     if source == "tomorrow_watchlist":
         return f"tomorrow_watchlist:{bucket if isinstance(bucket, str) and bucket else ''}"
@@ -1799,7 +1849,8 @@ def results_by_list(rows: pd.DataFrame, horizons: Tuple[int, ...] = (5, 20), *,
     for h in horizons:
         cols += [f"picks_{h}", f"days_{h}", f"hit_pct_{h}", f"hit_lower_pct_{h}",
                  f"avg_vs_nifty_{h}", f"avg_vs_nifty_net_{h}", f"status_{h}"]
-    attrs = {"entry_basis": "close", "entry_requested": entry, "cost_pct": cost_pct}
+    attrs = {"entry_basis": "close", "entry_requested": entry, "cost_pct": cost_pct,
+             "rebuilt_days": rebuilt_days(rows)}   # backfilled sessions included here
     empty = pd.DataFrame(columns=cols)
     empty.attrs.update(attrs)
     if rows is None or rows.empty or not {"source", "logged_date", "ticker"} <= set(rows.columns):
@@ -1863,6 +1914,9 @@ def evaluate_watchlist_rule(rows: pd.DataFrame,
     """Evaluate WATCHLIST_RULE on ledger rows carrying a `bucket` column
     (with_list_buckets). Pure. Picks without a recorded bucket are left out —
     their direction is unknown. A name in two buckets on one day counts once.
+    Backfilled rows (rebuilt after the fact, backfilled = 1) are left out too:
+    the pre-registered test counts only picks logged live. `excluded_backfilled`
+    says how many were dropped.
 
     status: 'too_early' (picks / days below the floors), 'pass' (day-clustered
     Wilson lower bound above the threshold), 'fail' otherwise. `summary` is one
@@ -1872,9 +1926,12 @@ def evaluate_watchlist_rule(rows: pd.DataFrame,
     h = int(rule["horizon_days"])
     res: Dict[str, Any] = {"status": "too_early", "rule": rule, "picks": 0, "days": 0,
                            "hit_pct": None, "hit_lower_pct": None, "avg_vs_nifty_net": None,
-                           "pending_days": 0}
+                           "pending_days": 0, "excluded_backfilled": 0}
     d = pd.DataFrame() if rows is None else rows
     if not d.empty and {"source", "logged_date", "ticker"} <= set(d.columns):
+        _bf = is_backfilled(d)
+        res["excluded_backfilled"] = int((_bf & (d["source"] == rule["source"])).sum())
+        d = d[~_bf]
         if "bucket" not in d.columns:
             d = d.assign(bucket=np.nan)
         d = d[(d["source"] == rule["source"]) & d["bucket"].isin(rule["buckets"])

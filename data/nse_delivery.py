@@ -296,7 +296,8 @@ def get_last_diagnostic() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_symbol_history(symbol: str, days: int = 60) -> pd.DataFrame:
-    """Return the last `days` rows for one symbol, newest first."""
+    """Return the last `days` rows for one symbol, newest first (rows dated up to
+    the point-in-time date only, during a backfill; utils/point_in_time)."""
     ensure_schema()
     sym = (symbol or "").upper().replace(".NS", "")
     try:
@@ -304,9 +305,9 @@ def load_symbol_history(symbol: str, days: int = 60) -> pd.DataFrame:
             return read_sql_df(_store._q("""
                 SELECT date, close, deliv_pct, traded_qty, deliv_qty
                 FROM nse_delivery_daily
-                WHERE symbol = ?
+                WHERE symbol = ? AND date <= ?
                 ORDER BY date DESC LIMIT ?
-            """), conn, params=(sym, int(days)))
+            """), conn, params=(sym, _max_date(), int(days)))
     except Exception as e:
         _log.warning("load_symbol_history failed for %s: %s", sym, e)
         return pd.DataFrame()
@@ -327,6 +328,18 @@ _PREFETCH_META: Dict[str, object] = {"key": None, "ts": 0.0, "lookback": 0}
 
 def _db_key() -> str:
     return _store._database_url() or _store._SQLITE_PATH
+
+
+def _max_date() -> str:
+    """Newest delivery date a read may see: the point-in-time date during a
+    backfill, else no limit ('9999-12-31'; dates are ISO text)."""
+    from utils.point_in_time import as_of
+    d = as_of()
+    return d.isoformat() if d else "9999-12-31"
+
+
+def _cache_key() -> str:
+    return f"{_db_key()}|{_max_date()}"
 
 
 def clear_prefetch() -> None:
@@ -352,8 +365,9 @@ def prefetch_snapshots(symbols, lookback: int = 60) -> int:
         ensure_schema()
         with _store._get_conn() as conn:
             cur = conn.cursor()
-            cur.execute(_store._q("SELECT DISTINCT date FROM nse_delivery_daily "
-                                  "ORDER BY date DESC LIMIT 1 OFFSET ?"), (int(lookback) * 2 - 1,))
+            cur.execute(_store._q("SELECT DISTINCT date FROM nse_delivery_daily WHERE date <= ? "
+                                  "ORDER BY date DESC LIMIT 1 OFFSET ?"),
+                        (_max_date(), int(lookback) * 2 - 1))
             row = cur.fetchone()
             whole_table = row is None
             parts = []
@@ -361,8 +375,8 @@ def prefetch_snapshots(symbols, lookback: int = 60) -> int:
                 chunk = syms[i:i + 500]
                 parts.append(read_sql_df(_store._q(
                     "SELECT symbol, date, deliv_pct FROM nse_delivery_daily "
-                    f"WHERE date >= ? AND symbol IN ({','.join('?' * len(chunk))})"),
-                    conn, params=(row[0] if row else "", *chunk)))
+                    f"WHERE date >= ? AND date <= ? AND symbol IN ({','.join('?' * len(chunk))})"),
+                    conn, params=(row[0] if row else "", _max_date(), *chunk)))
             parts = [p for p in parts if p is not None and not p.empty]
             df = pd.concat(parts) if parts else None
         if df is not None and not df.empty:
@@ -378,7 +392,7 @@ def prefetch_snapshots(symbols, lookback: int = 60) -> int:
         return 0
     _PREFETCH.clear()
     _PREFETCH.update(found)
-    _PREFETCH_META.update(key=_db_key(), ts=time.time(), lookback=int(lookback))
+    _PREFETCH_META.update(key=_cache_key(), ts=time.time(), lookback=int(lookback))
     _log.info("nse_delivery: prefetched %d of %d delivery snapshots in %.1fs",
               len(found), len(syms), time.time() - t0)
     return len(found)
@@ -388,7 +402,7 @@ def _prefetched(sym: str, lookback: int):
     """(True, snapshot) when the bulk cache answers for ``sym``, else (False, None)."""
     import time
     meta = _PREFETCH_META
-    if (not meta["ts"] or meta["lookback"] != lookback or meta["key"] != _db_key()
+    if (not meta["ts"] or meta["lookback"] != lookback or meta["key"] != _cache_key()
             or time.time() - float(meta["ts"]) > _PREFETCH_TTL_S or sym not in _PREFETCH):
         return False, None
     return True, _PREFETCH[sym]

@@ -317,6 +317,13 @@ if hasattr(_vl, "results_by_list"):
             f"Watchlist pick isn't priced at the next open). {_waiting:,} logged pick(s) are still "
             "inside their window. Past model output only, not investment advice."
         )
+        _rb_days = _rbl.attrs.get("rebuilt_days") or []
+        if _rb_days:
+            st.caption(
+                f"Includes {len(_rb_days)} rebuilt day(s) ({', '.join(_rb_days)}): Tomorrow's "
+                "Watchlist lists rebuilt after the fact from data up to that day's close, because "
+                "the after-close scan did not run. They are left out of the test below."
+            )
     if hasattr(_vl, "evaluate_watchlist_rule"):
         _wr = _vl.evaluate_watchlist_rule(_rbl_rows)
         _wrule = _wr["rule"]
@@ -330,6 +337,8 @@ if hasattr(_vl, "results_by_list"):
             f"{_wrule['logged_from']}, {_wrule['horizon_days']} sessions, at least "
             f"{_wrule['min_verdicts']} scored picks over {_wrule['min_days']} separate days. "
             "Separate from the test in the card above, which it doesn't change."
+            + (f" Counts live-logged picks only ({_wr['excluded_backfilled']} rebuilt pick(s) "
+               "left out)." if _wr.get("excluded_backfilled") else "")
         )
 
 # ── Source filter ─────────────────────────────────────────────────────────────

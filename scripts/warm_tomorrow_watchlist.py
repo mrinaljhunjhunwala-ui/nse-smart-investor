@@ -27,6 +27,12 @@ logic here, so there is exactly one place that logic lives and this can
 never drift from what the app itself would compute — same discipline as
 warm_top_picks.py.
 
+Backfill (FIX TW-BACKFILL, 27 Nov 2026): with AS_OF_DATES="2026-11-25,2026-11-26"
+in the environment (the workflow's as_of_dates input) or --as-of <dates>, the job
+only rebuilds those past sessions point-in-time and logs them to the verdict
+ledger as backfilled rows (see backfill()); no live scan, no snapshot overwrite,
+no breadth snapshot.
+
 Exit codes: always 0 — a failed warm-up should not fail the workflow or
 block the next scheduled attempt; the app already degrades gracefully to a
 live scan if no fresh snapshot is available.
@@ -56,7 +62,82 @@ _KV_KEY  = "tomorrow_watchlist_snapshot"
 _KV_USER = "_system"
 
 
+def parse_as_of_dates(raw: "str | None") -> "list[datetime.date]":
+    """'2026-11-25, 2026-11-26' -> [date, date] (sorted, deduplicated). Empty or
+    None -> []. Raises ValueError on a malformed entry."""
+    out = set()
+    for part in (raw or "").replace(";", ",").split(","):
+        part = part.strip()
+        if part:
+            out.add(datetime.date.fromisoformat(part))
+    return sorted(out)
+
+
+def backfill(dates: "list[datetime.date]") -> int:
+    """Rebuild Tomorrow's Watchlist for each past session in `dates` from data up
+    to that day's close and log it to the verdict ledger as backfilled rows
+    (dashboard/shared/cache.build_tomorrow_watchlist_as_of). Weekends, NSE
+    holidays and sessions not yet closed are skipped with a log line. Never
+    sends anything and never replaces the live snapshot; re-running a date adds
+    nothing and never touches rows that were logged live. Returns the number of
+    ledger rows added."""
+    try:
+        from analysis.verdict_ledger import last_closed_session
+        from dashboard.shared.cache import build_tomorrow_watchlist_as_of
+        from utils.nse_holidays import is_trading_day
+        import trade_store as store
+    except Exception as e:
+        _log.error("backfill: import failed, aborting: %s", e)
+        return 0
+    added = 0
+    for d in dates:
+        if not is_trading_day(d):
+            _log.info("backfill %s: skipped, not an NSE trading day (weekend or holiday)", d)
+            continue
+        if d > last_closed_session():
+            _log.info("backfill %s: skipped, that session has not closed yet", d)
+            continue
+        _t0 = datetime.datetime.now()
+        try:
+            result = build_tomorrow_watchlist_as_of(d, n=15)
+        except Exception as e:
+            _log.warning("backfill %s: not rebuilt, nothing written: %s", d, e)
+            continue
+        pit = result.get("point_in_time") or {}
+        added += int(pit.get("ledger_rows_added") or 0)
+        _log.info(
+            "backfill %s: done in %.1fs, scored %s of %s, breakout=%d breakdown=%d reversal=%d, "
+            "ledger rows added=%s%s; VIX %s (%s); not point-in-time: %s",
+            d, (datetime.datetime.now() - _t0).total_seconds(),
+            result.get("n_scored"), result.get("n_universe"),
+            len(result.get("breakout_candidates", [])), len(result.get("breakdown_watch", [])),
+            len(result.get("reversal_watch", [])), pit.get("ledger_rows_added"),
+            f" (SKIPPED: {pit['ledger_skipped']})" if pit.get("ledger_skipped") else "",
+            pit.get("vix"), pit.get("vix_source"), "; ".join(pit.get("not_point_in_time") or []))
+        # A record of the rebuilt list and what it could not see, one key per day.
+        # The live snapshot (tomorrow_watchlist_snapshot) is left alone.
+        store.kv_set(f"{_KV_KEY}:backfill:{d.isoformat()}",
+                     {"data": result, "generated_at": store.snapshot_timestamp(),
+                      "as_of": d.isoformat(), "backfilled": True}, user_id=_KV_USER)
+    return added
+
+
 def main() -> int:
+    # AS_OF_DATES (workflow_dispatch input as_of_dates) or --as-of: backfill only.
+    raw = os.environ.get("AS_OF_DATES", "")
+    if "--as-of" in sys.argv[1:]:
+        i = sys.argv.index("--as-of")
+        raw = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    if raw.strip():
+        try:
+            dates = parse_as_of_dates(raw)
+        except ValueError as e:
+            _log.error("backfill: bad as_of_dates %r (want YYYY-MM-DD, comma-separated): %s", raw, e)
+            return 0
+        _log.info("backfill: rebuilding Tomorrow's Watchlist for %s",
+                  ", ".join(d.isoformat() for d in dates))
+        backfill(dates)
+        return 0
     try:
         from dashboard.shared.cache import _tomorrow_watchlist
         import trade_store as store
