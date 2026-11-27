@@ -182,8 +182,19 @@ _FLOWS_TTL_S = 60 * 60
 _FLOWS_MAX_AGE_DAYS = 9          # 5 sessions + a weekend + a holiday or two
 
 
+def _as_of():
+    """Point-in-time date of a backfill run (utils/point_in_time), else None."""
+    try:
+        from utils.point_in_time import as_of
+        return as_of()
+    except Exception:
+        return None
+
+
 def _get_flows_cached() -> Optional[Dict]:
-    ent = _FLOWS_CACHE.get("flows")
+    _d = _as_of()
+    _key = f"flows@{_d.isoformat()}" if _d else "flows"
+    ent = _FLOWS_CACHE.get(_key)
     if ent is not None:
         ts, val = ent  # type: ignore[misc]
         ttl = _FLOWS_TTL_S if val is not None else _BENCH_NEG_TTL_S
@@ -191,13 +202,17 @@ def _get_flows_cached() -> Optional[Dict]:
             return val
     try:
         from analysis.fii_dii import load_history as _fd_load
-        _fd = _fd_load(days=5)
+        # Point-in-time run: read further back and keep rows dated <= the date.
+        _fd = _fd_load(days=40 if _d else 5)
+        if _fd is not None and not _fd.empty and _d:
+            _dates = pd.to_datetime(_fd["date"], errors="coerce")
+            _fd = _fd[_dates <= pd.Timestamp(_d)].sort_values("date", ascending=False).head(5)
         if _fd is not None and not _fd.empty:
             # FIX FLOWS-STALE (2026-10-02): the table has holes (NSE only serves
             # the latest day, missed nightly runs aren't backfilled), so "last 5
             # rows" could silently reach weeks back. Keep rows within
             # _FLOWS_MAX_AGE_DAYS calendar days of the newest market session.
-            _cut = (pd.Timestamp(_expected_last_session())
+            _cut = (pd.Timestamp(_d if _d else _expected_last_session())
                     - pd.Timedelta(days=_FLOWS_MAX_AGE_DAYS))
             _fd = _fd[pd.to_datetime(_fd["date"], errors="coerce") >= _cut]
             # FIX FLOWS-NAN (audit #28): a row missing either net used to be
@@ -215,7 +230,7 @@ def _get_flows_cached() -> Optional[Dict]:
     except Exception as e:
         _log.debug("FII/DII flows cache miss: %s: %s", type(e).__name__, e)
         v = None
-    _FLOWS_CACHE["flows"] = (_now(), v)
+    _FLOWS_CACHE[_key] = (_now(), v)
     return v
 
 
@@ -239,8 +254,11 @@ _BENCH_MISS_RETRY_S = 30.0
 def _get_bench_cached(period: str):
     """Return a cached Nifty DataFrame for `period`, or None on failure.
     See FIX CACHE-TTL above for expiry rules (1h TTL, date staleness,
-    5-min negative cache)."""
-    ent = _BENCH_CACHE.get(period)
+    5-min negative cache). A point-in-time run keys the cache by its date and
+    skips the staleness re-check (its frame ends at that date by design)."""
+    _d = _as_of()
+    key = (period, _d.isoformat()) if _d else period
+    ent = _BENCH_CACHE.get(key)
     if ent is not None:
         ts, v = ent  # type: ignore[misc]
         age = _now() - ts
@@ -250,19 +268,19 @@ def _get_bench_cached(period: str):
             # without relative strength. Retry after _BENCH_MISS_RETRY_S instead.
             if age <= _BENCH_MISS_RETRY_S:
                 return None
-        elif age <= _BENCH_TTL_S and not (age > _BENCH_NEG_TTL_S and _bench_is_stale(v)):
+        elif age <= _BENCH_TTL_S and (_d or not (age > _BENCH_NEG_TTL_S and _bench_is_stale(v))):
             return v
     try:
         b = _fetch_single("^NSEI", period=period)  # type: ignore[misc]
         if b is None or (hasattr(b, "empty") and b.empty):
-            _BENCH_CACHE[period] = (_now(), _BENCH_MISS)
+            _BENCH_CACHE[key] = (_now(), _BENCH_MISS)
             return None
-        _BENCH_CACHE[period] = (_now(), b)
+        _BENCH_CACHE[key] = (_now(), b)
         return b
     except Exception as e:
         _log.warning("bench cache: ^NSEI %s fetch failed, retry in 30s (scores lack relative strength): %s: %s",
                    period, type(e).__name__, e)
-        _BENCH_CACHE[period] = (_now(), _BENCH_MISS)
+        _BENCH_CACHE[key] = (_now(), _BENCH_MISS)
         return None
 
 
@@ -552,7 +570,23 @@ _REGIME_TTL_OK   = 1800.0   # 30 min — regime inputs are daily
 _REGIME_TTL_FAIL = 300.0    # retry a failed snapshot after 5 min
 
 
+_REGIME_LABEL_AS_OF: Dict[str, Optional[str]] = {}
+
+
 def _live_regime_label() -> Optional[str]:
+    _d = _as_of()
+    if _d:
+        # Point-in-time run: snapshot_live reads ^INDIAVIX / ^NSEI through
+        # data.fetcher, which cuts both to the date; one read per date.
+        k = _d.isoformat()
+        if k not in _REGIME_LABEL_AS_OF:
+            try:
+                from analysis.regime import snapshot_live as _reg_snap
+                _REGIME_LABEL_AS_OF[k] = getattr(_reg_snap(), "label", None)
+            except Exception as _rg_e:
+                _log.debug("regime snapshot (as of %s) unavailable: %s", k, _rg_e)
+                _REGIME_LABEL_AS_OF[k] = None
+        return _REGIME_LABEL_AS_OF[k]
     now = _regime_time.time()
     c = _REGIME_LABEL_CACHE
     ttl = _REGIME_TTL_OK if c["ok"] else _REGIME_TTL_FAIL
@@ -1862,7 +1896,8 @@ def score_dataframe(
         vix_regime=vix_info.get("regime"),
         score=total,
     )
-    valid_until = (datetime.now() + timedelta(days=horizon_days)).date().isoformat()
+    _start = _as_of() or datetime.now().date()
+    valid_until = (_start + timedelta(days=horizon_days)).isoformat()
 
     # FIX WL1: RSI/1-day-return were never exposed on CompositeScore, even
     # though RSI is already computed inside _score_technical() and both are
@@ -1952,6 +1987,41 @@ def score_dataframe(
     )
 
 
+_VIX_AS_OF: Dict[str, Optional[Dict]] = {}
+
+
+def vix_info_as_of(d) -> Optional[Dict]:
+    """India VIX regime at the close of date `d`, from ^INDIAVIX daily bars (via
+    data.fetcher, cut to `d`), in get_india_vix_regime's shape. None when no bar
+    on or within 5 days before `d` is available (score_stock then scores VIX as
+    "normal", never the live reading). Cached per date for the life of the process."""
+    k = d.isoformat()
+    if k in _VIX_AS_OF:
+        return _VIX_AS_OF[k]
+    info: Optional[Dict] = None
+    try:
+        from utils.point_in_time import cut
+        from utils.vix import classify as _vix_classify
+        if not _load_deps():
+            return None
+        vdf = cut(_fetch_single("^INDIAVIX", period="3mo"), d)  # type: ignore[misc]
+        close = vdf["Close"].astype(float).dropna() if vdf is not None and not vdf.empty else None
+        if close is not None and len(close):
+            last = pd.Timestamp(close.index[-1])
+            if last.tzinfo is not None:
+                last = last.tz_localize(None)
+            if (pd.Timestamp(d) - last.normalize()).days <= 5:
+                v = float(close.iloc[-1])
+                prev = float(close.iloc[-2]) if len(close) > 1 else None
+                info = {"vix": v, "regime": _vix_classify(v), "allow_buy": v <= 28,
+                        "vix_pct_chg": round((v / prev - 1) * 100, 2) if prev else None,
+                        "source": f"^INDIAVIX close {last.date().isoformat()}", "reason": ""}
+    except Exception as e:
+        _log.debug("vix_info_as_of(%s) unavailable: %s: %s", k, type(e).__name__, e)
+    _VIX_AS_OF[k] = info
+    return info
+
+
 def score_stock(
     ticker:           str,
     period:           str = "2y",
@@ -1985,6 +2055,9 @@ def score_stock(
                    ticker, canonical, e)
 
     # VIX
+    if vix_info is None and _as_of():
+        # never the live VIX on a backfill: neutral when the history has no bar
+        vix_info = vix_info_as_of(_as_of()) or {"regime": "normal", "vix": None, "allow_buy": True}
     if vix_info is None:
         try:
             vix_info = _get_india_vix_regime() if _get_india_vix_regime else None
@@ -2056,7 +2129,9 @@ def score_stock(
     positioning_info: Optional[Dict] = None
     try:
         from data.fno_universe import is_fno_eligible as _fno_check
-        if _fno_check(canonical) and _positioning_pillar_enabled():
+        # Not on a point-in-time run: the OI / PCR / FII-derivative reads are
+        # latest-only, so the pillar stays inactive there (neutral).
+        if _fno_check(canonical) and _positioning_pillar_enabled() and not _as_of():
             from data.nse_fno_bhavcopy import get_oi_regime_for_ticker as _oi_reg
             # Today's price change from the df we already have.
             _closes = df["Close"].tail(2)
@@ -2154,7 +2229,7 @@ def score_stock(
     # Update entry to live price if Angel One is configured
     try:
         from data.angel_fetcher import get_live_quote, is_configured
-        if is_configured():
+        if is_configured() and not _as_of():      # a backfill prices off that day's close
             live = get_live_quote(canonical)
             if live and live["price"] > 0 and not live_price_plausible(live["price"], result.entry):
                 # FIX LIVE-BOUND (2026-11-14): NSE's widest price band is 20%, so a quote

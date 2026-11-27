@@ -438,6 +438,24 @@ except Exception:
     _prior = None
 _sessions = sorted(_prior["logged_date"].unique(), reverse=True) if _prior is not None else []
 _last_session = _sessions[0] if _sessions else None
+# Sessions rebuilt after the fact (Tomorrow's Watchlist backfill, rows with
+# backfilled = 1): listed like any other day, with a "rebuilt later" badge.
+try:
+    from analysis.verdict_ledger import rebuilt_days as _rebuilt_days
+    _rebuilt = set(_rebuilt_days(_prior)) if _prior is not None else set()
+except Exception:
+    _rebuilt = set()
+_REBUILT_TIP = ("Rebuilt later: the after-close scan did not run that day, so this list was "
+                "rebuilt afterwards from data up to that day's close. Kept out of the "
+                "pre-registered watchlist test.")
+
+
+def _rebuilt_badge(session) -> str:
+    """Small "rebuilt later" pill for a backfilled session, else ''."""
+    if str(session) not in _rebuilt:
+        return ""
+    return (f' <span title="{html.escape(_REBUILT_TIP)}">'
+            f'{chip_pill("rebuilt later", "neutral")}</span>')
 try:
     _live = _picks_live_prices(tuple(
         str(t) for t in _prior.loc[_prior["logged_date"] == _last_session, "ticker"]
@@ -504,8 +522,9 @@ def _render_follow_through() -> None:
                                   chip_pill(_lab, _tone), _tone))
 
     st.markdown(
-        section_header(_hdr, f"logged {html.escape(_last_session)} · top {len(_cards)} by score · "
-                             "direction from each pick's bucket"),
+        section_header(_hdr, f"logged {html.escape(_last_session)}"
+                             + (" (rebuilt later)" if _last_session in _rebuilt else "")
+                             + f" · top {len(_cards)} by score · direction from each pick's bucket"),
         unsafe_allow_html=True,
     )
     st.markdown(f'<div class="fu-grid">{"".join(_cards)}</div>', unsafe_allow_html=True)
@@ -526,6 +545,7 @@ def _render_past_results() -> None:
         return
 
     _sel = st.selectbox("Session", options=_sessions, index=0, key="tw_past_session",
+                        format_func=lambda d: f"{d} · rebuilt later" if d in _rebuilt else str(d),
                         help="The session the picks were logged on (priced off that day's close).")
     _rows_html, _counts = [], {"Hit": 0, "Miss": 0, "Flat": 0, "Pending": 0}
     for _i, _r in enumerate(_prior[_prior["logged_date"] == _sel].to_dict("records"), start=1):
@@ -548,6 +568,9 @@ def _render_past_results() -> None:
         ])
     _n = sum(_counts.values())
     _decided = _counts["Hit"] + _counts["Miss"] + _counts["Flat"]
+    if _sel in _rebuilt:
+        st.markdown(_rebuilt_badge(_sel) + f' <span style="color:var(--faint)">'
+                    f'{html.escape(_REBUILT_TIP)}</span>', unsafe_allow_html=True)
     st.markdown(
         f"**{_sel}** · {_n} picks · {_counts['Hit']} hit · {_counts['Miss']} miss · "
         f"{_counts['Flat']} flat" + (f" · {_counts['Pending']} pending" if _counts["Pending"] else "")
@@ -606,7 +629,7 @@ def _render_past_results() -> None:
     st.markdown(signal_table(
         [("Session", "l"), ("Settled", "r"), ("Hit", "r"), ("Miss", "r"), ("Flat", "r"),
          ("Hit rate", "r"), ("Beat Nifty", "r"), ("Avg vs Nifty", "r")],
-        [[html.escape(_d), str(_s["n"]), str(_s["hit"]), str(_s["miss"]), str(_s["flat"]),
+        [[html.escape(_d) + _rebuilt_badge(_d), str(_s["n"]), str(_s["hit"]), str(_s["miss"]), str(_s["flat"]),
           _pct(_s["hit_rate"]), _pct(_s["beat_rate"]), _signed(_s["mean_vs_nifty"])]
          for _d, _s in _per]), unsafe_allow_html=True)
 

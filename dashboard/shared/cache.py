@@ -921,6 +921,20 @@ def _list_exclusion(tk: str, period: str = "2y") -> "str | None":
         return None
 
 
+def _list_exclusion_as_of(tk: str, as_of: "datetime.date", period: str = "2y") -> "str | None":
+    """_list_exclusion for a point-in-time rebuild: uncached, and the bar-based
+    checks (stale bars, circuit, history length) judged as of `as_of` on the
+    frame the fetcher cut to that date. Security info is today's."""
+    try:
+        from analysis.edge_flags import list_exclusion
+        from data.fetcher import peek_cached
+        from data.nse_security_info import get_security_info
+        return list_exclusion(peek_cached(tk, period=period), get_security_info(tk), today=as_of)
+    except Exception as _e:
+        _log.debug("cache._list_exclusion_as_of skipped for %s: %s", tk, _e)
+        return None
+
+
 # PATCH 3c: TTL reduced from 1800 → 300 (5 min) so Top Picks auto-refresh
 # every 5 min during market hours without needing a manual "Scan Now" click.
 # First scan still takes ~2 min; every reload within 5 min is instant from cache.
@@ -1265,6 +1279,46 @@ def get_top_picks(vix_regime: str = "normal", n: int = 20, sector_ranks: tuple =
 
 @st.cache_data(ttl=3600, show_spinner=False)   # 1hr cache — EOD signal, not intraday
 def _tomorrow_watchlist(n: int = 15) -> dict:
+    """The live Tomorrow's Watchlist scan (cached 1 h). See _build_tomorrow_watchlist."""
+    return _build_tomorrow_watchlist(n)
+
+
+# What a point-in-time rebuild cannot see as it was on the day. Recorded on the
+# rebuilt list and in every backfilled ledger row's note.
+_TW_NOT_POINT_IN_TIME = (
+    "universe = today's Nifty Total Market list",
+    "NSE security info (series, listing date) as of today",
+    "positioning pillar off",
+    "breadth shadow omitted",
+    "momentum leaders omitted",
+)
+
+
+def build_tomorrow_watchlist_as_of(as_of: "datetime.date", n: int = 15) -> dict:
+    """Rebuild Tomorrow's Watchlist for a PAST closed session `as_of` from data
+    up to that day's close (utils.point_in_time cuts every price, benchmark,
+    VIX, delivery and FII/DII read to bars dated <= as_of), and log the
+    shortlist to the verdict ledger as backfilled rows for that session.
+    Never cached, never sends anything, never touches the live snapshot.
+    Raises ValueError when `as_of` is not a closed NSE session."""
+    from analysis.verdict_ledger import last_closed_session
+    from utils.nse_holidays import is_trading_day
+    from utils.point_in_time import point_in_time
+    if not isinstance(as_of, datetime.date) or isinstance(as_of, datetime.datetime):
+        raise ValueError(f"as_of must be a date, not {as_of!r}")
+    if not is_trading_day(as_of):
+        raise ValueError(f"{as_of} is not an NSE trading day")
+    if as_of > last_closed_session():
+        raise ValueError(f"{as_of} has not closed yet")
+    from analysis.verdict_ledger import live_rows_on
+    _live = live_rows_on(as_of, "tomorrow_watchlist")
+    if _live:
+        raise ValueError(f"{as_of} already has {_live} live Tomorrow's Watchlist rows; not rebuilt")
+    with point_in_time(as_of):
+        return _build_tomorrow_watchlist(n, as_of=as_of)
+
+
+def _build_tomorrow_watchlist(n: int = 15, as_of: "datetime.date | None" = None) -> dict:
     """
     Scan the niftytotalmarket universe (~750; was nifty500 until 2026-10-07,
     which missed microcaps such as CUPID) for NEXT-SESSION setups (based on today's close),
@@ -1301,8 +1355,26 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     # page showed its 10:20 UTC stamp as if it were the 15:50 IST scan time.
     from utils.snapshot_time import ist_now as _ist_now
     scan_time = _ist_now().strftime("%d %b %H:%M")
+    if as_of is not None:
+        scan_time = as_of.strftime("%d %b") + " close (rebuilt)"
     out = {"breakout_candidates": [], "breakdown_watch": [], "reversal_watch": [],
            "scan_time": scan_time}
+    _vix_info = None
+    if as_of is not None:
+        # Point-in-time rebuild: one VIX reading for the date (the ^INDIAVIX close),
+        # neutral when the history has no bar; never the live VIX.
+        from analysis.score import vix_info_as_of
+        _vix_info = vix_info_as_of(as_of) or {"regime": "normal", "vix": None, "allow_buy": True}
+        out["point_in_time"] = {
+            "as_of": as_of.isoformat(),
+            "rebuilt_on": _ist_now().date().isoformat(),
+            "vix": _vix_info.get("vix"), "vix_regime": _vix_info.get("regime"),
+            "vix_source": _vix_info.get("source") or "neutral (no ^INDIAVIX bar)",
+            "point_in_time": ["daily prices and volume", "Nifty relative strength", "India VIX",
+                              "regime label", "sector ranks", "NSE delivery", "FII/DII flows",
+                              "list exclusions (bar-based)"],
+            "not_point_in_time": list(_TW_NOT_POINT_IN_TIME),
+        }
     try:
         _UNIV = get_universe("niftytotalmarket")
     except Exception as _e:
@@ -1311,14 +1383,15 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
 
     # Sector strength, resolved once outside the worker threads. Without it
     # every name was scored as "unranked" (audit 2026-10-03), so the same stock
-    # read differently here than on Top Picks / Analyze Stock.
-    _sec_df = _sector_df_from_tuple(_sector_ranks_tuple())
+    # read differently here than on Top Picks / Analyze Stock. A rebuild ranks
+    # afresh (uncached) on prices cut to its date.
+    _sec_df = _sector_df_from_tuple(_sector_ranks_tuple() if as_of is None else _sector_ranks_as_of())
     _prefetch_delivery(_UNIV)
 
     def _one(tk):
         try:
             from analysis.score import score_stock
-            s = score_stock(tk, sector_scores_df=_sec_df)
+            s = score_stock(tk, sector_scores_df=_sec_df, vix_info=_vix_info)
             # FIX 3: pattern_score no longer exists on CompositeScore (removed in
             # PATTERN_REMOVAL_MIGRATION). Access only valid fields.
             # FIX C6: this caller needs technical/momentum/volume but not the
@@ -1338,7 +1411,8 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
                     # threaded through.
                     "horizon": getattr(s, "horizon", ""),
                     "valid_until": getattr(s, "valid_until", ""),
-                    "list_excluded": _list_exclusion(tk)}
+                    "list_excluded": (_list_exclusion(tk) if as_of is None
+                                      else _list_exclusion_as_of(tk, as_of))}
         except Exception as _e:
             _log.debug("cache._tomorrow_watchlist score failed for %s: %s", tk, _e)
             return {"_failed": _unavailable_dict(tk, type(_e).__name__)}
@@ -1450,8 +1524,9 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     out["breakout_funnel"] = dict(_funnel)
     # Momentum leaders: same frames, regime-independent ranking. Never logged
     # to the ledger from here (the warm_top_picks run logs them once).
-    out["momentum_leaders"] = _momentum_leaders_from_scan(
-        _UNIV, {r["ticker"]: r for r in results})
+    if as_of is None:            # a rebuild leaves them out (not logged anywhere)
+        out["momentum_leaders"] = _momentum_leaders_from_scan(
+            _UNIV, {r["ticker"]: r for r in results})
     # Bear-regime scoring (#168/#198) holds Technical at 20/40 and RS at 5/10,
     # so no name can reach the BUY label the breakout gate needs and few fall
     # low enough for breakdown. Record it so the page can say the empty
@@ -1504,7 +1579,21 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     # warmer script are safe no-ops. Every failure path in log_verdict()
     # itself is swallowed and logged at debug, per its docstring - the
     # ledger is a background concern that must never break the scan.
+    _bf_note = None
+    if as_of is not None:
+        _bf_note = (f"rebuilt after the fact on {out['point_in_time']['rebuilt_on']} from data up to "
+                    f"{as_of.isoformat()}'s close; not point-in-time: "
+                    + "; ".join(_TW_NOT_POINT_IN_TIME))
+    _logged = 0
     try:
+        if as_of is not None:
+            # A rebuilt day is written once (re-runs are no-ops), so a mostly-failed
+            # rebuild must not fill it with a partial list: log nothing and say so.
+            from utils.snapshot_time import scan_too_degraded
+            if scan_too_degraded(out.get("n_universe"), out.get("n_scored")):
+                out["point_in_time"]["ledger_skipped"] = (
+                    f"scan too degraded (scored {out.get('n_scored')} of {out.get('n_universe')})")
+                raise RuntimeError(out["point_in_time"]["ledger_skipped"])
         from analysis.verdict_ledger import log_verdict as _vl_log
         from analysis.final_verdict import combine as _fv_combine
         # Each pick carries its bucket as a "tw:<bucket>" signal tag, so the
@@ -1530,14 +1619,18 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
                     composite_score=_pick.get("score"),
                     composite_action=_pick.get("action"),
                 )
-                _vl_log(
+                # A rebuild's entry is that day's close: no live re-anchor runs
+                # under point_in_time (analysis.score skips it).
+                _new = _vl_log(
                     ticker=_tk,
                     final_verdict=_fv,
                     entry_price=(float(_pick["entry"]) if _pick.get("entry") else None),
                     composite_score=(float(_pick["score"]) if _pick.get("score") is not None else None),
                     signal_tags=[_bucket_tag],
                     source="tomorrow_watchlist",
+                    **({"as_of": as_of, "backfill_note": _bf_note} if as_of is not None else {}),
                 )
+                _logged += 1 if _new else 0
             except Exception as _one_e:
                 _log.debug(
                     "cache._tomorrow_watchlist ledger write failed for %s: %s",
@@ -1546,6 +1639,8 @@ def _tomorrow_watchlist(n: int = 15) -> dict:
     except Exception as _vl_e:
         # verdict_ledger unavailable - ledger writes are best-effort only
         _log.debug("cache._tomorrow_watchlist ledger disabled: %s", _vl_e)
+    if as_of is not None:
+        out["point_in_time"]["ledger_rows_added"] = _logged
 
     return out
 
@@ -1802,6 +1897,20 @@ def _sector_ranking():
     except Exception as _e:
         _log.debug("cache.%s degraded: %s", "_sector_ranking", _e)
         return None
+
+
+def _sector_ranks_as_of() -> tuple:
+    """Sector ranks recomputed now, uncached: for a point-in-time rebuild, whose
+    fetches data.fetcher cuts to the rebuild date. () on failure."""
+    try:
+        from analysis.sector_strength import rank_sectors
+        df = rank_sectors()
+        if df is None or df.empty:
+            return ()
+        return tuple((str(idx), int(row["Rank"])) for idx, row in df.iterrows())
+    except Exception as _e:
+        _log.warning("cache._sector_ranks_as_of failed: %s", _e)
+        return ()
 
 
 def _sector_ranks_tuple() -> tuple:

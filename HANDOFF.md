@@ -2,6 +2,23 @@
 
 This section is the running memory between sessions; older sections below are history.
 
+## 27 Nov: Tomorrow's Watchlist backfill for the 25-26 Nov gap (`feat/watchlist-backfill`)
+- **Gap:** no Tomorrow's Watchlist on Wed 25 and Thu 26 Nov (Tue 24 was a holiday): the
+  warm-up timed out on per-stock DB round trips after the move to the Oracle VM (fixed in
+  #413; the live run for Fri 27 Nov worked, 105 s). Those days are missing from the page's
+  Past results and from the verdict ledger.
+- **Tool:** Warm Tomorrow's Watchlist → Run workflow → `as_of_dates` = `2026-11-25,2026-11-26`
+  (or `python scripts/warm_tomorrow_watchlist.py --as-of 2026-11-25,2026-11-26`). It rebuilds
+  each day with every price / volume / benchmark / VIX / delivery / FII-DII read cut to bars
+  dated <= that day (`utils/point_in_time.py`), logs the shortlist with `backfilled=1`, a
+  `backfill_note`, logged_date = that day and entry = its close. No sends, live snapshot
+  untouched, weekends/holidays skipped, re-runs add nothing, and a day that has any live rows
+  is not rebuilt. Not point-in-time: universe list and NSE security info (today's), breadth
+  shadow and momentum leaders omitted, positioning pillar off.
+- **Integrity:** `evaluate_watchlist_rule` / `WATCHLIST_RULE` count live-logged picks only
+  (backfilled rows excluded; rule definition unchanged). Results by list includes them with
+  an "Includes N rebuilt day(s)" caption; the watchlist page badges them "rebuilt later".
+
 ## 27 Nov: scans slowed 15x after the DB move; most Telegram messages stopped (`fix/watchlist-timeout-alert-volume`)
 - **Cause:** `score_stock` read each stock's delivery history with its own query. From US
   GitHub runners to the Mumbai VM that made the ~826-name scans 980 s+ (Warm Top Picks: 65 s on

@@ -29,6 +29,16 @@ on:
   # workflow_dispatch (alerts/README.md). GitHub's cron fired hours late and
   # only cost Actions minutes.
   workflow_dispatch:           # allow manual "Run workflow" from the Actions tab
+    inputs:
+      # Backfill (27 Nov 2026): rebuild missed past sessions point-in-time, e.g.
+      # "2026-11-25,2026-11-26". Empty (the default, and every cron-job.org run) = the
+      # normal live run. When set, the job ONLY rebuilds those dates (weekends and
+      # holidays are skipped with a log line) and every send step is skipped.
+      as_of_dates:
+        description: "Backfill only: comma-separated YYYY-MM-DD sessions to rebuild (empty = live run)"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: warm-tomorrow-watchlist
@@ -88,6 +98,7 @@ jobs:
         run: pip install --quiet -r requirements.txt
 
       - name: Run Tomorrow's Watchlist warm-up
+        if: ${{ inputs.as_of_dates == '' || inputs.as_of_dates == null }}
         timeout-minutes: 25
         continue-on-error: true
         env:
@@ -98,10 +109,24 @@ jobs:
           ANGEL_DISABLED: "1"
         run: python scripts/warm_tomorrow_watchlist.py
 
+      # Backfill only (as_of_dates set): no live scan, no snapshot overwrite, no sends.
+      # Rows go to the ledger marked backfilled (kept out of WATCHLIST_RULE); a date
+      # that already has live rows is skipped.
+      - name: Backfill Tomorrow's Watchlist
+        if: ${{ inputs.as_of_dates != '' && inputs.as_of_dates != null }}
+        timeout-minutes: 30
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANGEL_DISABLED: "1"
+          AS_OF_DATES: ${{ inputs.as_of_dates }}
+        run: python scripts/warm_tomorrow_watchlist.py
+
       # After-close Telegram/Gmail message with the top breakout and reversal
       # names from the snapshot just written. Shares the alert-state cache
       # with the other alert jobs, so it goes out at most once a day.
       - name: Restore alert state
+        if: ${{ inputs.as_of_dates == '' || inputs.as_of_dates == null }}
         id: restore_state
         uses: actions/cache/restore@v5
         with:
@@ -111,6 +136,7 @@ jobs:
             alert-state-
 
       - name: Send Tomorrow's Watchlist
+        if: ${{ inputs.as_of_dates == '' || inputs.as_of_dates == null }}
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -124,6 +150,7 @@ jobs:
       # Fridays only (the mode checks the weekday): how this week's BUY /
       # STRONG BUY reads moved since they were logged, vs the Nifty.
       - name: Send weekly report card
+        if: ${{ inputs.as_of_dates == '' || inputs.as_of_dates == null }}
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -140,6 +167,7 @@ jobs:
       # "why the top movers moved" message on 17 Nov (owner: not needed); that
       # mode still exists (--mode=why-moved) but nothing schedules it.
       - name: Send today's calls end-of-day check
+        if: ${{ inputs.as_of_dates == '' || inputs.as_of_dates == null }}
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -160,6 +188,7 @@ jobs:
       # post-close job instead. --always sends a one-line "all steady" note
       # when nothing needs attention, so there is a portfolio text every day.
       - name: Send portfolio after the close
+        if: ${{ inputs.as_of_dates == '' || inputs.as_of_dates == null }}
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
