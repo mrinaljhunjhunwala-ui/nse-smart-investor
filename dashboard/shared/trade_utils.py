@@ -47,6 +47,7 @@ FIX MH1  Manual portfolio holdings persistence (load_manual_holdings /
 from __future__ import annotations
 
 import datetime
+import html
 import logging
 import os
 import pathlib
@@ -1196,8 +1197,8 @@ def _render_autoclose_banner(closed: list) -> None:
             _rows += (
                 f'<div style="display:flex;justify-content:space-between;'
                 f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px">'
-                f'<span style="color:#ffa726">{_ic} <b>{c["ticker"]}</b> '
-                f'<span style="color:#888">({c["account"]})</span> — {_lbl}</span>'
+                f'<span style="color:#ffa726">{_ic} <b>{html.escape(str(c["ticker"]))}</b> '
+                f'<span style="color:#888">({html.escape(str(c["account"]))})</span> — {_lbl}</span>'
                 f'<span style="color:#ffa726;font-weight:700">close manually</span></div>'
             )
         else:
@@ -1205,8 +1206,8 @@ def _render_autoclose_banner(closed: list) -> None:
             _rows += (
                 f'<div style="display:flex;justify-content:space-between;'
                 f'padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px">'
-                f'<span style="color:#eee">{_ic} <b>{c["ticker"]}</b> '
-                f'<span style="color:#888">({c["account"]})</span> — '
+                f'<span style="color:#eee">{_ic} <b>{html.escape(str(c["ticker"]))}</b> '
+                f'<span style="color:#888">({html.escape(str(c["account"]))})</span> — '
                 f'{_lbl} @ ₹{c["exit"]:,.2f}</span>'
                 f'<span style="color:{_col};font-weight:700">₹{(c["pnl"] or 0):+,.0f}</span></div>'
             )

@@ -102,7 +102,8 @@ def test_locked_briefing_and_library(no_network):
     tab = _rn_tab(at)
     assert any("My Portfolio is locked" in str(c.value) for c in tab.caption)
     labels = [e.label for e in tab.expander]
-    assert any("Portfolio · Dividend income check" in lb for lb in labels)
+    # Portfolio notes list held tickers, so a locked session must not see them (audit 2026-11).
+    assert not any("Portfolio · Dividend income check" in lb for lb in labels)
     assert any("PFC · FY25 AR" in lb for lb in labels)
 
 

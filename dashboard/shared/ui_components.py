@@ -13,6 +13,7 @@ st.markdown(..., unsafe_allow_html=True). Nothing here touches Streamlit —
 these are pure string builders, testable in isolation.
 """
 from __future__ import annotations
+import html
 import math
 
 from typing import Optional
@@ -818,7 +819,8 @@ def ticker_hover_wrap(display_label: str,
     if sparkline_svg:
         rows_html += sparkline_svg
     if sector:
-        rows_html += f'<div class="thc-sector">{sector}</div>'
+        rows_html += f'<div class="thc-sector">{html.escape(str(sector))}</div>'
+    display_label = html.escape(str(display_label))
     header = f'<div class="thc-row"><span class="thc-sym">{display_label}</span></div>'
     return (
         f'<span class="ticker-hover" tabindex="0">'
