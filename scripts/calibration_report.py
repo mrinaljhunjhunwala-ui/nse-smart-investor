@@ -10,7 +10,7 @@ rising?" from the live ledger. It changes nothing: no rule, threshold or row is
 written. The registered tests are reported as they stand; this report is not a
 reason to retune them before their dates.
 
-Usage:  python scripts/calibration_report.py
+Usage:  py scripts/calibration_report.py
 Needs DATABASE_URL (the production ledger) and Yahoo for the Nifty history, so
 run it from GitHub Actions (provider_canary.yml, input calibration_report).
 """

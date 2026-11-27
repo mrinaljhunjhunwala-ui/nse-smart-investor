@@ -36,10 +36,10 @@ TARGET LIST (--source, default "active"):
   --tickers TICKER1,TICKER2,... - explicit list, overrides --source.
 
 USAGE:
-  python scripts/refresh_qualitative_flags.py
-  python scripts/refresh_qualitative_flags.py --source universe --delay 3
-  python scripts/refresh_qualitative_flags.py --tickers RELIANCE,TCS,INFY
-  python scripts/refresh_qualitative_flags.py --limit 5   # quick test run
+  py scripts/refresh_qualitative_flags.py
+  py scripts/refresh_qualitative_flags.py --source universe --delay 3
+  py scripts/refresh_qualitative_flags.py --tickers RELIANCE,TCS,INFY
+  py scripts/refresh_qualitative_flags.py --limit 5   # quick test run
 
 Requires DATABASE_URL in the environment, pointing at the SAME Neon Postgres
 instance configured in Streamlit Cloud's secrets (see dashboard/DB_SETUP.md).

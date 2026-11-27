@@ -21,9 +21,9 @@ USAGE
     uses (set it in your environment or .streamlit/secrets.toml equivalent),
     then just:
 
-        python tools/refresh_flags_batch.py                    # shortlist only (default)
-        python tools/refresh_flags_batch.py --tickers ABDL.NS RELIANCE.NS
-        python tools/refresh_flags_batch.py --universe nifty100 --limit 40
+        py tools/refresh_flags_batch.py                    # shortlist only (default)
+        py tools/refresh_flags_batch.py --tickers ABDL.NS RELIANCE.NS
+        py tools/refresh_flags_batch.py --universe nifty100 --limit 40
 
     Schedule it (cron / Task Scheduler) to run once daily before market
     open, e.g.:

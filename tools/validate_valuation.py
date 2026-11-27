@@ -7,7 +7,7 @@ a pytest test** — it makes live Yahoo network calls and must NOT run in CI. Th
 guarantee lives in tests/test_valuation_golden_snapshot.py.
 
 Usage:
-    python tools/validate_valuation.py [--snapshot PATH] [--update]
+    py tools/validate_valuation.py [--snapshot PATH] [--update]
 
     (no flags)   load the snapshot, run live, print a regression report (drift / unchanged / fail)
     --update     run live over the seed tickers and OVERWRITE the snapshot with current results
