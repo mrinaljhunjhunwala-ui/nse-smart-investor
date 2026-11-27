@@ -17,7 +17,7 @@ What it can and cannot show (printed with the result):
   * One week is a small sample. This checks that the rules behave sensibly; it
     does not prove an edge.
 
-Usage:  python scripts/catalyst_replay.py --sessions 5 --cap 80 [--telegram]
+Usage:  py scripts/catalyst_replay.py --sessions 5 --cap 80 [--telegram]
 Needs network (NSE, Yahoo, Screener): run it from GitHub Actions
 (provider_canary.yml, input replay_sessions), not from a sandbox.
 """

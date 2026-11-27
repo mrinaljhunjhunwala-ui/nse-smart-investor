@@ -8,7 +8,7 @@ a fixed context (VIX / sector rank / flows / delivery / regime / positioning).
 Used by tests/test_composite_golden_snapshot.py. After an INTENTIONAL scoring
 change, regenerate and review the diff:
 
-    python tools/composite_golden.py --update
+    py tools/composite_golden.py --update
 """
 from __future__ import annotations
 

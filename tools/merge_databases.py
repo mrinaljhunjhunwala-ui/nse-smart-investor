@@ -39,8 +39,8 @@ How each table is copied:
     max(id) + 1.
 
 Usage:
-    python tools/merge_databases.py --from OLD_URL --to NEW_URL            # dry run
-    python tools/merge_databases.py --apply                                # env URLs
+    py tools/merge_databases.py --from OLD_URL --to NEW_URL            # dry run
+    py tools/merge_databases.py --apply                                # env URLs
 Env fallbacks: OLD_DATABASE_URL (source), DATABASE_URL (target).
 
 The dry run does the whole copy inside one target transaction per table and rolls it
