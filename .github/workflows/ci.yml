@@ -36,7 +36,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: pip
 
       - name: Ruff (changed Python files only)
@@ -80,9 +80,9 @@ jobs:
         # real-postgres job below.
         run: python -m pytest -m "not slow" -q -rs
 
-  # Trial run on Python 3.14 (owner, 28 Nov 2026): shows what would break before any
-  # real job moves off 3.11. Non-blocking, and not named `test`, so automerge ignores it.
-  test-py314:
+  # Python 3.11 check (owner, 28 Nov 2026): the jobs that send alerts still run 3.11
+  # until they move too. Non-blocking, and not named `test`, so automerge ignores it.
+  test-py311:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     continue-on-error: true
@@ -90,14 +90,14 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.14"
+          python-version: "3.11"
           cache: pip
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install --quiet --prefer-binary -r requirements.txt
           pip install --quiet --prefer-binary pytest
-      - name: Run test suite on 3.14
+      - name: Run test suite on 3.11
         run: python -m pytest -m "not slow" -q -rs
 
   real-postgres:
@@ -132,7 +132,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: pip
 
       - name: Install dependencies
