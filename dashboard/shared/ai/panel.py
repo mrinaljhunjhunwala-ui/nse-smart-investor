@@ -70,6 +70,11 @@ def render_chat_panel(
             )
             return
 
+        # Every prompt spends the owner's GROQ_API_KEY, so only the PIN holder may chat (audit 2026-11).
+        from dashboard.shared.pin_gate import unlock_inline
+        if not unlock_inline("my_portfolio", "the AI co-pilot", f"ai_{symbol}", collapsible=False):
+            return
+
         st.caption(
             f"Neutral analyst grounded in the live dashboard state for **{symbol}**. "
             "Not investment advice."

@@ -72,3 +72,24 @@ def test_library_hides_portfolio_notes_when_locked(monkeypatch):
 
 def test_library_shows_portfolio_notes_when_unlocked(monkeypatch):
     assert "SECRETHOLD" in _run_library(monkeypatch, unlocked=True)
+
+
+def _run_copilot(monkeypatch, unlocked):
+    from dashboard.shared.ai import panel
+    import dashboard.shared.pin_gate as pg
+    calls = []
+    monkeypatch.setattr(panel, "is_available", lambda: True)
+    monkeypatch.setattr(pg, "unlock_inline", lambda *a, **k: unlocked)
+    monkeypatch.setattr(panel.st, "chat_input", lambda *a, **k: calls.append("input") or "hi")
+    monkeypatch.setattr(panel, "build_context", lambda inputs: "ctx")
+    monkeypatch.setattr(panel, "chat", lambda *a, **k: calls.append("chat") or "ok")
+    panel.render_chat_panel("ABC", None)
+    return calls
+
+
+def test_copilot_locked_never_calls_provider(monkeypatch):
+    assert _run_copilot(monkeypatch, unlocked=False) == []
+
+
+def test_copilot_unlocked_calls_provider(monkeypatch):
+    assert "chat" in _run_copilot(monkeypatch, unlocked=True)
