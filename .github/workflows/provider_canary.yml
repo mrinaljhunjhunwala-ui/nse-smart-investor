@@ -56,7 +56,7 @@ jobs:
       # Full requirements: the Screener probe needs bs4/lxml and the fetcher
       # imports pandas; same install as the other jobs.
       - name: Install dependencies
-        run: pip install --quiet -r requirements.txt
+        run: pip install --quiet --prefer-binary -r requirements.txt
 
       - name: Run provider canary
         env:
@@ -83,7 +83,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install --quiet -r requirements.txt
+        run: pip install --quiet --prefer-binary -r requirements.txt
 
       - name: Replay results and news calls
         env:
@@ -112,7 +112,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install --quiet -r requirements.txt
+        run: pip install --quiet --prefer-binary -r requirements.txt
 
       - name: Calibration report
         env:

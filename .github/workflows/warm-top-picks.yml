@@ -72,7 +72,7 @@ jobs:
       # a UI. Kept as its own requirements file so a future trim of the main
       # requirements.txt doesn't silently break this job.
       - name: Install dependencies
-        run: pip install --quiet -r requirements.txt
+        run: pip install --quiet --prefer-binary -r requirements.txt
 
       - name: Run Top Picks warm-up
         env:
