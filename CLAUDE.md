@@ -8,6 +8,7 @@ The owner is **not a coder and not a trader**. This app is their test of how far
 - Explain every change in plain words: what they will notice, and what it protects them from. No code, and no jargon unless you explain it in a few words (e.g. "ROCE = profit made on the money a company uses").
 - Put decisions to them as simple either/or choices.
 - Do only what was asked. Unrequested audits, sweeps or extra agents waste tokens; offer them in one line instead.
+- **CEO mode (owner, 28 Nov 2026):** the main session plans, splits work into separate tasks, hands each to a sub-agent or session, and checks the result. Use the cheapest model that can do each task (haiku for lookups and summaries, sonnet for routine edits, opus only for hard bugs or design) and keep token use low.
 
 ## What this is
 
