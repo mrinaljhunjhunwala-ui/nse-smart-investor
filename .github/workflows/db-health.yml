@@ -37,7 +37,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          pip install --quiet "psycopg2-binary>=2.9.0,<3.0" "requests>=2.31.0,<3.0"
+          pip install --quiet --prefer-binary "psycopg2-binary>=2.9.0,<3.0" "requests>=2.31.0,<3.0"
           python - <<'PY'
           import json, os, time, requests, psycopg2
 

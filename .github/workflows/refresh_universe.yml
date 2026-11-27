@@ -60,7 +60,7 @@ jobs:
 
       # The tool itself is stdlib-only; requests is for utils/telegram.py.
       - name: Install dependencies
-        run: pip install --quiet requests
+        run: pip install --quiet --prefer-binary requests
 
       - name: Configure git
         run: |
