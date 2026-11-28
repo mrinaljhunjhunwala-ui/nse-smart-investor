@@ -1139,7 +1139,7 @@ _ALL_SCORES_KV_KEY = "all_scored_snapshot"
 # open tab pulled the full snapshot ~180 times an hour. Reads are now shared
 # per server process for _SNAPSHOT_READ_TTL seconds; the warmers write every
 # 45 minutes, so this costs at most two minutes of freshness.
-_SNAPSHOT_READ_TTL = 120
+_SNAPSHOT_READ_TTL = 600  # the warmer only rewrites the snapshot about every 45 minutes
 _snapshot_reads: dict = {}
 
 
@@ -2214,7 +2214,7 @@ def load_band_record(band: str, horizon_days: int = 20):
     try:
         from analysis import verdict_ledger as _vl
         from analysis.calibration_summary import SCORE_BANDS, band_record
-        df = _vl.load_ledger(limit=1_000_000)
+        df = load_full_ledger_cached()   # one shared 10-min read, same 1,000,000-row limit
         if df is None or df.empty or _vl.ledger_error(df):
             return None
         mid = {label: (lo if lo is not None else (hi or 50) - 1) for lo, hi, label in SCORE_BANDS}
@@ -2283,3 +2283,20 @@ def load_full_ledger_cached() -> pd.DataFrame:
 
 
 load_full_ledger_cached.clear = _full_ledger_cached.clear
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _tag_calibration_cached(horizon_days: int, min_n: int, source: str | None) -> pd.DataFrame:
+    from analysis import verdict_ledger as _vl
+    kw = {"source": source} if source else {}
+    return _vl.tag_calibration(horizon_days=horizon_days, min_n=min_n, **kw)
+
+
+def tag_calibration_cached(horizon_days: int, min_n: int = 5, source: str | None = None) -> pd.DataFrame:
+    """verdict_ledger.tag_calibration cached an hour. A failed read (tagged
+    frame) is dropped from the cache so the next rerun retries."""
+    from analysis import verdict_ledger as _vl
+    df = _tag_calibration_cached(horizon_days, min_n, source)
+    if _vl.ledger_error(df):
+        _tag_calibration_cached.clear()
+    return df

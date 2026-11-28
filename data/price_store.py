@@ -245,7 +245,8 @@ def period_start(period: str, today: Optional[datetime.date] = None) -> datetime
     return today - datetime.timedelta(days=_PERIOD_DAYS.get(p, 370))
 
 
-def load_daily_bars(symbol: str, period: Optional[str] = None) -> pd.DataFrame:
+def load_daily_bars(symbol: str, period: Optional[str] = None,
+                    start: Optional[datetime.date] = None) -> pd.DataFrame:
     """Stored bars for ``symbol`` (all of them when ``period`` is None), as a
     flat Open/High/Low/Close/Volume frame on a naive DatetimeIndex. Empty frame
     if the table is missing or the read fails."""
@@ -256,6 +257,9 @@ def load_daily_bars(symbol: str, period: Optional[str] = None) -> pd.DataFrame:
         if period:
             sql += " AND date >= ?"
             params = (symbol, period_start(period).isoformat())
+        elif start is not None:
+            sql += " AND date >= ?"
+            params = (symbol, start.isoformat())
         with ts._get_conn() as conn:
             cur = conn.cursor()
             cur.execute(ts._q(sql + " ORDER BY date"), params)
@@ -407,10 +411,11 @@ def serve(symbol: str, period: str, now: Optional[datetime.datetime] = None) -> 
     if not enabled() or market_open(now) or not _has_rows():
         return None
     start = period_start(period, now.date())
-    df = load_daily_bars(symbol, None)
-    if df is None or df.empty:
+    lo, _hi = symbol_bounds(symbol)  # cheap MIN/MAX; the frame itself is only read from the period start
+    if lo is None or lo > start + datetime.timedelta(days=7):
         return None
-    if df.index[0].date() > start + datetime.timedelta(days=7):
+    df = load_daily_bars(symbol, None, start=start - datetime.timedelta(days=7))
+    if df is None or df.empty:
         return None
     if not is_fresh(df.index[-1].date(), now, max_lag=SERVE_MAX_LAG_SESSIONS):
         return None

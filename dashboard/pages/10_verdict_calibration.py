@@ -720,8 +720,8 @@ st.caption(
 )
 _min_n = st.slider("Minimum firings per tag", 3, 30, 5, 1,
                     key="_cal_tag_minn")
-_tag_tbl = _vl.tag_calibration(horizon_days=_horizon_choice, min_n=_min_n,
-                                **_src_kw(_vl.tag_calibration))
+from dashboard.shared.cache import tag_calibration_cached  # noqa: E402
+_tag_tbl = tag_calibration_cached(_horizon_choice, _min_n, _src_choice or None)
 if _ledger_read_error(_tag_tbl):
     _ledger_unavailable(_ledger_read_error(_tag_tbl), "the per-tag hit rate")
 elif _tag_tbl.empty:
