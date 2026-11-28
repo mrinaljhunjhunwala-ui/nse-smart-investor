@@ -517,3 +517,22 @@ def test_scan_jobs_restore_the_price_store_and_the_fill_job_saves_it():
         src = wf(n)
         assert "PRICE_STORE_PATH: data/price_store.db" in src, n
         assert "price-store-" in src, n
+
+
+def test_serve_reads_only_from_period_start(monkeypatch):
+    monkeypatch.setenv("NSE_PRICE_STORE", "1")
+    _store_ending_mon_9_nov()
+    now = datetime.datetime(2026, 11, 9, 18, 45, tzinfo=_IST)
+    full = ps.load_daily_bars("ABC.NS", None)
+    calls = []
+    real = ps.load_daily_bars
+
+    def spy(symbol, period=None, start=None):
+        calls.append(start)
+        return real(symbol, period, start=start)
+
+    monkeypatch.setattr(ps, "load_daily_bars", spy)
+    df = ps.serve("ABC.NS", "1y", now=now)
+    start = ps.period_start("1y", now.date())
+    assert calls == [start - datetime.timedelta(days=7)]
+    assert df.equals(full[full.index >= pd.Timestamp(start)])

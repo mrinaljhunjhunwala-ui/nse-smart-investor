@@ -229,6 +229,20 @@ ALERT_LOG_PREFIX = "alerts_sent:"
 _ALERT_LOG_MAX = 80
 
 
+_SNAPSHOT_MEMO: dict = {}
+
+
+def _snapshot_kv(store, key: str):
+    """kv_get of a big scan snapshot, read once per process (these blobs are MBs and
+    one alert run asks for them several times). Reads only; failures are not memoised.
+    Returns a deep copy so a caller that edits the snapshot cannot affect the next one."""
+    import copy
+    hit = _SNAPSHOT_MEMO.get(key)
+    if hit is None or hit[0] is not store.kv_get:  # a swapped-in reader (tests) never sees old data
+        hit = _SNAPSHOT_MEMO[key] = (store.kv_get, store.kv_get(key, user_id="_system"))
+    return copy.deepcopy(hit[1])
+
+
 def _log_sent(subject: str, msg: str) -> None:
     """Append one sent alert to KV alerts_sent:<IST date> (user "_system") so the
     Today page can list everything Telegram received. Never raises."""
@@ -948,7 +962,7 @@ def check_verdict_alerts(state: dict, today: str) -> int:
         print(f"[verdicts] import failed: {e}")
         return 0
     try:
-        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+        snap = _snapshot_kv(store, "top_picks_snapshot")
     except Exception as e:
         print(f"[verdicts] kv_get failed: {e}")
         return 0
@@ -967,7 +981,7 @@ def check_verdict_alerts(state: dict, today: str) -> int:
     candidates = list(snap["data"].get("buys") or [])
     seen = {_base_symbol(b.get("ticker")) for b in candidates}
     try:
-        full = store.kv_get("all_scored_snapshot", user_id="_system")
+        full = _snapshot_kv(store, "all_scored_snapshot")
     except Exception as e:
         print(f"[verdicts] all-scored kv_get failed: {e}")
         full = None
@@ -1470,7 +1484,7 @@ def check_delivery_digest(state: dict, today: str, *, max_picks: int = 5) -> int
         return 0
 
     try:
-        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+        snap = _snapshot_kv(store, "top_picks_snapshot")
     except Exception as _e:
         print(f"[digest] kv_get failed: {_e}")
         return 0
@@ -1605,7 +1619,7 @@ def check_test_digest(state: dict, today: str, *, max_picks: int = 5) -> int:
     today's picks, so the real digest and intraday checks are unaffected."""
     try:
         import trade_store as store
-        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+        snap = _snapshot_kv(store, "top_picks_snapshot")
     except Exception as _e:
         print(f"[test-digest] snapshot read failed: {_e}")
         return 0
@@ -1862,7 +1876,7 @@ def check_intraday_watchlist(state: dict, today: str, *, max_picks: int = 5) -> 
                   f"(scan at {_snapshot_ist_label(morning.get('generated_at'))})")
     else:
         try:
-            snap = store.kv_get("top_picks_snapshot", user_id="_system")
+            snap = _snapshot_kv(store, "top_picks_snapshot")
         except Exception as _e:
             print(f"[intraday] kv_get failed: {_e}")
             return 0
@@ -2214,7 +2228,7 @@ def check_weekly_digest(state: dict, today: str) -> int:
     # Section 1 — current top-picks list (from the persisted snapshot)
     try:
         import trade_store as store
-        snap = store.kv_get("top_picks_snapshot", user_id="_system")
+        snap = _snapshot_kv(store, "top_picks_snapshot")
         buys = (snap or {}).get("data", {}).get("buys", []) or []
     except Exception as _e:
         print(f"[weekly] snapshot read failed: {_e}")
