@@ -93,7 +93,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.11"
+          python-version: "3.14"
 
       # requirements.txt covers pandas/numpy/yfinance/psycopg2 needed for the
       # trade_store KV read and the fetcher. Install lean but complete.
